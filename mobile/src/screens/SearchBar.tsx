@@ -63,14 +63,14 @@ export function Magnifier({ color }: { color?: string }) {
 }
 
 /**
- * 0 and 1 for something being off and on. On the way to 1 it springs, passing 1 a little; on the way back to 0 it doesn't pass 0
- * at all (the circle coming back from the field passes its size by nothing, it was shrinking well under it before).
+ * 0 and 1 for something being off and on. On the way to 1 it springs, passing 1 a little (`bouncy`) or not at all; on the way
+ * back to 0 it doesn't pass 0 (the circle coming back from the field passed its size by nothing, it was shrinking well under it).
  */
-function useSwap(active: boolean): Animated.Value {
+function useSwap(active: boolean, bouncy = true): Animated.Value {
   const t = useRef(new Animated.Value(active ? 1 : 0)).current;
   useEffect(() => {
-    springLayout(t, active ? 1 : 0, active ? { bounciness: 6, speed: 11 } : { bounciness: 0, speed: 12 });
-  }, [active, t]);
+    springLayout(t, active ? 1 : 0, active && bouncy ? { bounciness: 6, speed: 11 } : { bounciness: 0, speed: 12 });
+  }, [active, bouncy, t]);
   return t;
 }
 
@@ -144,7 +144,9 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // Two values, each for one thing: `gone` for the circle giving its room to the bar while words are typed, `open` for the circle
   // being grown into the field. Nothing else may follow either (the box going blank was one value doing both).
   const gone = useSwap(typing && !active);
-  const open = useSwap(active);
+  // The field grows across the whole row: the same little overshoot that is barely seen on the bar's short way (the circle's
+  // width) was a wobble over that distance. It moves like the bar does, without one.
+  const open = useSwap(active, false);
   // The circle is as tall as the bar is at rest: the least height the bar has had (it grows with a long message, the circle doesn't).
   const [seen, setSeen] = useState<number | null>(null);
   const size = seen ?? CIRCLE;
@@ -191,7 +193,6 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   const contentFade = open.interpolate({ inputRange: [0, 0.3], outputRange: [1, 0], extrapolate: "clamp" });
   const barFade = open.interpolate({ inputRange: [0.6, 0.95], outputRange: [1, 0], extrapolate: "clamp" });
   const shown = Animated.add(gone.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" }), open).interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" });
-  const pop = open.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.03, 1], extrapolate: "clamp" });
   // The magnifier moves from the middle of the circle to the field's left; the rest comes in beside it.
   const magnifierLeft = open.interpolate({ inputRange: [0, 1], outputRange: [(size - MAGNIFIER) / 2, FIELD_LEFT], extrapolate: "clamp" });
   const fieldFade = open.interpolate({ inputRange: [0.35, 0.85], outputRange: [0, 1], extrapolate: "clamp" });
@@ -234,7 +235,7 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
             // While the circle has given its room to the bar it is not there to a screen reader either (it has no width to be touched at).
             accessibilityElementsHidden={typing && !active}
             importantForAccessibility={typing && !active ? "no-hide-descendants" : "auto"}
-            style={{ position: "absolute", right: 0, bottom: 0, width, height: size, opacity: shown, transform: [{ scaleY: pop }] }}
+            style={{ position: "absolute", right: 0, bottom: 0, width, height: size, opacity: shown }}
           >
             {/* While it is a circle the whole of it is the button; once it is the field it is not (its own buttons are), and it says nothing of being one. */}
             <PressScale
