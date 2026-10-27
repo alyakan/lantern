@@ -6,7 +6,7 @@ import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
-import { AboveKeyboard } from "../ui/keyboard";
+import { AboveKeyboard, barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
@@ -390,12 +390,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         />
       )}
       {asleep ? (
-        <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6, backgroundColor: colors.paper }}>
+        <View style={{ padding: 16, paddingBottom: barRoom(insets.bottom), gap: 6, backgroundColor: colors.paper }}>
           <Txt variant="small" tone="ink2">
             This chat is asleep to save memory. It picks up where it left off.
           </Txt>
           {/* The chat can still be searched while it sleeps: the same circle, beside the one button there is. */}
-          <SearchBar search={barSearch} capsule={{ flexDirection: "row", alignItems: "center", borderRadius: 26, padding: 6 }} inset={12}>
+          <SearchBar search={barSearch} capsule={{ flexDirection: "row", alignItems: "center", borderRadius: 26, padding: 6 }}>
             <View style={{ flex: 1 }}>
               <Button
                 label={waking ? "Waking…" : "Wake this chat"}
@@ -482,7 +482,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const jump = away && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
-    <AboveKeyboard style={{ backgroundColor: colors.paper }}>
+    <AboveKeyboard style={{ backgroundColor: colors.paper }} offset={KEYBOARD_GAP - barRoom(insets.bottom)}>
       {glass ? (
         <View style={{ flex: 1 }}>
           <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>

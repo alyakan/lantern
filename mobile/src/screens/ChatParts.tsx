@@ -5,7 +5,7 @@ import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
-import { useKeyboardUp } from "../ui/keyboard";
+import { barRoom } from "../ui/keyboard";
 import { SearchBar, type BarSearch } from "./SearchBar";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
@@ -555,8 +555,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
     input.current?.focus();
   });
   const insets = useSafeAreaInsets();
-  // With the keyboard up it sits right under the box: the home-indicator space would be a gap.
-  const keyboard = useKeyboardUp();
+  // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
+  // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
   const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
   const problem = dictation.problem ?? attach.problem;
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
@@ -564,7 +564,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const query = slashQuery(text);
   const matches = query === null || commands.length === 0 ? [] : matchCommands(commands, query);
   return (
-    <View style={{ paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: glass ? "transparent" : colors.paper }}>
+    <View style={{ paddingTop: 8, paddingBottom: barRoom(insets.bottom), backgroundColor: glass ? "transparent" : colors.paper }}>
       <SlashPicker
         matches={matches}
         onPick={(c) => {
@@ -651,7 +651,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-      <SearchBar search={search} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} inset={canAttach ? 12 : 0} back={() => input.current?.focus()}>
+      <SearchBar search={search} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} back={() => input.current?.focus()}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
           ref={input}
