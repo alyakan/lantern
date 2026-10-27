@@ -162,13 +162,43 @@ describe("a chat", () => {
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
     });
 
-    it("searches the messages loaded, newest first, and closes the sheet on one", async () => {
+    it("searches in the header: the field takes the title's place, the bar steps through the matches, Cancel puts it all back", async () => {
       await withSession(talk);
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
+      expect(screen.getByText("Type two letters or more")).toBeTruthy();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
-      await waitFor(() => expect(screen.getAllByRole("button", { name: /login/ }).length).toBe(2));
-      await fireEvent.press(screen.getAllByRole("button", { name: /^Claude: I changed the login/ })[0]);
+      // It starts on the newest of the two messages that say it.
+      await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
+      // The one being looked at has the accent outline, the other a faint one.
+      expect(screen.getAllByTestId("match-here")).toHaveLength(1);
+      expect(screen.getAllByTestId("match-other")).toHaveLength(1);
+      await fireEvent.press(screen.getByRole("button", { name: "Older match" }));
+      await waitFor(() => expect(screen.getByText("1 of 2")).toBeTruthy());
+      await fireEvent.press(screen.getByRole("button", { name: "Newer match" }));
+      await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
+      // Return in the field steps to the next older, like the up arrow.
+      await fireEvent(screen.getByLabelText("Search"), "submitEditing");
+      await waitFor(() => expect(screen.getByText("1 of 2")).toBeTruthy());
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
+      expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+    });
+
+    it("says so when nothing matches, and the arrows are off", async () => {
+      await withSession(talk);
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await fireEvent.changeText(screen.getByLabelText("Search"), "zzzzzz");
+      await waitFor(() => expect(screen.getByText(/Nothing says that/)).toBeTruthy());
+      expect(screen.getByRole("button", { name: "Older match" }).props.accessibilityState).toMatchObject({ disabled: true });
+    });
+
+    it("keeps what was typed in the message box while searching", async () => {
+      await withSession(talk);
+      await fireEvent.changeText(screen.getByLabelText("Message"), "half a thought");
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("half a thought"));
     });
 
     it("offers a way back to the latest when scrolled away, with how many came since", async () => {

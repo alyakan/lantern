@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { quickReplies, quote, rowText, searchRows } from "./chatText";
+import { currentMatch, findRows, quickReplies, quote, rowText, stepMatch } from "./chatText";
 import { timeline } from "./timeline";
 
 const you = (id: string, text: string): Item => ({ kind: "user", id, text, at: 1, sentBy: null });
@@ -15,26 +15,37 @@ describe("what a chat says in words", () => {
     expect(page && rowText(page)).toContain("Plan step 1");
   });
 
-  it("finds messages by what they say, newest first, with what is around it", () => {
-    const hits = searchRows(rows, "LOGIN");
-    expect(hits.map((h) => [h.who, h.key])).toEqual([["Claude", "a-a1"], ["You", "u-u1"]]);
-    expect(hits[1]).toMatchObject({ before: "Please fix the ", match: "login", after: " bug" });
-    expect(hits[0].before.startsWith("Fixed the ")).toBe(true);
+  it("finds the messages that say it, any case, the oldest first", () => {
+    const found = findRows(rows, "LOGIN");
+    expect(found.map((m) => m.key)).toEqual(["u-u1", "a-a1"]);
+    expect(found.map((m) => rows[m.index].key)).toEqual(["u-u1", "a-a1"]);
   });
 
-  it("cuts a long message to a little around the match, with dots", () => {
-    const long = `${"a ".repeat(60)}needle${" b".repeat(60)}`;
-    const [hit] = searchRows(timeline([said("a1", long)]), "needle");
-    expect(hit.before.startsWith("…")).toBe(true);
-    expect(hit.after.endsWith("…")).toBe(true);
-    expect(hit.match).toBe("needle");
-    expect(hit.before.length).toBeLessThan(45);
+  it("counts a message once, however many times it says it", () => {
+    expect(findRows(timeline([said("a1", "ab ab ab")]), "ab")).toHaveLength(1);
   });
 
   it("finds nothing for a query that is too short or isn't there", () => {
-    expect(searchRows(rows, "a")).toEqual([]);
-    expect(searchRows(rows, "  ")).toEqual([]);
-    expect(searchRows(rows, "zzzz")).toEqual([]);
+    expect(findRows(rows, "a")).toEqual([]);
+    expect(findRows(rows, "  ")).toEqual([]);
+    expect(findRows(rows, "zzzz")).toEqual([]);
+  });
+
+  it("starts on the newest match and steps older or newer, round at the ends", () => {
+    const found = findRows(rows, "login");
+    expect(currentMatch(found, null)?.key).toBe("a-a1");
+    expect(stepMatch(found, null, -1)?.key).toBe("u-u1");
+    expect(stepMatch(found, "u-u1", 1)?.key).toBe("a-a1");
+    expect(stepMatch(found, "u-u1", -1)?.key).toBe("a-a1");
+    expect(stepMatch(found, "a-a1", 1)?.key).toBe("u-u1");
+  });
+
+  it("keeps its place by the message, so a changed list does not move it, and falls back to the newest if it is gone", () => {
+    const found = findRows(rows, "login");
+    expect(currentMatch(found, "u-u1")?.key).toBe("u-u1");
+    expect(currentMatch(found, "gone")?.key).toBe("a-a1");
+    expect(currentMatch([], null)).toBeNull();
+    expect(stepMatch([], null, 1)).toBeNull();
   });
 });
 
