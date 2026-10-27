@@ -49,6 +49,8 @@ pub struct ChatInfo {
     pub workflow: Option<String>,
     /// What it runs on when that isn't Claude Code (a name to show), as the window says (None for a Claude chat).
     pub provider: Option<String>,
+    /// One short line of what the chat is doing (the tool it is in) or last said, for a list row (None until it has done either).
+    pub preview: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -84,6 +86,13 @@ struct Log {
     workflow: Option<String>,
     /// The name of what it runs on, when that isn't Claude Code.
     provider: Option<String>,
+    /// The last thing the chat itself said (not a helper), as one line, and the tool it is in while a turn goes (a list row shows
+    /// the second, else the first).
+    said: Option<String>,
+    doing: Option<String>,
+    /// The turn going now is the user's post-hook (Lantern's own message after an answer): what it says is not the chat's answer, so
+    /// it never becomes the preview.
+    hook_turn: bool,
     /// What the chat's claude last said it offers after a "/", and the plan it last kept: a phone that opens the chat is
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
@@ -125,10 +134,36 @@ impl Log {
             color: self.color.clone(),
             workflow: self.workflow.clone(),
             provider: self.provider.clone(),
+            preview: self.doing.clone().or_else(|| self.said.clone()),
+        }
+    }
+
+    /// What a list row says of the chat. Only what the chat itself does counts: a helper's steps would flicker the line, and what
+    /// the user typed, a shell printed or a prompt asked is never taken.
+    fn note_preview(&mut self, event: &UiEvent) {
+        match event {
+            UiEvent::UserText { text, .. } => {
+                self.doing = None;
+                self.hook_turn = crate::hooks::post_text(text.trim_start()).is_some();
+            }
+            UiEvent::ConversationReset => (self.said, self.doing, self.hook_turn) = (None, None, false),
+            UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } => (self.doing, self.hook_turn) = (None, false),
+            // The hook's own steps and words: the row goes on showing the answer the user is waiting to read.
+            _ if self.hook_turn => {}
+            UiEvent::Thinking { parent: None } => self.doing = Some("Thinking".into()),
+            UiEvent::ToolStarted { parent: None, name, summary, .. } => self.doing = preview_line(&format!("{name} {summary}")),
+            UiEvent::AssistantText { parent: None, text, .. } => {
+                self.doing = None;
+                if let Some(line) = said_line(text) {
+                    self.said = Some(line);
+                }
+            }
+            _ => {}
         }
     }
 
     fn note(&mut self, event: &UiEvent) {
+        self.note_preview(event);
         match event {
             UiEvent::UserText { text, .. } => {
                 self.working = true;
@@ -211,6 +246,41 @@ pub fn title_from(text: &str) -> Option<String> {
         title.push('…');
     }
     Some(title)
+}
+
+/// How long a list row's preview line is, in characters.
+const PREVIEW_LEN: usize = 80;
+
+/// `text` as one line for a list row: whitespace folded, control and direction-changing characters dropped (a line is never
+/// allowed to read differently from what it is), cut to `PREVIEW_LEN`. None when nothing is left.
+pub fn preview_line(text: &str) -> Option<String> {
+    let clean: String = text.chars().filter(|c| !c.is_control() || c.is_whitespace()).filter(|c| !matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')).collect();
+    let line = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut out: String = line.chars().take(PREVIEW_LEN).collect();
+    if line.chars().count() > PREVIEW_LEN {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// The last line of what the chat said that is words (not an empty line, a code fence or a line of code inside one), without its
+/// markdown marks.
+fn said_line(text: &str) -> Option<String> {
+    let mut fenced = false;
+    let mut last = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("```") {
+            fenced = !fenced;
+        } else if !fenced && !line.is_empty() {
+            last = Some(line);
+        }
+    }
+    let last = last?;
+    let bare = last.trim_start_matches(['#', '>', '-', '*', ' ']).replace(['*', '`'], "");
+    preview_line(&bare)
 }
 
 /// A message without the notes Lantern puts before it: each is a `[Lantern…]` block, the long ones running to their end
@@ -767,6 +837,63 @@ mod tests {
         assert_eq!(title_from(&format!("{settings}\n\n{guide}\n\n[Lantern note: moved]\n\nship it")).as_deref(), Some("ship it"));
         assert_eq!(title_from(&"y".repeat(100)).unwrap().chars().count(), 81);
         assert_eq!(title_from("[Lantern: only a note]"), None);
+    }
+
+    fn said(text: &str) -> UiEvent {
+        UiEvent::AssistantText { parent: None, block_id: "b".into(), text: text.into() }
+    }
+
+    fn started(parent: Option<&str>, name: &str, summary: &str) -> UiEvent {
+        UiEvent::ToolStarted { parent: parent.map(String::from), tool_use_id: "t".into(), name: name.into(), summary: summary.into() }
+    }
+
+    #[test]
+    fn a_chats_preview_is_the_tool_it_is_in_and_then_what_it_last_said() {
+        let hub = hub();
+        assert_eq!(hub.chat("a").map(|c| c.preview), None);
+        feed(&hub, "a", vec![user("fix it")]);
+        assert_eq!(hub.chat("a").unwrap().preview, None, "what the user typed is never the preview");
+        feed(&hub, "a", vec![UiEvent::Thinking { parent: None }]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Thinking"));
+        feed(&hub, "a", vec![started(None, "Bash", "npm test")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Bash npm test"));
+        feed(&hub, "a", vec![said("Looking at it.\n\nThe tests pass now. Want me to open a PR?"), done()]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("The tests pass now. Want me to open a PR?"));
+        // A new turn shows its tool again, and a reset clears everything.
+        feed(&hub, "a", vec![user("go"), started(None, "Edit", "src/a.rs")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Edit src/a.rs"));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.chat("a").unwrap().preview, None);
+    }
+
+    #[test]
+    fn the_post_hooks_turn_never_replaces_the_answer_in_the_preview() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("fix it"), said("All fixed.")]);
+        feed(&hub, "a", vec![UiEvent::UserText { text: crate::hooks::post_message("Update the brain if needed"), at: None, sent_by: Some("lantern".into()), images: 0 }, UiEvent::Thinking { parent: None }, started(None, "Bash", "brain log"), said("The brain is updated."), done()]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("All fixed."));
+        // The user's next turn is its own again.
+        feed(&hub, "a", vec![user("more"), said("Sure.")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Sure."));
+    }
+
+    #[test]
+    fn a_helpers_steps_and_words_never_move_a_chats_preview() {
+        let hub = hub();
+        feed(&hub, "a", vec![said("Done."), UiEvent::Thinking { parent: Some("t1".into()) }, started(Some("t1"), "Bash", "rm -rf x"), UiEvent::AssistantText { parent: Some("t1".into()), block_id: "s".into(), text: "helper".into() }]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Done."));
+    }
+
+    #[test]
+    fn a_preview_line_is_one_short_line_that_reads_as_it_is() {
+        assert_eq!(said_line("## **Done**\n```\ncode\n```").as_deref(), Some("Done"));
+        assert_eq!(said_line("- one\n- `two` items\n\n").as_deref(), Some("two items"));
+        assert_eq!(preview_line("a\n\tb   c").as_deref(), Some("a b c"));
+        assert_eq!(preview_line("ls \u{202e}evil\u{0007}").as_deref(), Some("ls evil"));
+        assert_eq!(preview_line(" \n "), None);
+        let long = preview_line(&"y".repeat(100)).unwrap();
+        assert_eq!(long.chars().count(), PREVIEW_LEN + 1);
+        assert!(long.ends_with('…'));
     }
 
     #[test]

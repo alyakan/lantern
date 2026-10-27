@@ -31,4 +31,9 @@ workflow: RemoteWorkflow | null,
  * What the chat runs on when that isn't Claude Code ("Codex", an endpoint's name), as the Mac's window says. None for a Claude chat,
  * and from a Mac that doesn't say.
  */
-provider?: string | null, };
+provider?: string | null, 
+/**
+ * One short line for the chat's row: the tool it is in while it works, else the last thing it said (None until it has done
+ * either, and from a Mac that doesn't say).
+ */
+preview?: string | null, };

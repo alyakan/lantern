@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Animated, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
@@ -8,14 +8,19 @@ import { useConnectionState, useController, useSyncState } from "../shell/hooks"
 import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
-import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
+import { FadeSlideIn, PressScale, PulseDot, skips } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
+import { Glide } from "../ui/Glide";
+import { DarkLantern } from "../ui/lanterns";
+import { PinIcon } from "../ui/PinIcon";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
+import { SwipeRow } from "../ui/SwipeRow";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { countsOf, diffPreviewOf } from "../view/diffPreview";
-import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
+import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
+import { HomeSearch } from "./HomeSearch";
 import { UsageStrip } from "./ChatExtras";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
@@ -112,8 +117,19 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
 /** How far a project card's header and chats are from its edge. */
 const CARD_INSET = 16;
 
-/** `inset`: the space on either side of the row (the page's, unless the row sits in a card that has its own). */
-function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl, selected = false }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number; selected?: boolean }) {
+/** What swiping a row does: its tray (open or not, one at a time on the list) and what each button and the pin do. */
+interface RowSwipe {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPin: () => void;
+  /** Mark read or unread, for a chat that is waiting (others have no such thing). */
+  onToggleUnread: (() => void) | null;
+  /** Close it (on the Mac too), for a Mac that can. */
+  onClose: (() => void) | null;
+}
+
+/** `inset`: the space on either side of the row (the page's, unless the row sits in a card that has its own). `background`: what is behind the row (the page, or its card). */
+function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl, selected = false, background, swipe }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number; selected?: boolean; background: string; swipe?: RowSwipe }) {
   const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
@@ -121,26 +137,28 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   // The space between the row's own edge and its content.
   const pad = inset > 8 ? inset - 8 : inset;
   const status = row.unread ? ", unread" : row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
-  return (
-    // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
-    <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
+  const body = (
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}${row.preview ? `, ${row.preview}` : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
       {/* The chat you are in: underlined with a line of the accent, from where the row's content starts to where it ends. */}
       {selected && <View accessibilityElementsHidden testID="selected-underline" style={{ position: "absolute", left: pad, right: pad, bottom: 0, height: 2, borderRadius: 1, backgroundColor: accent }} />}
       <View>
         <Tile letter={row.initial} bg={bg} fg={fg} />
         {/* Something new in it: a dot on the tile (cut out from the page behind it), and the title in bold below. */}
-        {row.unread && <View accessibilityElementsHidden testID="unread-dot" style={{ position: "absolute", top: -3, right: -3, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: colors.paper }} />}
+        {row.unread && <View accessibilityElementsHidden testID="unread-dot" style={{ position: "absolute", top: -3, right: -3, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: background }} />}
       </View>
       <View style={{ flex: 1 }}>
-        <Txt variant="body" numberOfLines={1} style={{ fontWeight: row.unread ? "800" : "400" }}>
-          {row.pinned && (
-            <Txt variant="tiny" tone="ink3" accessibilityElementsHidden>
-              {"📌 "}
-            </Txt>
-          )}
-          {row.title}
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {row.pinned && <PinIcon />}
+          <Txt variant="body" numberOfLines={1} style={{ flexShrink: 1, fontWeight: row.unread ? "800" : "400" }}>
+            {row.title}
+          </Txt>
+        </View>
+        {/* What it is doing, or last said (a Mac that doesn't say leaves the row as it was). */}
+        {!!row.preview && (
+          <Txt variant="small" tone="ink2" numberOfLines={1} style={{ marginTop: 1 }}>
+            {row.preview}
+          </Txt>
+        )}
         {showProject && !!row.project && (
           <View style={{ marginTop: 3 }}>
             <ProjectTag name={row.project} color={row.projectColor} />
@@ -148,7 +166,14 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
         )}
       </View>
       {row.status === "working" ? (
-        <Working />
+        <View style={{ alignItems: "flex-end", gap: 4 }}>
+          <Working />
+          {!!row.elapsed && (
+            <Txt variant="tiny" tone="ink3">
+              {row.elapsed}
+            </Txt>
+          )}
+        </View>
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {row.status === "needs_you" && <PulseDot color={colors.hi} />}
@@ -158,7 +183,41 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
         </View>
       )}
     </PressScale>
-    </FadeSlideIn>
+  );
+  return (
+    // A row glides to its new place when the list reorders; the rows come in one after the other when Home opens (and a new chat
+    // comes in alone); a press gives under the finger.
+    <Glide>
+      <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
+        {swipe ? (
+          <SwipeRow
+            background={background}
+            open={swipe.open}
+            onOpenChange={swipe.onOpenChange}
+            pin={{ label: row.pinned ? "Unpin" : "Pin", onTrigger: swipe.onPin }}
+            tray={[...(swipe.onToggleUnread ? [{ key: "read", label: row.unread ? "Read" : "Unread", onPress: swipe.onToggleUnread }] : []), ...(swipe.onClose ? [{ key: "close", label: "Close", tone: "danger" as const, onPress: swipe.onClose }] : [])]}
+          >
+            {body}
+          </SwipeRow>
+        ) : (
+          body
+        )}
+      </FadeSlideIn>
+    </Glide>
+  );
+}
+
+/** A quiet label over a stretch of the list ("Waiting on you", "Earlier"). */
+function SectionLabel({ label, count }: { label: string; count: number }) {
+  return (
+    <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "baseline", gap: 6, paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 2 }}>
+      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" }}>
+        {label}
+      </Txt>
+      <Txt variant="tiny" tone="ink3">
+        {count}
+      </Txt>
+    </View>
   );
 }
 
@@ -180,7 +239,7 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
  * the chats away when pressed, and the chats under it. The shadow is on the outer view, since clipping the corners would
  * clip it too.
  */
-function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedSlot }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void; selectedSlot?: string | null }) {
+function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, swipeFor, selectedSlot }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void; swipeFor: (r: Row) => RowSwipe; selectedSlot?: string | null }) {
   const colors = useColors();
   const name = group.project || "No project";
   const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
@@ -206,7 +265,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedS
             // Every chat is held in from the card's edges (the row has 8 of its own inside, so the open chat's wash has room around
             // what is on it); no lines between one and the next.
             <View key={r.slot} testID={`card-row-${r.slot}`} style={{ marginHorizontal: CARD_INSET - 8 }}>
-              <ChatRow row={r} index={i} showProject={false} inset={8} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
+              <ChatRow row={r} index={i} showProject={false} inset={8} background={colors.card} swipe={swipeFor(r)} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
             </View>
           ))}
       </View>
@@ -262,6 +321,12 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const [acting, setActing] = useState<Row | null>(null);
   const pins = usePins();
   const [usageOpen, setUsageOpen] = useState(false);
+  // The chat whose swipe buttons are out (one at a time), and the search of the list (what is typed narrows it).
+  const [openSlot, setOpenSlot] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  // How far the page is scrolled: the headline fades and trails as it goes.
+  const scrollY = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
@@ -277,6 +342,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   };
   const toggle = (project: string) => {
     const next = folded.includes(project) ? folded.filter((p) => p !== project) : [...folded, project];
+    // A card folds and unfolds as a height, with what is under it following (asked for by the press itself, so only Home's own layout moves).
+    if (!skips()) LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
     setFolded(next);
     void saveFolded(next);
   };
@@ -292,6 +359,21 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const head = headline(stack.length);
   const list = rows(chats, now, seen, workingSince, pins);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
+  // What is searched for narrows the list; while it is, the rest of Home (what waits on you) steps aside.
+  const asked = searching ? query.trim() : "";
+  const shown = asked ? list.filter((r) => matches(r, asked)) : list;
+
+  const swipeFor = (r: Row): RowSwipe => ({
+    open: openSlot === r.slot,
+    onOpenChange: (o) => setOpenSlot((cur) => (o ? r.slot : cur === r.slot ? null : cur)),
+    onPin: () => setPinned(r.slot, !r.pinned),
+    onToggleUnread: r.status === "idle" ? () => (r.unread ? markSeen(r.slot, r.activeAt) : markUnread(r.slot)) : null,
+    onClose: canClose ? () => setClosing(r) : null,
+  });
+  const closeSearch = () => {
+    setSearching(false);
+    setQuery("");
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -303,7 +385,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}>
+      <Animated.ScrollView
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        // Buttons a swipe laid out go back in when the list moves.
+        onScrollBeginDrag={() => setOpenSlot(null)}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
+      >
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl }}>
           <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 }}>
             {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
@@ -331,25 +421,30 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           <HomeSkeleton />
         ) : (
           <>
-        <View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16 }}>
-          <Txt variant="headline">{head.big}</Txt>
-          <Txt variant="headline" tone="ink3">
-            {head.small}
-          </Txt>
-        </View>
+        {!asked && (
+          <>
+            {/* The headline fades and trails behind as the page scrolls up over it. */}
+            <Animated.View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16, opacity: scrollY.interpolate({ inputRange: [0, 110], outputRange: [1, 0.2], extrapolate: "clamp" }), transform: [{ translateY: scrollY.interpolate({ inputRange: [0, 130], outputRange: [0, 40], extrapolate: "clamp" }) }] }}>
+              <Txt variant="headline">{head.big}</Txt>
+              <Txt variant="headline" tone="ink3">
+                {head.small}
+              </Txt>
+            </Animated.View>
 
-        {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
-        {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
-        {stack.length === 0 && macName && <Suggestions onPick={onNewChat} />}
-        {stack.length > 1 && (
-          <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
-            {stack.length - 1} more after this one
-          </Txt>
+            {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
+            {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
+            {stack.length === 0 && macName && <Suggestions onPick={onNewChat} />}
+            {stack.length > 1 && (
+              <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
+                {stack.length - 1} more after this one
+              </Txt>
+            )}
+          </>
         )}
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 6 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, paddingTop: asked ? 14 : 22, paddingBottom: 6 }}>
           <Txt variant="small" style={{ fontWeight: "700" }}>
-            All chats
+            {asked ? "Results" : "All chats"}
           </Txt>
           {list.length > 1 && <GroupingSwitch value={grouping} onChange={group} />}
           <PressScale accessibilityRole="button" accessibilityLabel="New chat" onPress={() => onNewChat()} hitSlop={8} scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
@@ -359,18 +454,49 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </PressScale>
         </View>
         {list.length === 0 ? (
-          <Txt variant="body" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 8 }}>
-            No chats are open on your Mac. Start one in Lantern and it shows up here.
-          </Txt>
+          <View style={{ alignItems: "center", paddingHorizontal: space.xxl, paddingTop: 36, paddingBottom: 12 }}>
+            <View style={{ transform: [{ scale: 0.75 }], marginBottom: 6 }}>
+              <DarkLantern />
+            </View>
+            <Txt variant="heading" style={{ textAlign: "center" }}>
+              Quiet in here
+            </Txt>
+            <Txt variant="body" tone="ink2" style={{ textAlign: "center", marginTop: 6 }}>
+              No chats are open on your Mac. Start one in Lantern and it shows up here.
+            </Txt>
+          </View>
+        ) : shown.length === 0 ? (
+          <View accessibilityLiveRegion="polite" style={{ alignItems: "center", paddingHorizontal: space.xxl, paddingTop: 36 }}>
+            <Txt variant="heading" style={{ textAlign: "center" }}>
+              No chat says that
+            </Txt>
+            <Txt variant="body" tone="ink2" style={{ textAlign: "center", marginTop: 6 }}>
+              Search looks at the title, the project and the line under it.
+            </Txt>
+          </View>
         ) : grouping === "project" ? (
-          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} selectedSlot={selectedSlot} />)
+          groups(shown).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} swipeFor={swipeFor} selectedSlot={selectedSlot} />)
         ) : (
-          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />)
+          // Labelled stretches (Pinned, Waiting on you, Working, Earlier) once there is more than one of them.
+          (() => {
+            const parts = sections(shown);
+            let n = 0;
+            return parts.map((s) => (
+              <Fragment key={s.key}>
+                {parts.length > 1 && <SectionLabel label={s.label} count={s.rows.length} />}
+                {s.rows.map((r) => (
+                  <ChatRow key={r.slot} row={r} index={n++} background={colors.paper} swipe={swipeFor(r)} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />
+                ))}
+              </Fragment>
+            ));
+          })()
         )}
-        <SupportCard onPress={onSupport} />
+        {!asked && <SupportCard onPress={onSupport} />}
           </>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
+      {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
+      {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {usageOpen && plan && <UsageSheet plan={plan} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet

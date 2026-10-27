@@ -72,6 +72,10 @@ export interface Row {
   sortAt: number;
   /** Pinned to the top of the list on this phone. */
   pinned?: boolean;
+  /** One short line of what it is doing or last said, when the Mac sent one (an older Mac sends none). */
+  preview: string | null;
+  /** How long it has been working ("4 min"), once it has been for a while; null when it isn't working or has only just begun. */
+  elapsed: string | null;
 }
 
 const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => string | null> = {
@@ -104,9 +108,42 @@ export function rows(chats: RemoteChat[], now: number, seen: Record<string, numb
   return chats
     .map((c): Row => {
       const title = c.title?.trim() || "New chat";
-      return { rank: RANK[c.status], sortAt: c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
+      const sortAt = c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at;
+      const spent = c.status === "working" ? ago(sortAt, now) : "now";
+      return { preview: c.preview?.trim() || null, elapsed: spent === "now" ? null : spent, rank: RANK[c.status], sortAt, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
     })
     .sort(byOrder);
+}
+
+/** The labelled stretches of the recent list. */
+export type SectionKey = "pinned" | "needs_you" | "working" | "earlier";
+
+export interface Section {
+  key: SectionKey;
+  label: string;
+  rows: Row[];
+}
+
+const SECTION_LABEL: Record<SectionKey, string> = { pinned: "Pinned", needs_you: "Waiting on you", working: "Working", earlier: "Earlier" };
+
+/** The rows of the list (already in `byOrder`) cut into the stretches it is made of: pinned, then what needs you, what works, the rest. */
+export function sections(list: Row[]): Section[] {
+  const out: Section[] = [];
+  for (const r of list) {
+    const key: SectionKey = r.pinned ? "pinned" : r.rank === 0 ? "needs_you" : r.rank === 1 ? "working" : "earlier";
+    const last = out[out.length - 1];
+    if (last?.key === key) last.rows.push(r);
+    else out.push({ key, label: SECTION_LABEL[key], rows: [r] });
+  }
+  return out;
+}
+
+/** Whether a chat answers a search: every word typed is somewhere in its title, project or preview (case aside); nothing typed matches all. */
+export function matches(r: Row, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = `${r.title} ${r.project} ${r.preview ?? ""}`.toLowerCase();
+  return words.every((w) => text.includes(w));
 }
 
 /** How Home lists the chats: all of them, the most recent first, or under their project. */

@@ -380,6 +380,11 @@ pub struct RemoteChat {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub provider: Option<String>,
+    /// One short line for the chat's row: the tool it is in while it works, else the last thing it said (None until it has done
+    /// either, and from a Mac that doesn't say).
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub preview: Option<String>,
 }
 
 /// How a chat goes about its work: a plain conversation, one page at a time in a flavour (Build, Review, Debug or Design), or a
@@ -567,7 +572,7 @@ impl From<crate::storage::phone::PhoneView> for RemoteStorage {
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview }
     }
 }
 
@@ -967,7 +972,7 @@ mod tests {
 
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
-        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None };
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None };
         let auto = RemoteChat::from(info(Some("auto")));
         assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
@@ -1102,7 +1107,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()) };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }
