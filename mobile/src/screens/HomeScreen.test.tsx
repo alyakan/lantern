@@ -4,6 +4,7 @@ import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { resetSeen } from "../seen";
+import { resetPins } from "../pins";
 import { HomeScreen } from "./HomeScreen";
 
 // What Home remembers about how it lists the chats: kept in memory here, not in the Keychain.
@@ -382,7 +383,8 @@ describe("closing a chat from Home", () => {
   it("is offered when a chat is held down, asks first, and closes it on the Mac", async () => {
     const { lastOf } = await home();
     await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
-    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(lastOf("close")).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Close chat" }));
     await waitFor(() => expect(lastOf("close")).toEqual({ op: "close", slot: "a" }));
@@ -391,15 +393,56 @@ describe("closing a chat from Home", () => {
   it("says Claude is busy for a chat that is working, instead of asking", async () => {
     await home();
     await fireEvent(screen.getByRole("button", { name: "Widget, lantern, working" }), "longPress");
-    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(screen.getByText("Claude is busy in this chat. Stop it first, then close it.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Close chat" })).toBeNull();
   });
 
-  it("offers nothing for a Mac that can't close chats", async () => {
+  it("offers no closing for a Mac that can't close chats (the other actions are still there)", async () => {
     await home(connected);
     await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close chat…" })).toBeNull();
     expect(screen.queryByText("Close this chat?")).toBeNull();
+  });
+});
+
+describe("what holding a chat down offers besides closing it", () => {
+  beforeEach(() => {
+    mockRemembered = "recent";
+    resetPins();
+  });
+  const chats = [chat({ slot: "a", title: "Release", active_at: NOW - 5 * 60_000 }), chat({ slot: "b", title: "Widget", active_at: NOW - 60_000 })];
+
+  it("pins a chat to the top, and unpins it", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    const order = () => screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /^(Release|Widget)/.test(l));
+    expect(order()[0]).toMatch(/^Widget/);
+    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Pin to the top" }));
+    await waitFor(() => expect(order()[0]).toMatch(/^Release.*pinned/));
+    await fireEvent(screen.getByRole("button", { name: /^Release.*pinned/ }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Unpin from the top" }));
+    await waitFor(() => expect(order()[0]).toMatch(/^Widget/));
+  });
+
+  it("marks an idle chat unread, and read again", async () => {
+    mockSeen = { a: NOW, b: NOW };
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, lantern, unread" })).toBeTruthy());
+    await fireEvent(screen.getByRole("button", { name: "Release, lantern, unread" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Mark as read" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, lantern" })).toBeTruthy());
+  });
+
+  it("does not offer read or unread for a chat that is working", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "w", title: "Busy", status: "working" })] });
+    await fireEvent(screen.getByRole("button", { name: "Busy, lantern, working" }), "longPress");
+    expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Mark as/ })).toBeNull();
   });
 });
 

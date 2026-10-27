@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
-import { settleSeen, useSeen } from "../seen";
+import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
+import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
@@ -16,6 +17,7 @@ import { countsOf, diffPreviewOf } from "../view/diffPreview";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { UsageStrip } from "./ChatExtras";
+import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { Suggestions } from "./Suggestions";
 
@@ -121,7 +123,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
       {/* The chat you are in: underlined with a line of the accent, from where the row's content starts to where it ends. */}
       {selected && <View accessibilityElementsHidden testID="selected-underline" style={{ position: "absolute", left: pad, right: pad, bottom: 0, height: 2, borderRadius: 1, backgroundColor: accent }} />}
       <View>
@@ -131,6 +133,11 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
       </View>
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: row.unread ? "800" : "400" }}>
+          {row.pinned && (
+            <Txt variant="tiny" tone="ink3" accessibilityElementsHidden>
+              {"📌 "}
+            </Txt>
+          )}
           {row.title}
         </Txt>
         {showProject && !!row.project && (
@@ -250,6 +257,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // Holding a chat down offers to close it (on the Mac too), for a Mac that can.
   const canClose = useMacCan("close");
   const [closing, setClosing] = useState<Row | null>(null);
+  // Holding a chat down also offers to pin it, and to mark it read or unread (on this phone only).
+  const [acting, setActing] = useState<Row | null>(null);
+  const pins = usePins();
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
@@ -270,6 +280,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   };
   const seen = useSeen();
   useEffect(() => settleSeen(chats), [chats]);
+  useEffect(() => settlePins(chats.map((c) => c.slot)), [chats]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
@@ -277,7 +288,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
   const stack = cards(waiting, chats);
   const head = headline(stack.length);
-  const list = rows(chats, now, seen, workingSince);
+  const list = rows(chats, now, seen, workingSince, pins);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
 
   const refresh = async () => {
@@ -350,14 +361,26 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
         ) : grouping === "project" ? (
-          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} selectedSlot={selectedSlot} />)
+          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} selectedSlot={selectedSlot} />)
         ) : (
-          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={canClose ? () => setClosing(r) : undefined} />)
+          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />)
         )}
         <SupportCard onPress={onSupport} />
           </>
         )}
       </ScrollView>
+      {acting && (
+        <ChatActionsSheet
+          title={acting.title}
+          project={acting.project}
+          pinned={!!acting.pinned}
+          unread={acting.status === "idle" ? acting.unread : null}
+          onTogglePin={() => setPinned(acting.slot, !acting.pinned)}
+          onToggleUnread={acting.status === "idle" ? () => (acting.unread ? markSeen(acting.slot, acting.activeAt) : markUnread(acting.slot)) : null}
+          onClose={canClose ? () => setClosing(acting) : null}
+          onDismiss={() => setActing(null)}
+        />
+      )}
       {closing && (
         <CloseChatSheet
           title={closing.title}
