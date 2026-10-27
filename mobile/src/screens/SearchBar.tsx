@@ -63,13 +63,13 @@ export function Magnifier({ color }: { color?: string }) {
 }
 
 /**
- * 0 and 1 for something being off and on. It springs: on the way to 1 it passes it a little, and on the way back to 0 it passes
- * that, which is where the circle swells past its size before it settles.
+ * 0 and 1 for something being off and on. On the way to 1 it springs, passing 1 a little; on the way back to 0 it doesn't pass 0
+ * at all (the circle coming back from the field passes its size by nothing, it was shrinking well under it before).
  */
 function useSwap(active: boolean): Animated.Value {
   const t = useRef(new Animated.Value(active ? 1 : 0)).current;
   useEffect(() => {
-    springLayout(t, active ? 1 : 0, { bounciness: 9, speed: 10 });
+    springLayout(t, active ? 1 : 0, active ? { bounciness: 6, speed: 11 } : { bounciness: 0, speed: 12 });
   }, [active, t]);
   return t;
 }
@@ -175,9 +175,10 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // The circle: its width is the circle's (which goes to nothing as the bar takes its room) until it opens, then the whole row's.
   const base = gone.interpolate({ inputRange: [0, 1], outputRange: [size, 0], extrapolateRight: "clamp" });
   const notOpen = open.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
-  const width = Animated.add(Animated.multiply(base, notOpen), open.interpolate({ inputRange: [0, 1], outputRange: [0, rowWidth] }));
+  // (The field's share of the width never goes below nothing: a spring that passed 0 on its way back took the circle well under its size.)
+  const width = Animated.add(Animated.multiply(base, notOpen), open.interpolate({ inputRange: [0, 1], outputRange: [0, rowWidth], extrapolateLeft: "clamp" }));
   const shown = Animated.add(gone.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" }), open).interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" });
-  const pop = open.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.06, 1], extrapolate: "clamp" });
+  const pop = open.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.03, 1], extrapolate: "clamp" });
   // The magnifier moves from the middle of the circle to the field's left; the rest comes in beside it.
   const magnifierLeft = open.interpolate({ inputRange: [0, 1], outputRange: [(size - MAGNIFIER) / 2, FIELD_LEFT], extrapolate: "clamp" });
   const fieldFade = open.interpolate({ inputRange: [0.35, 0.85], outputRange: [0, 1], extrapolate: "clamp" });

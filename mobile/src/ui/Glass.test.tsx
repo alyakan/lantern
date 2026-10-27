@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { AccessibilityInfo, StyleSheet, Text } from "react-native";
 import { act, render, screen } from "@testing-library/react-native";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
@@ -9,7 +10,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule
 
 // The module asks the phone about reduced transparency as it loads, and listens for the setting changing: watch for that.
 const subscribe = jest.spyOn(AccessibilityInfo, "addEventListener");
-const { Glass, GLASS_FILL, COMPOSER_FILL } = require("./Glass") as typeof import("./Glass");
+const { Glass, GLASS_FILL, COMPOSER_FILL, GLASS_SETTLE_MS } = require("./Glass") as typeof import("./Glass");
 const reduce = (on: boolean) => act(async () => void (subscribe.mock.calls.find((c) => c[0] === "reduceTransparencyChanged")![1] as (on: boolean) => void)(on));
 
 const available = isLiquidGlassAvailable as jest.Mock;
@@ -69,6 +70,37 @@ describe("a glass surface", () => {
     await screen.rerender(<Glass testID="surface" />);
     expect(layerOf()!.props.colorScheme).toBe("dark");
     expect(layerOf()).not.toBe(before);
+  });
+
+  it("makes its glass again once, when the screen it came in with has settled, and leaves what is on it alone", async () => {
+    // A chat slides in while its glass mounts, and that glass has come up clear: rebuilt once the slide is over, it draws.
+    jest.useFakeTimers();
+    try {
+      available.mockReturnValue(true);
+      let mounts = 0;
+      const Child = () => {
+        useEffect(() => void (mounts += 1), []);
+        return <Text>typed</Text>;
+      };
+      await render(
+        <Glass testID="surface">
+          <Child />
+        </Glass>,
+      );
+      const first = layerOf();
+      await act(async () => void jest.advanceTimersByTime(GLASS_SETTLE_MS - 50));
+      expect(layerOf()).toBe(first);
+      await act(async () => void jest.advanceTimersByTime(100));
+      const second = layerOf();
+      expect(second).not.toBe(first);
+      // The words (a message box's input) are not rebuilt with it: they keep their place, their focus and what was typed.
+      expect(mounts).toBe(1);
+      // Once, not for ever.
+      await act(async () => void jest.advanceTimersByTime(5000));
+      expect(layerOf()).toBe(second);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("is today's solid card, with its shadow, where it doesn't", async () => {
