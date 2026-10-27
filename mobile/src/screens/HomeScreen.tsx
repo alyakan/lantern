@@ -20,6 +20,7 @@ import { UsageStrip } from "./ChatExtras";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { Suggestions } from "./Suggestions";
+import { UsageSheet } from "./UsageSheet";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -260,6 +261,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // Holding a chat down also offers to pin it, and to mark it read or unread (on this phone only).
   const [acting, setActing] = useState<Row | null>(null);
   const pins = usePins();
+  const [usageOpen, setUsageOpen] = useState(false);
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
@@ -323,7 +325,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </View>
         </View>
-        {plan && <UsageStrip plan={plan} />}
+        {plan && <UsageStrip plan={plan} onPress={() => setUsageOpen(true)} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -369,6 +371,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </>
         )}
       </ScrollView>
+      {usageOpen && plan && <UsageSheet plan={plan} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet
           title={acting.title}

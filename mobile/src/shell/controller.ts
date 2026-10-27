@@ -9,6 +9,7 @@ import { fromBase64Url, readPairingLink, toBase64Url, type PairingOffer } from "
 import { Sync, type SyncDeps } from "../sync/sync";
 import { LiveCards, type CardFactory } from "../liveActivity";
 import { forgetLastKnown } from "../lastKnown";
+import { forgetUsageHistory } from "../usageHistory";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -127,5 +128,6 @@ export class Controller {
     this.sync.reset();
     // What the offline screen remembers of that Mac's chats goes with it.
     void forgetLastKnown();
+    void forgetUsageHistory();
   }
 }

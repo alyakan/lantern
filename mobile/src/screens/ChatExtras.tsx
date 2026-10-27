@@ -349,12 +349,12 @@ export function ContextRow({ context }: { context: { tokens: number; window: num
 }
 
 /** On Home: how much of the subscription's five-hour window is used, in a line with a thin bar under it. */
-export function UsageStrip({ plan }: { plan: PlanUsage }) {
+export function UsageStrip({ plan, onPress }: { plan: PlanUsage; /** Opens the usage in full (the chart). */ onPress?: () => void }) {
   const colors = useColors();
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessible style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
+    <PressScale accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessibilityHint={onPress ? "Opens the usage history" : undefined} accessible disabled={!onPress} onPress={onPress} haptic="select" scaleTo={0.98} style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Txt variant="tiny" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
           {u.tone === "stop" ? "Plan limit reached" : `Plan · ${u.percent}% used`}
@@ -369,7 +369,7 @@ export function UsageStrip({ plan }: { plan: PlanUsage }) {
         <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
       </View>
       {plan.week && <WeekStrip week={plan.week} />}
-    </View>
+    </PressScale>
   );
 }
 
