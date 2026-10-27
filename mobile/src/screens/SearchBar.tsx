@@ -7,7 +7,7 @@
  * The message box stays in the bar all the while, out of sight, so what was typed in it is kept, and the keyboard is handed from
  * one text field to the other without dropping.
  */
-import { useEffect, useRef, type ComponentRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode, type RefObject } from "react";
 import { Animated, Keyboard, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import { Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
@@ -30,7 +30,7 @@ export interface BarSearch {
   onCancel: () => void;
 }
 
-/** The circle's size: that of the message box beside it (a 36 point field with 6 points around it). */
+/** The circle's size until the bar has been measured: a 36 point field with 6 points around it. It then takes the bar's own height. */
 const CIRCLE = 48;
 const GAP = 8;
 
@@ -132,11 +132,16 @@ function SearchContents({ search, input, inset }: { search: BarSearch; input: Re
  * when it isn't searching, laid out in a row; `capsule` is the bar's own shape and padding. `back` puts the keyboard back in the
  * message box when the search ends, if the keyboard was up when it began (else the keyboard goes down, as it was).
  */
-export function SearchBar({ search, circle = true, capsule, lift, fill, inset = 0, back, children }: { search?: BarSearch; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; /** Room at the field's left, where the bar's own padding is small. */ inset?: number; back?: () => void; children: ReactNode }) {
+export function SearchBar({ search, circle = true, typing = false, capsule, lift, fill, inset = 0, back, children }: { search?: BarSearch; /** Words are being typed in the message box: the circle gives its room to the bar, as it does for the search field. */ typing?: boolean; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; /** Room at the field's left, where the bar's own padding is small. */ inset?: number; back?: () => void; children: ReactNode }) {
   const keyboard = useKeyboardUp();
   const input = useRef<ComponentRef<typeof TextInput>>(null);
-  const t = useSwap(!!search?.active);
   const active = !!search?.active;
+  // The circle is out while the bar is the search field and while words are being typed in the message box.
+  const shut = active || typing;
+  const t = useSwap(shut);
+  // The circle is as tall as the bar is at rest: the least height the bar has had (it grows with a long message, the circle doesn't).
+  const [seen, setSeen] = useState<number | null>(null);
+  const size = seen ?? CIRCLE;
   const keyboardBefore = useRef(false);
   const was = useRef(false);
   useEffect(() => {
@@ -152,7 +157,7 @@ export function SearchBar({ search, circle = true, capsule, lift, fill, inset = 
   }, [active]);
 
   const swell = t.interpolate({ inputRange: [0, 0.55, 1], outputRange: [1, 1.04, 1], extrapolate: "clamp" });
-  const width = t.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE, 0], extrapolateRight: "clamp" });
+  const width = t.interpolate({ inputRange: [0, 1], outputRange: [size, 0], extrapolateRight: "clamp" });
   const margin = t.interpolate({ inputRange: [0, 1], outputRange: [GAP, 0], extrapolateRight: "clamp" });
   const fade = t.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" });
   const shrink = t.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3], extrapolate: "clamp" });
@@ -169,7 +174,7 @@ export function SearchBar({ search, circle = true, capsule, lift, fill, inset = 
         </Txt>
       )}
       <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
-        <Animated.View style={{ flex: 1, transform: [{ scale: swell }] }}>
+        <Animated.View testID="chat-bar" style={{ flex: 1, transform: [{ scale: swell }] }} onLayout={(e) => setSeen((prev) => { const h = Math.round(e.nativeEvent.layout.height * 2) / 2; return prev === null || h < prev ? h : prev; })}>
           <Glass lift={lift} fill={fill} style={capsule}>
             <View style={[{ flex: 1, flexDirection: "row", alignItems: "flex-end", gap: GAP }, hideMessage.style]} {...rest(hideMessage)}>
               {children}
@@ -182,9 +187,9 @@ export function SearchBar({ search, circle = true, capsule, lift, fill, inset = 
           </Glass>
         </Animated.View>
         {search && circle && (
-          <Animated.View pointerEvents={active ? "none" : "auto"} style={{ width, marginLeft: margin, opacity: fade, transform: [{ scale: shrink }] }}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" accessibilityElementsHidden={active} onPress={search.onOpen} scaleTo={0.9} haptic="light">
-              <Glass style={{ width: "100%", height: CIRCLE, borderRadius: CIRCLE / 2, alignItems: "center", justifyContent: "center" }}>
+          <Animated.View pointerEvents={shut ? "none" : "auto"} style={{ width, marginLeft: margin, opacity: fade, transform: [{ scale: shrink }] }}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" accessibilityElementsHidden={shut} importantForAccessibility={shut ? "no-hide-descendants" : "auto"} onPress={search.onOpen} scaleTo={0.9} haptic="light">
+              <Glass testID="search-circle" style={{ width: "100%", height: size, borderRadius: size / 2, alignItems: "center", justifyContent: "center" }}>
                 <Magnifier />
               </Glass>
             </PressScale>
