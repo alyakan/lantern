@@ -151,7 +151,9 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // How wide the row is, which is how wide the field grows to (until it is measured, the screen less the page's margins).
   const [rowWidth, setRowWidth] = useState(screenWidth - 24);
   // While the bar is shrunk (any part of the way), its words and buttons keep the width they had at rest and run on, faded, under
-  // the field: let narrow, a typed draft would wrap to more lines, and the bar would grow taller as it shrank.
+  // the field: let narrow, a typed draft would wrap to more lines, and the bar would grow taller as it shrank. And the field stays
+  // there (fading) until the circle is back: taken away at once as the search ended, it had the keyboard, and the chat and the bar
+  // jumped down in one frame while the keyboard was still going (seen on the simulator).
   const [innerWidth, setInnerWidth] = useState<number | null>(null);
   const [shrunk, setShrunk] = useState(active);
   useEffect(() => {
@@ -249,7 +251,7 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
                 <Animated.View style={{ position: "absolute", left: magnifierLeft, top: (size - MAGNIFIER) / 2 }}>
                   <Magnifier />
                 </Animated.View>
-                <Animated.View style={{ position: "absolute", left: FIELD_LEFT + MAGNIFIER + GAP, right: 6, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", display: active ? "flex" : "none", opacity: fieldFade }}>
+                <Animated.View style={{ position: "absolute", left: FIELD_LEFT + MAGNIFIER + GAP, right: 6, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", display: active || shrunk ? "flex" : "none", opacity: fieldFade }}>
                   <SearchContents search={search} input={input} />
                 </Animated.View>
               </Glass>
