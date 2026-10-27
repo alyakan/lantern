@@ -1,5 +1,5 @@
 import "@shopify/flash-list/jestSetup";
-import { StyleSheet } from "react-native";
+import { Keyboard, StyleSheet, type ViewProps } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
@@ -230,6 +230,69 @@ describe("a chat", () => {
       // Text size changing it for the better: the least it has been.
       await lay(50);
       expect(circle()).toBe(50);
+    });
+
+    // Whether this node, or anything above it, takes no touches (by prop or by style).
+    const blocked = (node: { props?: ViewProps; parent?: unknown } | null | undefined): boolean => {
+      for (let n = node as { props?: ViewProps; parent?: unknown } | null | undefined; n; n = n.parent as typeof n) {
+        if (n.props?.pointerEvents === "none" || StyleSheet.flatten(n.props?.style)?.pointerEvents === "none") return true;
+      }
+      return false;
+    };
+
+    it("leaves the message box exactly as touchable after a search as before it, however often it is shown and dismissed", async () => {
+      await withSession(talk);
+      expect(blocked(screen.getByLabelText("Message"))).toBe(false);
+      for (let i = 0; i < 3; i++) {
+        await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+        await fireEvent.changeText(screen.getByLabelText("Search"), "login");
+        await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+        await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
+        // The box is there, reachable, and nothing over or around it takes its touches.
+        expect(blocked(screen.getByLabelText("Message"))).toBe(false);
+        expect(screen.getByLabelText("Message").props.editable).not.toBe(false);
+        expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+      }
+      // And it takes what is typed in it.
+      await fireEvent.changeText(screen.getByLabelText("Message"), "still works");
+      expect(screen.getByLabelText("Message").props.value).toBe("still works");
+    });
+
+    it("sizes the circle by the bar at rest, not by a layout in passing", async () => {
+      await withSession(talk);
+      const lay = (height: number) => fireEvent(screen.getByTestId("chat-bar"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });
+      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height;
+      await lay(52);
+      expect(circle()).toBe(52);
+      // The bar with nothing in it yet (just its padding), and an absurd height: neither is the bar, so the circle keeps its size.
+      await lay(12);
+      await lay(0);
+      await lay(400);
+      expect(circle()).toBe(52);
+    });
+
+    it("keeps the room under the chat bar the same when the keyboard comes, so nothing changes size at that moment", async () => {
+      const handlers = new Map<string, (e?: unknown) => void>();
+      const spy = jest.spyOn(Keyboard, "addListener").mockImplementation(((name: string, handler: (e?: unknown) => void) => {
+        handlers.set(name, handler);
+        return { remove: () => {} };
+      }) as never);
+      await withSession(talk);
+      // The bar's own box (the one with the room above and below it).
+      const room = () => {
+        for (let n = screen.getByLabelText("Message") as { props?: ViewProps; parent?: unknown } | null; n; n = n.parent as typeof n) {
+          const style = StyleSheet.flatten(n.props?.style);
+          if (style?.paddingTop === 8 && typeof style.paddingBottom === "number") return style.paddingBottom;
+        }
+        return null;
+      };
+      const down = room();
+      expect(down).not.toBeNull();
+      await act(async () => handlers.get("keyboardWillShow")?.());
+      expect(room()).toBe(down);
+      await act(async () => handlers.get("keyboardWillHide")?.());
+      expect(room()).toBe(down);
+      spy.mockRestore();
     });
 
     it("can still be searched while it sleeps: the circle is beside the Wake button, and the field replaces it while searching", async () => {

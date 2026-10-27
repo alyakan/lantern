@@ -4,8 +4,9 @@
  * back out of the bar when the search ends. The bar swells a little as it grows, and the circle overshoots as it returns: a
  * spring, not a slide.
  *
- * The message box stays in the bar all the while, out of sight, so what was typed in it is kept, and the keyboard is handed from
- * one text field to the other without dropping.
+ * The message box never leaves the bar or changes how it takes touches: the search field is a layer over it, there only while
+ * searching (and not there at all otherwise, so it can't catch a touch meant for the box). What was typed in the box is kept, and
+ * the keyboard is handed from one text field to the other without dropping.
  */
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode, type RefObject } from "react";
 import { Animated, Keyboard, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
@@ -33,6 +34,16 @@ export interface BarSearch {
 /** The circle's size until the bar has been measured: a 36 point field with 6 points around it. It then takes the bar's own height. */
 const CIRCLE = 48;
 const GAP = 8;
+/** Room at the search field's left inside the bar, and how long the keyboard waits for the field to be there and the bar to start growing. */
+const FIELD_LEFT = 16;
+const FOCUS_DELAY_MS = 80;
+/**
+ * What the bar can measure at rest (a 36 point field with 6 points around it, more with large text). A measurement outside it is a
+ * layout in passing, not the bar, and must not be what the circle is sized by: the circle keeps the least height seen, so one odd
+ * one would shrink it for good.
+ */
+const BAR_MIN = 40;
+const BAR_MAX = 80;
 
 /** A magnifying glass, drawn from a ring and a handle. */
 export function Magnifier({ color }: { color?: string }) {
@@ -45,18 +56,6 @@ export function Magnifier({ color }: { color?: string }) {
     </View>
   );
 }
-
-/** What is out of the way: not in the layout, no height, can't be touched and isn't read out. (It stays mounted, to be focused.) */
-const AWAY = { position: "absolute", left: 0, right: 0, top: 0, height: 0, opacity: 0, overflow: "hidden" } as const;
-const away = (hidden: boolean) => ({
-  style: hidden ? AWAY : undefined,
-  pointerEvents: hidden ? ("none" as const) : ("auto" as const),
-  accessibilityElementsHidden: hidden,
-  importantForAccessibility: hidden ? ("no-hide-descendants" as const) : ("auto" as const),
-});
-
-/** The parts of `away` that go on as props (its style goes in the style array beside the layout's own). */
-const rest = (a: ReturnType<typeof away>) => ({ pointerEvents: a.pointerEvents, accessibilityElementsHidden: a.accessibilityElementsHidden, importantForAccessibility: a.importantForAccessibility });
 
 /**
  * 0 while the bar is a message box and 1 while it is the search field. It springs: on the way to 1 it passes it a little, and on
@@ -81,12 +80,12 @@ function RoundButton({ label, onPress, disabled, children }: { label: string; on
 }
 
 /** What the bar holds while it searches: the field, "2 of 5", the arrows, and the way out. */
-function SearchContents({ search, input, inset }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null>; inset: number }) {
+function SearchContents({ search, input }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null> }) {
   const colors = useColors();
   const typed = search.query.trim().length >= 2;
   const none = typed && search.count === 0;
   return (
-    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: GAP, minHeight: 36, paddingLeft: inset }}>
+    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: GAP, minHeight: 36 }}>
       <Magnifier color={colors.ink3} />
       <TextInput
         ref={input}
@@ -132,7 +131,7 @@ function SearchContents({ search, input, inset }: { search: BarSearch; input: Re
  * when it isn't searching, laid out in a row; `capsule` is the bar's own shape and padding. `back` puts the keyboard back in the
  * message box when the search ends, if the keyboard was up when it began (else the keyboard goes down, as it was).
  */
-export function SearchBar({ search, circle = true, typing = false, capsule, lift, fill, inset = 0, back, children }: { search?: BarSearch; /** Words are being typed in the message box: the circle gives its room to the bar, as it does for the search field. */ typing?: boolean; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; /** Room at the field's left, where the bar's own padding is small. */ inset?: number; back?: () => void; children: ReactNode }) {
+export function SearchBar({ search, circle = true, typing = false, capsule, lift, fill, back, children }: { search?: BarSearch; /** Words are being typed in the message box: the circle gives its room to the bar, as it does for the search field. */ typing?: boolean; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; back?: () => void; children: ReactNode }) {
   const keyboard = useKeyboardUp();
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const active = !!search?.active;
@@ -147,12 +146,17 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   useEffect(() => {
     if (active) {
       keyboardBefore.current = keyboard;
-      input.current?.focus();
-    } else if (was.current) {
+      was.current = true;
+      // The field was not there a frame ago: a moment for it to be laid out, and for the bar to start growing before the keyboard
+      // rises, so the two don't both begin at once.
+      const timer = setTimeout(() => input.current?.focus(), FOCUS_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+    if (was.current) {
+      was.current = false;
       if (keyboardBefore.current) back?.();
       else Keyboard.dismiss();
     }
-    was.current = active;
     // (Only the search starting or ending runs this: the keyboard moving is read here, not a reason to run it again.)
   }, [active]);
 
@@ -162,9 +166,9 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   const fade = t.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" });
   const shrink = t.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3], extrapolate: "clamp" });
   const none = !!search && search.query.trim().length >= 2 && search.count === 0;
-  // The message box is out of the way while searching, and the search field while not (both stay, so each can be focused).
-  const hideMessage = away(active);
-  const hideSearch = away(!active);
+  // The message box fades out as the field fades in over it. Nothing is ever made untouchable: the field is there only while searching.
+  const boxFade = t.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: "clamp" });
+  const fieldFade = t.interpolate({ inputRange: [0.25, 0.8], outputRange: [0, 1], extrapolate: "clamp" });
 
   return (
     <View>
@@ -174,15 +178,19 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
         </Txt>
       )}
       <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
-        <Animated.View testID="chat-bar" style={{ flex: 1, transform: [{ scale: swell }] }} onLayout={(e) => setSeen((prev) => { const h = Math.round(e.nativeEvent.layout.height * 2) / 2; return prev === null || h < prev ? h : prev; })}>
+        <Animated.View testID="chat-bar" style={{ flex: 1, transform: [{ scale: swell }] }} onLayout={(e) => {
+          const h = Math.round(e.nativeEvent.layout.height * 2) / 2;
+          if (h < BAR_MIN || h > BAR_MAX) return;
+          setSeen((prev) => (prev === null || h < prev ? h : prev));
+        }}>
           <Glass lift={lift} fill={fill} style={capsule}>
-            <View style={[{ flex: 1, flexDirection: "row", alignItems: "flex-end", gap: GAP }, hideMessage.style]} {...rest(hideMessage)}>
+            <Animated.View accessibilityElementsHidden={active} importantForAccessibility={active ? "no-hide-descendants" : "auto"} style={{ flex: 1, flexDirection: "row", alignItems: "flex-end", gap: GAP, opacity: boxFade }}>
               {children}
-            </View>
+            </Animated.View>
             {search && (
-              <View style={[{ flex: 1 }, hideSearch.style]} {...rest(hideSearch)}>
-                <SearchContents search={search} input={input} inset={inset} />
-              </View>
+              <Animated.View style={{ position: "absolute", left: 0, right: 0, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", paddingLeft: FIELD_LEFT, paddingRight: 6, display: active ? "flex" : "none", opacity: fieldFade }}>
+                <SearchContents search={search} input={input} />
+              </Animated.View>
             )}
           </Glass>
         </Animated.View>
