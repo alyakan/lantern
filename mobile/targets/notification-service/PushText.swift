@@ -9,8 +9,9 @@ struct PushText: Equatable {
 }
 
 /// Opens the text a push carries. The Mac seals it (ChaCha20-Poly1305, RFC 8439) with a key only this phone has; Apple relays
-/// scrambled bytes. `enc` is base64 of nonce (12) + ciphertext + tag (16), and the chat's slot is authenticated with it, so a
-/// text can't be moved to another chat's push. Nothing here touches the Keychain or the network: it can be compiled and tested
+/// scrambled bytes. `enc` is base64 of nonce (12) + ciphertext + tag (16), and the chat's slot and the prompt's request id (empty
+/// when the push has none) are authenticated with it, so a text can't be moved to another chat's push, or to another prompt's
+/// Allow button. Nothing here touches the Keychain or the network: it can be compiled and tested
 /// alone (mobile/scripts/verify-push-text.sh). Neither the key nor the text is ever logged.
 enum PushCrypto {
     /// Authenticated with the text: the Mac builds the same words (src-tauri/src/remote/notifier.rs).
@@ -33,13 +34,13 @@ enum PushCrypto {
         return data
     }
 
-    static func open(enc: String, slot: String, key: Data) throws -> PushText {
+    static func open(enc: String, slot: String, requestId: String, key: Data) throws -> PushText {
         guard key.count == 32 else { throw Failure.badKey }
         guard let combined = Data(base64Encoded: enc), combined.count > 12 + 16 else { throw Failure.badEnvelope }
         let plain: Data
         do {
             let box = try ChaChaPoly.SealedBox(combined: combined)
-            plain = try ChaChaPoly.open(box, using: SymmetricKey(data: key), authenticating: Data((aadPrefix + slot).utf8))
+            plain = try ChaChaPoly.open(box, using: SymmetricKey(data: key), authenticating: Data("\(aadPrefix)\(slot):\(requestId)".utf8))
         } catch {
             throw Failure.cannotOpen
         }

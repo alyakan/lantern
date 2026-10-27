@@ -32,7 +32,7 @@ final class NotificationService: UNNotificationServiceExtension {
               let enc = data["enc"] as? String,
               let slot = data["slot"] as? String,
               let key = PushKeychain.key(),
-              let text = try? PushCrypto.open(enc: enc, slot: slot, key: key),
+              let text = try? PushCrypto.open(enc: enc, slot: slot, requestId: data["request_id"] as? String ?? "", key: key),
               let out = content.mutableCopy() as? UNMutableNotificationContent
         else { return content }
         out.title = text.title

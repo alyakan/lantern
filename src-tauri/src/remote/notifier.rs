@@ -132,8 +132,9 @@ struct Ask {
     /// The one name that says which: the program of a command, the file's name, the tool's. Only used when the user turned
     /// "Show titles" on (see `detail_of`).
     detail: Option<String>,
-    /// What the prompt asks, in full words, for the phone's extension (see rich.rs); only sent when the setting is on.
-    text: Option<String>,
+    /// What the prompt asks, in words for the phone's extension, and whether they are all of it (see rich.rs); only sent when the
+    /// setting is on.
+    text: Option<rich::Prompt>,
 }
 
 impl Ask {
@@ -271,10 +272,10 @@ impl Notifier {
                 if !saved.rich_notifications {
                     return None;
                 }
-                let text = ask.as_ref()?.text.as_deref()?;
+                let ask = ask.as_ref()?;
                 let lead = project.as_deref().or(chat_title.as_deref()).unwrap_or("Lantern");
                 let subtitle = if project.is_some() { chat_title.as_deref() } else { None };
-                rich::sealed_alert(&alert, device.push_key.as_deref()?, slot, lead, subtitle, text)
+                rich::sealed_alert(&alert, device.push_key.as_deref()?, slot, lead, subtitle, ask.text.as_ref()?)
             };
             for device in apple {
                 let rich_alert = sealed(device);
@@ -706,7 +707,8 @@ pub(crate) mod tests {
 
     fn words_of(alert: &Value) -> Value {
         let enc = alert["body"]["enc"].as_str().expect("sealed");
-        serde_json::from_slice(&rich::open(KEY, alert["body"]["slot"].as_str().unwrap(), enc).expect("opens")).unwrap()
+        let request_id = alert["body"]["request_id"].as_str().unwrap_or("");
+        serde_json::from_slice(&rich::open(KEY, alert["body"]["slot"].as_str().unwrap(), request_id, enc).expect("opens")).unwrap()
     }
 
     #[tokio::test]
@@ -727,6 +729,31 @@ pub(crate) mod tests {
         // The real words are in it, and only sealed: Apple's copy has the command nowhere in the clear.
         assert!(!push.to_string().contains("SECRET-COMMAND"));
         assert_eq!(words_of(push), serde_json::json!({"title": "p", "body": "Wants to run:\necho SECRET-COMMAND"}));
+    }
+
+    #[tokio::test]
+    async fn a_command_that_was_cut_or_an_edit_that_was_not_all_shown_has_no_buttons_and_a_whole_one_keeps_them() {
+        let r = rig_apple(1);
+        give_keys(&r);
+        r.store.set_rich_notifications(true).unwrap();
+        r.hub.opened("a", "/p");
+        let bash = |id: &str, command: String| UiEvent::PermissionRequested { request_id: id.into(), tool_name: "Bash".into(), input: serde_json::json!({"command": command}) };
+        let edit = |id: &str, new: &str| UiEvent::PermissionRequested { request_id: id.into(), tool_name: "Edit".into(), input: serde_json::json!({"file_path": "/p/a.rs", "old_string": "a", "new_string": new}) };
+        r.event("a", bash("short", "git status".into())).await;
+        r.event("a", bash("long", "x".repeat(5000))).await;
+        r.event("a", edit("small", "b\nc")).await;
+        r.event("a", edit("big", "1\n2\n3\n4\n5")).await;
+        let sent = r.alerts();
+        let category = |i: usize| sent[i].1["aps"]["category"].as_str().map(str::to_string);
+        assert_eq!(category(0).as_deref(), Some("lantern_decide"), "a short command is all shown");
+        assert_eq!(category(1), None, "a command cut to fit");
+        assert_eq!(category(2).as_deref(), Some("lantern_decide"), "a small edit is all shown");
+        assert_eq!(category(3), None, "an edit with lines not shown");
+        // Each is sealed to its own prompt: the words of one do not open for another's id.
+        for (i, id) in ["short", "long", "small", "big"].iter().enumerate() {
+            assert_eq!(sent[i].1["body"]["request_id"], *id);
+            assert!(words_of(&sent[i].1)["body"].is_string());
+        }
     }
 
     #[tokio::test]
