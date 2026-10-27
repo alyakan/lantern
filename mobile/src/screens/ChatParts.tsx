@@ -24,7 +24,9 @@ import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
+import { DiffPreviewCard } from "./DiffPreviewCard";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 
@@ -322,8 +324,12 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
     return () => clearTimeout(t);
   }, [settling, h, openOpacity, doneOpacity]);
 
-  const swipe = view.kind === "allow" && !!onAllow;
   const approval = approvalOf(item.toolName, item.input);
+  // A file change is drawn in the card, and can only be swiped to allow here when all of it can be read here: a change that is cut
+  // short, longer than the card shows, or "everywhere it appears" is opened to be read first.
+  const preview = approval ? null : diffPreviewOf(item.toolName, item.input);
+  const readHere = !preview || fitsInline(preview);
+  const swipe = view.kind === "allow" && !!onAllow && readHere;
   const openCard = (
     <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -345,6 +351,12 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
           {view.detail}
         </Txt>
       )}
+      {preview && <DiffPreviewCard preview={preview} file={null} tone="paper" />}
+      {preview && !readHere && (
+        <Txt variant="small" tone="ink2" testID="read-first">
+          This is more than fits here. Open it to read all of it before you decide.
+        </Txt>
+      )}
       {swipe ? (
         // Half the card's width, from the middle to the right edge, where the thumb is.
         <View style={{ marginTop: 8, width: "50%", alignSelf: "flex-end" }}>
@@ -352,7 +364,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
           <SwipeToAllow key={`${item.id}:${tries}`} compact onDrag={onSwiping} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
         </View>
       ) : (
-        <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
+        <Button label={preview ? "Review the change" : "Review"} style={{ marginTop: 6 }} onPress={onReview} />
       )}
     </View>
   );

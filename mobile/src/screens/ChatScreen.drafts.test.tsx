@@ -89,3 +89,42 @@ describe("a message sent while Claude is busy", () => {
     expect(screen.queryByText(/Queued/)).toBeNull();
   });
 });
+
+describe("a file change waiting inside the chat", () => {
+  async function chatWithPrompt(input: unknown, tool = "Edit") {
+    const { controller } = makeController();
+    attachSession(controller);
+    await renderWith(
+      <ChatScreen slot="a" onBack={jest.fn()} onReview={jest.fn()} />,
+      { chats: [chat({ status: "needs_you" })], events: { a: [{ kind: "permission_requested", request_id: "p1", tool_name: tool, input }] } },
+      controller,
+    );
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+  }
+
+  it("shows the change, and can be swiped to allow when all of it is shown", async () => {
+    await chatWithPrompt({ file_path: "/p/a.ts", old_string: "let a = 1;", new_string: "let a = 2;" });
+    expect(screen.getByTestId("diff-preview")).toBeTruthy();
+    expect(screen.getByText("let a = 2;")).toBeTruthy();
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+  });
+
+  it("asks to be opened first when the change is longer than the card shows", async () => {
+    await chatWithPrompt({ file_path: "/p/a.ts", content: Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n") }, "Write");
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    expect(screen.getByTestId("read-first")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review the change" })).toBeTruthy();
+  });
+
+  it("asks to be opened first when it replaces every place the text appears", async () => {
+    await chatWithPrompt({ file_path: "/p/a.ts", old_string: "a", new_string: "b", replace_all: true });
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    expect(screen.getByText(/changes every place this text appears/i)).toBeTruthy();
+  });
+
+  it("a command is still swiped to allow as before", async () => {
+    await chatWithPrompt({ command: "ls" }, "Bash");
+    expect(screen.queryByTestId("diff-preview")).toBeNull();
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+  });
+});

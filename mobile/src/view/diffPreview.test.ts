@@ -1,4 +1,4 @@
-import { countsOf, CUT, diffPreviewOf, editBlock, MAX_EDITS, MAX_LINES, MAX_LINE_CHARS } from "./diffPreview";
+import { countsOf, CUT, diffPreviewOf, editBlock, fitsInline, INLINE_LINES, MAX_EDITS, MAX_LINES, MAX_LINE_CHARS } from "./diffPreview";
 
 describe("diffPreviewOf", () => {
   it("shows an edit as removed then added lines with context kept from the shared start and end", () => {
@@ -95,6 +95,27 @@ describe("a change the Mac cut short", () => {
     expect(diffPreviewOf("MultiEdit", { edits: many })!.partial).toBe(true);
     expect(diffPreviewOf("MultiEdit", { edits: [{ old_string: "a", new_string: "b" }, { bad: 1 }] })!.partial).toBe(true);
     expect(diffPreviewOf("MultiEdit", { edits: [{ old_string: "a", new_string: "b" }] })!.partial).toBe(false);
+  });
+});
+
+describe("an edit that replaces every place", () => {
+  it("says so, for an edit and for one of a multi-edit", () => {
+    expect(diffPreviewOf("Edit", { old_string: "a", new_string: "b", replace_all: true })!.replaceAll).toBe(true);
+    expect(diffPreviewOf("Edit", { old_string: "a", new_string: "b" })!.replaceAll).toBe(false);
+    expect(diffPreviewOf("MultiEdit", { edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d", replace_all: true }] })!.replaceAll).toBe(true);
+  });
+});
+
+describe("fitsInline", () => {
+  const line = (n: number) => Array.from({ length: n }, (_, i) => `l${i}`).join("\n");
+  it("is true for a short whole change", () => {
+    expect(fitsInline(diffPreviewOf("Edit", { old_string: "a", new_string: "b" })!)).toBe(true);
+  });
+  it("is false for a long one, a cut one and a replace-all", () => {
+    expect(fitsInline(diffPreviewOf("Write", { content: line(INLINE_LINES + 1) })!)).toBe(false);
+    expect(fitsInline(diffPreviewOf("Write", { content: line(INLINE_LINES) })!)).toBe(true);
+    expect(fitsInline(diffPreviewOf("Write", { content: `x${CUT}` })!)).toBe(false);
+    expect(fitsInline(diffPreviewOf("Edit", { old_string: "a", new_string: "b", replace_all: true })!)).toBe(false);
   });
 });
 

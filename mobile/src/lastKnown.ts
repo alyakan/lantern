@@ -1,7 +1,8 @@
 /**
  * What the Mac last listed, kept on this phone only (the Keychain) so that when the Mac can't be reached, the phone can show
- * what was there and when, greyed, instead of a bare "can't reach". Titles and project names only: no slot, no status (it would be
- * stale and misleading), no message text.
+ * what was there and when, greyed, instead of a bare "can't reach". The titles Home lists (as on Home, one can be made from the
+ * first thing said) and project names only: no slot, no status (it would be stale and misleading), no message text. It is forgotten
+ * when the phone is unpaired.
  */
 import * as SecureStore from "expo-secure-store";
 import type { RemoteChat } from "./protocol/generated/RemoteChat";
@@ -25,7 +26,7 @@ export interface LastKnown {
   chats: KnownChat[];
 }
 
-/** The chats with a real title (never the stand-in made from a first message), newest first as listed, as they are kept. */
+/** The chats that have a title, newest first as listed, as they are kept. */
 export function snapshotOf(chats: RemoteChat[], mac: string | null, now: number): LastKnown | null {
   const known = [...chats]
     .sort((a, b) => b.active_at - a.active_at)

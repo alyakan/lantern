@@ -66,6 +66,18 @@ export async function saveDraft(slot: string, text: string): Promise<void> {
   }
 }
 
+/** Forgets every draft, on the phone too (this phone was unpaired from the Mac: its drafts are not another Mac's). */
+export async function forgetDrafts() {
+  const slots = [...new Set([...(await readIndex()), ...memory.keys()])];
+  memory.clear();
+  try {
+    for (const slot of slots) await SecureStore.deleteItemAsync(keyOf(slot), OPTIONS);
+    await SecureStore.deleteItemAsync(INDEX_KEY, OPTIONS);
+  } catch {
+    // Nothing more to do.
+  }
+}
+
 /** For tests: forget what is held in memory. */
 export function resetDrafts() {
   memory.clear();

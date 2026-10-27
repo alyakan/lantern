@@ -84,6 +84,17 @@ export function settlePins(listed: string[]) {
   });
 }
 
+/** Forgets every pin, on the phone too (this phone was unpaired from the Mac). */
+export async function forgetPins() {
+  resetPins();
+  emit();
+  try {
+    await SecureStore.deleteItemAsync(KEY, OPTIONS);
+  } catch {
+    // Nothing more to do.
+  }
+}
+
 /** Back to nothing known (the tests' fresh start). */
 export function resetPins() {
   pins = [];

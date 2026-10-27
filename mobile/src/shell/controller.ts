@@ -10,6 +10,8 @@ import { Sync, type SyncDeps } from "../sync/sync";
 import { LiveCards, type CardFactory } from "../liveActivity";
 import { forgetLastKnown } from "../lastKnown";
 import { forgetUsageHistory } from "../usageHistory";
+import { forgetDrafts } from "../drafts";
+import { forgetPins } from "../pins";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -126,8 +128,10 @@ export class Controller {
   async unpair() {
     await this.connection.forget();
     this.sync.reset();
-    // What the offline screen remembers of that Mac's chats goes with it.
+    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, pins) goes with it.
     void forgetLastKnown();
     void forgetUsageHistory();
+    void forgetDrafts();
+    void forgetPins();
   }
 }

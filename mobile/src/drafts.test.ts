@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import { DRAFTS_KEPT, DRAFT_MAX_CHARS, loadDraft, resetDrafts, saveDraft } from "./drafts";
+import { DRAFTS_KEPT, DRAFT_MAX_CHARS, forgetDrafts, loadDraft, resetDrafts, saveDraft } from "./drafts";
 
 // The Keychain, as a map.
 const mockStore = new Map<string, string>();
@@ -65,5 +65,17 @@ describe("drafts", () => {
     (SecureStore.getItemAsync as jest.Mock).mockRejectedValueOnce(new Error("locked"));
     await saveDraft("a", "kept");
     expect(await loadDraft("a")).toBe("kept");
+  });
+});
+
+describe("forgetDrafts", () => {
+  it("removes every draft and the index, so none can come back for another Mac", async () => {
+    await saveDraft("a", "one");
+    await saveDraft("b", "two");
+    await forgetDrafts();
+    resetDrafts();
+    expect(await loadDraft("a")).toBe("");
+    expect(await loadDraft("b")).toBe("");
+    expect([...mockStore.keys()]).toEqual([]);
   });
 });

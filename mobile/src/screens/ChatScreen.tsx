@@ -7,7 +7,7 @@ import { useConnectionState, useController, useDeviceId, useSyncState } from "..
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
-import { FadeSlideIn, PressScale } from "../ui/motion";
+import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
 import { space, useColors } from "../ui/theme";
@@ -143,7 +143,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     setAnswered((s) => new Set(s).add(id));
     if (a.reply) void sync.send(slot, a.reply);
   };
-  const fail = (e: unknown) => setProblem((e as Error).message);
+  const fail = (e: unknown) => {
+    setProblem((e as Error).message);
+    buzz("warning");
+  };
 
   /**
    * A command typed in the terminal. The phone first checks who is holding it by Face ID (or Touch ID, never the passcode
