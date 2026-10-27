@@ -134,6 +134,16 @@ describe("turns", () => {
   });
 });
 
+describe("the post-hook", () => {
+  it("marks where the hook's turn begins, once however often it is told, after the answer", () => {
+    const hook: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    const s = run([...turn.slice(0, 5), hook, hook, { kind: "assistant_text", block_id: "h1", text: "Updated." } as RemoteEvent].map((e, i) => event("a", i + 1, e)));
+    const kinds = items(s).map((it) => it.kind);
+    expect(kinds).toEqual(["user", "assistant", "hook", "assistant"]);
+    expect(items(s)[2]).toEqual({ kind: "hook", id: "hook-u-1-ship it", text: "Update the brain if needed" });
+  });
+});
+
 describe("a message sent from this phone", () => {
   it("shows at once, and the Mac's copy takes its place", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "ship it", at: 5 });

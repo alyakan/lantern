@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Linking, ScrollView, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
@@ -44,17 +44,35 @@ export function Marked({ text, mark }: { text: string; mark?: string }) {
   );
 }
 
+/** The files a message's turn edited, and what a tap on one named in its words does (opens its diff). */
+const FileLinks = createContext<{ files: string[]; onFile: (path: string) => void } | null>(null);
+
+/** The edited file a bit of code in the words names: the whole path, or its end ("home.ts", "view/home.ts", "home.ts:42"). */
+export function fileNamed(code: string, files: string[]): string | null {
+  const name = code.trim().replace(/:\d+(?::\d+)?$/, "");
+  if (!name || /\s/.test(name)) return null;
+  return files.find((f) => f === name || f.endsWith(`/${name.replace(/^\.?\//, "")}`)) ?? null;
+}
+
 function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string }) {
   const accent = useAccent();
   const colors = useColors();
   const hit = useHit();
+  const links = useContext(FileLinks);
   return (
     <>
       {spans.map((s, i) => {
         switch (s.kind) {
-          case "code":
+          case "code": {
+            const file = links ? fileNamed(s.text, links.files) : null;
             return (
-              <Text key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }}>
+              <Text
+                key={i}
+                accessibilityRole={file ? "link" : undefined}
+                accessibilityHint={file ? "Shows what changed in this file" : undefined}
+                onPress={file ? () => links?.onFile(file) : undefined}
+                style={[{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }, file ? { color: accent, textDecorationLine: "underline", textDecorationStyle: "dotted" } : null]}
+              >
                 {mark
                   ? splitMarked(s.text, mark).map((p, j) => (
                       <Text key={j} style={p.hit ? hit : undefined}>
@@ -64,6 +82,7 @@ function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string
                   : s.text}
               </Text>
             );
+          }
           case "bold":
             return (
               <Text key={i} style={{ fontWeight: "700" }}>
@@ -228,10 +247,11 @@ function Table({ block, tone, mark }: { block: Extract<Block, { kind: "table" }>
 const BULLET_WIDTH = 10;
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
-  return (
+  const links = useMemo(() => (files?.length && onFile ? { files, onFile } : null), [files, onFile]);
+  const body = (
     <View style={{ gap: 8 }}>
       {blocks.map((b, i) => {
         switch (b.kind) {
@@ -293,4 +313,5 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
       })}
     </View>
   );
+  return links ? <FileLinks.Provider value={links}>{body}</FileLinks.Provider> : body;
 });

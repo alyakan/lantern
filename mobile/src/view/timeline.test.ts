@@ -1,10 +1,10 @@
 import type { Item } from "../sync/reducer";
-import { stepChips, summaryOf, timeline, turnLine } from "./timeline";
+import { dayLabel, lastLine, stepChips, summaryOf, timeline, turnLine } from "./timeline";
 
 type Step = Extract<Item, { kind: "step" }>;
 const step = (id: string, name: string, over: Partial<Step> = {}): Step => ({ kind: "step", id, name, summary: "", done: true, isError: false, edits: [], tests: null, ...over });
 const said = (id: string, text: string, streaming = false): Item => ({ kind: "assistant", id, text, streaming });
-const you = (id: string, text: string): Item => ({ kind: "user", id, text, at: 1, sentBy: null });
+const you = (id: string, text: string): Item => ({ kind: "user", id, text, at: null, sentBy: null });
 
 describe("a run of steps as chips", () => {
   it("counts reads, searches and edits (files once, lines summed)", () => {
@@ -105,7 +105,8 @@ describe("a turn's summary", () => {
     const s = summaryOf(items, 4);
     expect(s?.durationMs).toBe(192_000);
     expect(s?.chips.map((c) => c.label)).toEqual(["Edited 1 file +4 −1", "9 tests passed"]);
-    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "steps", "summary", "turn"]);
+    // The card says how long the turn took: no line of its own under it.
+    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "steps", "summary"]);
   });
 
   it("is a list too, however short, and a few sentences without one", () => {
@@ -123,11 +124,89 @@ describe("a turn's summary", () => {
 
   it("is only the last message of the turn: what Claude said between its steps stays a message", () => {
     const items = [you("u1", "do it"), said("a0", long), ...worked().slice(1), said("a1", long), turn("t1")];
-    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "assistant", "steps", "summary", "turn"]);
+    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "assistant", "steps", "summary"]);
   });
 
   it("counts only its own turn's work, not an earlier turn's", () => {
     const items: Item[] = [...worked(), turn("t1"), you("u2", "and?"), said("a2", long), turn("t2")];
     expect(summaryOf(items, 6)).toBeNull();
+  });
+});
+
+describe("a turn's end, where it is said", () => {
+  const end = (over: Partial<Extract<Item, { kind: "turn" }>> = {}): Item => ({ kind: "turn", id: "t", isError: false, result: null, durationMs: 42_000, ...over });
+  it("ends the turn's last row of steps, instead of a line of its own", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "Done."), end()]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant"]);
+    expect(rows[1].kind === "steps" && rows[1].took).toBe("42 s");
+  });
+  it("keeps a line of its own for a quick answer with no steps, and always for an error", () => {
+    expect(timeline([you("u1", "hi"), said("a1", "Hello."), end()]).map((r) => r.kind)).toEqual(["user", "assistant", "turn"]);
+    expect(timeline([you("u1", "go"), step("1", "Read"), end({ isError: true, result: "rate limited" })]).map((r) => r.kind)).toEqual(["user", "steps", "turn"]);
+  });
+  it("only counts its own turn's steps", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), end({ id: "t1" }), you("u2", "hi"), said("a2", "Hello."), end({ id: "t2" })]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "user", "assistant", "turn"]);
+  });
+});
+
+describe("days and times in a chat", () => {
+  const NOW = new Date(2026, 9, 28, 9, 0).getTime();
+  const at = (id: string, t: number): Item => ({ kind: "user", id, text: id, at: t, sentBy: null });
+  const kinds = (items: Item[]) => timeline(items, NOW).map((r) => (r.kind === "day" ? `day:${r.label}` : r.kind === "user" ? `user:${r.showTime}` : r.kind));
+
+  it("says nothing above today's first message, and names the day a new one starts", () => {
+    expect(kinds([at("a", NOW - 60_000)])).toEqual(["user:true"]);
+    const yesterday = NOW - 86_400_000;
+    expect(kinds([at("a", yesterday), at("b", NOW - 60_000)])).toEqual(["day:Yesterday", "user:true", "day:Today", "user:true"]);
+  });
+
+  it("shows a message's time only after a gap, and never for one with no time", () => {
+    expect(kinds([at("a", NOW - 30 * 60_000), at("b", NOW - 28 * 60_000), at("c", NOW - 5 * 60_000)])).toEqual(["user:true", "user:false", "user:true"]);
+    expect(kinds([you("a", "x")])).toEqual(["user:false"]);
+  });
+
+  it("names an older day by its date", () => {
+    expect(dayLabel(new Date(2026, 9, 20, 12).getTime(), NOW)).not.toMatch(/Today|Yesterday/);
+    expect(dayLabel(NOW - 3 * 3_600_000, NOW)).toBe("Today");
+  });
+});
+
+describe("a post-hook in the timeline", () => {
+  const hook: Item = { kind: "hook", id: "hook-u1", text: "Update the brain if needed" };
+  const turnEnd: Item = { kind: "turn", id: "t", isError: false, result: null, durationMs: 9000 };
+  const long = "Done. Here is what changed:\n\n- one\n- two\n- three";
+  const work = [step("1", "Read"), step("2", "Edit", { edits: [{ path: "/p/a.ts", created: false, added: 1, removed: 0 }] }), step("3", "Bash")];
+
+  it("folds what the hook made Claude say and do into one row after the answer, which is still the turn's summary", () => {
+    const rows = timeline([you("u1", "go"), ...work, said("a1", long), hook, step("h1", "Bash", { summary: "brain log" }), said("h2", "The brain is updated."), turnEnd]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "summary", "hook"]);
+    const h = rows[3];
+    expect(h.kind === "hook" && [h.text, h.said, h.chips.map((c) => c.label), h.going]).toEqual(["Update the brain if needed", "The brain is updated.", ["Ran 1 command"], false]);
+  });
+
+  it("is still going until the turn ends", () => {
+    const rows = timeline([you("u1", "go"), said("a1", "Hi."), hook, step("h1", "Bash", { done: false })]);
+    expect(rows.at(-1)?.kind === "hook" && rows.at(-1)).toMatchObject({ going: true });
+  });
+
+  it("says the last line of the hook's words", () => {
+    expect(lastLine("Checked.\n\n**The brain is updated.**\n```\ncode\n```")).toBe("The brain is updated.");
+  });
+});
+
+describe("the files a message's turn edited", () => {
+  it("are given to each message of the turn, and not to another turn's", () => {
+    const rows = timeline([you("u1", "go"), said("a0", "Looking."), step("1", "Edit", { edits: [{ path: "/p/src/a.ts", created: false, added: 1, removed: 0 }] }), said("a1", "Changed `a.ts`."), you("u2", "next"), said("a2", "Ok.")]);
+    const files = rows.filter((r) => r.kind === "assistant").map((r) => (r.kind === "assistant" ? r.files : null));
+    expect(files).toEqual([["/p/src/a.ts"], ["/p/src/a.ts"], []]);
+  });
+});
+
+describe("a chip whose step is still going", () => {
+  it("says so, and stops once it is done", () => {
+    expect(stepChips([step("1", "Bash", { done: false })])[0].running).toBe(true);
+    expect(stepChips([step("1", "Bash")])[0].running).toBeUndefined();
+    expect(stepChips([step("1", "Read", { done: false })])[0].running).toBe(true);
   });
 });
