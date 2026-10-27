@@ -24,7 +24,7 @@ import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
-import { fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { control, fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
@@ -669,7 +669,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ flex: 1, maxHeight: 120, minHeight: 36, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
+          style={{ flex: 1, maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
         />
         {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
         <SendButton

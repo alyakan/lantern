@@ -10,7 +10,7 @@ import { AboveKeyboard, barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
-import { radius, space, useColors } from "../ui/theme";
+import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
 import { projectColorOf } from "../view/home";
@@ -303,14 +303,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
         {lead === "back" && (
           <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
-            <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
               <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
             </Glass>
           </PressScale>
         )}
         {(lead === "sidebar" || lead === "hide") && (
           <PressScale accessibilityRole="button" accessibilityLabel={lead === "hide" ? "Hide chats" : "Show chats"} onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
-            <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
               {/* A window with its side panel: the chats (filled in while they are beside the chat). */}
               <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
                 <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink, backgroundColor: lead === "hide" ? colors.ink : "transparent" }} />
@@ -322,15 +322,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
             // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass).
-            <Glass style={{ flex: 1, minHeight: 48, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 6, justifyContent: "center" }}>
-              <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
+            <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
+              <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
                 {chat?.title?.trim() || "Chat"}
               </Txt>
               {/* The project in its colour (the desktop sidebar's), then how the chat stands and what it runs on. */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} />}
                 {!!([asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).length) && (
-                  <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>
+                  <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
                     {[asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).join(" · ")}
                   </Txt>
                 )}
@@ -340,7 +340,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         </ChatSettings>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: control, paddingHorizontal: 18, borderRadius: control / 2, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.onInk }} />
               <Txt variant="small" tone="on-ink" style={{ fontWeight: "700" }}>
                 Stop
