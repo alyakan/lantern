@@ -19,7 +19,8 @@ import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
-import { distanceFromEnd, FindBar, JumpToBottom, Magnifier, MessageActionsSheet, PlanCard, QuickReplies, SearchField, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
+import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
+import { SearchBar, type BarSearch } from "./SearchBar";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
@@ -101,6 +102,17 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     if (!find) return;
     const m = stepMatch(matches, find.cursor, dir);
     if (m) setFind({ ...find, cursor: m.key });
+  };
+  // What the chat bar needs to search: the circle beside it, and the field it turns into.
+  const barSearch: BarSearch = {
+    active: !!find,
+    query: find?.query ?? "",
+    count: matches.length,
+    position: here ? matches.indexOf(here) + 1 : 0,
+    onOpen: () => setFind({ query: "", cursor: null }),
+    onChange: (query) => setFind({ query, cursor: null }),
+    onStep: step,
+    onCancel: () => setFind(null),
   };
   // A message being read aloud: reading stops when the chat is left.
   const [reading, setReading] = useState(false);
@@ -306,10 +318,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           </PressScale>
         )}
-        {find ? (
-          <SearchField query={find.query} onChange={(query) => setFind({ query, cursor: null })} onNext={() => step(-1)} onCancel={() => setFind(null)} />
-        ) : (
-          <>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
@@ -330,12 +338,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           )}
         </ChatSettings>
-        {/* Looking for something said in this chat. */}
-        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setFind({ query: "", cursor: null })} hitSlop={8} scaleTo={0.88}>
-          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-            <Magnifier />
-          </Glass>
-        </PressScale>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
             <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -345,8 +347,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
               </Txt>
             </PressScale>
           </FadeSlideIn>
-        )}
-          </>
         )}
       </View>
 
@@ -369,8 +369,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   );
   const foot = (
     <>
-      {find && <FindBar query={find.query} count={matches.length} position={here ? matches.indexOf(here) + 1 : 0} onOlder={() => step(-1)} onNewer={() => step(1)} />}
-      <View style={find ? { display: "none" } : undefined}>
       <PlanCard todos={view.todos} />
       {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
@@ -396,22 +394,26 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           <Txt variant="small" tone="ink2">
             This chat is asleep to save memory. It picks up where it left off.
           </Txt>
-          <Button
-            label={waking ? "Waking…" : "Wake this chat"}
-            disabled={!online || waking}
-            onPress={() => {
-              setWaking(true);
-              sync.wake(slot).catch((e) => {
-                setWaking(false);
-                fail(e);
-              });
-            }}
-          />
+          {/* The chat can still be searched while it sleeps: the same circle, beside the one button there is. */}
+          <SearchBar search={barSearch} capsule={{ flexDirection: "row", alignItems: "center", borderRadius: 26, padding: 6 }} inset={12}>
+            <View style={{ flex: 1 }}>
+              <Button
+                label={waking ? "Waking…" : "Wake this chat"}
+                disabled={!online || waking}
+                onPress={() => {
+                  setWaking(true);
+                  sync.wake(slot).catch((e) => {
+                    setWaking(false);
+                    fail(e);
+                  });
+                }}
+              />
+            </View>
+          </SearchBar>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} />
       )}
-      </View>
     </>
   );
   const listEl = (

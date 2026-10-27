@@ -44,6 +44,18 @@ export function bounce(value: Animated.Value, to: number, o: { delay?: number; b
   Animated.sequence([Animated.delay(o.delay ?? 0), Animated.spring(value, { toValue: to, useNativeDriver: true, speed: o.speed ?? 14, bounciness: o.bounciness ?? 12 })]).start();
 }
 
+/**
+ * A spring for what layout draws (a width, a margin, a scale that follows them): the native driver can't move those, so this one
+ * runs in JavaScript. It overshoots a little, so a thing that grows swells past its size and settles.
+ */
+export function springLayout(value: Animated.Value, to: number, o: { bounciness?: number; speed?: number } = {}) {
+  if (skips()) {
+    value.setValue(to);
+    return;
+  }
+  Animated.spring(value, { toValue: to, useNativeDriver: false, speed: o.speed ?? 12, bounciness: o.bounciness ?? 10 }).start();
+}
+
 /** A small tap on the phone: "light" for a press, "select" for a choice, "success" and "warning" for what a decision came to. */
 export function buzz(kind: "light" | "select" | "success" | "warning" = "light") {
   if (motion.instant) return;
