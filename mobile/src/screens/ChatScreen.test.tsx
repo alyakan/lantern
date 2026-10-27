@@ -1,5 +1,5 @@
 import "@shopify/flash-list/jestSetup";
-import { Keyboard, StyleSheet, type ViewProps } from "react-native";
+import { Keyboard, StyleSheet, TextInput, type ViewProps } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
@@ -260,6 +260,16 @@ describe("a chat", () => {
       expect(screen.getByLabelText("Message").props.value).toBe("still works");
     });
 
+    // The phone's keyboard, for a test to bring up: every handler the screen gave Keyboard for each event.
+    const keyboardEvents = () => {
+      const handlers = new Map<string, ((e?: unknown) => void)[]>();
+      const spy = jest.spyOn(Keyboard, "addListener").mockImplementation(((name: string, handler: (e?: unknown) => void) => {
+        handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+        return { remove: () => handlers.set(name, (handlers.get(name) ?? []).filter((h) => h !== handler)) };
+      }) as never);
+      return { emit: (name: string) => act(async () => (handlers.get(name) ?? []).forEach((h) => h())), restore: () => spy.mockRestore() };
+    };
+
     // The opacity the nearest drawn layer above this node says (the message box's row fades while a search is on).
     const opacityOf = (node: { props?: ViewProps; parent?: unknown } | null | undefined): number | undefined => {
       for (let n = node as { props?: ViewProps; parent?: unknown } | null | undefined; n; n = n.parent as typeof n) {
@@ -282,8 +292,11 @@ describe("a chat", () => {
     });
 
     it("fades the message box out only while the search is on, and brings it back", async () => {
+      const kb = keyboardEvents();
       await withSession(talk);
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await kb.emit("keyboardWillShow");
+      kb.restore();
       expect(opacityOf(screen.getByLabelText("Message", { includeHiddenElements: true }))).toBe(0);
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(opacityOf(screen.getByLabelText("Message"))).toBe(1));
@@ -311,7 +324,10 @@ describe("a chat", () => {
       expect(circle().width).toBe(circle().height);
       const room = bar().marginRight;
       expect(room).toBeGreaterThan(0);
+      const kb = keyboardEvents();
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await kb.emit("keyboardWillShow");
+      kb.restore();
       // Searching: the circle has grown to the whole row, and the bar has given all of it up (it is as wide as nothing), and faded.
       expect(circle().width).toBe(300);
       expect(bar().marginRight).toBeGreaterThanOrEqual(300);
@@ -321,6 +337,35 @@ describe("a chat", () => {
       // And back: the bar has its width again, beside the circle.
       expect(bar().marginRight).toBe(room);
       expect(bar().opacity).toBe(1);
+    });
+
+    it("grows the field when the keyboard starts coming, not before, so the bar rides the keyboard up (or anyway, if it doesn't come)", async () => {
+      const kb = keyboardEvents();
+      await withSession(talk);
+      await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
+      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      // Pressed: the field is asking for the keyboard, and hasn't grown yet.
+      expect(screen.getByLabelText("Search")).toBeTruthy();
+      expect(circle().width).toBe(circle().height);
+      await kb.emit("keyboardWillShow");
+      expect(circle().width).toBe(300);
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(circle().width).toBe(circle().height));
+      // No keyboard says it is coming: it grows all the same, a moment later.
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await waitFor(() => expect(circle().width).toBe(300), { timeout: 1000 });
+      kb.restore();
+    });
+
+    it("asks for the keyboard the moment the search opens, so the bar rides it from the start", async () => {
+      await withSession(talk);
+      // (The test TextInput's focus is one shared mock.)
+      const focus = (TextInput as unknown as { prototype: { focus: jest.Mock } }).prototype.focus;
+      focus.mockClear();
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      // At once: no wait for a timer (it used to come 80 ms later, after the keyboard had to catch up).
+      expect(focus).toHaveBeenCalled();
     });
 
     it("keeps the bar's words at their width as the bar shrinks, so a typed draft doesn't wrap and make it taller", async () => {
