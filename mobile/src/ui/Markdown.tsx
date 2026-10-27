@@ -3,6 +3,7 @@ import { Linking, ScrollView, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
 import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
+import { hasMark, markTokens, splitMarked } from "../view/mark";
 import { useAccent } from "./accent";
 import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
 import { Txt } from "./components";
@@ -18,9 +19,35 @@ function look(tone: Tone, colors: Palette) {
   return { raised: colors.nightRaised, wash: colors.nightRaised, line: colors.nightLine, code: colors.white, label: "night" as const };
 }
 
-function Spans({ spans, tone }: { spans: Span[]; tone: Tone }) {
+/** What a chat search looks for, in the soft highlighter wash with ink words on it (a bubble's own words would be lost on it). */
+function useHit() {
+  const colors = useColors();
+  return { backgroundColor: colors.hiSoft, color: colors.ink };
+}
+
+/** Plain text with what a chat search looks for marked: just the text when nothing is searched. */
+export function Marked({ text, mark }: { text: string; mark?: string }) {
+  const hit = useHit();
+  if (!mark) return <>{text}</>;
+  return (
+    <>
+      {splitMarked(text, mark).map((p, i) =>
+        p.hit ? (
+          <Text key={i} style={hit}>
+            {p.text}
+          </Text>
+        ) : (
+          p.text
+        ),
+      )}
+    </>
+  );
+}
+
+function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string }) {
   const accent = useAccent();
   const colors = useColors();
+  const hit = useHit();
   return (
     <>
       {spans.map((s, i) => {
@@ -28,35 +55,41 @@ function Spans({ spans, tone }: { spans: Span[]; tone: Tone }) {
           case "code":
             return (
               <Text key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }}>
-                {s.text}
+                {mark
+                  ? splitMarked(s.text, mark).map((p, j) => (
+                      <Text key={j} style={p.hit ? hit : undefined}>
+                        {p.text}
+                      </Text>
+                    ))
+                  : s.text}
               </Text>
             );
           case "bold":
             return (
               <Text key={i} style={{ fontWeight: "700" }}>
-                {s.spans ? <Spans spans={s.spans} tone={tone} /> : s.text}
+                {s.spans ? <Spans spans={s.spans} tone={tone} mark={mark} /> : <Marked text={s.text} mark={mark} />}
               </Text>
             );
           case "italic":
             return (
               <Text key={i} style={{ fontStyle: "italic" }}>
-                {s.spans ? <Spans spans={s.spans} tone={tone} /> : s.text}
+                {s.spans ? <Spans spans={s.spans} tone={tone} mark={mark} /> : <Marked text={s.text} mark={mark} />}
               </Text>
             );
           case "strike":
             return (
               <Text key={i} style={{ textDecorationLine: "line-through", opacity: 0.7 }}>
-                {s.spans ? <Spans spans={s.spans} tone={tone} /> : s.text}
+                {s.spans ? <Spans spans={s.spans} tone={tone} mark={mark} /> : <Marked text={s.text} mark={mark} />}
               </Text>
             );
           case "link":
             return (
               <Text key={i} accessibilityRole="link" style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(s.url).catch(() => {})}>
-                {s.text}
+                <Marked text={s.text} mark={mark} />
               </Text>
             );
           default:
-            return s.text;
+            return mark ? <Marked key={i} text={s.text} mark={mark} /> : s.text;
         }
       })}
     </>
@@ -95,7 +128,7 @@ function tokenColour(kind: TokenKind, colors: Palette): string | undefined {
 }
 
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
-function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Tone }) {
+function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; tone: Tone; mark?: string }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,10 +142,13 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
   const colors = useColors();
   const l = look(tone, colors);
   const { lines: total, folds } = useMemo(() => foldOf(text), [text]);
-  const folded = folds && !open;
   // Colour only on the page itself: on an ink bubble or the night screens the words stay one colour, as they always were.
   const lines = useMemo(() => highlight(text, tone === "ink" ? lang : ""), [text, lang, tone]);
+  // What a search looks for in the folded part opens it: a match you can't see is no match to step to.
+  const found = !!mark && folds && lines.slice(FOLDED_LINES).some((l) => hasMark(l.map((t) => t.text).join(""), mark));
+  const folded = folds && !open && !found;
   const shown = folded ? lines.slice(0, FOLDED_LINES) : lines;
+  const hit = useHit();
   return (
     <View style={{ backgroundColor: l.raised, borderRadius: radius.inner, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
@@ -130,10 +166,10 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
           {shown.map((line, i) => (
             <Fragment key={i}>
               {i > 0 ? "\n" : ""}
-              {line.map((t, j) => {
+              {(mark ? markTokens(line, mark) : line.map((t) => ({ ...t, hit: false }))).map((t, j) => {
                 const colour = tokenColour(t.kind, colors);
-                return colour ? (
-                  <Text key={j} style={{ color: colour }}>
+                return colour || t.hit ? (
+                  <Text key={j} style={t.hit ? hit : { color: colour }}>
                     {t.text}
                   </Text>
                 ) : (
@@ -145,9 +181,9 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
         </Text>
       </ScrollView>
       {folds && (
-        <PressScale accessibilityRole="button" accessibilityLabel={open ? "Show less code" : `Show ${total - FOLDED_LINES} more lines of code`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
+        <PressScale accessibilityRole="button" accessibilityLabel={folded ? `Show ${total - FOLDED_LINES} more lines of code` : "Show less code"} accessibilityState={{ expanded: !folded }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
           <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "700" }}>
-            {open ? "Show less" : `Show ${total - FOLDED_LINES} more lines`}
+            {folded ? `Show ${total - FOLDED_LINES} more lines` : "Show less"}
           </Txt>
         </PressScale>
       )}
@@ -162,7 +198,7 @@ const columnWidth = (cells: Span[][]) => Math.round(Math.min(240, Math.max(72, M
  * A table in a box of its own: the header on a tint, a line between rows, columns as wide as their content (up to a
  * limit, past which a cell wraps), aligned as the table says. It scrolls sideways in there when it can't fit, not the page.
  */
-function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone: Tone }) {
+function Table({ block, tone, mark }: { block: Extract<Block, { kind: "table" }>; tone: Tone; mark?: string }) {
   const widths = block.head.map((h, c) => columnWidth([h, ...block.rows.map((r) => r[c] ?? [])]));
   const textAlign = (a: Align) => a;
   const colors = useColors();
@@ -172,7 +208,7 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
       {cells.map((cell, c) => (
         <View key={c} style={{ width: widths[c], paddingHorizontal: 12, paddingVertical: 8, borderLeftWidth: c === 0 ? 0 : 1, borderLeftColor: line, justifyContent: "center" }}>
           <Txt variant="small" tone={tone} selectable style={{ textAlign: textAlign(block.align[c] ?? "left"), fontWeight: head ? "700" : undefined }}>
-            <Spans spans={cell} tone={tone} />
+            <Spans spans={cell} tone={tone} mark={mark} />
           </Txt>
         </View>
       ))}
@@ -192,7 +228,7 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
 const BULLET_WIDTH = 10;
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
   return (
@@ -202,17 +238,17 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
           case "heading":
             return b.level <= 2 ? (
               <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={{ marginTop: 4 }}>
-                <Spans spans={b.spans} tone={tone} />
+                <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             ) : (
               <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={{ fontWeight: "700", marginTop: 2 }}>
-                <Spans spans={b.spans} tone={tone} />
+                <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
           case "paragraph":
             return (
               <Txt key={i} variant="body" tone={tone} selectable={selectable}>
-                <Spans spans={b.spans} tone={tone} />
+                <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
           case "list":
@@ -232,7 +268,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
                         </Txt>
                       )}
                       <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
-                        <Spans spans={item} tone={tone} />
+                        <Spans spans={item} tone={tone} mark={mark} />
                       </Txt>
                     </View>
                   );
@@ -243,16 +279,16 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
             return (
               <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: 10 }}>
                 <Txt variant="body" tone="ink2" selectable={selectable}>
-                  <Spans spans={b.spans} tone={tone} />
+                  <Spans spans={b.spans} tone={tone} mark={mark} />
                 </Txt>
               </View>
             );
           case "table":
-            return <Table key={i} block={b} tone={tone} />;
+            return <Table key={i} block={b} tone={tone} mark={mark} />;
           case "rule":
             return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
           case "code":
-            return <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} />;
+            return <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} />;
         }
       })}
     </View>

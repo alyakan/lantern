@@ -2,6 +2,7 @@ import { StyleSheet } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { Markdown } from "./Markdown";
+import { lightColors } from "./theme";
 
 const table = ["| Step | Status | Time |", "|:--|:-:|--:|", "| Bump the version | **done** | 3 s |", "| Run `npm test` | passed | 41 s |", "| Open the PR | pending | |"].join("\n");
 
@@ -163,5 +164,66 @@ describe("the room between a list's mark and its words", () => {
   it("keeps room for a number's two digits", async () => {
     await render(<Markdown text={"1. first\n2. second"} />);
     expect(markWidth("1.")).toBeGreaterThanOrEqual(22);
+  });
+});
+
+describe("what a chat search looks for, marked in the words", () => {
+  const flat = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style);
+  const marked = (text: string) => {
+    const st = flat(text);
+    return st.backgroundColor === lightColors.hiSoft && st.color === lightColors.ink;
+  };
+  const long = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+
+  it("marks the word in a paragraph in any case, in the highlighter wash with ink words, and leaves the rest", async () => {
+    await render(<Markdown text="Fix the Login bug, then login again" mark="LOGIN" />);
+    expect(screen.getAllByText(/login/i).filter((n) => n.props.style && StyleSheet.flatten(n.props.style).backgroundColor === lightColors.hiSoft)).toHaveLength(2);
+    expect(marked("Login")).toBe(true);
+    expect(screen.getByText("Fix the Login bug, then login again")).toBeTruthy();
+  });
+
+  it("marks it in a heading, a list item, a quote, bold, italic, a link and inline code, each keeping its own look", async () => {
+    await render(<Markdown text={"# The login page\n\n- fix **login** now\n- *login* is slow\n\n> login quote\n\nsee [login docs](https://example.com) and `npm login`"} mark="login" />);
+    // Heading, bold, italic, quote, link and code: six places (a bold or italic span is itself a Text of that word, so only the washed ones count).
+    const washed = screen.getAllByText("login").filter((n) => StyleSheet.flatten(n.props.style)?.backgroundColor === lightColors.hiSoft);
+    expect(washed).toHaveLength(6);
+    // Around a mark the span is what it was: the code is still code, the link still a link.
+    expect(StyleSheet.flatten(screen.getByText("npm login").props.style).fontFamily).toMatch(/Menlo|monospace/);
+    expect(screen.getByRole("link").props.accessibilityRole).toBe("link");
+  });
+
+  it("marks inside inline code without losing the code look around it", async () => {
+    await render(<Markdown text="run `npm test` now" mark="npm" />);
+    expect(marked("npm")).toBe(true);
+    expect(StyleSheet.flatten(screen.getByText("npm test").props.style).fontFamily).toMatch(/Menlo|monospace/);
+  });
+
+  it("marks a match that runs across the colours of a code block, and the code's words stay what they were", async () => {
+    await render(<Markdown text={"```ts\nconst user = 1;\n```"} mark="t user" />);
+    expect(marked("t")).toBe(true);
+    expect(marked("user")).toBe(true);
+    expect(screen.getByText("cons")).toBeTruthy();
+    expect(StyleSheet.flatten(screen.getByText("cons").props.style).backgroundColor).not.toBe(lightColors.hiSoft);
+  });
+
+  it("opens a folded code block when the match is in the part folded", async () => {
+    await render(<Markdown text={"```\n" + long(30) + "\n```"} mark="line 30" />);
+    expect(screen.getByText(/line 30/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show less code" })).toBeTruthy();
+  });
+
+  it("marks it in a table cell", async () => {
+    await render(<Markdown text={table} mark="version" />);
+    expect(marked("version")).toBe(true);
+    expect(screen.getByText("Bump the version")).toBeTruthy();
+  });
+
+  it("marks nothing for no query or one under two characters, and a text not searched is drawn as it was", async () => {
+    for (const mark of [undefined, "", " ", "l"]) {
+      await render(<Markdown text="Fix the Login bug" mark={mark} />);
+      expect(screen.queryByText("Login")).toBeNull();
+      expect(screen.getByText("Fix the Login bug")).toBeTruthy();
+      await screen.unmount();
+    }
   });
 });

@@ -17,7 +17,7 @@ import { useDictation } from "../ui/useDictation";
 import { useAttachments } from "../ui/useAttachments";
 import type { ImageSource } from "../platformImages";
 import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
-import { Markdown } from "../ui/Markdown";
+import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
@@ -39,7 +39,7 @@ export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
-export const UserRow = memo(function UserRow({ item, onActions, queued = false }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean }) {
+export const UserRow = memo(function UserRow({ item, onActions, queued = false, mark }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string }) {
   const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
@@ -63,7 +63,7 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false }
           </Txt>
         )}
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} />}
+        {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
       </Pressable>
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
@@ -86,7 +86,7 @@ const SUMMARY_COLLAPSED = 230;
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
-export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void }) {
+export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string }) {
   const colors = useColors();
   const [full, setFull] = useState(false);
   const [height, setHeight] = useState<number | null>(null);
@@ -94,7 +94,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
   const long = height !== null && height > SUMMARY_COLLAPSED + 50;
-  const clipped = long && !full;
+  const clipped = long && !full && !mark;
   const took = row.durationMs ? turnLine({ kind: "turn", id: "", isError: false, result: null, durationMs: row.durationMs }).text.replace("Finished in ", "") : null;
   const copy = () => {
     void Promise.resolve(Clipboard.setStringAsync(row.item.text)).catch(() => {});
@@ -122,7 +122,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: 
           </View>
           <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} />
+              <Markdown text={row.item.text} selectable={!onActions} mark={mark} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {clipped && (
@@ -158,10 +158,10 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: 
   );
 });
 
-export const AssistantRow = memo(function AssistantRow({ item, onActions }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void }) {
+export const AssistantRow = memo(function AssistantRow({ item, onActions, mark }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string }) {
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <Markdown text={item.text} selectable={!onActions} />
+      <Markdown text={item.text} selectable={!onActions} mark={mark} />
     </Pressable>
   );
 });
@@ -206,23 +206,27 @@ export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { c
 });
 
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
-export const PageRow = memo(function PageRow({ row, answered, onAction }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void }) {
+export const PageRow = memo(function PageRow({ row, answered, onAction, mark }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const { page } = row;
-  const body = open || page.body.length < 260 ? page.body : `${page.body.slice(0, 240).trimEnd()}…`;
+  // A page is cut short unless it was opened or a search is marking it (the words looked for may be in the part cut).
+  const cut = page.body.length >= 260 && !open && !mark;
+  const body = cut ? `${page.body.slice(0, 240).trimEnd()}…` : page.body;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <View style={[{ backgroundColor: colors.card, borderRadius: 18, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
-          {page.kicker}
+          <Marked text={page.kicker} mark={mark} />
         </Txt>
-        <Txt variant="heading">{page.title}</Txt>
-        {!!body && <Markdown text={body} />}
+        <Txt variant="heading">
+          <Marked text={page.title} mark={mark} />
+        </Txt>
+        {!!body && <Markdown text={body} mark={mark} />}
         {page.body.length >= 260 && (
           <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">
-              {open ? "Show less" : "Show the whole page"}
+              {cut ? "Show the whole page" : "Show less"}
             </Txt>
           </Pressable>
         )}
