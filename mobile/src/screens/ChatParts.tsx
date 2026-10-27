@@ -470,7 +470,7 @@ const inView = (shown: boolean) => ({
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search }: { /** The chat's search: a circle beside the bar that turns the bar into its field (see SearchBar.tsx). */ search?: BarSearch;  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, working = false, onStop }: { /** Claude is in the middle of a turn: the bar's button is Stop (a square), and a message typed is queued by a small link above the bar. */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: a circle beside the bar that turns the bar into its field (see SearchBar.tsx). */ search?: BarSearch;  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
@@ -559,6 +559,13 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
   const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
   const problem = dictation.problem ?? attach.problem;
+  // Sends what is typed (and the pictures attached), and empties the box.
+  const submit = () => {
+    dictation.cancel();
+    onSend(text.trim(), attach.images.length > 0 ? attach.images : undefined);
+    attach.clear();
+    setText("");
+  };
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
   const query = slashQuery(text);
@@ -651,6 +658,11 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
+      {working && ready && (
+        <FadeSlideIn from={6} ms={160} style={{ alignItems: "flex-end", marginBottom: 6, marginRight: 8 }}>
+          <QueueLink onPress={submit} />
+        </FadeSlideIn>
+      )}
       <SearchBar search={search} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} back={() => input.current?.focus()}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
@@ -672,15 +684,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           style={{ flex: 1, maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
         />
         {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-        <SendButton
-          ready={ready}
-          onPress={() => {
-            dictation.cancel();
-            onSend(text.trim(), attach.images.length > 0 ? attach.images : undefined);
-            attach.clear();
-            setText("");
-          }}
-        />
+        {/* While Claude works the button is Stop, in Send's place; what is typed is queued by the link above the bar. */}
+        {working && onStop ? <StopButton onPress={onStop} /> : <SendButton ready={ready} onPress={submit} />}
       </SearchBar>
       {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
@@ -695,6 +700,32 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
       </View>
       </View>
     </View>
+  );
+}
+
+/**
+ * Stop, while Claude works: a square on a dark circle, in the place of Send (a square, no words: the label is for a screen reader).
+ * It pops in as it takes Send's place.
+ */
+function StopButton({ onPress }: { onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <PopIn>
+      <PressScale accessibilityRole="button" accessibilityLabel="Stop" accessibilityHint="Stops what Claude is doing" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: colors.onInk }} />
+      </PressScale>
+    </PopIn>
+  );
+}
+
+/** What is typed while Claude works is queued by this small link above the bar, at its right: it goes after the turn, in order. */
+function QueueLink({ onPress }: { onPress: () => void }) {
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel="Queue message" accessibilityHint="Sends it once Claude has finished" onPress={onPress} hitSlop={10} haptic="light" scaleTo={0.94}>
+      <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+        Queue message
+      </Txt>
+    </PressScale>
   );
 }
 

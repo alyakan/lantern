@@ -53,6 +53,8 @@ The phone never sends tool input. To answer an `AskUserQuestion` it sends only t
 
 **Code blocks** are coloured (`view/highlight.ts`: keywords, strings, numbers, comments and a diff's added and removed lines, for the languages Claude writes most; a line scanner that only ever changes a colour, never the text) and one over 18 lines folds to 12 with "Show more". Copy copies all of it.
 
+**Stop and queuing.** While Claude works, the chat bar's trailing button is Stop: a white square on a dark circle, no words, in the place of Send (it pops in as it takes the place; `StopButton` in `screens/ChatParts.tsx`). The title bar no longer has a Stop. A message typed while Claude works is queued by a small link, "Queue message", above the bar at its right, which appears only while Claude works and something is typed or attached; Send is not there to do it. While the chat is being searched, or is in terminal mode, the bar's own buttons are not shown, so neither is Stop.
+
 **Queued messages.** A message that came in while a turn was running and has nothing of Claude's after it says "Queued" (`view/queue.ts`). It is a reading of the chat, not something the Mac says, so a Mac that echoes it differently may show it a little late or not at all.
 
 **When the Mac can't be reached,** the offline screen shows the chat titles and project names Home listed last time, greyed, with how long ago (`lastKnown.ts`, saved while connected, forgotten on unpairing; a title can be made from the first thing said, as on Home).
