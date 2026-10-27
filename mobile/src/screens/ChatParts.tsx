@@ -453,6 +453,18 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 });
 
 /**
+ * Which of the message box and the terminal is in view. Both stay mounted: swapping one for the other would end the first one's
+ * hold on the keyboard (it drops, and comes back for the second), where handing focus from one to the other keeps it up. The one
+ * out of view has no height, can't be touched and isn't read out.
+ */
+const inView = (shown: boolean) => ({
+  style: shown ? undefined : ({ height: 0, opacity: 0, overflow: "hidden" } as const),
+  pointerEvents: shown ? ("auto" as const) : ("none" as const),
+  accessibilityElementsHidden: !shown,
+  importantForAccessibility: shown ? ("auto" as const) : ("no-hide-descendants" as const),
+});
+
+/**
  * The message box: a capsule with a send button; typing and sending only while connected. With `onRun` a "!" at the start
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
@@ -518,7 +530,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   useEffect(() => {
     if (terminal || disabled) dictation.cancel();
   }, [terminal, disabled, dictation.cancel]);
-  // The keyboard stays up across the change, in whichever box is there.
+  // The keyboard stays up across the change: focus moves from the one box to the other, both being there.
   useEffect(() => {
     if (terminal) termInput.current?.focus();
     else if (wasTerminal.current) input.current?.focus();
@@ -558,7 +570,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         }}
       />
       <View style={{ paddingHorizontal: 12 }}>
-      {terminal ? (
+      <View {...inView(terminal)}>
         <>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
             <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
@@ -578,7 +590,6 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               onSubmitEditing={() => void run()}
               returnKeyType="go"
               blurOnSubmit={false}
-              autoFocus
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -604,7 +615,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             Runs on your Mac, outside Claude · backspace to leave
           </Txt>
         </>
-      ) : (
+      </View>
+      <View {...inView(!terminal)}>
       <>
       {problem && (
         <View accessibilityRole="alert" style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6, marginHorizontal: 8 }}>
@@ -675,7 +687,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         />
       )}
       </>
-      )}
+      </View>
       </View>
     </View>
   );
