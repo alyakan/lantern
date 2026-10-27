@@ -29,7 +29,7 @@ function useElapsed(running: boolean): number | null {
  * runs it can be stopped, and when it asks something (a password, a code, y/n) a field appears to answer it: a hidden one
  * for a password, whose text is never kept.
  */
-export function ShellCard({ item, onInput, onStop }: { item: Shell; onInput: (text: string) => void; onStop: () => void }) {
+export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onInput: (text: string) => void; onStop: () => void; /** Puts what the command printed in the message box, to tell Claude (the person reads it and sends it). */ onTell?: () => void }) {
   const [all, setAll] = useState(false);
   const clean = cleanOutput(item.output);
   const shown = all ? { text: clean.replace(/\n$/, ""), hidden: 0 } : lastLines(clean, SHOWN_LINES);
@@ -73,10 +73,14 @@ export function ShellCard({ item, onInput, onStop }: { item: Shell; onInput: (te
             <HeaderButton label="Stop" hint="Stop this command" onPress={onStop} />
           </>
         ) : (
-          <Text style={{ color: failed ? term.fail : term.dim, fontFamily: fonts.mono, fontSize: 11 }}>
-            {end}
-            {elapsed !== null && elapsed >= 1000 ? `${end ? " · " : ""}${took(elapsed)}` : ""}
-          </Text>
+          <>
+            {/* Not for a command that read a password: its output is not offered to anyone. */}
+            {onTell && !item.secret && !!clean.trim() && <HeaderButton label="Tell Claude" hint="Puts what it printed in the message box, to read and send" onPress={onTell} />}
+            <Text style={{ color: failed ? term.fail : term.dim, fontFamily: fonts.mono, fontSize: 11 }}>
+              {end}
+              {elapsed !== null && elapsed >= 1000 ? `${end ? " · " : ""}${took(elapsed)}` : ""}
+            </Text>
+          </>
         )}
       </View>
       {shown.hidden > 0 && (

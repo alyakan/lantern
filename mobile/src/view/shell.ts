@@ -102,3 +102,23 @@ export function hasHiddenChars(text: string): boolean {
   }
   return false;
 }
+
+/** How many of a command's last lines go to Claude when it is told, and how much text at most. */
+export const TELL_LINES = 60;
+export const TELL_MAX_CHARS = 4000;
+
+/**
+ * A message that tells Claude what a command run from the phone's terminal printed: the command, how it ended and the end of
+ * its output, in a code block that cannot be closed early by anything in the output. It goes into the message box to be read and
+ * sent by the person, never sent for them: the output is whatever the command printed, secrets included.
+ */
+export function tellClaude(command: string, rawOutput: string, status: "running" | "done" | "failed" | "stopped", code: number | null): string {
+  const out = lastLines(cleanOutput(rawOutput), TELL_LINES);
+  let body = out.text.length > TELL_MAX_CHARS ? out.text.slice(-TELL_MAX_CHARS) : out.text;
+  const cutStart = out.hidden > 0 || body.length < out.text.length;
+  // The fence is longer than any run of backticks in the output, so the output can't end the block.
+  const longest = Math.max(2, ...[...(body + command).matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(longest + 1);
+  const end = endLine(status, code);
+  return [`I ran this in the terminal on my Mac${end ? ` (${end})` : ""}:`, "", fence, `$ ${command}`, ...(cutStart ? ["… (the start of the output is left out)"] : []), body, fence].join("\n");
+}

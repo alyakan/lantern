@@ -14,7 +14,7 @@ import { space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
-import { hasHiddenChars } from "../view/shell";
+import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
@@ -248,7 +248,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
-              <ShellCard item={row.item} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
+              <ShellCard item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
             </View>
           );
       }

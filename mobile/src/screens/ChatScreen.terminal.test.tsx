@@ -211,6 +211,19 @@ describe("the card a command fills", () => {
     expect(screen.getByText(/more/)).toBeTruthy();
   });
 
+  it("can tell Claude what it printed: the words go in the message box to be read, not sent", async () => {
+    const { lastOf } = await terminal({ events: [...started, { kind: "shell_output", id, text: "1 failed\n" }, { kind: "shell_done", id, code: 1, stopped: false }] });
+    await fireEvent.press(screen.getByRole("button", { name: "Tell Claude" }));
+    await waitFor(() => expect(screen.getByLabelText("Message").props.value).toContain("$ npm test\n1 failed"));
+    expect(screen.getByLabelText("Message").props.value).toContain("I ran this in the terminal on my Mac (exit 1):");
+    expect(lastOf("send")).toBeUndefined();
+  });
+
+  it("offers nothing to tell while the command runs, or when it printed nothing", async () => {
+    await terminal({ events: [...started, { kind: "shell_output", id, text: "working…\n" }] });
+    expect(screen.queryByRole("button", { name: "Tell Claude" })).toBeNull();
+  });
+
   it("can be stopped while it runs, and a reply can be typed to it", async () => {
     const { lastOf } = await terminal({ events: [...started, { kind: "shell_output", id, text: "Continue? [y/N] " }] });
     expect(screen.getByLabelText("Running")).toBeTruthy();
