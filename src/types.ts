@@ -82,6 +82,17 @@ export interface Endpoint {
 /** An endpoint with whether its key variable is set in the login shell (null: it has none). */
 export interface EndpointStatus extends Endpoint {
   key_set: boolean | null;
+  /** A key is saved for it in Settings (kept in the Keychain; never sent back). It wins over the variable. */
+  saved_key: boolean;
+}
+
+/** What Settings → API keys shows (the backend's `AuthState`): which providers run on a key and which keys exist. Never a key. */
+export interface AuthState {
+  claude: { use_key: boolean; has_key: boolean };
+  /** The ids of the endpoints that have a saved key. */
+  endpoint_keys: string[];
+  /** Why Codex has no key yet. */
+  not_yet: string;
 }
 
 export type UiEvent =
