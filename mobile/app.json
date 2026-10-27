@@ -10,6 +10,13 @@
     "ios": {
       "bundleIdentifier": "com.alyakan.lantern",
       "supportsTablet": true,
+      "appleTeamId": "2NT5QR24SX",
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.alyakan.lantern",
+          "$(AppIdentifierPrefix)com.alyakan.lantern.push"
+        ]
+      },
       "infoPlist": {
         "UISupportedInterfaceOrientations~ipad": [
           "UIInterfaceOrientationPortrait",
@@ -97,7 +104,8 @@
           "enablePushNotifications": true
         }
       ],
-      "./plugins/withLanternCard"
+      "./plugins/withLanternCard",
+      "@bacons/apple-targets"
     ]
   }
 }

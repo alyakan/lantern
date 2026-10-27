@@ -346,6 +346,12 @@ export class Sync {
     return this.ask({ op: "push_token", token });
   }
 
+  /** Gives the Mac the key this phone made for its notifications' words (see pushKey.ts). Only to a Mac that lists "pushkey". */
+  registerPushKey(key: string) {
+    if (!this.has("pushkey")) return Promise.resolve();
+    return this.ask({ op: "push_key", key });
+  }
+
   /** Tells the Mac which card this phone shows on its lock screen (null: none now). Only to a Mac that keeps them. */
   liveActivity(state: { card: RemoteLiveCard | null }) {
     if (!this.has("liveactivity")) return Promise.resolve();

@@ -12,6 +12,7 @@ import { forgetLastKnown } from "../lastKnown";
 import { forgetUsageHistory } from "../usageHistory";
 import { forgetDrafts } from "../drafts";
 import { forgetPins } from "../pins";
+import { pushKeyStore } from "../platformPushKey";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -133,5 +134,7 @@ export class Controller {
     void forgetUsageHistory();
     void forgetDrafts();
     void forgetPins();
+    // The key for the words of notifications was for this Mac: it goes with the pairing.
+    void pushKeyStore?.forget().catch(() => {});
   }
 }

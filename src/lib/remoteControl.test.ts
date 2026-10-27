@@ -6,6 +6,7 @@ describe("who is connected", () => {
   const view: RemoteView = {
     enabled: true,
     show_titles: false,
+    rich_notifications: false,
     keep_awake: false,
     tailnet: [],
     allow_phone_auto: false,

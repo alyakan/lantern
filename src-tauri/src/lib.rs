@@ -2186,6 +2186,11 @@ fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::Remot
     state.remote.view_after(state.remote.store.set_show_titles(on))
 }
 
+#[tauri::command]
+fn remote_set_rich_notifications(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_rich_notifications(on))
+}
+
 /// Holds the Mac awake while Remote control is on, so a phone away from home can still reach it.
 #[tauri::command]
 fn remote_set_keep_awake(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
@@ -3011,6 +3016,7 @@ pub fn run() {
             remote_settings,
             remote_set_enabled,
             remote_set_show_titles,
+            remote_set_rich_notifications,
             remote_set_live_key,
             remote_set_keep_awake,
             remote_set_allow_auto,

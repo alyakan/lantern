@@ -4,6 +4,10 @@
 //! the lock-screen card says it); the chat's title only if the user turned that on in Settings. At most one push per chat and
 //! kind, until the user has looked: opened the chat on the phone, answered what was asked, or sent the next message.
 //!
+//! With "Show what Claude asks in notifications" on, and a phone that made a push key, the push also carries the real words
+//! (the whole command, the file and what changes) encrypted for the phone's notification extension (see rich.rs); the generic
+//! ones above stay as the fallback, and a phone without a key, or with the setting off, gets only those.
+//!
 //! A push straight to Apple carries buttons (a notification category), which the phone and its watch show without opening the
 //! app: Allow and Deny on a prompt for a command, an edit or a tool, and Reply on a chat that finished. A prompt of that kind is
 //! its own push, with its request id, so a button answers that very prompt (the Mac refuses an id nothing is waiting on).
@@ -14,6 +18,7 @@ use super::hub::{ChatStatus, SessionHub};
 use super::live_activity::{Alert, Apns, Needs};
 use super::pairing::{is_apns_token, Device, RemoteStore};
 use super::push_log::note;
+use super::rich;
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -127,6 +132,8 @@ struct Ask {
     /// The one name that says which: the program of a command, the file's name, the tool's. Only used when the user turned
     /// "Show titles" on (see `detail_of`).
     detail: Option<String>,
+    /// What the prompt asks, in full words, for the phone's extension (see rich.rs); only sent when the setting is on.
+    text: Option<String>,
 }
 
 impl Ask {
@@ -186,9 +193,11 @@ impl Notifier {
         match &ev.event {
             UiEvent::PermissionRequested { request_id, tool_name, input } => {
                 let needs = Needs::of_tool(tool_name);
-                self.push(slot, Kind::NeedsYou, Some(Ask { request_id: Some(request_id.clone()), needs, detail: detail_of(needs, tool_name, input) })).await
+                let folder = self.hub.chat(slot).and_then(|c| c.folder);
+                let text = rich::prompt_text(needs, tool_name, input, folder.as_deref());
+                self.push(slot, Kind::NeedsYou, Some(Ask { request_id: Some(request_id.clone()), needs, detail: detail_of(needs, tool_name, input), text })).await
             }
-            UiEvent::MergeProposed { .. } => self.push(slot, Kind::NeedsYou, Some(Ask { request_id: None, needs: Needs::Approval, detail: None })).await,
+            UiEvent::MergeProposed { .. } => self.push(slot, Kind::NeedsYou, Some(Ask { request_id: None, needs: Needs::Approval, detail: None, text: None })).await,
             // Nothing waits any more (answered anywhere, or withdrawn): the next thing that waits is news again.
             UiEvent::PermissionResolved { .. } | UiEvent::PermissionWithdrawn { .. } | UiEvent::MergeResolved { .. } => {
                 if self.hub.chat(slot).is_none_or(|c| c.status != ChatStatus::NeedsYou) {
@@ -255,8 +264,21 @@ impl Notifier {
             // Which tool, program or file: only with "Show titles" on, as the chat's own title is.
             let detail = if saved.show_titles { ask.as_ref().and_then(|a| a.detail.as_deref()) } else { None };
             let alert = alert_for(slot, kind, ask.as_ref(), title.as_deref(), project.as_deref(), detail);
+            // With the setting on, a phone that has a push key also gets the real words, sealed for its extension to read; the
+            // generic ones go with them, for a phone that can't read them.
+            let chat_title = self.hub.chat(slot).and_then(|c| c.title).map(|t| t.chars().take(60).collect::<String>());
+            let sealed = |device: &Device| -> Option<Alert> {
+                if !saved.rich_notifications {
+                    return None;
+                }
+                let text = ask.as_ref()?.text.as_deref()?;
+                let lead = project.as_deref().or(chat_title.as_deref()).unwrap_or("Lantern");
+                let subtitle = if project.is_some() { chat_title.as_deref() } else { None };
+                rich::sealed_alert(&alert, device.push_key.as_deref()?, slot, lead, subtitle, text)
+            };
             for device in apple {
-                match self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
+                let rich_alert = sealed(device);
+                match self.apns.alert(device.push_token.as_deref().unwrap_or_default(), rich_alert.as_ref().unwrap_or(&alert)).await {
                     // A phone Apple no longer knows (the app was removed) is forgotten for push (it stays paired).
                     Ok(reply) if reply.gone() => {
                         let _ = self.store.clear_push_token(&device.id);
@@ -671,6 +693,68 @@ pub(crate) mod tests {
         for secret in ["SECRET-COMMAND", "SECRET-PROMPT", "SECRET-RESULT", "Bash", "echo"] {
             assert!(!json.contains(secret), "{secret} leaked into a push");
         }
+    }
+
+    /// A key the phone made, given to every phone of the rig.
+    const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+
+    fn give_keys(r: &Rig) {
+        for d in r.store.saved().devices {
+            r.store.set_push_key(&d.id, KEY).unwrap();
+        }
+    }
+
+    fn words_of(alert: &Value) -> Value {
+        let enc = alert["body"]["enc"].as_str().expect("sealed");
+        serde_json::from_slice(&rich::open(KEY, alert["body"]["slot"].as_str().unwrap(), enc).expect("opens")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn with_the_setting_on_a_phone_with_a_key_gets_the_real_words_sealed_beside_the_generic_ones() {
+        let r = rig_apple(1);
+        give_keys(&r);
+        r.store.set_rich_notifications(true).unwrap();
+        r.hub.opened("a", "/p");
+        r.event("a", ask("p1")).await;
+        let sent = r.alerts();
+        assert_eq!(sent.len(), 1);
+        let push = &sent[0].1;
+        // The generic words and the buttons are as they were, and the push is marked for the extension.
+        assert_eq!(push["aps"]["alert"], serde_json::json!({"title": "p", "body": "Wants to run a command."}));
+        assert_eq!(push["aps"]["category"], "lantern_decide");
+        assert_eq!(push["aps"]["mutable-content"], 1);
+        assert_eq!(push["body"]["request_id"], "p1");
+        // The real words are in it, and only sealed: Apple's copy has the command nowhere in the clear.
+        assert!(!push.to_string().contains("SECRET-COMMAND"));
+        assert_eq!(words_of(push), serde_json::json!({"title": "p", "body": "Wants to run:\necho SECRET-COMMAND"}));
+    }
+
+    #[tokio::test]
+    async fn with_the_setting_off_or_no_key_only_the_generic_words_go() {
+        for (on, keys) in [(false, true), (true, false), (false, false)] {
+            let r = rig_apple(1);
+            if keys {
+                give_keys(&r);
+            }
+            r.store.set_rich_notifications(on).unwrap();
+            r.hub.opened("a", "/p");
+            r.event("a", ask("p1")).await;
+            let push = &r.alerts()[0].1;
+            assert!(push["aps"].get("mutable-content").is_none() && push["body"].get("enc").is_none(), "on {on}, keys {keys}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_question_is_sealed_too_and_a_finished_chat_has_nothing_to_seal() {
+        let r = rig_apple(1);
+        give_keys(&r);
+        r.store.set_rich_notifications(true).unwrap();
+        r.hub.opened("a", "/p");
+        r.event("a", question("q1")).await;
+        r.event("a", done(false)).await;
+        let sent = r.alerts();
+        assert_eq!(words_of(&sent[0].1)["body"], "Has a question:\nSECRET-QUESTION?");
+        assert!(sent[1].1["body"].get("enc").is_none(), "what Claude said is not in a push");
     }
 
     #[tokio::test]

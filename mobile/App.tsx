@@ -18,6 +18,9 @@ import { AccentFromPledge, TipsContext } from "./src/shell/tipsContext";
 import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
 import { demoPlatform, TipJar } from "./src/tips";
 import { actionHost, onNotificationResponse, pushPlatform, quietInForeground, registerButtons } from "./src/platformPush";
+import { pushKeyStore } from "./src/platformPushKey";
+import { randomBytes } from "./src/platform/random";
+import { sharePushKey } from "./src/pushKey";
 import { secureMacStore } from "./src/storage";
 import { AppLock } from "./src/lock";
 import { lockPlatform, secureLockMemory } from "./src/platformLock";
@@ -101,6 +104,22 @@ export default function App() {
     };
     check();
     const stop = controller.subscribeConnection(check);
+    return () => void stop();
+  }, [controller]);
+  // The key for the words of notifications goes to the Mac on every connection (it keeps the last one it was given).
+  useEffect(() => {
+    let sent = false;
+    const give = () => {
+      const up = controller.getConnection().kind === "connected";
+      if (!up) sent = false;
+      if (!up || sent) return;
+      sent = true;
+      void sharePushKey(controller.sync, pushKeyStore, randomBytes).then((ok) => {
+        if (!ok) sent = false;
+      });
+    };
+    give();
+    const stop = controller.subscribeConnection(give);
     return () => void stop();
   }, [controller]);
 

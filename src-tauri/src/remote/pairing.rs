@@ -8,6 +8,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+/// The push key and what it seals are in standard base64: that is what the phone's Keychain and its extension use.
+const B64STD: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
+/// A push key's length: ChaCha20-Poly1305's.
+pub const PUSH_KEY_LEN: usize = 32;
 
 /// How long a QR code can be used for.
 pub const OFFER_TTL_MS: u64 = 5 * 60 * 1000;
@@ -62,6 +66,11 @@ pub struct Device {
     pub last_seen: Option<u64>,
     /// Where its notifications go (Expo's push token), once it says.
     pub push_token: Option<String>,
+    /// The key (32 bytes, standard base64) the phone made for the words of its notifications: the Mac encrypts them with it
+    /// and the phone's notification extension reads them, so Apple only carries what it can't read. None until the phone says
+    /// (an older build never does).
+    #[serde(default)]
+    pub push_key: Option<String>,
 }
 
 /// Remote control's settings and its paired devices, as saved.
@@ -73,6 +82,10 @@ pub struct Saved {
     /// Notifications name the chat (off: they only say a chat needs you, or finished).
     #[serde(default)]
     pub show_titles: bool,
+    /// Notifications say what Claude asks (the whole command, the file and what changes), encrypted for the phone's extension
+    /// to read. Off until the user turns it on, as titles are: it puts the words on the lock screen.
+    #[serde(default)]
+    pub rich_notifications: bool,
     /// The Mac isn't let to sleep from idling while Remote control is on, so a phone away from home can still reach it.
     #[serde(default)]
     pub keep_awake: bool,
@@ -125,6 +138,10 @@ impl RemoteStore {
         self.change(|s| s.show_titles = on)
     }
 
+    pub fn set_rich_notifications(&self, on: bool) -> Result<(), String> {
+        self.change(|s| s.rich_notifications = on)
+    }
+
     pub fn set_keep_awake(&self, on: bool) -> Result<(), String> {
         self.change(|s| s.keep_awake = on)
     }
@@ -166,7 +183,7 @@ impl RemoteStore {
                 return d.clone();
             }
             let id = format!("phone-{}", &key[..12.min(key.len())]);
-            let device = Device { id, name, key, paired_at: now, last_seen: Some(now), push_token: None };
+            let device = Device { id, name, key, paired_at: now, last_seen: Some(now), push_token: None, push_key: None };
             s.devices.push(device.clone());
             device
         })
@@ -202,6 +219,15 @@ impl RemoteStore {
             return Err("That isn't a push token.".into());
         }
         self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = Some(token.to_string())))
+    }
+
+    /// The key a phone made for its notifications' words: exactly 32 bytes, in standard base64. Anything else is refused.
+    pub fn set_push_key(&self, id: &str, key: &str) -> Result<(), String> {
+        let ok = B64STD.decode(key).is_ok_and(|k| k.len() == PUSH_KEY_LEN);
+        if !ok {
+            return Err("That isn't a push key.".into());
+        }
+        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_key = Some(key.to_string())))
     }
 
     /// Forgets a device's push token (Expo says the phone no longer has the app); the device stays paired.
@@ -244,7 +270,27 @@ mod tests {
         s.set_allow_phone_auto(true).unwrap();
         let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10).unwrap();
         let again = RemoteStore::load(Some(dir.path().join("remote.json")));
-        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, keep_awake: true, allow_phone_auto: true, devices: vec![d] });
+        assert!(!again.saved().rich_notifications, "the words of a prompt stay off the lock screen until the user says");
+        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, rich_notifications: false, keep_awake: true, allow_phone_auto: true, devices: vec![d] });
+    }
+
+    #[test]
+    fn a_phones_push_key_is_kept_only_if_it_is_32_bytes_of_base64_and_an_older_file_without_it_still_loads() {
+        let (s, dir) = store();
+        let d = s.add_device(&[1u8; 32], "Phone", 1).unwrap();
+        let key = B64STD.encode([7u8; 32]);
+        assert!(s.set_push_key(&d.id, "not base64!").is_err());
+        assert!(s.set_push_key(&d.id, &B64STD.encode([7u8; 16])).is_err());
+        assert!(s.saved().devices[0].push_key.is_none());
+        s.set_push_key(&d.id, &key).unwrap();
+        assert_eq!(RemoteStore::load(Some(dir.path().join("remote.json"))).saved().devices[0].push_key.as_deref(), Some(key.as_str()));
+        // A phone's new key replaces the old one.
+        let other = B64STD.encode([9u8; 32]);
+        s.set_push_key(&d.id, &other).unwrap();
+        assert_eq!(s.saved().devices[0].push_key.as_deref(), Some(other.as_str()));
+        let old = r#"{"enabled":true,"devices":[{"id":"x","name":"n","key":"k","paired_at":1,"last_seen":null,"push_token":null}]}"#;
+        std::fs::write(dir.path().join("remote.json"), old).unwrap();
+        assert!(RemoteStore::load(Some(dir.path().join("remote.json"))).saved().devices[0].push_key.is_none());
     }
 
     #[test]

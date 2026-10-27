@@ -226,6 +226,13 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <span>Show chat titles in notifications</span>
             </label>
             <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or finished. On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use.</span>
+            <label className="general-option">
+              <input type="checkbox" checked={view.rich_notifications} onChange={(e) => act(api.remoteSetRichNotifications(e.target.checked))} />
+              <span>Show what Claude asks in notifications</span>
+            </label>
+            <span className="settings-muted">
+              On, a notification that asks to run a command, change a file or use a tool shows the whole command, the file and what changes, or the question, so you can judge it from the lock screen. It is encrypted on this Mac with a key your phone made, so Apple's servers carry only bytes they can't read; the phone decrypts it itself. Only a phone on a recent build of the app can, and any other still gets the short words. It is on your lock screen, so the phone's own Show Previews setting (Settings › Notifications) still applies.
+            </span>
           </section>
           <section className="general-section" aria-labelledby="remote-live">
             <h3 id="remote-live" className="general-title">
