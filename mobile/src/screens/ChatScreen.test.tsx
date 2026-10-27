@@ -162,11 +162,14 @@ describe("a chat", () => {
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
     });
 
-    it("searches in the header: the field takes the title's place, the bar steps through the matches, Cancel puts it all back", async () => {
+    it("searches from the chat bar: the circle beside it makes the bar the search field, which steps through the matches, and Cancel puts it all back", async () => {
       await withSession(talk);
+      expect(screen.getByLabelText("Message")).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      // The circle is gone and the bar is the search field: the message box is out of the way (and keeps what was in it).
       expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
-      expect(screen.getByText("Type two letters or more")).toBeTruthy();
+      expect(screen.queryByLabelText("Message")).toBeNull();
+      expect(screen.getByLabelText("Search")).toBeTruthy();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
       // It starts on the newest of the two messages that say it.
       await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
@@ -186,6 +189,7 @@ describe("a chat", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
       expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+      expect(screen.getByLabelText("Message")).toBeTruthy();
       // Not searching, nothing is marked.
       expect(washed()).toHaveLength(0);
     });
@@ -204,6 +208,17 @@ describe("a chat", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("half a thought"));
+    });
+
+    it("can still be searched while it sleeps: the circle is beside the Wake button, and the field replaces it while searching", async () => {
+      await withSession(talk, {}, {}, { status: "asleep" });
+      expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(screen.queryByRole("button", { name: "Wake this chat" })).toBeNull();
+      await fireEvent.changeText(screen.getByLabelText("Search"), "login");
+      await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy());
     });
 
     it("offers a way back to the latest when scrolled away, with how many came since", async () => {
