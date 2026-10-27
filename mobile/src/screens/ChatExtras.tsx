@@ -37,7 +37,7 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  * What can be done with a message held down: copy it, quote it in a reply, select part of it, and (your own last one) edit
  * it and send it again. Each does it and closes the sheet.
  */
-export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; onClose: () => void }) {
+export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
@@ -75,6 +75,16 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
                 }}
               />
               <ActionRow label="Select text" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
+              {onReadAloud && (
+                <ActionRow
+                  label={reading ? "Stop reading" : "Read aloud"}
+                  hint={reading ? undefined : "The phone's voice reads the words, not the code"}
+                  onPress={() => {
+                    onReadAloud();
+                    close();
+                  }}
+                />
+              )}
               {onEdit && (
                 <ActionRow
                   label="Edit and send again"

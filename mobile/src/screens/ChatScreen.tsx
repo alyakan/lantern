@@ -11,6 +11,7 @@ import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
 import { space, useColors } from "../ui/theme";
+import { platformSpeech } from "../platformSpeech";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { hasHiddenChars } from "../view/shell";
@@ -81,6 +82,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // the message box (a quote, an edit).
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean } | null>(null);
   const [searching, setSearching] = useState(false);
+  // A message being read aloud: reading stops when the chat is left.
+  const [reading, setReading] = useState(false);
+  useEffect(() => () => platformSpeech.stop(), []);
   const [away, setAway] = useState<{ since: number } | null>(null);
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
@@ -478,6 +482,22 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           text={actions.text}
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
+          reading={reading}
+          onReadAloud={() => {
+            if (reading) {
+              platformSpeech.stop();
+              setReading(false);
+              return;
+            }
+            setReading(true);
+            platformSpeech.read(actions.text).then(
+              () => setReading(false),
+              (e: Error) => {
+                setReading(false);
+                fail(e);
+              },
+            );
+          }}
           onClose={() => setActions(null)}
         />
       )}

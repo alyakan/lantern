@@ -63,6 +63,13 @@ jest.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium" },
 }));
 
+// No voice on Node: speech finishes at once.
+jest.mock("expo-speech", () => ({
+  speak: jest.fn((_text: string, o?: { onDone?: () => void }) => o?.onDone?.()),
+  stop: jest.fn(),
+  isSpeakingAsync: jest.fn(async () => false),
+}));
+
 // An animation that never ends (the working bar) would keep a render from ever settling.
 try {
   const { Animated } = require("react-native");
