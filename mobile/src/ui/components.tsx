@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
+import { ActivityIndicator, Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
 import { EMBER, useAccent, useRegular } from "./accent";
 import { Chevron } from "./Chevron";
 import { PressScale } from "./motion";
@@ -61,12 +61,13 @@ export function Tag({ children }: { children: string }) {
 }
 
 /** One small fact, as the timeline folds a turn's steps into a row of them. */
-export function Chip({ children, tone = "plain", onPress, chevron }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed" }) {
+export function Chip({ children, tone = "plain", onPress, chevron, busy = false }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed"; /** What it stands for is still going: a small spinner before the words. */ busy?: boolean }) {
   const colors = useColors();
   const border = tone === "ok" ? `${colors.go}55` : tone === "bad" ? `${colors.stop}55` : colors.rule;
   const content = (
     <View style={{ backgroundColor: colors.card, borderColor: border, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        {busy && <ActivityIndicator testID="chip-busy" size="small" color={colors.ink3} style={{ transform: [{ scale: 0.7 }], marginLeft: -4, marginRight: -2, height: 14 }} />}
         <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
           {children}
         </Txt>

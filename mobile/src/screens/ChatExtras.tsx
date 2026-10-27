@@ -3,7 +3,7 @@ import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
 import { contextOf, progressOf, shortTokens, usageOf, weekOf } from "../view/plan";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { ScrollView, Share, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
@@ -36,7 +36,7 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  * What can be done with a message held down: copy it, quote it in a reply, select part of it, and (your own last one) edit
  * it and send it again. Each does it and closes the sheet.
  */
-export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; onClose: () => void }) {
+export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, sentAt = null, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; /** When it was sent (your messages): said at the top, since the chat shows a time only now and then. */ sentAt?: number | null; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
@@ -58,6 +58,11 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
             </>
           ) : (
             <>
+              {sentAt !== null && (
+                <Txt variant="small" tone="ink3" style={{ marginBottom: 2 }}>
+                  Sent {new Date(sentAt).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </Txt>
+              )}
               <ActionRow
                 label="Copy"
                 onPress={() => {
@@ -74,6 +79,14 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                 }}
               />
               <ActionRow label="Select text" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
+              <ActionRow
+                label="Share"
+                hint="Send it to another app"
+                onPress={() => {
+                  void Share.share({ message: text }).catch(() => {});
+                  close();
+                }}
+              />
               {onReadAloud && (
                 <ActionRow
                   label={reading ? "Stop reading" : "Read aloud"}

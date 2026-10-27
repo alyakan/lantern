@@ -25,7 +25,8 @@ import { SearchBar, type BarSearch } from "./SearchBar";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
 
@@ -41,6 +42,31 @@ export interface ChatProps {
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
+/** How much has to have happened while away for "Caught up on…" to be said: a few events is just the chat going on. */
+export const BANNER_AT = 10;
+
+/** The line under a working chat: what Claude is doing right now, and for how long it has been at it. */
+function WorkingFooter({ activity, since }: { activity: string; since: number | null }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
+      <Dots />
+      {/* What it is doing is said when it changes; the seconds are not read out each time they tick. */}
+      <Txt variant="small" tone="ink3" numberOfLines={1} accessibilityLiveRegion="polite" style={{ flexShrink: 1 }}>
+        {activity}
+      </Txt>
+      {since !== null && (
+        <Txt variant="small" tone="ink3" accessibilityElementsHidden importantForAccessibility="no">
+          · {elapsed(now - since)}
+        </Txt>
+      )}
+    </View>
+  );
+}
 /** How long "Waking…" waits for the chat to be awake before the button comes back. */
 export const WAKE_WAIT_MS = 20_000;
 
@@ -52,7 +78,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
-  const { chats, views, plan } = useSyncState();
+  const { chats, views, plan, workingSince } = useSyncState();
   const canOutput = useMacCan("output");
   const canShell = useMacCan("shell");
   const canImages = useMacCan("images");
@@ -71,8 +97,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [bottom, setBottom] = useState(0);
   const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
-  const rows = useMemo(() => timeline(view.items), [view.items]);
   const working = chat?.status === "working";
+  const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
@@ -85,7 +111,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [problem, setProblem] = useState<string | null>(null);
   // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
   // the message box (a quote, an edit).
-  const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean } | null>(null);
+  const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
   const matches = useMemo(() => (find ? findRows(rows, find.query) : []), [rows, find]);
@@ -158,7 +184,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
 
   // A catch-up that covered a stretch away says so for a moment.
   useEffect(() => {
-    if (view.caughtUp <= 0) return;
+    if (view.caughtUp < BANNER_AT) return;
     setBanner(true);
     const t = setTimeout(() => setBanner(false), BANNER_MS);
     return () => clearTimeout(t);
@@ -231,7 +257,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
 
   // Your last message can be edited and sent again; what Claude's last message asks, if it is a yes or no, can be answered at once.
   const lastUser = [...rows].reverse().find((r) => r.kind === "user")?.key;
-  const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps");
+  const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
+  // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
+  const lastTurn = [...rows].reverse().find((r) => r.kind === "turn" || r.kind === "user");
+  const lastUserText = [...rows].reverse().find((r) => r.kind === "user");
+  // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
+  // again would do it all over.
+  const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
+  const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
+  const openFile = useCallback((path: string) => setFiles([path]), []);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
   const send = (text: string) => {
@@ -252,15 +286,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={setFiles} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <SummaryRow row={row} onFiles={setFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page":
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
-          return <StepsRow chips={row.chips} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             <PromptRow
@@ -279,7 +313,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "desktop":
           return <DesktopRow item={row.item} />;
         case "turn":
-          return <TurnRow item={row.item} />;
+          return <TurnRow item={row.item} onRetry={row === lastTurn && online ? retry : undefined} />;
+        case "day":
+          return <DayRow label={row.label} />;
+        case "hook":
+          return <HookRow row={row} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
@@ -449,12 +487,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         }
         ListFooterComponent={
           working ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
-              <Dots />
-              <Txt variant="small" tone="ink3">
-                Claude is working…
-              </Txt>
-            </View>
+            <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} />
           ) : (
             <View style={{ height: 8 }} />
           )
@@ -528,6 +561,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
           reading={reading}
+          sentAt={actions.at ?? null}
           onReadAloud={() => {
             if (reading) {
               platformSpeech.stop();

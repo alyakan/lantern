@@ -29,6 +29,8 @@ export type Item =
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
   | { kind: "desktop"; id: string; what: string }
   | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null }
+  /** The user's post-hook was sent after Claude's answer: what Claude says and does after this, to the turn's end, is the hook's. */
+  | { kind: "hook"; id: string; text: string }
   /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
   | { kind: "shell"; id: string; command: string; output: string; status: "running" | "done" | "failed" | "stopped"; code: number | null; /** It is reading a secret (a password): what is typed in reply is hidden. */ secret: boolean };
 
@@ -190,6 +192,11 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: "withdrawn" } : p)) };
     case "permission_resolved":
       return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: event.allow ? "allowed" : "denied", by: event.by } : p)) };
+    case "hook_turn": {
+      // Named for the message that began the turn, like its end, so the same hook told twice is one.
+      const began = [...items].reverse().find((it) => it.kind === "user");
+      return { ...view, items: upsert(items, { kind: "hook", id: `hook-${began?.id ?? "start"}`, text: event.text }) };
+    }
     case "needs_desktop":
       return { ...view, items: upsert(items, { kind: "desktop", id: `desktop-${event.what}`, what: event.what }) };
     case "session_started":

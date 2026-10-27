@@ -169,6 +169,9 @@ pub enum RemoteEvent {
     PermissionResolved { request_id: String, allow: bool, by: String },
     /// Something only the desktop can answer: a merge proposal, a failed setup.
     NeedsDesktop { what: String },
+    /// The user's post-hook (Settings > Hooks) was sent as a turn after Claude's answer, with what it asks: what Claude says and does
+    /// after this, to the end of the turn, is the hook's, not the answer. A phone that doesn't know this event shows it all as before.
+    HookTurn { text: String },
     SessionStarted { session_id: String },
     SessionEnded { code: Option<i32> },
     Asleep { asleep: bool },
@@ -219,8 +222,8 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
     use RemoteEvent as R;
     use UiEvent as U;
     Some(match event {
-        // A post-hook is Lantern's own message (see hooks.rs): the phone is shown what it does, not that it was sent.
-        U::UserText { text, .. } if crate::hooks::post_text(text).is_some() => return None,
+        // A post-hook is Lantern's own message (see hooks.rs): the phone is not shown it as the user's, only told that what follows is the hook's.
+        U::UserText { text, .. } if crate::hooks::post_text(text).is_some() => R::HookTurn { text: crate::hooks::post_text(text).unwrap_or_default().to_string() },
         U::UserText { text, at, sent_by, images } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone(), images: (*images > 0).then_some(*images) },
         U::Thinking { parent: None } => R::Thinking,
         U::TextDelta { parent: None, block_id, text } => R::TextDelta { block_id: block_id.clone(), text: text.clone() },
@@ -1077,6 +1080,14 @@ mod tests {
         assert_eq!(to_remote_for(&UiEvent::ContextUsed { tokens: 5 }, false), None, "to a phone that can't read it");
         assert_eq!(to_remote(&UiEvent::ShellOutput { id: "s".into(), text: "secret".into() }), None);
         assert_eq!(to_remote(&UiEvent::Unknown { raw: serde_json::json!({}) }), None);
+    }
+
+    #[test]
+    fn a_post_hook_is_told_to_the_phone_as_the_hooks_turn_not_as_the_users_message() {
+        let hook = UiEvent::UserText { text: crate::hooks::post_message("Update the brain if needed"), at: Some(1), sent_by: Some("lantern".into()), images: 0 };
+        assert_eq!(to_remote(&hook), Some(RemoteEvent::HookTurn { text: "Update the brain if needed".into() }));
+        // A phone that can't read extras is still told: it only marks what follows.
+        assert_eq!(to_remote_for(&hook, false), Some(RemoteEvent::HookTurn { text: "Update the brain if needed".into() }));
     }
 
     #[test]

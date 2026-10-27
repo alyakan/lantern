@@ -2,7 +2,7 @@ import type { Item } from "../sync/reducer";
 import { currentMatch, findRows, quickReplies, quote, rowText, stepMatch } from "./chatText";
 import { timeline } from "./timeline";
 
-const you = (id: string, text: string): Item => ({ kind: "user", id, text, at: 1, sentBy: null });
+const you = (id: string, text: string): Item => ({ kind: "user", id, text, at: null, sentBy: null });
 const said = (id: string, text: string): Item => ({ kind: "assistant", id, text, streaming: false });
 
 describe("what a chat says in words", () => {

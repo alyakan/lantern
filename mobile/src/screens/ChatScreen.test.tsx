@@ -58,7 +58,9 @@ describe("a chat", () => {
     expect(screen.getByText("Read 1 file")).toBeTruthy();
     expect(screen.getByText("Edited 1 file +1 −1")).toBeTruthy();
     expect(screen.getByText("412 tests passed")).toBeTruthy();
-    expect(screen.getByText("Finished in 3 s")).toBeTruthy();
+    // How long it took ends the row of chips, rather than a line of its own.
+    expect(screen.getByLabelText("Finished in 3 s")).toBeTruthy();
+    expect(screen.queryByText("Finished in 3 s")).toBeNull();
   });
 
   it("groups the commands into one chip that opens to each of them", async () => {
@@ -506,7 +508,8 @@ describe("a chat", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     await quiet.unmount();
     const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
-    expect(screen.getByText("Claude is working…")).toBeTruthy();
+    // The line under it says what Claude is doing (here, between steps: working).
+    expect(screen.getByText(/^Working/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(lastOf("interrupt")).toEqual({ op: "interrupt", slot: "a" }));
   });

@@ -21,7 +21,8 @@ import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { DiffSkeleton } from "../ui/skeleton";
+import { DiffSkeleton, Dots } from "../ui/skeleton";
+import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { control, fonts, radius, shadow, space, useColors } from "../ui/theme";
@@ -29,7 +30,7 @@ import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import { MarkupSheet } from "./MarkupSheet";
-import { turnLine, type Row, type StepChip } from "../view/timeline";
+import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -40,16 +41,20 @@ export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
-export const UserRow = memo(function UserRow({ item, onActions, queued = false, mark }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string }) {
+/** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
+const TURN_GAP = 22;
+
+export const UserRow = memo(function UserRow({ item, onActions, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
+  // Yours are on the right, Claude's words across the page from the left: who said what reads down the side.
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
-      {item.at !== null && (
-        <Txt variant="tiny" tone="ink3" style={{ marginBottom: 4, marginLeft: 2 }}>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: TURN_GAP, alignItems: "flex-end" }}>
+      {item.at !== null && showTime && (
+        <Txt variant="tiny" tone="ink3" style={{ marginBottom: 4, marginRight: 2 }}>
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : 1 }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
@@ -67,12 +72,12 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
         {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
       </Pressable>
       {item.failed && (
-        <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
+        <Txt variant="small" tone="stop" style={{ marginTop: 4, marginRight: 2, textAlign: "right" }}>
           Not sent. {item.failed}
         </Txt>
       )}
       {queued && !item.failed && (
-        <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginLeft: 2 }}>
+        <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
           Queued · Claude reads it after this step
         </Txt>
       )}
@@ -87,7 +92,7 @@ const SUMMARY_COLLAPSED = 230;
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
-export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string }) {
+export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark, onFile }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
   const colors = useColors();
   const [full, setFull] = useState(false);
   const [height, setHeight] = useState<number | null>(null);
@@ -123,7 +128,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
           </View>
           <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} mark={mark} />
+              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {clipped && (
@@ -159,27 +164,94 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
   );
 });
 
-export const AssistantRow = memo(function AssistantRow({ item, onActions, mark }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string }) {
+/** A caret at the end of words still coming in (not inside a code block that is still open, where it would read as code). */
+export function withCaret(text: string): string {
+  const fences = (text.match(/^\s*```/gm) ?? []).length;
+  return fences % 2 === 1 ? text : `${text.trimEnd()} ▍`;
+}
+
+export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <Markdown text={item.text} selectable={!onActions} mark={mark} />
+      <Markdown text={item.streaming ? withCaret(item.text) : item.text} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
     </Pressable>
   );
 });
 
-export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void }) {
+/** Where a new day starts in the chat: its name, small, between two hairlines. */
+export const DayRow = memo(function DayRow({ label }: { label: string }) {
+  const colors = useColors();
+  return (
+    <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 2 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700", letterSpacing: 0.4 }}>
+        {label}
+      </Txt>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+    </View>
+  );
+});
+
+/**
+ * What the user's post-hook made Claude say and do after its answer, folded into one quiet line ("Post-hook · The brain is
+ * updated."), so the answer is the last thing read. Tapped, it opens to the hook's words and its steps.
+ */
+export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: Extract<Row, { kind: "hook" }>; onFiles: (files: string[]) => void; onOutput?: (step: { id: string; text: string }) => void }) {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const line = row.going ? "Running…" : lastLine(row.said) || "Done";
+  return (
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={`Post-hook: ${row.text}. ${line}`} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", maxWidth: "100%", paddingVertical: 4 }}>
+        {row.going ? <Dots /> : <Chevron open={open} size={6} />}
+        <Txt variant="small" tone="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>
+          <Txt variant="small" tone="ink3" style={{ fontWeight: "700" }}>
+            Post-hook
+          </Txt>
+          {` · ${line}`}
+        </Txt>
+      </PressScale>
+      {open && (
+        <FadeSlideIn from={6} ms={180}>
+          <View style={{ marginTop: 6, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: colors.rule, gap: 8 }}>
+            <Txt variant="tiny" tone="ink3">
+              {row.text}
+            </Txt>
+            {row.chips.length > 0 && <StepsRow rowKey={row.key} chips={row.chips} onFiles={onFiles} onOutput={onOutput} took={null} inset={0} />}
+            {!!row.said && <Markdown text={row.said} />}
+          </View>
+        </FadeSlideIn>
+      )}
+    </View>
+  );
+});
+
+export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useState<string | null>(null);
   const opened = chips.find((c) => c.key === open && c.items);
+  // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in. A cell the list reuses
+  // for another row is that row's first drawing.
+  const seen = useRef<{ row: string | undefined; keys: Set<string> }>({ row: rowKey, keys: new Set(chips.map((c) => c.key)) });
+  if (seen.current.row !== rowKey) seen.current = { row: rowKey, keys: new Set(chips.map((c) => c.key)) };
+  const first = seen.current.keys;
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 8 }}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {chips.map((c) => (
-          <Chip key={c.key} tone={c.tone} chevron={c.items ? (open === c.key ? "open" : "closed") : undefined} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
-            {c.label}
-          </Chip>
-        ))}
+    <View style={{ paddingHorizontal: inset, paddingTop: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        {chips.map((c) => {
+          const chip = (
+            <Chip key={c.key} tone={c.tone} busy={!!c.running} chevron={c.items ? (open === c.key ? "open" : "closed") : undefined} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
+              {c.label}
+            </Chip>
+          );
+          return first.has(c.key) ? chip : <PopIn key={c.key}>{chip}</PopIn>;
+        })}
+        {!!took && (
+          <Txt variant="tiny" tone="ink3" accessibilityLabel={`Finished in ${took}`} style={{ marginLeft: 2 }}>
+            · {took}
+          </Txt>
+        )}
       </View>
       {opened?.items && (
         <FadeSlideIn>
@@ -442,13 +514,21 @@ export const DesktopRow = memo(function DesktopRow({ item }: { item: Extract<Ite
   );
 });
 
-export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { kind: "turn" }> }) {
+/** A turn's end, for one that has nowhere else to say it: how long it took, quietly, or what went wrong, with a way to try again. */
+export const TurnRow = memo(function TurnRow({ item, onRetry }: { item: Extract<Item, { kind: "turn" }>; /** Sends the turn's message again: only on the last turn, when it failed. */ onRetry?: () => void }) {
   const line = turnLine(item);
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: 8 }}>
-      <Txt variant="tiny" tone={line.bad ? "stop" : "ink3"}>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 8, flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <Txt variant="tiny" tone={line.bad ? "stop" : "ink3"} style={{ flexShrink: 1 }}>
         {line.text}
       </Txt>
+      {line.bad && onRetry && (
+        <PressScale accessibilityRole="button" accessibilityLabel="Try again" accessibilityHint="Sends your last message again" onPress={onRetry} hitSlop={8} haptic="select" scaleTo={0.94}>
+          <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+            Try again
+          </Txt>
+        </PressScale>
+      )}
     </View>
   );
 });
