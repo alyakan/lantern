@@ -10,6 +10,7 @@ pub mod keys;
 pub mod live_activity;
 pub mod notifier;
 pub mod pairing;
+pub mod rich;
 pub mod push_log;
 pub mod protocol;
 pub mod secure;
@@ -212,6 +213,8 @@ pub struct DeviceView {
 pub struct RemoteView {
     pub enabled: bool,
     pub show_titles: bool,
+    /// Notifications say what Claude asks, sealed for the phone's extension (see rich.rs).
+    pub rich_notifications: bool,
     pub keep_awake: bool,
     /// The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home.
     pub tailnet: Vec<String>,
@@ -332,7 +335,7 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, rich_notifications: saved.rich_notifications, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.

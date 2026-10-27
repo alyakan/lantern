@@ -30,6 +30,11 @@ vi.mock("../api", () => ({
       view = { ...view, show_titles: on };
       return Promise.resolve(view);
     },
+    remoteSetRichNotifications: (on: boolean) => {
+      calls.push({ cmd: "rich", args: on });
+      view = { ...view, rich_notifications: on };
+      return Promise.resolve(view);
+    },
     remoteSetKeepAwake: (on: boolean) => {
       calls.push({ cmd: "awake", args: on });
       view = { ...view, keep_awake: on };
@@ -62,7 +67,7 @@ const { RemoteControl } = await import("./RemoteControl");
 beforeEach(() => {
   calls.length = 0;
   picked = null;
-  view = { enabled: false, show_titles: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+  view = { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
 });
 
 describe("Settings › Remote control", () => {
@@ -205,6 +210,14 @@ describe("Settings › Remote control", () => {
     expect(titles).not.toBeChecked();
     fireEvent.click(titles);
     await waitFor(() => expect(calls).toContainEqual({ cmd: "titles", args: true }));
+  });
+
+  it("what Claude asks in notifications is off until turned on", async () => {
+    render(<RemoteControl now={() => 0} />);
+    const rich = await screen.findByRole("checkbox", { name: "Show what Claude asks in notifications" });
+    expect(rich).not.toBeChecked();
+    fireEvent.click(rich);
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "rich", args: true }));
   });
 });
 

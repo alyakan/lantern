@@ -116,7 +116,7 @@ describe("a chat a paired phone starts", () => {
 });
 
 /** What Settings says about phones using Auto, as remote_settings answers it. */
-const settingsSaying = (allow: boolean) => ({ remote_settings: { enabled: true, show_titles: false, allow_phone_auto: allow, devices: [], connected: [], listening: true, pairing: false } });
+const settingsSaying = (allow: boolean) => ({ remote_settings: { enabled: true, show_titles: false, rich_notifications: false, allow_phone_auto: allow, devices: [], connected: [], listening: true, pairing: false } });
 const fromPhoneEvent = (event: string, payload: Record<string, unknown>) => (globalThis as unknown as { mockEmit: (e: string, p?: unknown) => Promise<void> }).mockEmit(event, payload);
 const restarts = (calls: Call[]) => calls.filter(([c]) => c === "restart_session");
 const harnessApplied = (calls: Call[]) => calls.filter(([c]) => c === "apply_harness");

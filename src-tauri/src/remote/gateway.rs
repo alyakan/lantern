@@ -907,6 +907,7 @@ impl<'a> Session<'a> {
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
+            Request::PushKey { key } => self.gw.store.set_push_key(&self.device, &key).map(|()| serde_json::Value::Null),
             Request::LiveActivity { start_token, card } => {
                 use super::live_activity::{clean_project, valid_token, LiveCard, Status};
                 if start_token.as_deref().is_some_and(|t| !valid_token(t)) {

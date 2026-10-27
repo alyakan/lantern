@@ -20,6 +20,10 @@ default_platform(:ios)
 BUNDLE_ID = "com.alyakan.lantern"
 # The Live Activity's widget extension (expo-widgets' default id): it is signed and uploaded inside the app, with a profile of its own.
 WIDGET_ID = "#{BUNDLE_ID}.ExpoWidgetsTarget"
+# The notification service extension (targets/notification-service): it opens the text a push from the Mac carries. It is signed
+# and uploaded inside the app too, with a profile of its own. It needs no App Group and no capability: its keychain group
+# (<team>.com.alyakan.lantern.push) is covered by the TEAMID.* every App Store profile carries.
+NOTIFICATION_ID = "#{BUNDLE_ID}.NotificationService"
 # A team id is printed on every app in the store: it is not a secret.
 TEAM_ID = ENV["APPLE_TEAM_ID"] || "2NT5QR24SX"
 
@@ -152,10 +156,23 @@ platform :ios do
     "-authenticationKeyPath #{File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")} -authenticationKeyID #{key_id} -authenticationKeyIssuerID #{issuer}"
   end
 
-  # The App Store profiles for the app and its widget, made through the API key when one is missing (an existing one is used),
-  # as { id => profile name }: the export signs with them by name. Needs the Apple Distribution certificate in this Mac's keychain.
+  # Registers the App ID `id` through the API key when the developer account has none (an existing one is left alone): a profile
+  # can only be made for an App ID that exists, and Xcode only registers one while it signs, which is after the profiles are made.
+  # It needs no capability; the app's and the widget's ids were made by Xcode and are found here. (`key` is what asc_key returned:
+  # the app_store_connect_api_key action has already given Spaceship its token.)
+  def ensure_app_id(id)
+    found = Spaceship::ConnectAPI::BundleId.all(filter: { identifier: id }).any? { |b| b.identifier == id }
+    return UI.message("App ID #{id} exists.") if found
+    UI.important("Registering the App ID #{id} (it did not exist).")
+    Spaceship::ConnectAPI::BundleId.create(name: "Lantern #{id.split(".").last}", platform: "IOS", identifier: id)
+  end
+
+  # The App Store profiles for the app, its widget and its notification extension, made through the API key when one is missing
+  # (an existing one is used), as { id => profile name }: the export signs with them by name. Needs the Apple Distribution
+  # certificate in this Mac's keychain.
   def app_store_profiles(key)
-    [BUNDLE_ID, WIDGET_ID].each_with_object({}) do |id, names|
+    [BUNDLE_ID, WIDGET_ID, NOTIFICATION_ID].each_with_object({}) do |id, names|
+      ensure_app_id(id) if id == NOTIFICATION_ID
       get_provisioning_profile(app_identifier: id, api_key: key, provisioning_name: "Lantern #{id} App Store", team_id: TEAM_ID)
       names[id] = lane_context[SharedValues::SIGH_NAME]
     end
