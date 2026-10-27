@@ -17,7 +17,7 @@ import { Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
 import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
-import { PressScale, springLayout } from "../ui/motion";
+import { easeLayout, PressScale, springLayout } from "../ui/motion";
 import { control, useColors } from "../ui/theme";
 
 /** What the bar needs to search: the state of the search, and what its buttons do. */
@@ -63,14 +63,15 @@ export function Magnifier({ color }: { color?: string }) {
 }
 
 /**
- * 0 and 1 for something being off and on. On the way to 1 it springs, passing 1 a little (`bouncy`) or not at all; on the way
- * back to 0 it doesn't pass 0 (the circle coming back from the field passed its size by nothing, it was shrinking well under it).
+ * 0 and 1 for something being off and on. With `spring`, on the way to 1 it springs, passing 1 a little, and on the way back to
+ * 0 it doesn't pass 0. Without, it eases into place both ways and passes neither.
  */
-function useSwap(active: boolean, bouncy = true): Animated.Value {
+function useSwap(active: boolean, spring = true): Animated.Value {
   const t = useRef(new Animated.Value(active ? 1 : 0)).current;
   useEffect(() => {
-    springLayout(t, active ? 1 : 0, active && bouncy ? { bounciness: 6, speed: 11 } : { bounciness: 0, speed: 12 });
-  }, [active, bouncy, t]);
+    if (spring) springLayout(t, active ? 1 : 0, active ? { bounciness: 6, speed: 11 } : { bounciness: 0, speed: 12 });
+    else easeLayout(t, active ? 1 : 0);
+  }, [active, spring, t]);
   return t;
 }
 
@@ -144,8 +145,9 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // Two values, each for one thing: `gone` for the circle giving its room to the bar while words are typed, `open` for the circle
   // being grown into the field. Nothing else may follow either (the box going blank was one value doing both).
   const gone = useSwap(typing && !active);
-  // The field grows across the whole row: the same little overshoot that is barely seen on the bar's short way (the circle's
-  // width) was a wobble over that distance. It moves like the bar does, without one.
+  // The field grows across the whole row: the bar's little overshoot, barely seen on its short way (the circle's width), was a
+  // wobble over that distance, and even a spring without bounce passed its place a little (the bar overshot as the field went).
+  // So it has no spring: it eases in and out.
   const open = useSwap(active, false);
   // The circle is as tall as the bar is at rest: the least height the bar has had (it grows with a long message, the circle doesn't).
   const [seen, setSeen] = useState<number | null>(null);
