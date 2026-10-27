@@ -56,6 +56,18 @@ export function springLayout(value: Animated.Value, to: number, o: { bounciness?
   Animated.spring(value, { toValue: to, useNativeDriver: false, speed: o.speed ?? 12, bounciness: o.bounciness ?? 10 }).start();
 }
 
+/**
+ * An eased move for what layout draws (a width, a margin), with no spring: it slows into place and never passes it. For a long
+ * way across the screen, where a spring's overshoot, however small, is seen.
+ */
+export function easeLayout(value: Animated.Value, to: number, ms = 300) {
+  if (skips()) {
+    value.setValue(to);
+    return;
+  }
+  Animated.timing(value, { toValue: to, duration: ms, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+}
+
 /** A small tap on the phone: "light" for a press, "select" for a choice, "success" and "warning" for what a decision came to. */
 export function buzz(kind: "light" | "select" | "success" | "warning" = "light") {
   if (motion.instant) return;
