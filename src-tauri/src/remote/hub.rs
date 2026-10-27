@@ -90,6 +90,9 @@ struct Log {
     /// the second, else the first).
     said: Option<String>,
     doing: Option<String>,
+    /// The turn going now is the user's post-hook (Lantern's own message after an answer): what it says is not the chat's answer, so
+    /// it never becomes the preview.
+    hook_turn: bool,
     /// What the chat's claude last said it offers after a "/", and the plan it last kept: a phone that opens the chat is
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
@@ -139,7 +142,14 @@ impl Log {
     /// the user typed, a shell printed or a prompt asked is never taken.
     fn note_preview(&mut self, event: &UiEvent) {
         match event {
-            UiEvent::UserText { .. } => self.doing = None,
+            UiEvent::UserText { text, .. } => {
+                self.doing = None;
+                self.hook_turn = crate::hooks::post_text(text.trim_start()).is_some();
+            }
+            UiEvent::ConversationReset => (self.said, self.doing, self.hook_turn) = (None, None, false),
+            UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } => (self.doing, self.hook_turn) = (None, false),
+            // The hook's own steps and words: the row goes on showing the answer the user is waiting to read.
+            _ if self.hook_turn => {}
             UiEvent::Thinking { parent: None } => self.doing = Some("Thinking".into()),
             UiEvent::ToolStarted { parent: None, name, summary, .. } => self.doing = preview_line(&format!("{name} {summary}")),
             UiEvent::AssistantText { parent: None, text, .. } => {
@@ -148,8 +158,6 @@ impl Log {
                     self.said = Some(line);
                 }
             }
-            UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } => self.doing = None,
-            UiEvent::ConversationReset => (self.said, self.doing) = (None, None),
             _ => {}
         }
     }
@@ -856,6 +864,17 @@ mod tests {
         assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Edit src/a.rs"));
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
         assert_eq!(hub.chat("a").unwrap().preview, None);
+    }
+
+    #[test]
+    fn the_post_hooks_turn_never_replaces_the_answer_in_the_preview() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("fix it"), said("All fixed.")]);
+        feed(&hub, "a", vec![UiEvent::UserText { text: crate::hooks::post_message("Update the brain if needed"), at: None, sent_by: Some("lantern".into()), images: 0 }, UiEvent::Thinking { parent: None }, started(None, "Bash", "brain log"), said("The brain is updated."), done()]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("All fixed."));
+        // The user's next turn is its own again.
+        feed(&hub, "a", vec![user("more"), said("Sure.")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Sure."));
     }
 
     #[test]
