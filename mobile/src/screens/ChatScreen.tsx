@@ -231,16 +231,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const unseen = away ? Math.max(0, rows.length - away.since) : 0;
 
   const renderRow = ({ item: row }: { item: Row }) => {
+    // What is searched for, given only to the messages that say it: the rest are not drawn again as it is typed.
+    const term = marks.all.has(row.key) ? find?.query : undefined;
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} queued={queued.has(row.item.id)} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
+          return <UserRow item={row.item} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
         case "assistant":
-          return <AssistantRow item={row.item} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <AssistantRow item={row.item} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={setFiles} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <SummaryRow row={row} onFiles={setFiles} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page":
-          return <PageRow row={row} answered={answered.has(row.item.id)} onAction={(a) => reply(row.item.id, a)} />;
+          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
           return <StepsRow chips={row.chips} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":

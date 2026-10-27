@@ -170,6 +170,9 @@ describe("a chat", () => {
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
       // It starts on the newest of the two messages that say it.
       await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
+      // The word is marked in the text of each message that says it.
+      const washed = () => screen.queryAllByText("login").filter((n) => StyleSheet.flatten(n.props.style)?.backgroundColor === lightColors.hiSoft);
+      expect(washed()).toHaveLength(2);
       // The one being looked at has the accent outline, the other a faint one.
       expect(screen.getAllByTestId("match-here")).toHaveLength(1);
       expect(screen.getAllByTestId("match-other")).toHaveLength(1);
@@ -183,6 +186,8 @@ describe("a chat", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
       expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+      // Not searching, nothing is marked.
+      expect(washed()).toHaveLength(0);
     });
 
     it("says so when nothing matches, and the arrows are off", async () => {
