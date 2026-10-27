@@ -57,6 +57,21 @@ describe("the message box as a terminal", () => {
     expect(screen.queryByText(/Claude sees/)).toBeNull();
   });
 
+  it("keeps both boxes there, one out of sight, so the keyboard is handed across and never dropped", async () => {
+    await terminal();
+    const hidden = { includeHiddenElements: true };
+    // The terminal is there before it is wanted, out of sight; so is the message box once it is.
+    expect(screen.getByLabelText("Shell command", hidden)).toBeTruthy();
+    expect(screen.queryByLabelText("Shell command")).toBeNull();
+    const box = screen.getByLabelText("Message");
+    await type("!ls");
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    // The same message box, not a new one: it was never taken away, so nothing let go of the keyboard.
+    expect(screen.getByLabelText("Message", hidden)).toBe(box);
+    expect(screen.getByLabelText("Message", hidden).props.value).toBe("!ls");
+  });
+
   it("is an ordinary message box for words, and for a '!' anywhere but the start", async () => {
     await terminal();
     await type("hello!");
