@@ -27,6 +27,7 @@ import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
+import { MarkupSheet } from "./MarkupSheet";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 
@@ -498,6 +499,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const attach = useAttachments();
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
+  // The photo being drawn on.
+  const [marking, setMarking] = useState<PickedImage | null>(null);
   const chosen = useRef<ImageSource | null>(null);
   useEffect(() => {
     if (choosing || !chosen.current) return;
@@ -628,7 +631,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           </PressScale>
         </View>
       )}
-      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} />}
+      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
       <Glass lift={0.12} fill={COMPOSER_FILL} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
@@ -658,6 +661,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           }}
         />
       </Glass>
+      {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
           onClose={() => setChoosing(false)}
@@ -786,13 +790,18 @@ function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onP
 }
 
 /** The pictures attached so far, as small squares above the box, each with a × that takes it off. */
-function Thumbnails({ images, onRemove }: { images: PickedImage[]; onRemove: (id: string) => void }) {
+function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
   const colors = useColors();
   return (
     <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }} style={{ flexGrow: 0 }}>
       {images.map((image, i) => (
         <View key={image.id} style={{ width: 64, height: 64 }}>
           <Image accessibilityLabel={`Photo ${i + 1}`} source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: colors.rule }} />
+          <PressScale accessibilityRole="button" accessibilityLabel={`Mark up photo ${i + 1}`} accessibilityHint="Draw on it before it is sent" onPress={() => onMarkUp(image)} hitSlop={6} haptic="select" scaleTo={0.9} style={{ position: "absolute", left: 4, bottom: 4, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: colors.ink, justifyContent: "center" }}>
+            <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "800" }}>
+              ✎
+            </Txt>
+          </PressScale>
           <PressScale accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} onPress={() => onRemove(image.id)} hitSlop={8} haptic="light" scaleTo={0.9} style={{ position: "absolute", top: -7, right: -7, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
             <Txt variant="small" tone="on-ink" style={{ fontWeight: "800", lineHeight: 16 }}>
               ×

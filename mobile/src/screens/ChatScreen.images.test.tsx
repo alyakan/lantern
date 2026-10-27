@@ -9,6 +9,7 @@ import type { PickedImage } from "../view/attachments";
 import { ChatScreen } from "./ChatScreen";
 
 jest.mock("../platformImages", () => ({ pickImages: jest.fn() }));
+jest.mock("../platformMarkup", () => ({ captureMarkedUp: jest.fn(async () => ({ id: "img-marked", uri: "file:///marked.jpg", data: "/9j/MARKED", mediaType: "image/jpeg", width: 100, height: 75 })) }));
 const pick = pickImages as jest.Mock<Promise<Picked>, [string, number]>;
 
 const photo = (n: number): PickedImage => ({ id: `img-${n}`, uri: `file:///photo-${n}.jpg`, data: `/9j/DATA${n}`, mediaType: "image/jpeg", width: 1568, height: 1176 });
@@ -143,5 +144,25 @@ describe("attaching photos to a message", () => {
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     expect(screen.getByText("3 photos sent")).toBeTruthy();
     expect(screen.getByLabelText("You: look at these (3 photos)")).toBeTruthy();
+  });
+});
+
+describe("drawing on a photo before it is sent", () => {
+  it("sends the marked-up photo in place of the one that was picked", async () => {
+    pick.mockResolvedValueOnce({ images: [photo(1)] });
+    const { lastOf } = await chatWith();
+    await attach("Photo library");
+    await waitFor(() => expect(thumbs()).toHaveLength(1));
+    await fireEvent.press(screen.getByRole("button", { name: "Mark up photo 1" }));
+    const canvas = await screen.findByTestId("markup-canvas");
+    const at = (x: number, y: number) => ({ nativeEvent: { locationX: x, locationY: y } });
+    await act(async () => void fireEvent(canvas, "responderGrant", at(10, 10)));
+    await act(async () => void fireEvent(canvas, "responderMove", at(80, 40)));
+    await fireEvent.press(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByTestId("markup-canvas")).toBeNull(), { timeout: 3000 });
+    expect(thumbs()).toHaveLength(1);
+    await fireEvent.changeText(screen.getByLabelText("Message"), "this part");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lastOf("send")).toMatchObject({ images: [{ media_type: "image/jpeg", data: "/9j/MARKED" }] }));
   });
 });

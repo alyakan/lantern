@@ -63,6 +63,8 @@ jest.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium" },
 }));
 
+// No screen to take a picture of on Node: a marked-up picture comes back as a file at once.
+jest.mock("react-native-view-shot", () => ({ captureRef: jest.fn(async () => "file:///marked.jpg") }));
 // No voice on Node: speech finishes at once.
 jest.mock("expo-speech", () => ({
   speak: jest.fn((_text: string, o?: { onDone?: () => void }) => o?.onDone?.()),
