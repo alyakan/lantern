@@ -330,11 +330,17 @@ fn carries_settings_note(text: &str) -> bool {
     !text.trim_start().starts_with('/')
 }
 
-/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
-/// lowered them.
+/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker), and never Auto on a
+/// provider that has no auto mode, worker or not: Claude Code's auto mode on an endpoint's model would have that model approve
+/// its own commands, and a phone's Permissions switch (or an older window) asks for it as easily as any. True when that lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
-    let Some(ceiling) = ceiling else { return false };
-    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
+    let caps = capabilities_of(cfg.provider);
+    let (mode, auto) = match ceiling {
+        Some(ceiling) => args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &caps),
+        // No worker's ceiling: only a provider with no auto mode is held back, and Step by step stays Step by step, without its auto-approve.
+        None if !caps.supports_auto_mode => (if cfg.mode == Mode::Auto { Mode::Ask } else { cfg.mode }, false),
+        None => (cfg.mode, cfg.auto_approve),
+    };
     let lowered = (mode, auto) != (cfg.mode, cfg.auto_approve);
     cfg.mode = mode;
     cfg.auto_approve = auto;
@@ -482,9 +488,9 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> remote::gateway::BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
-        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow).await })
+        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
     }
 
     fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
@@ -2136,10 +2142,12 @@ async fn respond_permission(state: State<'_, AppState>, slot: String, request_id
     Err("That permission request is no longer pending: it was answered already, or the agent stopped asking.".into())
 }
 
-/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does.
+/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does,
+/// and where a chat may run (Claude Code, and an endpoint or two; the window leaves out any whose questions a phone can't answer).
 #[tauri::command]
-fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>) {
+fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>, providers: Option<Vec<remote::protocol::RemoteProvider>>) {
     state.remote.hub.set_presets(presets);
+    state.remote.hub.set_providers(providers.unwrap_or_default());
 }
 
 /// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
@@ -2259,10 +2267,10 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
-async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> Result<String, String> {
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str() };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());
@@ -3440,6 +3448,26 @@ mod tests {
         let mut no_worker = config(Mode::Auto, false);
         assert!(!cap_mode(&mut no_worker, None));
         assert_eq!(no_worker.mode, Mode::Auto);
+    }
+
+    /// A provider with no auto mode never runs Auto, whoever asks: an endpoint's model would approve its own commands. A chat
+    /// that is no worker is capped too, and Claude's own is left as asked.
+    #[test]
+    fn a_chat_on_a_provider_with_no_auto_mode_is_never_left_on_auto() {
+        for provider in [ProviderId::Gateway, ProviderId::Codex] {
+            let mut auto = SessionConfig { provider, ..config(Mode::Auto, false) };
+            assert!(cap_mode(&mut auto, None), "{provider:?}");
+            assert_eq!((auto.mode, auto.auto_approve), (Mode::Ask, false), "{provider:?}");
+            let mut steps = SessionConfig { provider, ..config(Mode::Steps, true) };
+            assert!(cap_mode(&mut steps, None), "{provider:?}");
+            assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, false), "{provider:?}: Step by step stays, without its auto-approve");
+            // What it was on already isn't "lowered", and asking again changes nothing.
+            let mut ask = SessionConfig { provider, ..config(Mode::Ask, false) };
+            assert!(!cap_mode(&mut ask, None) && ask.mode == Mode::Ask, "{provider:?}");
+        }
+        let mut claude = SessionConfig { provider: ProviderId::Claude, ..config(Mode::Auto, true) };
+        assert!(!cap_mode(&mut claude, None));
+        assert_eq!((claude.mode, claude.auto_approve), (Mode::Auto, true));
     }
 
     /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat

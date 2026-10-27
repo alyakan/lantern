@@ -14,7 +14,7 @@ import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
-import { autoNote, MODES, WORKFLOWS } from "../view/controls";
+import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
@@ -61,6 +61,17 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const { supported, controls } = useControls();
   const [permissions, setPermissions] = useState<RemotePermissions>("ask");
   const [preset, setPreset] = useState<string | null>(null);
+  // Where it runs: the project's own unless chosen. A Mac with only Claude Code to offer (or an older one) offers no choice.
+  const providers = providersOf(controls);
+  const [provider, setProvider] = useState<string | null>(null);
+  const chosen = providers.find((p) => p.id === provider) ?? null;
+  const chooseProvider = (id: string | null) => {
+    setProvider(id);
+    // What the new one has none of is let go of, so a choice made for another provider is never sent to it (nor shown as if it were).
+    const next = providers.find((p) => p.id === id);
+    if (next && !next.auto) setPermissions("ask");
+    if (next && !next.presets) setPreset(null);
+  };
   const canFlow = useMacCan("workflow");
   const [workflow, setWorkflow] = useState<Exclude<RemoteWorkflow, "team">>("chat");
   // The options behind the line that says what it runs on.
@@ -101,7 +112,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
     setError(null);
     try {
       // Only what was chosen is sent, and only to a Mac that can take it.
-      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions, ...(preset ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}) } : {}));
+      // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was.)
+      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions: chosen && !chosen.auto ? "ask" : permissions, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {}));
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -110,9 +122,12 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
 
   const workflowName = WORKFLOWS.find((w) => w.value === workflow)?.label ?? "Chat";
   const presetLabel = controls?.presets.find((p) => p.id === preset)?.name ?? "Project's own";
+  // Where it runs has no Auto, or no presets (the Mac's presets are Claude Code's): what it can't do is shown off, with why.
+  const noAuto = chosen && !chosen.auto ? noAutoOn(chosen.name) : null;
+  const showPresets = (controls?.presets.length ?? 0) > 0 && (!chosen || chosen.presets);
   // What it will run on, said in a line: the options themselves open from it.
-  const summary = [canFlow ? workflowName : null, MODES.find((m) => m.value === permissions)?.label, presetLabel].filter(Boolean).join(" · ");
-  const note = autoNote(controls);
+  const summary = [chosen?.name, canFlow ? workflowName : null, noAuto ? "Ask" : MODES.find((m) => m.value === permissions)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
+  const note = noAuto ?? autoNote(controls);
 
   return (
     <Sheet onClose={onClose}>
@@ -192,6 +207,19 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                 {opened && (
                   <FadeSlideIn from={6} ms={180}>
                     <View style={{ gap: 12, paddingTop: 12 }}>
+                      {providers.length > 1 && (
+                        <View>
+                          <Caption>Provider</Caption>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                            {[{ id: null as string | null, name: "As on your Mac" }, ...providers].map((p) => (
+                              <Pill key={p.id ?? "own"} label={p.name} on={p.id === provider} onPress={() => chooseProvider(p.id)} />
+                            ))}
+                          </ScrollView>
+                          <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
+                            {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac is what this project's chats use there (Claude, if that is Codex: a phone can't answer its questions)."}
+                          </Txt>
+                        </View>
+                      )}
                       {canFlow && (
                         <View>
                           <Caption>How it works</Caption>
@@ -206,7 +234,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                         <Caption>Permissions</Caption>
                         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                           {MODES.map((m) => {
-                            const off = m.value === "auto" ? note : null;
+                            const off = m.value === "auto" ? note : null; // (the Mac's setting, or the provider having none)
                             return <Pill key={m.value} label={m.label} hint={off ?? m.hint} on={m.value === permissions} disabled={!!off} onPress={() => setPermissions(m.value)} />;
                           })}
                         </View>
@@ -214,7 +242,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                           {note ?? (permissions === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.")}
                         </Txt>
                       </View>
-                      {controls.presets.length > 0 && (
+                      {showPresets && (
                         <View>
                           <Caption>Models</Caption>
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>

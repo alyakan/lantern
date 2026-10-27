@@ -3,7 +3,7 @@
 //! client was sent; anything older than it keeps is read from the chat's transcript.
 
 use super::bus::BusEvent;
-use super::protocol::RemotePreset;
+use super::protocol::{RemotePreset, RemoteProvider};
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,6 +47,8 @@ pub struct ChatInfo {
     pub color: Option<String>,
     /// "chat", "steps" or "team", as the window says (None until it has).
     pub workflow: Option<String>,
+    /// What it runs on when that isn't Claude Code (a name to show), as the window says (None for a Claude chat).
+    pub provider: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -80,6 +82,8 @@ struct Log {
     preset: Option<String>,
     color: Option<String>,
     workflow: Option<String>,
+    /// The name of what it runs on, when that isn't Claude Code.
+    provider: Option<String>,
     /// What the chat's claude last said it offers after a "/", and the plan it last kept: a phone that opens the chat is
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
@@ -120,6 +124,7 @@ impl Log {
             preset: self.preset.clone(),
             color: self.color.clone(),
             workflow: self.workflow.clone(),
+            provider: self.provider.clone(),
         }
     }
 
@@ -242,6 +247,8 @@ pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
     /// The presets the window offers (Settings › Models), as it last said.
     presets: Mutex<Vec<RemotePreset>>,
+    /// Where the window lets a phone start a chat (Claude Code, and an endpoint or two), as it last said; empty when there is only Claude Code.
+    providers: Mutex<Vec<RemoteProvider>>,
     /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
     plan: Mutex<PlanSeen>,
     cap: usize,
@@ -260,7 +267,7 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
@@ -372,6 +379,32 @@ impl SessionHub {
         self.presets.lock().unwrap().clone()
     }
 
+    /// Where the window lets a phone start a chat, as it says it: at most a few dozen, with their names cut short, and none that
+    /// repeats an id. Fewer than two is "only Claude Code", which a phone is told by an empty list.
+    pub fn set_providers(&self, providers: Vec<RemoteProvider>) {
+        let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
+        let mut kept: Vec<RemoteProvider> = Vec::new();
+        for p in providers.into_iter().take(40) {
+            let p = RemoteProvider { id: cut(p.id, 80), name: cut(p.name, 60), ..p };
+            if !p.id.is_empty() && !kept.iter().any(|k| k.id == p.id) {
+                kept.push(p);
+            }
+        }
+        *self.providers.lock().unwrap() = if kept.len() < 2 { Vec::new() } else { kept };
+    }
+
+    pub fn providers(&self) -> Vec<RemoteProvider> {
+        self.providers.lock().unwrap().clone()
+    }
+
+    /// What a chat runs on when that isn't Claude Code, as the window names it ("Codex", an endpoint's name); None clears it.
+    pub fn set_provider(&self, slot: &str, name: Option<&str>) {
+        // Only a chat that is listed: this must never make one appear.
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.provider = name.map(|n| n.chars().take(60).collect());
+        }
+    }
+
     /// The window's title for the chat (it beats the first prompt).
     pub fn titled(&self, slot: &str, title: &str) {
         if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
@@ -464,7 +497,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -509,7 +542,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -522,14 +555,14 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
 
     #[test]
     fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
         assert_eq!(hub.steps("a"), None, "no plan yet");
@@ -546,7 +579,7 @@ mod tests {
 
     #[test]
     fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
         feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
@@ -739,7 +772,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

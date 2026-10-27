@@ -97,7 +97,7 @@ impl FixtureHost {
 
     fn build(remote: &Remote, pace: Duration, waiting: bool) -> Arc<Self> {
         let (bus, hub) = (remote.bus.clone(), remote.hub.clone());
-        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
+        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: None };
 
         let mut history: HashMap<String, Vec<UiEvent>> = HashMap::new();
         history.insert(
@@ -259,9 +259,13 @@ impl Host for FixtureHost {
         Ok(())
     }
 
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow) -> BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>> {
         let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
         self.hub.opened(&slot, &folder);
+        // A chat that isn't on Claude carries the provider's name, as the window sends it for a real one.
+        if let Some(p) = self.hub.providers().into_iter().find(|p| Some(&p.id) == provider.as_ref()).filter(|p| p.id != "claude") {
+            self.hub.set_provider(&slot, Some(&p.name));
+        }
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
         self.hub.flow(&slot, workflow.as_str());
         self.hub.titled(&slot, &title_of(&text));
