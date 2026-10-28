@@ -11,7 +11,7 @@ const say = (id: string, text: string): ChatItem => ({ type: "assistant", id, te
 const done = { type: "turn", id: "end", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 } as const;
 
 describe("groupItems", () => {
-  it("folds a turn's tools and narration into one block, keeping the reply after it", () => {
+  it("folds a turn's tools and narration into one block, keeping what came before the work and the reply after it", () => {
     const items: ChatItem[] = [
       { type: "user", id: "u1", text: "hi" },
       say("m0", "Let me look."),
@@ -22,10 +22,27 @@ describe("groupItems", () => {
       done,
     ];
     const rows = groupItems(items);
-    expect(rows.map((r) => r.type)).toEqual(["user", "activity", "assistant", "turn"]);
-    expect(rows[1]).toMatchObject({ id: "a:t1", live: false, steps: [{ id: "t1" }, { id: "t2" }] });
-    expect((rows[1] as { entries: ChatItem[] }).entries.map((e) => e.id)).toEqual(["m0", "t1", "m1", "t2"]);
-    expect(rows[2]).toMatchObject({ id: "m2" });
+    expect(rows.map((r) => r.type)).toEqual(["user", "assistant", "activity", "assistant", "turn"]);
+    expect(rows[1]).toMatchObject({ id: "m0" });
+    expect(rows[2]).toMatchObject({ id: "a:t1", live: false, steps: [{ id: "t1" }, { id: "t2" }] });
+    expect((rows[2] as { entries: ChatItem[] }).entries.map((e) => e.id)).toEqual(["t1", "m1", "t2"]);
+    expect(rows[3]).toMatchObject({ id: "m2" });
+  });
+
+  it("keeps an answer Claude gives before it goes on to work, even when the turn ends on a summary of that work", () => {
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "Can the AI also manage todos?" },
+      say("m0", "Yes. The plan will gain to-do changes alongside its block changes."),
+      tool("t1", "Read"),
+      say("m1", "Now tests."),
+      tool("t2", "Bash"),
+      say("m2", "Done: to-dos can be created, completed and deleted."),
+      done,
+    ];
+    const rows = groupItems(items);
+    expect(rows.map((r) => r.type)).toEqual(["user", "assistant", "activity", "assistant", "turn"]);
+    expect(rows[1]).toMatchObject({ id: "m0" });
+    expect((rows[2] as { entries: ChatItem[] }).entries.map((e) => e.id)).toEqual(["t1", "m1", "t2"]);
   });
 
   it("folds a post-hook and what Claude did for it into one row, and leaves the turn's closing note after it", () => {

@@ -16,8 +16,9 @@ export type Row = Exclude<ChatItem, Step | HookItem> | ActivityRow | HookRow;
 
 /**
  * Folds each turn's work (tool calls, the narration between them, answered permissions) into one activity row at
- * the point the work started, like Warp's in-place status. What stays out: the reply (the assistant text after the
- * last tool, or else the last text), permission prompts still waiting for an answer, and the turn's closing note.
+ * the point the work started, like Warp's in-place status. What stays out: what Claude says before its first tool (often
+ * the answer to a question, before it goes on to act on it), the reply (the assistant text after the last tool, or else
+ * the last text), permission prompts still waiting for an answer, and the turn's closing note.
  * `live` says whether the stream is still running; only its last turn can be. What follows a post-hook, up to the turn's
  * closing note, is folded the same way inside the hook's own row.
  */
@@ -79,8 +80,11 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   if (lastTool < 0) return items as Row[];
   const replyAfterTools = items.some((it, i) => i > lastTool && it.type === "assistant");
   const reply = replyAfterTools ? -1 : lastIndexWhere(items, (it) => it.type === "assistant");
+  // What Claude says before it first acts: often the answer to the user's question, so it stays in the conversation.
+  const firstTool = items.findIndex((it) => it.type === "tool");
+  const opening = new Set(items.flatMap((it, i) => (i < firstTool && it.type === "assistant" ? [i] : [])));
   const inBlock = (it: ChatItem, i: number) =>
-    i <= lastTool && i !== reply && (it.type === "tool" || it.type === "assistant" || (it.type === "permission" && it.decision !== null && !KEPT_CARDS.includes(it.toolName)));
+    i <= lastTool && i !== reply && !opening.has(i) && (it.type === "tool" || it.type === "assistant" || (it.type === "permission" && it.decision !== null && !KEPT_CARDS.includes(it.toolName)));
   const entries = items.filter(inBlock) as Entry[];
   const steps = entries.filter((e): e is Step => e.type === "tool");
   // Live until the turn is fully done, even while the reply streams: the work line keeps moving until then.
