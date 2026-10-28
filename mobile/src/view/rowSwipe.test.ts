@@ -1,4 +1,4 @@
-import { BUTTON, PIN_AT, follow, settle, swiping, trayWidth } from "./rowSwipe";
+import { BUTTON, PIN_AT, follow, settle, startsAwayFromEdge, swiping, trayWidth } from "./rowSwipe";
 
 describe("when a drag is a swipe", () => {
   it("is not one until it has gone a little way, and is mostly sideways", () => {
@@ -50,5 +50,14 @@ describe("what happens when the finger lifts", () => {
   it("makes a tray as wide as its buttons", () => {
     expect(trayWidth(1)).toBe(BUTTON);
     expect(trayWidth(0)).toBe(0);
+  });
+});
+
+describe("where a swipe right began", () => {
+  it("is where the finger is less how far it has come, so the first swipe right is the row's too", () => {
+    // A finger in the middle of the row, 30 points in: it began at 150, well away from the edge.
+    expect(startsAwayFromEdge(180, 30)).toBe(true);
+    // One that began at the very edge is the system's.
+    expect(startsAwayFromEdge(40, 30)).toBe(false);
   });
 });
