@@ -248,6 +248,13 @@ describe("reducer", () => {
     expect(firstPrompt(replayed)).toBeNull();
   });
 
+  it("a Stop hook keeping Claude going is a hook too, so the answer before it stays the answer", () => {
+    const running = { ...initialState, status: "running" as const, items: [{ type: "user" as const, id: "u1", text: "any more reports?" }, { type: "assistant" as const, id: "m1", text: "Yes, 44 users." }] };
+    const after = ev(running, { kind: "user_text", text: "Stop hook feedback:\n[brain nudge]: Save what you learned.\n", at: 9 });
+    expect(after.items[2]).toEqual({ type: "hook", id: "h1", text: "Save what you learned.", at: 9 });
+    expect(after.status).toBe("running");
+  });
+
   it("a compaction is Lantern's bookkeeping: the chat shows nothing of it", () => {
     const s = { ...initialState, status: "running" as const };
     expect(ev(s, { kind: "compacted" })).toEqual(s);

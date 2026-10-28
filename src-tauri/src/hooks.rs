@@ -97,9 +97,30 @@ pub fn post_message(post: &str) -> String {
     format!("{POST_PREFIX}{post}")
 }
 
-/// The post-hook inside a message, if it is one (for the window's card when a chat is replayed).
+/// What Claude Code's own message starts with when a Stop hook of the user's (a `settings.json` hook, not Lantern's) keeps
+/// Claude going after it has answered. With an exit-2 hook the reason comes after `[the hook's command]: `.
+pub const STOP_PREFIX: &str = "Stop hook feedback:\n";
+
+/// The post-hook inside a message, if it is one (for the window's card when a chat is replayed). A Stop hook's feedback
+/// counts as one: what Claude does for it comes after the answer, and isn't the answer.
 pub fn post_text(message: &str) -> Option<&str> {
-    message.strip_prefix(POST_PREFIX)
+    message.strip_prefix(POST_PREFIX).or_else(|| message.strip_prefix(STOP_PREFIX).map(|reason| without_command(reason).trim_end()))
+}
+
+/// `reason` without the `[command]: ` an exit-2 Stop hook's feedback starts with.
+fn without_command(reason: &str) -> &str {
+    reason.strip_prefix('[').and_then(|r| r.split_once("]: ")).map_or(reason, |(_, rest)| rest)
+}
+
+/// The text of a Claude Code Stop hook's feedback, from a `user` stream line or transcript record (its content is a
+/// string or text blocks).
+pub fn stop_feedback(message: &serde_json::Value) -> Option<String> {
+    let content = &message["content"];
+    let text = match content.as_str() {
+        Some(s) => s.to_string(),
+        None => content.as_array()?.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+    };
+    text.starts_with(STOP_PREFIX).then_some(text)
 }
 
 /// Where a chat's post-hook stands.
@@ -304,6 +325,18 @@ mod tests {
         let sent = post_message("update the brain");
         assert_eq!(post_text(&sent), Some("update the brain"));
         assert_eq!(post_text("update the brain"), None);
+    }
+
+    #[test]
+    fn a_stop_hooks_feedback_counts_as_a_post_hook_in_either_form() {
+        assert_eq!(post_text("Stop hook feedback:\nBefore you finish: save it."), Some("Before you finish: save it."));
+        assert_eq!(post_text("Stop hook feedback:\n[bash /tmp/hook.sh]: Before you finish: save it.\n"), Some("Before you finish: save it."));
+        assert_eq!(post_text("My stop hook feedback:\nnot one"), None);
+        let blocks = serde_json::json!({"content": [{"type": "text", "text": "Stop hook feedback:\nsave it"}]});
+        assert_eq!(stop_feedback(&blocks).as_deref(), Some("Stop hook feedback:\nsave it"));
+        assert_eq!(stop_feedback(&serde_json::json!({"content": "Stop hook feedback:\nsave it"})).as_deref(), Some("Stop hook feedback:\nsave it"));
+        assert_eq!(stop_feedback(&serde_json::json!({"content": [{"type": "tool_result", "tool_use_id": "t", "content": "Stop hook feedback:\nx"}]})), None);
+        assert_eq!(stop_feedback(&serde_json::json!({"content": "hello"})), None);
     }
 
     #[test]

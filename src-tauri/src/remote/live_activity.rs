@@ -656,6 +656,8 @@ impl LiveActivities {
             UiEvent::PermissionResolved { .. } | UiEvent::PermissionWithdrawn { .. } | UiEvent::MergeResolved { .. } => {
                 (self.hub.chat(slot).is_none_or(|c| c.status != ChatStatus::NeedsYou)).then_some(Next::Update(Status::Working))
             }
+            // A Stop hook keeping Claude going is the same turn, still on its clock.
+            UiEvent::UserText { text, .. } if text.starts_with(crate::hooks::STOP_PREFIX) => None,
             UiEvent::UserText { .. } => Some(Next::Restart),
             UiEvent::Todos { parent: None, .. } | UiEvent::PlanUsage { .. } => Some(Next::Detail),
             UiEvent::TurnDone { is_error: false, .. } => Some(Next::End(Status::Done)),
