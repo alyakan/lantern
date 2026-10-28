@@ -971,7 +971,7 @@ function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.lg, paddingBottom: insets.bottom + space.lg, gap: 10 }}>
+        <View style={{ padding: space.lg, paddingBottom: insets.bottom + space.lg, gap: 10 }}>
           <Txt variant="heading">Add photos</Txt>
           <Txt variant="small" tone="ink2">
             They go to Claude with your message, up to {MAX_IMAGES}.
@@ -1019,7 +1019,7 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ flexShrink: 1, backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + 8 }}>
+        <View style={{ flexShrink: 1, paddingBottom: insets.bottom + 8 }}>
           <View style={{ padding: space.lg, gap: 8 }}>
             <Txt variant="heading">What changed</Txt>
             {files.length > 1 && (

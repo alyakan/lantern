@@ -133,7 +133,7 @@ export function PairDeviceSheet({ onClose }: { onClose: () => void }) {
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10 }}>
+        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10 }}>
           <Txt variant="heading" accessibilityRole="header">
             Pair another device
           </Txt>

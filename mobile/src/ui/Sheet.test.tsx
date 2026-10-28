@@ -1,6 +1,7 @@
 import { StyleSheet, Text } from "react-native";
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { Sheet } from "./Sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Sheet, SHEET_INSET, SHEET_RADIUS } from "./Sheet";
 
 describe("Sheet", () => {
   it("shows what it is given, and closes from the dark behind it or from inside", async () => {
@@ -61,5 +62,23 @@ describe("Sheet", () => {
       expect(up).not.toBe(dark);
       up = up.parent;
     }
+  });
+
+  it("floats in from the screen's edges, round all over, and gives what is in it only a little room at the bottom", async () => {
+    const Bottom = () => <Text>{`bottom ${useSafeAreaInsets().bottom}`}</Text>;
+    await render(<Sheet onClose={jest.fn()}>{() => <Bottom />}</Sheet>);
+    expect(screen.getByText(`bottom ${SHEET_INSET}`)).toBeTruthy();
+    // The panel: its corners are all round (not just the top ones).
+    let panel: Record<string, unknown> | undefined;
+    const find = (n: unknown) => {
+      const node = n as { props?: { style?: unknown }; children?: unknown[] | null } | null;
+      if (!node || typeof node !== "object" || panel) return;
+      const style = StyleSheet.flatten(node.props?.style as never) as Record<string, unknown> | undefined;
+      if (style?.borderRadius === SHEET_RADIUS) panel = style;
+      for (const c of node.children ?? []) find(c);
+    };
+    find(screen.toJSON());
+    expect(panel).toBeTruthy();
+    expect(panel?.borderTopLeftRadius).toBeUndefined();
   });
 });

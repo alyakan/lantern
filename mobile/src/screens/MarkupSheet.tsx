@@ -5,7 +5,7 @@ import { captureMarkedUp } from "../platformMarkup";
 import { Button, Txt } from "../ui/components";
 import { buzz } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import type { PickedImage } from "../view/attachments";
 import { begin, extend, fitInside, PEN, pieces, undo, type Stroke } from "../view/markup";
 
@@ -44,7 +44,7 @@ export function MarkupSheet({ image, onDone, onClose }: { image: PickedImage; on
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, alignItems: "center" }, shadow.float]}>
+        <View style={[{ padding: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, alignItems: "center" }]}>
           <Txt variant="heading" accessibilityRole="header" style={{ alignSelf: "flex-start" }}>
             Mark up the photo
           </Txt>

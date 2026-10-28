@@ -13,7 +13,7 @@ import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
@@ -60,7 +60,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
+        <View style={[{ flexShrink: 1 }]}>
           <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
             <Txt variant="title" accessibilityRole="header">
               Chat settings

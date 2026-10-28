@@ -21,7 +21,7 @@ import { ChatToast, type ToastShown } from "../ui/ChatToast";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
@@ -51,7 +51,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ flexShrink: 1, backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
+        <View style={{ flexShrink: 1, paddingBottom: insets.bottom + space.lg }}>
           <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
             Message which chat?
           </Txt>

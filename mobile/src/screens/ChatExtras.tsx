@@ -13,13 +13,13 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { fonts, radius, space, useColors } from "../ui/theme";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
   const colors = useColors();
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.paper, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.wash, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
       <Txt variant="body" tone={tone} style={{ fontWeight: "700" }}>
         {label}
       </Txt>
@@ -43,7 +43,7 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }, shadow.float]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }]}>
           {selecting ? (
             <>
               <Txt variant="heading" accessibilityRole="header">
@@ -242,7 +242,7 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
         <Txt variant="body" style={{ fontWeight: "700" }}>
           Plan usage
@@ -269,7 +269,7 @@ export function WeekRow({ week }: { week: { used: number; resetsAt: number | nul
   const w = weekOf(week);
   const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+    <View accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
         <Txt variant="body" style={{ fontWeight: "700" }}>
           Weekly limit
@@ -294,7 +294,7 @@ export function ContextRow({ context }: { context: { tokens: number; window: num
   const c = contextOf(context);
   const fill = c.tone === "stop" ? colors.stop : c.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Context: ${c.label}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+    <View accessibilityLabel={`Context: ${c.label}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
         <Txt variant="body" style={{ fontWeight: "700" }}>
           Context
@@ -385,7 +385,7 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }, shadow.float]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }]}>
           <Txt variant="heading" accessibilityRole="header" numberOfLines={2}>
             {title}
           </Txt>

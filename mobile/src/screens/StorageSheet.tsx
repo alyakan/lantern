@@ -6,7 +6,7 @@ import { useController } from "../shell/hooks";
 import { useAppLock } from "../shell/lockContext";
 import { Button, Txt } from "../ui/components";
 import { Sheet } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import { bytesText, clearTotals, diskTone, kindText, scanState, usedShare } from "../view/storage";
 
 /** How often what the Mac says is asked for again while it scans or clears. */
@@ -109,7 +109,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10, flexShrink: 1 }}>
+        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10, flexShrink: 1 }}>
           <Txt variant="heading" accessibilityRole="header">
             Your Mac's storage
           </Txt>

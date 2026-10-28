@@ -4,7 +4,7 @@ import type { PlanUsage } from "../sync/reducer";
 import { useUsageHistory } from "../usageHistory";
 import { Button, Txt } from "../ui/components";
 import { Sheet } from "../ui/Sheet";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import { usageOf, weekOf } from "../view/plan";
 import { dailyBars, daysKnown } from "../view/usageHistory";
 
@@ -24,7 +24,7 @@ export function UsageSheet({ plan, onClose }: { plan: PlanUsage; onClose: () => 
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10 }, shadow.float]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10 }]}>
           <Txt variant="heading" accessibilityRole="header">
             Plan usage
           </Txt>
@@ -45,7 +45,7 @@ export function UsageSheet({ plan, onClose }: { plan: PlanUsage; onClose: () => 
                 <Txt variant="tiny" tone="ink3">
                   {b.peak === null ? "–" : `${b.peak}%`}
                 </Txt>
-                <View style={{ width: "100%", height: CHART_HEIGHT, justifyContent: "flex-end", backgroundColor: colors.paper, borderRadius: 6, overflow: "hidden" }}>
+                <View style={{ width: "100%", height: CHART_HEIGHT, justifyContent: "flex-end", backgroundColor: colors.wash, borderRadius: 6, overflow: "hidden" }}>
                   {b.peak !== null && <View style={{ height: Math.max(3, (b.peak / 100) * CHART_HEIGHT), backgroundColor: toneColour(b.peak), borderRadius: 6 }} />}
                 </View>
                 <Txt variant="tiny" tone={b.today ? "ink" : "ink3"} style={b.today ? { fontWeight: "700" } : undefined}>
