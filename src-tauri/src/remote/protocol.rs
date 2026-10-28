@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -727,6 +727,10 @@ pub enum Request {
     Suggest { refresh: bool },
     /// One file's diff from the chat's start, as unified-diff text.
     Diff { slot: String, path: String },
+    /// A reviewed file's diff, as unified-diff text: in the pull request or branch the chat is reviewing (its last review_target
+    /// call), or, when it isn't reviewing anything, the chat's own change to it (as Diff). `path` is as the review's page names
+    /// it, relative to the repository or absolute in it. Only sent to a Mac whose Welcome lists "reviewdiff".
+    ReviewDiff { slot: String, path: String },
     /// What a finished step of the chat printed (a command's output, a skill's, a helper's report, an MCP tool's), as text,
     /// cut to STEP_OUTPUT_MAX. Never what Claude read from a file or the web (hub.rs `output_may_be_read`). Only what the Mac
     /// still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose Welcome lists "output".

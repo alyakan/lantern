@@ -303,6 +303,11 @@ export class Sync {
     return this.ask<string>({ op: "diff", slot, path });
   }
 
+  /** A reviewed file's diff in what the chat reviews (or its own change, when it reviews nothing). Only for a Mac that lists "reviewdiff". */
+  reviewDiff(slot: string, path: string) {
+    return this.ask<string>({ op: "review_diff", slot, path });
+  }
+
   /**
    * A new one-time pairing code to show another device (rejects with why not). Any code the Mac's window is showing stops
    * working. Only for a Mac that lists "pair": an older one ends the connection at a request it doesn't know. The answer is

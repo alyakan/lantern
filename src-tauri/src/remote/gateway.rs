@@ -129,6 +129,9 @@ pub trait Host: Send + Sync + 'static {
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
+    /// A file of what the chat is reviewing, as a unified diff of the pull request or branch: `path` is relative to the
+    /// repository or absolute in it (checked by `reviewed_path`), and a file outside the repository is refused.
+    fn review_diff(&self, slot: String, path: String, target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>>;
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
     /// shown yet (see history::page).
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
@@ -856,6 +859,16 @@ impl<'a> Session<'a> {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
             }
+            Request::ReviewDiff { slot, path } => {
+                self.chat_known(&slot)?;
+                let path = reviewed_path(&path)?.to_string();
+                match self.gw.hub.review_target(&slot) {
+                    Some(target) => host.review_diff(slot, path, target).await,
+                    // Not reviewing anything: the chat's own change to the file, as Diff gives it.
+                    None => host.diff(slot, path).await,
+                }
+                .map(serde_json::Value::String)
+            }
             Request::StepOutput { slot, tool_use_id } => {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
@@ -993,6 +1006,20 @@ mod erased {
     }
 }
 
+/// A reviewed file's path as a phone sends it (from the review's page): relative to the repository, or absolute. Never a
+/// way out of it ("..") or a character a path has no business holding; the host then only reads it inside the repository.
+pub fn reviewed_path(path: &str) -> Result<&str, String> {
+    let bad = || "That isn't a file of this review.".to_string();
+    let p = path.trim();
+    if p.is_empty() || p.len() > 1024 || p.chars().any(char::is_control) {
+        return Err(bad());
+    }
+    if std::path::Path::new(p).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(bad());
+    }
+    Ok(p)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1125,6 +1152,9 @@ pub(crate) mod tests {
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
+        }
+        fn review_diff(&self, _: String, path: String, target: super::super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
+            Box::pin(async move { Ok(format!("review {path} pr={:?} base={:?}", target.pr, target.base)) })
         }
         fn history(&self, _: String, _: Option<usize>) -> BoxFut<Result<crate::history::Page, String>> {
             let h = self.history.lock().unwrap().clone();
@@ -1571,6 +1601,32 @@ pub(crate) mod tests {
         assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
         assert!(p.ask(Request::Diff { slot: "z".into(), path: "/etc/passwd".into() }).await.1.is_some());
         assert!(p.ask(Request::Wake { slot: "unknown".into() }).await.1.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_reviewed_files_diff_comes_from_what_the_chat_reviews_or_else_its_own_edits() {
+        let r = rig();
+        r.hub.asleep("z", "/p", Some("Review".into()), Some("s".into()));
+        let (_, mut p) = paired(&r).await;
+        // Not reviewing anything yet: the chat's own change, as Diff.
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 1, event: UiEvent::ReviewTarget { pr: Some(512), base: None } });
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=Some(512) base=None")));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 2, event: UiEvent::ReviewTarget { pr: None, base: Some("feat/core".into()) } });
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=None base=Some(\"feat/core\")")));
+        // Never a way out of the repository, and only a chat that is open.
+        for bad in ["../secrets", "src/../../etc/passwd", "", "a\nb"] {
+            assert!(p.ask(Request::ReviewDiff { slot: "z".into(), path: bad.into() }).await.1.is_some(), "{bad:?}");
+        }
+        assert!(p.ask(Request::ReviewDiff { slot: "unknown".into(), path: "src/lib.rs".into() }).await.1.is_some());
+    }
+
+    #[test]
+    fn a_reviewed_path_is_a_path_in_the_repository() {
+        assert_eq!(reviewed_path(" src/a.rs "), Ok("src/a.rs"));
+        assert_eq!(reviewed_path("/Users/me/repo/src/a.rs"), Ok("/Users/me/repo/src/a.rs"));
+        assert!(reviewed_path("../a").is_err());
+        assert!(reviewed_path(&"x".repeat(2000)).is_err());
     }
 
     #[tokio::test]

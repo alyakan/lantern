@@ -169,6 +169,16 @@ async fn pr_range(state: &AppState, folder: std::path::PathBuf, number: Option<u
     Ok(range)
 }
 
+/// A file's diff as a phone reads it: unified text, cut to PHONE_DIFF_MAX.
+fn phone_diff(path: &str, d: &FileDiff) -> String {
+    let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(path, path).to_string();
+    if text.len() > PHONE_DIFF_MAX {
+        format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)])
+    } else {
+        text
+    }
+}
+
 /// The login-shell PATH, computed once off the main thread.
 async fn login_path(state: &AppState) -> Option<String> {
     let cell = state.login_path.clone();
@@ -524,10 +534,35 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone();
         Box::pin(async move {
             let s = app.state::<AppState>().slots.get(&slot)?;
-            // Only a file the chat changed: the tracker knows no other.
+            // Only a file the chat changed: the tracker knows no other. A review's page may name it relative to the chat's folder.
+            let path = if std::path::Path::new(&path).is_absolute() { path } else { s.folder()?.join(&path).to_string_lossy().into_owned() };
             let d = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None)?;
-            let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(&path, &path).to_string();
-            Ok(if text.len() > PHONE_DIFF_MAX { format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)]) } else { text })
+            Ok(phone_diff(&path, &d))
+        })
+    }
+
+    fn review_diff(&self, slot: String, path: String, target: remote::hub::ReviewTarget) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let s = state.slots.get(&slot)?;
+            // The range the window's Changes pane shows for the same review (get_file_diff's Pr and Branch scopes), with the
+            // file's path as the hint that picks the repository in a folder of several.
+            let range = match target.pr {
+                Some(pr) => pr_range(&state, s.folder()?, Some(u32::try_from(pr).map_err(|_| "That pull request number is too big.")?), vec![path.clone()]).await?,
+                None => {
+                    let (folder, hints, base) = (s.view_folder()?, vec![path.clone()], target.base.clone());
+                    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
+                }
+            };
+            // Only a file in the repository: pr::file reads it from the review's two commits there.
+            let full = if std::path::Path::new(&path).is_absolute() { std::path::PathBuf::from(&path) } else { range.root.join(&path) };
+            if !full.starts_with(&range.root) {
+                return Err("That file isn't in this repository.".into());
+            }
+            let full = full.to_string_lossy().into_owned();
+            let d = tauri::async_runtime::spawn_blocking(move || pr::file(&range, &full)).await.map_err(|e| e.to_string())??;
+            Ok(phone_diff(&path, &d))
         })
     }
 

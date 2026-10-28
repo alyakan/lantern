@@ -1,10 +1,10 @@
 import "@shopify/flash-list/jestSetup";
 import { Keyboard, StyleSheet, TextInput, type ViewProps } from "react-native";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
-import { chat, connected, connectedWithControls, makeController, renderWith } from "../test/render";
+import { chat, connected, connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
@@ -1030,6 +1030,71 @@ describe("Step by step's pages", () => {
       expect(screen.getByTestId("chat-list")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Previous page" })).toBeNull();
     });
+  });
+});
+
+describe("a Review, a file page at a time", () => {
+  const filePage = (n: number, path: string) =>
+    `# File ${n} of 2 — ${path} (+12 −3)\n\n### What changed\nThe token is checked before it is used.\n\n### Findings\n⚠ line 42 (blocker): The token is never refreshed.\n⚠ line 50 (nit): A typo in the message.\n\n### Notes\nChecked the tests too.`;
+  const review = async (events: RemoteEvent[], features: string[] = ["reviewdiff"], answers = {}) => {
+    const { controller } = makeController();
+    const session = attachSession(controller, answers, features);
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ workflow: "steps" })], events: { a: events }, connection: connectedWith(features) }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    return session;
+  };
+  const one: RemoteEvent[] = [{ kind: "assistant_text", block_id: "f1", text: filePage(1, "src/lib/auth.ts") }];
+
+  it("lays a file page out with its file, what changed, its findings and notes", async () => {
+    await review(one);
+    expect(screen.getByRole("link", { name: "src/lib/auth.ts" })).toBeTruthy();
+    expect(screen.getByText("The token is checked before it is used.")).toBeTruthy();
+    expect(screen.getByText("Blocker")).toBeTruthy();
+    expect(screen.getByText("Nit")).toBeTruthy();
+    expect(screen.getByText("Checked the tests too.")).toBeTruthy();
+  });
+
+  it("sends your verdicts with Next, as the Mac does", async () => {
+    const { lastOf } = await review(one);
+    await fireEvent.press(within(screen.getByTestId("finding-0")).getByRole("button", { name: "Agree" }));
+    await fireEvent.press(within(screen.getByTestId("finding-1")).getByRole("button", { name: "Reject" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(lastOf("send")).toMatchObject({ text: "Next. Agreed: line 42. Rejected: line 50." }));
+    // Sent: the verdicts can't be changed any more.
+    expect(screen.queryByRole("button", { name: "Agree" })).toBeNull();
+  });
+
+  it("sends a plain Next with no verdict, and a verdict pressed twice is taken back", async () => {
+    const { lastOf } = await review(one);
+    const agree = () => within(screen.getByTestId("finding-0")).getByRole("button", { name: "Agree" });
+    await fireEvent.press(agree());
+    await fireEvent.press(agree());
+    await fireEvent.press(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(lastOf("send")).toMatchObject({ text: "Next" }));
+  });
+
+  it("opens the change in the file from its name and from a finding's line, read from what is reviewed", async () => {
+    const { lastOf } = await review(one, ["reviewdiff"], { review_diff: "--- a\n+++ b\n-old\n+new" });
+    await fireEvent.press(screen.getByRole("link", { name: "src/lib/auth.ts" }));
+    await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/auth.ts" }));
+    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByRole("link", { name: "line 42" }));
+    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+  });
+
+  it("asks an older Mac for the chat's own change instead, which it knows", async () => {
+    const { lastOf, asked } = await review(one, [], { diff: "--- a\n+++ b\n+mine" });
+    await fireEvent.press(screen.getByRole("link", { name: "src/lib/auth.ts" }));
+    await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "src/lib/auth.ts" }));
+    expect(asked.some((r) => r.op === "review_diff")).toBe(false);
+  });
+
+  it("shows an answered page's verdicts, read back from the Next that carried them", async () => {
+    await review([...one, { kind: "user_text", text: "Next. Agreed: line 42.", at: 2, sent_by: "desktop" }, { kind: "assistant_text", block_id: "f2", text: filePage(2, "src/lib/api.ts") }]);
+    await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+    expect(within(screen.getByTestId("step-page-0")).getByText("Agreed")).toBeTruthy();
+    expect(within(screen.getByTestId("step-page-0")).queryByRole("button", { name: "Agree" })).toBeNull();
   });
 });
 

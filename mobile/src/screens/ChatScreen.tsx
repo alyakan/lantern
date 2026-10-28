@@ -23,6 +23,8 @@ import { StepNav, StepPager } from "./StepPager";
 import { changedFiles } from "../view/changes";
 import { ChangesPane } from "./ChangesPane";
 import { ChangesIcon, PanelMenu } from "./PanelMenu";
+import { ReviewFilePage } from "./ReviewPage";
+import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -91,6 +93,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
   const { sync } = controller;
   const { chats, views, plan, workingSince } = useSyncState();
   const canOutput = useMacCan("output");
+  // A Mac that can read a reviewed file's diff from the PR or branch under review; an older one only has the chat's own edits.
+  const canReviewDiff = useMacCan("reviewdiff");
   const canShell = useMacCan("shell");
   const canImages = useMacCan("images");
   const lock = useAppLock();
@@ -114,6 +118,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
+  // A Review page's file whose change is open, and the verdicts picked on each page not yet sent (by the page's message id).
+  const [reviewed, setReviewed] = useState<string | null>(null);
+  const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
   // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
   const changed = useMemo(() => changedFiles(view.items), [view.items]);
   const [changesOpen, setChangesOpen] = useState(false);
@@ -133,6 +140,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
   const stepsChat = chat?.workflow === "steps";
   const [asList, setAsList] = useState(false);
   const pages = useMemo(() => (stepsChat ? stepPagesOf(rows) : []), [stepsChat, rows]);
+  // The newest page's heading: its buttons, and a Review page's verdicts, can still be given (until one is pressed).
+  const newest = pages.length ? [...pages[pages.length - 1].rows].reverse().find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page") : undefined;
   const paged = stepsChat && !asList && pages.length > 0;
   const [picked, setPicked] = useState<{ index: number; of: number } | null>(null);
   const pageAt = picked ? Math.min(picked.index, pages.length - 1) : pages.length - 1;
@@ -237,6 +246,24 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
     return () => clearTimeout(t);
   }, [waking, asleep]);
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
+  const loadReviewed = useCallback((path: string) => (canReviewDiff ? sync.reviewDiff(slot, path) : sync.diff(slot, path)), [sync, slot, canReviewDiff]);
+  /** A Review file page's parts, when its message has them. */
+  const reviewOf = (row: Extract<Row, { kind: "page" }>): ReviewFile | null => (row.page.kind === "file" ? parseReviewFile(row.page.title, row.page.body) : null);
+  /** The verdicts a Review page's Next carried, read back from that message (the first of yours after the page). */
+  const sentVerdicts = (row: Extract<Row, { kind: "page" }>, file: ReviewFile) => {
+    for (let i = rows.indexOf(row) + 1; i < rows.length && rows[i].kind !== "page"; i++) {
+      const r = rows[i];
+      if (r.kind === "user") return verdictsFromNext(r.item.text, file.findings);
+    }
+    return undefined;
+  };
+  const pickVerdict = (id: string, index: number, v: Verdict | null) =>
+    setVerdicts((all) => {
+      const mine = { ...all[id] };
+      if (v) mine[index] = v;
+      else delete mine[index];
+      return { ...all, [id]: mine };
+    });
 
   const reply = (id: string, a: PageAction) => {
     setAnswered((s) => new Set(s).add(id));
@@ -327,8 +354,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
           return <SummaryRow row={row} onFiles={setFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
-        case "page":
+        case "page": {
+          // On a page of its own, a Review file page is laid out as the Mac's: its file a link to its change, and its findings.
+          const file = paged ? reviewOf(row) : null;
+          if (file) {
+            const open = row === newest && !answered.has(row.item.id) && !working;
+            return <ReviewFilePage kicker={row.page.kicker} file={file} verdicts={open ? verdicts[row.item.id] : (sentVerdicts(row, file) ?? verdicts[row.item.id])} onVerdict={open ? (i, v) => pickVerdict(row.item.id, i, v) : undefined} onOpen={setReviewed} />;
+          }
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onAction={(a) => reply(row.item.id, a)} />;
+        }
         case "steps":
           return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
@@ -576,8 +610,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
       />
   );
   // The newest page's buttons go at its end, and stay while the step is talked about (until one is pressed, or Claude is at work).
-  const heading = paged ? [...pages[pages.length - 1].rows].reverse().find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page") : undefined;
-  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, a)} /> : null;
+  const heading = paged ? newest : undefined;
+  // A Review file page's Next carries its verdicts, as the Mac's does ("Next. Agreed: line 42."; a plain "Next" with none).
+  const nextOf = (h: Extract<Row, { kind: "page" }>, a: PageAction): PageAction => {
+    const file = a.reply === "Next" ? reviewOf(h) : null;
+    if (!file) return a;
+    const message = verdictMessage(file.findings, verdicts[h.item.id]);
+    return { ...a, reply: message === "Next." ? "Next" : message };
+  };
+  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
   const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
@@ -650,6 +691,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
         <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" />} onHide={() => setChangesOpen(false)} />
       </Modal>
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
+      {reviewed && <DiffSheet files={[reviewed]} load={loadReviewed} onClose={() => setReviewed(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
     </View>
   );

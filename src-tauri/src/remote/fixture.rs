@@ -283,6 +283,10 @@ impl Host for FixtureHost {
         })
     }
 
+    fn review_diff(&self, slot: String, path: String, _target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
+        self.diff(slot, path)
+    }
+
     fn diff(&self, _slot: String, path: String) -> BoxFut<Result<String, String>> {
         Box::pin(async move {
             if path == "/Users/you/dev/lantern/package.json" {
