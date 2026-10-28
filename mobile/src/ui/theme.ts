@@ -131,7 +131,10 @@ export const FONT_FILES = ["BricolageGrotesque_700Bold", "BricolageGrotesque_800
  * Stop, the search circle, the message box at rest): one number, so they line up. The message box's own field is `control - 12`
  * (6 points of capsule around it).
  */
-export const control = 48;
+export const control = 44;
+
+/** The round buttons inside the chat bar (send, dictate, attach, Stop): a little inside its capsule. */
+export const barButton = control - 8;
 
 export const radius = { card: 24, inner: 14, pill: 999, sheet: 22 } as const;
 
@@ -162,5 +165,5 @@ export const shadow = {
   }) as object,
 };
 
-/** The smallest a touch target is (Apple's 44, Material's 48: the larger). */
-export const MIN_TARGET = 48;
+/** The smallest a touch target is: Apple's 44 points. */
+export const MIN_TARGET = 44;
