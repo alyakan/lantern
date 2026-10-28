@@ -268,14 +268,14 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         view.kind === "question" ? (
           <View style={{ gap: 8 }}>
             <Button label="Send answer" kind="hi" disabled={!answers || busy} onPress={() => answers && answer(true, answers)} />
-            <Button label="Decline" kind="night-ghost" disabled={busy} onPress={() => answer(false)} />
+            <Button label="Decline" kind="night-ghost" link disabled={busy} onPress={() => answer(false)} />
           </View>
         ) : (
           <View style={{ gap: 12 }}>
             {/* It stays up while the answer goes, and shows it was allowed (it can't be dragged again). */}
             {/* A failed answer brings a fresh one back (the key), not the one that looks allowed. */}
             <SwipeToAllow key={outcome.kind === "failed" ? "again" : "first"} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => answer(true)} />
-            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled={busy} onPress={() => answer(false)} style={{ backgroundColor: "transparent" }} />
+            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" link disabled={busy} onPress={() => answer(false)} />
           </View>
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
@@ -284,7 +284,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
           {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
           <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ opacity: 0 }}>
-            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled onPress={() => {}} style={{ backgroundColor: "transparent" }} />
+            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" link disabled onPress={() => {}} />
           </View>
         </View>
       ) : (
