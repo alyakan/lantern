@@ -933,6 +933,67 @@ describe("Step by step's pages", () => {
     expect(screen.getByText("Done")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
   });
+
+  describe("in a Step by step chat, a page at a time", () => {
+    const run: RemoteEvent[] = [
+      { kind: "user_text", text: "Cut 0.1.53", at: 1, sent_by: "desktop" },
+      { kind: "assistant_text", block_id: "p1", text: "# Step 1 of 2 — Bump the version\n\nTo 0.1.53." },
+      { kind: "user_text", text: "Next. Commit this step first.", at: 2, sent_by: "desktop" },
+      { kind: "assistant_text", block_id: "p2", text: "# Step 2 of 2 — Open the PR\n\nWith the changelog." },
+    ];
+    const steps = (events: RemoteEvent[] = run) => withSession(events, {}, {}, { workflow: "steps" });
+
+    it("lays the pages side by side and opens on the newest, saying which it is", async () => {
+      await steps();
+      expect(screen.getByTestId("step-pager")).toBeTruthy();
+      expect(screen.queryByTestId("chat-list")).toBeNull();
+      expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy();
+      // The newest page's buttons are there, on it.
+      expect(screen.getByRole("button", { name: "Commit, next" })).toBeTruthy();
+    });
+
+    it("goes to the page before and after with its arrows", async () => {
+      await steps();
+      expect(screen.getByRole("button", { name: "Next page" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      expect(screen.getByText("Step 1 of 2 · 2 of 3")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      expect(screen.getByText("Start · 1 of 3")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Previous page" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("button", { name: "Next page" }));
+      expect(screen.getByText("Step 1 of 2 · 2 of 3")).toBeTruthy();
+    });
+
+    it("follows a new page when on the newest, and says one came when reading an older one", async () => {
+      const { controller } = await steps(run.slice(0, 2));
+      expect(screen.getByText("Step 1 of 2 · 2 of 2")).toBeTruthy();
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 100, event: run[2] } }));
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 101, event: run[3] } }));
+      await waitFor(() => expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy());
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 102, event: { kind: "assistant_text", block_id: "p3", text: "# Done — shipped" } } }));
+      // Still on the page being read; the way to the new one says so.
+      await waitFor(() => expect(screen.getByRole("button", { name: "New page" })).toBeTruthy());
+      expect(screen.getByText("Step 1 of 2 · 2 of 4")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "New page" }));
+      expect(screen.getByText("Done · 4 of 4")).toBeTruthy();
+    });
+
+    it("can be read as one chat, and back as pages", async () => {
+      await steps();
+      await fireEvent.press(screen.getByRole("button", { name: "Show as one chat" }));
+      expect(screen.getByTestId("chat-list")).toBeTruthy();
+      expect(screen.queryByTestId("step-pager")).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Show as pages" }));
+      expect(screen.getByTestId("step-pager")).toBeTruthy();
+    });
+
+    it("is a plain chat in any other workflow", async () => {
+      await withSession(run);
+      expect(screen.getByTestId("chat-list")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Previous page" })).toBeNull();
+    });
+  });
 });
 
 describe("what a turn changed", () => {
