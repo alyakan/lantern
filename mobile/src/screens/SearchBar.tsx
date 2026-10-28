@@ -37,11 +37,14 @@ export interface BarSearch {
 /** The circle's size until the bar has been measured; it then takes the bar's own height, which is the same number at rest. */
 const CIRCLE = control;
 const GAP = 8;
-/** Room at the search field's left inside the bar, and how long the keyboard waits for the field to be there and the bar to start growing. */
+/** Room at the search field's left inside the bar. */
 const FIELD_LEFT = 16;
+/** How long the field waits for the keyboard to start coming before it grows anyway. */
+const GROW_WAIT_MS = 400;
+/** How long the search, opened here, waits for its field to have the keyboard before it tells the chat anyway. */
+const OPEN_TELL_MS = 300;
 /** The magnifier's own size. */
 const MAGNIFIER = 20;
-const FOCUS_DELAY_MS = 80;
 /**
  * What the bar can measure at rest (a 36 point field with 6 points around it, more with large text). A measurement outside it is a
  * layout in passing, not the bar, and must not be what the circle is sized by: the circle keeps the least height seen, so one odd
@@ -86,7 +89,7 @@ function RoundButton({ label, onPress, disabled, children }: { label: string; on
 }
 
 /** What the grown circle holds beside its magnifier: the field, "2 of 5", the arrows, and the way out. */
-function SearchContents({ search, input }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null> }) {
+function SearchContents({ search, input, onFocused, onCancel }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null>; onFocused: () => void; onCancel: () => void }) {
   const colors = useColors();
   const typed = search.query.trim().length >= 2;
   const none = typed && search.count === 0;
@@ -99,6 +102,9 @@ function SearchContents({ search, input }: { search: BarSearch; input: RefObject
         onChangeText={search.onChange}
         // Return goes to the next older match, like the up arrow.
         onSubmitEditing={() => search.onStep(-1)}
+        onFocus={() => {
+          onFocused();
+        }}
         blurOnSubmit={false}
         placeholder="Search this chat"
         placeholderTextColor={colors.ink3}
@@ -121,7 +127,7 @@ function SearchContents({ search, input }: { search: BarSearch; input: RefObject
           <Chevron open={false} color={colors.ink} size={7} />
         </View>
       </RoundButton>
-      <RoundButton label="Cancel search" onPress={search.onCancel}>
+      <RoundButton label="Cancel search" onPress={onCancel}>
         <View accessibilityElementsHidden style={{ width: 12, height: 12 }}>
           <View style={{ position: "absolute", left: 5, top: 0, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
           <View style={{ position: "absolute", left: 5, top: 0, width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink, transform: [{ rotate: "-45deg" }] }} />
@@ -140,7 +146,28 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   const keyboard = useKeyboardUp();
   const { width: screenWidth } = useWindowDimensions();
   const input = useRef<ComponentRef<typeof TextInput>>(null);
-  const active = !!search?.active;
+  // The search opens here first: the field is shown and asks for the keyboard at once, and the chat is told once the field has
+  // it. Told first, the chat drew itself again before the field could ask (about 70 ms on the simulator, more on a phone), and
+  // the keyboard came late, after the field had started to grow, so the bar caught up with it instead of riding it from the start.
+  const [opening, setOpening] = useState(false);
+  const active = !!search?.active || opening;
+  const told = useRef(false);
+  const tell = () => {
+    if (told.current || !search) return;
+    told.current = true;
+    search.onOpen();
+  };
+  useEffect(() => {
+    if (search?.active) setOpening(false);
+  }, [search?.active]);
+  useEffect(() => {
+    if (!opening) return;
+    told.current = false;
+    // If the field never says it has the keyboard, the chat is told anyway.
+    const t = setTimeout(tell, OPEN_TELL_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening]);
   const hasCircle = !!search && circle;
   // Two values, each for one thing: `gone` for the circle giving its room to the bar while words are typed, `open` for the circle
   // being grown into the field. Nothing else may follow either (the box going blank was one value doing both).
@@ -148,7 +175,31 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // The field grows across the whole row: the bar's little overshoot, barely seen on its short way (the circle's width), was a
   // wobble over that distance, and even a spring without bounce passed its place a little (the bar overshot as the field went).
   // So it has no spring: it eases in and out.
-  const open = useSwap(active, false);
+  // The field starts growing when the keyboard starts coming, not at the press. Grown from the press, it was growing (its width
+  // moving every frame) as the keyboard set off, and the bar then went straight to where the keyboard would end and waited for
+  // it, instead of riding it up as it does when the message box is tapped (seen on the simulator, frame by frame; with the field
+  // shown at once it rode the keyboard, and so it does when the two start together). If the keyboard is up already, or doesn't
+  // say it is coming, it grows anyway.
+  const [grow, setGrow] = useState(active);
+  useEffect(() => {
+    if (!active) {
+      setGrow(false);
+      return;
+    }
+    if (keyboard) {
+      setGrow(true);
+      return;
+    }
+    const sub = Keyboard.addListener("keyboardWillShow", () => setGrow(true));
+    const t = setTimeout(() => setGrow(true), GROW_WAIT_MS);
+    return () => {
+      sub.remove();
+      clearTimeout(t);
+    };
+    // (Only the search starting or ending runs this: the keyboard is read, not followed.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  const open = useSwap(grow, false);
   // The circle is as tall as the bar is at rest: the least height the bar has had (it grows with a long message, the circle doesn't).
   const [seen, setSeen] = useState<number | null>(null);
   const size = seen ?? CIRCLE;
@@ -170,10 +221,11 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
     if (active) {
       keyboardBefore.current = keyboard;
       was.current = true;
-      // The field was not there a frame ago: a moment for it to be laid out, and for it to start growing before the keyboard
-      // rises, so the two don't both begin at once.
-      const timer = setTimeout(() => input.current?.focus(), FOCUS_DELAY_MS);
-      return () => clearTimeout(timer);
+      // The keyboard comes at once, with the field starting to grow: the bar rides it from the start, as when the message box is
+      // tapped. (It used to wait 80 ms for the field, and the bar then caught up with a keyboard already on its way.) The field is
+      // laid out by now: this runs after the render that shows it.
+      input.current?.focus();
+      return;
     }
     if (was.current) {
       was.current = false;
@@ -245,7 +297,7 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
               accessibilityRole={active ? undefined : "button"}
               accessibilityLabel={active ? undefined : "Search this chat"}
               disabled={active}
-              onPress={search.onOpen}
+              onPress={() => setOpening(true)}
               scaleTo={0.94}
               haptic="light"
               style={{ flex: 1 }}
@@ -255,7 +307,17 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
                   <Magnifier />
                 </Animated.View>
                 <Animated.View style={{ position: "absolute", left: FIELD_LEFT + MAGNIFIER + GAP, right: 6, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", display: active || shrunk ? "flex" : "none", opacity: fieldFade }}>
-                  <SearchContents search={search} input={input} />
+                  <SearchContents
+                    search={search}
+                    input={input}
+                    onFocused={() => {
+                      if (opening) tell();
+                    }}
+                    onCancel={() => {
+                      setOpening(false);
+                      search.onCancel();
+                    }}
+                  />
                 </Animated.View>
               </Glass>
             </PressScale>

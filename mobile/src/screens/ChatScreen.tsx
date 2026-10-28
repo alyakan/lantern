@@ -30,6 +30,10 @@ import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
 
+/** What no search, or a search that finds nothing, marks: the same each time, so the list has nothing to draw again for it. */
+const NO_MATCHES: ReturnType<typeof findRows> = [];
+const NO_MARKS = { here: null as string | null, all: new Set<string>() };
+
 export interface ChatProps {
   slot: string;
   onBack: () => void;
@@ -114,9 +118,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
-  const matches = useMemo(() => (find ? findRows(rows, find.query) : []), [rows, find]);
+  // Opening the search (nothing typed yet) changes none of these, so the list isn't drawn again then, while the keyboard comes.
+  const query = find?.query ?? null;
+  const matches = useMemo(() => (query === null ? NO_MATCHES : findRows(rows, query)), [rows, query]);
   const here = find ? currentMatch(matches, find.cursor) : null;
-  const marks = useMemo(() => ({ here: here?.key ?? null, all: new Set(matches.map((m) => m.key)) }), [matches, here]);
+  const markedHere = here?.key ?? null;
+  const marks = useMemo(() => (matches.length === 0 && markedHere === null ? NO_MARKS : { here: markedHere, all: new Set(matches.map((m) => m.key)) }), [matches, markedHere]);
   // The chat goes to each match as it is chosen (and to the newest as the search finds it).
   const hereRef = useRef(here);
   hereRef.current = here;
