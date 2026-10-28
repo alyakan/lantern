@@ -18,6 +18,16 @@ export function swiping(dx: number, dy: number): boolean {
   return Math.abs(dx) > START_AT && Math.abs(dx) > Math.abs(dy) * SIDEWAYS;
 }
 
+/** How far from the screen's left edge a swipe right must start to be the row's (nearer, it is the system's). */
+export const EDGE = 20;
+
+/**
+ * Whether a drag right began away from the screen's left edge: where it began is where the finger is now (`moveX`) less how far
+ * it has come (`dx`). (A PanResponder's `x0` can't be used: it is only set once a gesture is granted, so before the first one it
+ * is 0, which reads as the edge.)
+ */
+export const startsAwayFromEdge = (moveX: number, dx: number) => moveX - dx >= EDGE;
+
 /** The tray's width for `buttons` of them. */
 export const trayWidth = (buttons: number) => buttons * BUTTON;
 

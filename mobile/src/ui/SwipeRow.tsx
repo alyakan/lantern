@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Animated, PanResponder, Pressable, StyleSheet, View } from "react-native";
-import { PIN_AT, follow, settle, swiping, trayWidth, BUTTON } from "../view/rowSwipe";
+import { PIN_AT, follow, settle, startsAwayFromEdge, swiping, trayWidth, BUTTON } from "../view/rowSwipe";
 import { useAccent } from "./accent";
 import { Txt } from "./components";
 import { buzz, skips } from "./motion";
@@ -14,9 +14,6 @@ export interface TrayButton {
   tone?: "accent" | "danger";
   onPress: () => void;
 }
-
-/** Further from the screen's left edge than this, a swipe right is the row's (nearer, it is the system's). */
-const EDGE = 20;
 
 /**
  * A row that can be swiped: right pins it (the row is let go past the pin hint and springs back, the phone tapping as it crosses),
@@ -53,7 +50,7 @@ export function SwipeRow({ children, background, pin, tray, open, onOpenChange }
         if (!swiping(g.dx, g.dy)) return false;
         const l = live.current;
         // Left needs buttons to lay out; right needs something to pin (and not to start at the edge), or an open tray to close.
-        return g.dx < 0 ? l.width > 0 : l.open || (l.canPin && g.x0 >= EDGE);
+        return g.dx < 0 ? l.width > 0 : l.open || (l.canPin && startsAwayFromEdge(g.moveX, g.dx));
       },
       onPanResponderGrant: () => {
         from.current = pos.current;
