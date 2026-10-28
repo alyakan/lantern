@@ -68,7 +68,7 @@ describe("the accent", () => {
       </AccentContext.Provider>,
     );
     expect(bg("Warm")).toBe(EMBER);
-    expect(bg("Quiet")).toBe(colors.paper);
+    expect(bg("Quiet")).toBe(colors.wash);
   });
 
   it("colours the links in Claude's text", async () => {

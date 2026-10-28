@@ -2,7 +2,7 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { Sheet } from "../ui/Sheet";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 
 export interface ChatActionsProps {
   title: string;
@@ -24,7 +24,7 @@ export function ChatActionsSheet({ title, project, pinned, unread, onClose, onTo
   return (
     <Sheet onClose={onDismiss}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }, shadow.float]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }]}>
           <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
             {title}
           </Txt>

@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { Sheet } from "../ui/Sheet";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 
 /**
  * Closing a chat, asked first: it closes on the Mac too (as closing it in the window's sidebar does), and its conversation
@@ -17,7 +17,7 @@ export function CloseChatSheet({ title, why, onConfirm, onClose }: { title: stri
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10 }, shadow.float]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10 }]}>
           <Txt variant="title" accessibilityRole="header">
             Close this chat?
           </Txt>

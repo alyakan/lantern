@@ -13,7 +13,7 @@ import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 
@@ -132,7 +132,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
+        <View style={[{ flexShrink: 1 }]}>
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
           <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -165,7 +165,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
               placeholderTextColor={colors.ink3}
               multiline
               editable={!busy}
-              style={{ backgroundColor: colors.paper, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
             />
 
             {continueChat ? null : projects === null ? (
@@ -188,7 +188,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
             {!continueChat && supported && controls && (
               <FadeSlideIn from={8}>
                 {/* One line says what it runs on; the options are behind it. */}
-                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 14, minHeight: 48 }}>
+                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.wash, borderRadius: 14, paddingHorizontal: 14, minHeight: 48 }}>
                   <View style={{ flexShrink: 1 }}>
                     <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
                       Runs on

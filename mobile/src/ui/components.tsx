@@ -27,7 +27,7 @@ export function Button({ label, onPress, kind = "ink", disabled, style, accessib
   // A regular's main buttons are Ember too.
   const regular = useRegular();
   const colors = useColors();
-  const bg = { ink: regular ? EMBER : colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  const bg = { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
   // On "hi" the words are dark in either appearance: they are on yellow.
   const fg = kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (

@@ -260,7 +260,7 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
+        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
           <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
           <Txt variant="body" tone="ink2">
             {where}
