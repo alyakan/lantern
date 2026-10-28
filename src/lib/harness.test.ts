@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILT_IN, advisorsFor, familyOf, presetsOf, settingsOf, summary, usesFable, validAdvisor } from "./harness";
+import { BUILT_IN, SUBAGENTS_OFF, advisorsFor, familyOf, presetsOf, settingsOf, summary, usesFable, validAdvisor } from "./harness";
 
 const [def, balanced, thrifty, max] = BUILT_IN;
 
@@ -32,6 +32,7 @@ describe("harness", () => {
   it("describes each preset in a line, and flags Fable", () => {
     expect(summary(balanced)).toBe("Sonnet · Opus advisor · Haiku subagents");
     expect(summary(def)).toMatch(/Claude Code's own settings/);
+    expect(summary({ ...balanced, subagent: SUBAGENTS_OFF })).toBe("Sonnet · Opus advisor · no subagents");
     expect(usesFable(max)).toBe(true);
     expect(usesFable(thrifty)).toBe(false);
   });

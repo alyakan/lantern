@@ -53,6 +53,10 @@ fn command(cfg: &SessionConfig) -> Command {
     let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
     // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
     // go there, a command line is readable by any process), and the token and what to take out in the environment.
+    // Subagents off: claude starts without the tool that starts them ("Task" in claude 2.1.308, "Agent" in some versions).
+    if cfg.subagent_model.as_deref() == Some(crate::session::SUBAGENTS_OFF) {
+        args.push("--disallowedTools=Agent,Task".into());
+    }
     let gateway = cfg.endpoint.as_ref().zip(cfg.model.as_deref()).map(|(g, model)| gateway_env(g, model));
     if let Some(g) = &gateway {
         add_settings(&mut args, g.settings.clone());
@@ -73,8 +77,15 @@ fn command(cfg: &SessionConfig) -> Command {
             cmd.env(k, v);
         }
     }
-    if let Some(m) = &cfg.subagent_model {
-        cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+    match cfg.subagent_model.as_deref() {
+        // No subagents, so no model for them, whatever Lantern itself was started with.
+        Some(crate::session::SUBAGENTS_OFF) => {
+            cmd.env_remove("CLAUDE_CODE_SUBAGENT_MODEL");
+        }
+        Some(m) => {
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+        }
+        None => {}
     }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
@@ -724,6 +735,22 @@ done"#,
         let (args, sub) = seen.split_once('|').unwrap();
         assert!(args.ends_with("--advisor opus"), "{args}");
         assert_eq!(sub, "haiku");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn subagents_off_starts_claude_without_the_tool_and_no_subagent_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"${{CLAUDE_CODE_SUBAGENT_MODEL-unset}}\" > {d}/seen.txt\ncat > /dev/null"));
+        let (sink, _rx) = channel_sink();
+        let mut cfg = config(fake, dir.path(), None);
+        cfg.subagent_model = Some(crate::session::SUBAGENTS_OFF.into());
+        let s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        let seen = wait_for_file(&dir.path().join("seen.txt")).await;
+        let (args, sub) = seen.split_once('|').unwrap();
+        assert!(args.contains("--disallowedTools=Agent,Task"), "{args}");
+        assert_eq!(sub, "unset");
         s.stop().await;
     }
 
