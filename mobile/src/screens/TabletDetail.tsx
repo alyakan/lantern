@@ -55,7 +55,7 @@ export function TabletDetail({ slot, decide, layout, onShowChats, onHideChats, o
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
           {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-          <ChatScreen key={slot} slot={slot} lead={layout === "split" ? "hide" : "sidebar"} onSidebar={layout === "split" ? onHideChats : onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} />
+          <ChatScreen key={slot} slot={slot} changesButton={!room} lead={layout === "split" ? "hide" : "sidebar"} onSidebar={layout === "split" ? onHideChats : onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} />
         </View>
         {room && !changesOpen && (
           <PressScale accessibilityRole="button" accessibilityLabel={`Show the ${changed.length} changed ${changed.length === 1 ? "file" : "files"}`} onPress={() => setChangesOpen(true)} haptic="select" scaleTo={0.94} style={{ position: "absolute", top: insets.top + 8, right: 16, height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, justifyContent: "center" }}>

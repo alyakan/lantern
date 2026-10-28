@@ -16,7 +16,7 @@ const lineTone = (line: string): "add" | "del" | "plain" => (line.startsWith("+"
  * A tablet's right-hand pane: the files the open chat has changed, and a diff of the one chosen, read from the Mac the way the
  * chat's own "What changed" sheet reads it. Read-only: nothing here writes anything.
  */
-export function ChangesPane({ slot, onHide }: { slot: string; onHide: () => void }) {
+export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false }: { slot: string; onHide: () => void; /** What the button that puts it away says. */ hideLabel?: string; /** On a phone it is a sheet over the chat, which starts below the clock already. */ inSheet?: boolean }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -44,7 +44,7 @@ export function ChangesPane({ slot, onHide }: { slot: string; onHide: () => void
   }, [path, load, files.find((f) => f.path === path)?.added, files.find((f) => f.path === path)?.removed]);
   const line = changesLine(files);
   return (
-    <View testID="changes-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: insets.top + 6 }}>
+    <View testID="changes-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet ? 16 : insets.top + 6 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.lg, paddingBottom: 8 }}>
         <View style={{ flex: 1 }}>
           <Txt variant="heading" accessibilityRole="header">
@@ -56,7 +56,7 @@ export function ChangesPane({ slot, onHide }: { slot: string; onHide: () => void
             </Txt>
           )}
         </View>
-        <Button label="Hide" kind="ghost" onPress={onHide} />
+        <Button label={hideLabel} kind="ghost" onPress={onHide} />
       </View>
       {files.length === 0 ? (
         <Txt variant="body" tone="ink2" style={{ padding: space.lg }}>

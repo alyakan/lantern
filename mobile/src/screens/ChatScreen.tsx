@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { AppState, Modal, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +20,8 @@ import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
 import { PagesButton, StepNav, StepPager } from "./StepPager";
+import { changedFiles } from "../view/changes";
+import { ChangesPane } from "./ChangesPane";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -44,6 +46,8 @@ export interface ChatProps {
   /** What leads the header: a back button (the phone), the chats' button (a tablet held upright: they slide in), or the button that hides them (they are beside the chat, and this gives the chat the whole width). */
   lead?: "back" | "sidebar" | "hide";
   onSidebar?: () => void;
+  /** A button in the title bar opens what the chat changed (not where a pane beside the chat already shows it). */
+  changesButton?: boolean;
 }
 
 /** How long "Caught up on 14 events" stays up. */
@@ -80,7 +84,7 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, changesButton = true }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -109,6 +113,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
+  // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
+  const changed = useMemo(() => changedFiles(view.items), [view.items]);
+  const [changesOpen, setChangesOpen] = useState(false);
   const [banner, setBanner] = useState(false);
   const [waking, setWaking] = useState(false);
   // While a swipe to allow is being dragged the chat holds still: it can't scroll out from under the finger.
@@ -405,6 +412,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           )}
         </ChatSettings>
+        {changesButton && changed.length > 0 && (
+          <PressScale accessibilityRole="button" accessibilityLabel={`Changes: ${changed.length} ${changed.length === 1 ? "file" : "files"} changed`} onPress={() => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.9}>
+            <Glass style={{ height: control, borderRadius: control / 2, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Txt variant="small" style={{ fontWeight: "700" }}>
+                Changes
+              </Txt>
+              <Txt variant="small" tone="ink2" style={{ fontWeight: "700" }}>
+                {changed.length}
+              </Txt>
+            </Glass>
+          </PressScale>
+        )}
       </View>
       {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} onChatView={() => setAsList(true)} />}
       {stepsChat && asList && pages.length > 0 && (
@@ -621,6 +640,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           onClose={() => setActions(null)}
         />
       )}
+      <Modal visible={changesOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setChangesOpen(false)}>
+        <ChangesPane slot={slot} inSheet hideLabel="Close" onHide={() => setChangesOpen(false)} />
+      </Modal>
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
     </View>
