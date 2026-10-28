@@ -27,6 +27,7 @@ describe("migrateFolderState", () => {
       "settings.subagentsByFolder": { [OLD]: "inline" },
       "settings.promptHistory": { [OLD]: ["fix the retry"] },
       "settings.harnessByFolder": { [OLD]: "max" },
+      "settings.providerByFolder": { [OLD]: "codex" },
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
       "sidebar.projectColors": { [OLD]: 3 },
@@ -38,14 +39,17 @@ describe("migrateFolderState", () => {
       "settings.projectSetupByFolder": { [OLD]: { commands: ["npm ci"], run: "npm run dev" } },
       "prChecks.byFolder": { [OLD]: { mode: "fix", tries: 4 } },
       "prChecks.loopByFolder": { [OLD]: { "57": { tries: 2, status: "waiting" } } },
+      "settings.chatHooksByFolder": { [OLD]: { pre: { text: "check the brain", on: true } } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
+    expect(read(store, "settings.chatHooksByFolder")[NEXT]).toEqual({ pre: { text: "check the brain", on: true } });
     expect(read(store, "settings.permissionsByFolder")).toEqual({ [OLD]: "auto", "/other": "ask", [NEXT]: "auto" });
     expect(read(store, "settings.workflowByFolder")).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
     expect(read(store, "settings.subagentsByFolder")).toEqual({ [OLD]: "inline", [NEXT]: "inline" });
     expect(read(store, "settings.promptHistory")).toEqual({ [OLD]: ["fix the retry"], [NEXT]: ["fix the retry"] });
     expect(read(store, "settings.harnessByFolder")).toEqual({ [OLD]: "max", [NEXT]: "max" });
+    expect(read(store, "settings.providerByFolder")).toEqual({ [OLD]: "codex", [NEXT]: "codex" });
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
     expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });

@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
@@ -27,7 +28,7 @@ export default defineConfig(() => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/mobile/**"],
     },
   },
 
@@ -35,5 +36,7 @@ export default defineConfig(() => ({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test-setup.ts",
+    // The phone app (mobile/) has its own tests, run by its own Jest.
+    exclude: [...configDefaults.exclude, "mobile/**"],
   },
 }));

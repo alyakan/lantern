@@ -14,7 +14,7 @@ impl Provider for ClaudeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true }
+        Capabilities { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true, phone_approvals: true }
     }
 
     fn models(&self) -> &'static [&'static str] {
@@ -42,7 +42,7 @@ mod tests {
     #[test]
     fn claude_can_do_everything_and_offers_its_three_aliases() {
         let c = ClaudeProvider.capabilities();
-        assert!(c.supports_auto_mode && c.supports_advisor && c.reports_cost_usd && c.supports_skills && c.supports_effort && c.model_switchable);
+        assert!(c.supports_auto_mode && c.supports_advisor && c.reports_cost_usd && c.supports_skills && c.supports_effort && c.model_switchable && c.supports_lantern_tools && c.can_lead_team && c.phone_approvals);
         assert_eq!(ClaudeProvider.models(), ["opus", "sonnet", "haiku"]);
         assert!(ClaudeProvider.models().iter().all(|m| crate::args::valid_model(m)));
     }

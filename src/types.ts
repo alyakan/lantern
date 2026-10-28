@@ -45,6 +45,12 @@ export interface Capabilities {
   supports_skills: boolean;
   supports_effort: boolean;
   model_switchable: boolean;
+  /** Lantern's own tools reach it, so what relies on them (the Network tab's Summarize) is offered. */
+  supports_lantern_tools: boolean;
+  /** It can be the Lead of a team (start agents): for now only Claude Code's. */
+  can_lead_team: boolean;
+  /** A paired phone can see and answer its approval cards (they come through Claude Code's permission bridge); Codex's ask in its own protocol. */
+  phone_approvals: boolean;
 }
 
 export interface ProviderInfo {
@@ -52,9 +58,35 @@ export interface ProviderInfo {
   capabilities: Capabilities;
 }
 
+/** A provider the window may start a chat on (the backend's `list_providers`): its models, and where its program is. */
+export interface ProviderListing extends ProviderInfo {
+  /** The model names its CLI takes, for the model picker and the "+ Agent" form. */
+  models: string[];
+  /** Its program, for starting a chat on it. Null for Claude Code when the window already found it. */
+  binary: string | null;
+  /** For an endpoint the user set up (run by Claude Code): which one. Null for every CLI. Its `id` here is "gateway:<endpoint id>". */
+  endpoint?: { id: string; name: string } | null;
+}
+
+/** An endpoint the user set up in Settings → Endpoints (the backend's `Endpoint`): where Claude Code sends a chat's requests. */
+export interface Endpoint {
+  /** Made by the backend when it is first saved; empty for one not saved yet. */
+  id: string;
+  name: string;
+  url: string;
+  /** The NAME of the environment variable that holds its key (never the key). */
+  key_env: string | null;
+  models: string[];
+}
+
+/** An endpoint with whether its key variable is set in the login shell (null: it has none). */
+export interface EndpointStatus extends Endpoint {
+  key_set: boolean | null;
+}
+
 export type UiEvent =
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
-  | { kind: "user_text"; text: string; at?: number }
+  | { kind: "user_text"; text: string; at?: number; sent_by?: string; images?: number }
   | { kind: "thinking"; parent: string | null }
   | { kind: "text_delta"; parent: string | null; block_id: string; text: string }
   | { kind: "assistant_text"; parent: string | null; block_id: string; text: string }
@@ -78,10 +110,14 @@ export type UiEvent =
   | { kind: "advisor_done"; parent: string | null; id: string; outcome: "reviewed" | "declined" | "unavailable"; error_code: string | null }
   | { kind: "model_usage"; models: ModelCost[] }
   | { kind: "conversation_reset" }
+  /** The conversation was compacted. The chat shows nothing of it: the backend uses it to bring the pre-hook back. */
+  | { kind: "compacted" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "permission_withdrawn"; request_id: string }
+  | { kind: "permission_resolved"; request_id: string; allow: boolean; by: string }
   | { kind: "permission_auto_allowed"; request_id: string; tool_name: string; input: unknown; scope: RuleScope; rule: Rule }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
+  | { kind: "shell_started"; id: string; command: string }
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
@@ -109,6 +145,8 @@ export type UiEvent =
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
   /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
   | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
+  /** The subscription's weekly window, the same way: `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "week_usage"; used: number; resets_at: number | null }
   /** The chat's review_target call: what the Changes pane compares (a pull request, or the checked-out branch against `base`; null: Lantern finds it). */
   | { kind: "review_target"; pr: number | null; base: string | null }
   | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
@@ -220,6 +258,8 @@ export interface NewWorker {
   model: string | null;
   /** The role it is started in, which is also what is kept of it on its card; absent: none. A read-only one has only the tools that read files: no editing and no commands. */
   role?: AgentRole;
+  /** The provider it runs on, when not its main agent's own (absent: the main agent's, as the backend defaults). `model` is that provider's. */
+  provider?: string;
 }
 
 /**
@@ -315,6 +355,10 @@ export interface ModelOption {
 
 /** How claude runs in a chat. null model or effort = Claude Code's default. */
 export interface Settings {
+  /** Which agent CLI runs the chat (absent: Claude Code, as for chats saved before there was a choice). */
+  provider?: string;
+  /** For a chat on an endpoint the user set up (`provider` is "gateway"): which one. */
+  endpoint?: string;
   mode: Mode;
   model: string | null;
   effort: string | null;

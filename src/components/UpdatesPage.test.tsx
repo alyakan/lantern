@@ -55,7 +55,7 @@ describe("UpdatesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Update ready/ }));
     expect(onRestart).not.toHaveBeenCalled();
     expect(screen.getByRole("alertdialog")).toHaveTextContent("2 chats are still working");
-    fireEvent.click(screen.getByRole("button", { name: "Restart now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restart and restore chats" }));
     expect(onRestart).toHaveBeenCalled();
   });
 });

@@ -10,6 +10,7 @@ import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
+import { agentName } from "../lib/provider";
 import { COMMIT_NEXT, continuedIn, isApproval, isCommitAnswer, movesOn, pageLabel, pagesOf, pageTitle, promptText, SKIP_COMMIT_NEXT, startedChoice, UPDATE_MAP, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
@@ -335,7 +336,7 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
                   teach={teach}
                   review={review}
                   arch={arch}
-                  suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
+                  suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined, agent: agentName(state.provider) } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
                   summary={p.heading?.kind === "summary" && onSend ? { rows: arch ? concerns : reviewed, onAction: onSend, busy: running, architecture: arch } : null}
@@ -413,7 +414,7 @@ interface PageProps extends StreamHandlers {
    * A switch page: the flavour the chat was in, how you answered (the next page's opening prompt), and how to answer
    * (only on the newest page, when idle).
    */
-  suggestion?: { current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void } | null;
+  suggestion?: { current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void; agent?: string } | null;
   /** Review: your verdicts on this page's findings, and how to set one (only on the newest page, when idle). */
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
@@ -543,18 +544,18 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
  * Claude's suggestion to work in a flavour: start it, stay in the one you're in, or start another. Once answered, it
  * says how.
  */
-function SuggestionCard({ flavour, explain, why, current, answer, onAnswer }: { flavour: Flavour; explain: boolean; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
+function SuggestionCard({ flavour, explain, why, current, answer, onAnswer, agent = "Claude" }: { flavour: Flavour; explain: boolean; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void; agent?: string }) {
   const label = FLAVOUR_LABEL[flavour];
   // "Build, explaining as you go" when Claude suggests the option too.
   const named = flavourName(flavour, explain);
   const started = answer === null ? null : startedChoice(answer) ?? (isApproval(answer) ? { flavour, explain } : null);
   const outcome = answer === null ? null : started ? `You started ${flavourName(started.flavour, started.explain)}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
   return (
-    <div className={`suggestion${outcome ? " answered" : ""}`} role="group" aria-label={`Claude suggests ${label}`}>
+    <div className={`suggestion${outcome ? " answered" : ""}`} role="group" aria-label={`${agent} suggests ${label}`}>
       <div className="suggestion-head">
         <span className="suggestion-icon">{FLAVOUR_ICON[flavour]}</span>
         <span>
-          Claude suggests <strong>{named}</strong>
+          {`${agent} suggests`} <strong>{named}</strong>
         </span>
       </div>
       {why && <p className="suggestion-why">{why}</p>}

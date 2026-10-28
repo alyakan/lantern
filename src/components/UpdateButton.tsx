@@ -33,14 +33,14 @@ export function UpdateButton({ version, busy, onRestart, onLater }: Props) {
   const chats = busy === 1 ? "1 chat is" : `${busy} chats are`;
   return (
     <div className="model-picker" ref={root}>
-      <button className="meta-item" title={`Lantern ${version} is ready. Click to restart and update.`} aria-expanded={busy > 0 ? asking : undefined} onClick={() => (busy > 0 ? setAsking(!asking) : onRestart())}>
+      <button className="meta-item" title={`Lantern ${version} is ready. Click to restart and update; your chats come back.`} aria-expanded={busy > 0 ? asking : undefined} onClick={() => (busy > 0 ? setAsking(!asking) : onRestart())}>
         <RestartIcon />
         Update ready
       </button>
       {asking && (
         <div className="menu update-menu" ref={inside.ref} style={inside.style} role="alertdialog" aria-label={`Update to ${version}`}>
           <p className="update-question">
-            {chats} still working. Restarting stops {busy === 1 ? "it" : "them"}; you can resume {busy === 1 ? "it" : "them"} from History.
+            {chats} still working. Restarting interrupts {busy === 1 ? "it" : "them"}; your chats come back afterwards, ready for your next message.
           </p>
           <div className="update-actions">
             <button
@@ -53,7 +53,7 @@ export function UpdateButton({ version, busy, onRestart, onLater }: Props) {
               Update when I quit
             </button>
             <button className="primary" onClick={onRestart}>
-              Restart now
+              Restart and restore chats
             </button>
           </div>
         </div>

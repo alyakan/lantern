@@ -854,6 +854,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .canvas-toggle, .settings-button, .storage-button { position: relative; }
 .storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--add); flex: none; }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */
@@ -938,6 +940,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .msg.user { display: var(--user-display); gap: 1ch; background: var(--bg-user); border: var(--user-border); border-radius: var(--radius-inner); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user::before { content: var(--user-mark); flex: none; color: var(--accent); }
 .msg.user > * { min-width: 0; }
+/* Under a message: what went with it that isn't words (a phone's photos). */
+.msg-note { margin: 2px 12px 0; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 /* What you sent, at most three lines until Show more. */
 .collapsible-wrap { flex: 1; min-width: 0; }
 .collapsible.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--clamp-lines, 3); overflow: hidden; }
@@ -1064,7 +1068,19 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 /* Permission + turn */
 .permission { border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; font-size: calc(13px * var(--font-scale)); }
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+.permission-detail.open { max-height: 50vh; }
 .permission-actions { display: flex; gap: 6px; }
+.permission-action { font-weight: 600; }
+.permission-clipped { font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.permission-facts { display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: calc(12px * var(--font-scale)); }
+.permission-facts > div { display: flex; gap: 8px; }
+.permission-facts dt { flex: none; color: var(--muted-text); min-width: 52px; }
+.permission-facts dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.permission-reason { font-size: calc(12px * var(--font-scale)); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 96px; overflow: auto; }
+.permission-reason > span { color: var(--muted-text); }
+.permission-warning { font-size: calc(12px * var(--font-scale)); color: var(--warn); overflow-wrap: anywhere; }
+.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
+.permission-same { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-subtle); }
 .always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -1915,6 +1931,14 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .auto-turn-more { display: block; padding: 0; font-size: inherit; }
 .auto-turn > span:nth-child(2) { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .auto-turn-time { font-variant-numeric: tabular-nums; }
+/* A post-hook and what Claude did for it: one line like an auto turn's note, with the work folded under it until it is opened. */
+.hook-card { margin: 6px 0 2px; }
+.hook-card-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 0; border: none; background: none; text-align: left; font: inherit; font-size: calc(12px * var(--font-scale)); color: var(--muted); cursor: pointer; }
+.hook-card-head:hover { color: var(--text-2); }
+.hook-card-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.hook-card-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hook-card-toggle { flex: none; }
+.hook-card-body { margin: 4px 0 2px 13px; padding-left: 10px; border-left: 1px solid var(--line); }
 /* Something you sent, in Step by step: your initials, name and the time, then the message. */
 .user-note { display: flex; flex-direction: column; gap: 5px; padding: 9px 12px 10px; border-radius: var(--radius-card); background: var(--bg-user); font-size: calc(13px * var(--font-scale)); user-select: text; }
 .user-note-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
@@ -2253,6 +2277,14 @@ body::after { content: var(--crt-on); position: fixed; inset: 0; z-index: 214748
 .settings-loading, .settings-muted { font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .settings-muted { display: block; }
 .settings-error { padding: 7px 10px; border-radius: var(--radius-inner); background: var(--error-bg); color: var(--text); font-size: calc(12.5px * var(--font-scale)); overflow-wrap: anywhere; }
+.remote-pair-code { display: flex; gap: 16px; align-items: center; }
+.remote-pair-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.remote-pair-code p { margin: 0 0 8px; font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); max-width: 46ch; }
+.remote-qr {
+  --qr-paper: #ffffff;
+  width: 132px; height: 132px; padding: 8px; background: var(--qr-paper); border-radius: var(--radius-inner); flex: none; image-rendering: pixelated; }
+.remote-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 10px; border-radius: var(--radius-inner); background: var(--info-bg); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice button { margin-left: auto; }
 button.danger { color: var(--del); }
@@ -2599,11 +2631,23 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .pr-setting-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .pr-setting-main .settings-row-name { flex: 1; }
 .pr-setting-tries { display: flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+/* Settings → Endpoints: one form per endpoint, on the MCP form's grid; what spans it is the models, the notes and the buttons. */
+.endpoint-row { border: none; background: none; }
+.endpoint-fields > label.wide, .endpoint-fields > .settings-row-sub, .endpoint-actions { grid-column: 1 / -1; }
+.endpoint-fetch-error { color: var(--text); }
+.endpoint-actions, .endpoint-add { display: flex; align-items: center; gap: 8px; }
+.endpoint-add { padding-top: 4px; }
+.endpoint-spacer { flex: 1; }
 .pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
 /* A project's notes: the revert dialog's frame around a text box, its limit counter and Clear at the far left. */
 .notes-field { width: 100%; min-height: 140px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); resize: vertical; outline: none; box-sizing: border-box; }
 .notes-field:focus { border-color: var(--faint); }
 .notes-field::placeholder { color: var(--muted-text); }
+/* Settings → Hooks: a short box for each prompt, and a project's two hooks one under the other. */
+.hook-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.hook-field .notes-field, .hook-project .notes-field { min-height: 64px; }
+.hook-project { display: flex; flex-direction: column; gap: 8px; padding: 9px 10px; }
+.hook-project-kind { display: flex; flex-direction: column; gap: 6px; }
 .notes-foot { display: flex; justify-content: space-between; gap: 12px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .notes-count { flex: none; font-variant-numeric: tabular-nums; }
 .notes-count.near { color: var(--attn-text); }
@@ -2818,8 +2862,32 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .plan-meter.warn { color: var(--warn); }
 .plan-meter.stop { color: var(--del); font-weight: 600; }
 .plan-meter-box { position: relative; align-self: center; }
-button.plan-meter { height: 24px; border: none; border-radius: var(--radius-pill); background: none; font-family: var(--ui); cursor: pointer; }
+button.plan-meter { display: inline-flex; align-items: center; gap: 12px; height: 28px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-family: var(--ui); cursor: pointer; }
 button.plan-meter:hover { background: var(--bg-hover); }
+button.plan-meter svg { width: 10px; height: 10px; opacity: 0.6; }
+/* A window in the title bar: its word and percentage over a thin bar, each window in its own colour. */
+.mini-meter { display: inline-flex; flex-direction: column; gap: 3px; min-width: 64px; color: var(--text-2); font-weight: 400; font-size: calc(11.5px * var(--font-scale)); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mini-meter.warn { color: var(--warn); }
+.mini-meter.stop { color: var(--del); font-weight: 600; }
+.mini-meter-track { position: relative; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.mini-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--accent); transition: width 300ms ease-out; }
+.mini-meter.warn .mini-meter-fill { background: var(--warn); }
+.mini-meter.stop .mini-meter-fill { background: var(--del); }
+/* A window in the pop-over: a full bar with a tick where an even pace has it at the end of each hour or day, and a marker for now. */
+.usage-bar { margin: 0 0 14px; padding: 0 4px; }
+.usage-bar-head { display: flex; justify-content: space-between; margin-bottom: 6px; font: 600 calc(13px * var(--font-scale)) var(--ui); font-variant-numeric: tabular-nums; }
+.usage-bar.warn .usage-bar-pct { color: var(--warn); }
+.usage-bar.stop .usage-bar-pct { color: var(--del); }
+.usage-bar-track { position: relative; height: 8px; border-radius: var(--radius-pill); background: var(--line); }
+.usage-bar-fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--radius-pill); background: var(--accent); transition: width 300ms ease-out; }
+.usage-bar.warn .usage-bar-fill { background: var(--warn); }
+.usage-bar.stop .usage-bar-fill { background: var(--del); }
+.usage-bar-tick { position: absolute; top: -2px; bottom: -2px; width: 1px; margin-left: -0.5px; background: var(--text-2); opacity: 0.55; }
+.usage-bar-pace { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); }
+.usage-bar-days { position: relative; height: 14px; margin-top: 4px; color: var(--text-2); font-size: calc(10.5px * var(--font-scale)); }
+.usage-bar-days span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.usage-bar-sentence { margin: 6px 0 0; color: var(--text-2); line-height: 1.4; }
+.usage-heading { margin: 4px 0 4px; padding: 8px 4px 0; border-top: 1px solid var(--line); color: var(--text-2); font: 600 calc(11px * var(--font-scale)) var(--ui); text-transform: uppercase; letter-spacing: 0.04em; }
 /* Where the plan's use went: every open chat and team, biggest first, under the title bar's meter. */
 .usage-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; width: min(440px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 80px)); overflow-y: auto; padding: 12px 12px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); box-shadow: var(--shadow); color: var(--text); font-size: calc(12.5px * var(--font-scale)); animation: guide-in 140ms ease-out; }
 .usage-plan { margin: 0 0 8px; padding: 0 4px; font: 600 calc(13px * var(--font-scale)) var(--ui); }
@@ -2933,6 +3001,8 @@ button.plan-meter:hover { background: var(--bg-hover); }
 .team-state.quiet { color: var(--warn); font-weight: 600; }
 .team-quiet { color: var(--warn); font-weight: 600; }
 .team-ask { width: calc(100% - 12px); margin: 4px 6px 6px; height: var(--pill-m); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
+.team-provider { margin-left: 6px; font: 500 calc(11.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.team-note { margin: 6px 10px 2px; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; }
 .team-ask:hover { background: var(--bg-hover); }
 
 /* What opens over the canvas (the agent menu, the questions and forms): in the viewport, not in the world that zooms. */

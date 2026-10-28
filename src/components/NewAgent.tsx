@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { usePopover } from "../lib/usePopover";
 import { useChatState, useNodeActions } from "../lib/canvasContext";
-import { MODEL_CHOICES } from "../lib/models";
+import { modelChoicesFor } from "../lib/models";
+import { providerChoicesForAgents, providerIdOf, providerName, useProviders } from "../lib/provider";
 import { useRoleStore } from "../lib/roleStore";
 import { agentName, allRoles, BUILTIN_ROLES, briefFor, roleId, TASK_MARK, type Role } from "../lib/roles";
 import type { NewWorker } from "../types";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
 
-const EMPTY: Form = { roleId: "", task: "", name: "", brief: null, isolation: "worktree", model: null, readOnly: false };
+const EMPTY: Form = { roleId: "", task: "", name: "", brief: null, isolation: "worktree", model: null, readOnly: false, provider: null };
 interface Form {
   /** The role chosen ("": none, a blank brief). */
   roleId: string;
@@ -18,10 +19,12 @@ interface Form {
   /** The brief as the user rewrote it; null while it is still the role's, with the task in it. */
   brief: string | null;
   isolation: NewWorker["isolation"];
-  /** Null: Claude Code's default, which is also what "Default" in the list means. */
+  /** Null: the provider's default, which is also what "Default" in the list means. */
   model: string | null;
   /** With a role: its editing tools are switched off. */
   readOnly: boolean;
+  /** Null: the main agent's own provider, as the backend defaults. */
+  provider: string | null;
 }
 
 /** What a role fills the form with. */
@@ -51,6 +54,15 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
   /** Saving the form as a role: the name being typed. */
   const [saving, setSaving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // With more than one provider the worker can run on another one than its main agent: the provider comes first, and the
+  // models listed are that provider's. Its own (the main agent's) is what it runs on if nothing is chosen.
+  // (Not an endpoint the user set up: an agent running on one comes with mixed teams.)
+  const all = useProviders();
+  const agentProviders = providerChoicesForAgents(all.list);
+  const providers = { list: agentProviders, multi: agentProviders.length > 1 };
+  const own = providerIdOf(useChatState(main)?.provider);
+  const provider = form.provider ?? own;
+  const choices = modelChoicesFor(provider, providers.list.find((p) => p.id === provider)?.models ?? [], providerName(provider));
   const task = useRef<HTMLTextAreaElement>(null);
   const { box, button, id } = usePopover(open, () => !busy && setOpen(false), false);
   useEffect(() => {
@@ -79,7 +91,7 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
     setProblem(null);
     const named = form.name.trim() || (role ? agentName(role, form.task) : null);
     actions
-      .spawn(main, { task: brief.trim(), name: named, isolation: form.isolation, model: form.model, ...(role ? { role: { id: role.id, label: role.label, read_only: form.readOnly || shared } } : {}) })
+      .spawn(main, { task: brief.trim(), name: named, isolation: form.isolation, model: form.model, ...(provider !== own ? { provider } : {}), ...(role ? { role: { id: role.id, label: role.label, read_only: form.readOnly || shared } } : {}) })
       .then(
         () => {
           setOpen(false);
@@ -225,10 +237,23 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
               <p className="new-agent-hint">Read only gives it just the tools that read files, plus read-only git: it can look and report but not change files or run other commands.</p>
             </fieldset>
           )}
+          {providers.multi && (
+            <label>
+              Runs on
+              <select value={provider} onChange={(e) => set({ provider: e.target.value, model: null })}>
+                {providers.list.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {providerName(p.id)}
+                    {p.id === own ? " · the Lead's" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Model
             <select value={form.model ?? ""} onChange={(e) => set({ model: e.target.value || null })}>
-              {MODEL_CHOICES.map((m) => (
+              {choices.map((m) => (
                 <option key={m.value ?? "default"} value={m.value ?? ""}>
                   {m.label} · {m.hint}
                 </option>

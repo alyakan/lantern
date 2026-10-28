@@ -135,13 +135,39 @@ pub(crate) fn prompt_text(r: &Value) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+/// How many pictures a user record carries: its image blocks (a picture a tool read is inside a tool result, not one of these).
+fn image_blocks(r: &Value) -> u32 {
+    r["message"]["content"].as_array().map_or(0, |blocks| blocks.iter().filter(|b| b["type"] == "image").count() as u32)
+}
+
+/// What a replayed record says the user sent: the words (see prompt_text) and how many pictures went with them. A message of
+/// pictures alone has no words, and is a message all the same: without it the reply that follows would be taken for the
+/// answer to the one before.
+fn replayed_prompt(r: &Value) -> Option<(String, u32)> {
+    let images = image_blocks(r);
+    if let Some(text) = prompt_text(r) {
+        return Some((text, images));
+    }
+    let blocks = r["message"]["content"].as_array()?;
+    let alone = r["type"] == "user" && in_conversation(r) && images > 0 && blocks.iter().all(|b| b["type"] == "image" || (b["type"] == "text" && b["text"].as_str().is_some_and(|t| t.trim().is_empty())));
+    alone.then(|| (String::new(), images))
+}
+
 /// The notes Lantern puts in front of a message it sends (a revert's, a moved folder's): each is a block, then a blank line,
 /// then what the user typed. They aren't part of the prompt, so a replayed chat doesn't show them.
+/// The settings note (see args::settings_note) has blank lines of its own, so it runs to its end mark.
 fn without_lantern_note(text: &str) -> &str {
     let mut rest = text;
-    while rest.starts_with("[Lantern note:") {
-        match rest.split_once("\n\n") {
-            Some((_, after)) => rest = after,
+    loop {
+        let after = if rest.starts_with(crate::args::SETTINGS_NOTE_START) {
+            rest.split_once(crate::args::NOTE_END).map(|(_, after)| after.trim_start())
+        } else if rest.starts_with("[Lantern note:") {
+            rest.split_once("\n\n").map(|(_, after)| after)
+        } else {
+            None
+        };
+        match after {
+            Some(after) => rest = after,
             None => break,
         }
     }
@@ -459,7 +485,7 @@ pub fn started_in(path: &Path) -> Option<String> {
 }
 
 /// A transcript timestamp ("2026-09-28T18:40:24.309Z") as ms since the epoch.
-fn iso_ms(s: &str) -> Option<u64> {
+pub(crate) fn iso_ms(s: &str) -> Option<u64> {
     let (date, time) = s.strip_suffix('Z')?.split_once('T')?;
     let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
     let (y, m, day) = (d.next()??, d.next()??, d.next()??);
@@ -517,11 +543,18 @@ pub fn replay(path: &Path) -> Replay {
     let mut parser = StreamParser::default();
     let mut events = Vec::new();
     for r in records(path) {
+        // A Stop hook's feedback is written as meta, but it splits the answer from what Claude did for the hook.
+        if r["type"] == "user" && r["isMeta"] == true && r["isSidechain"] != true {
+            if let Some(text) = crate::hooks::stop_feedback(&r["message"]) {
+                events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None, images: 0 });
+                continue;
+            }
+        }
         if !in_conversation(&r) {
             continue;
         }
-        if let Some(text) = prompt_text(&r) {
-            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms) });
+        if let Some((text, images)) = replayed_prompt(&r) {
+            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None, images });
             continue;
         }
         let line = match r["type"].as_str() {
@@ -639,7 +672,7 @@ mod tests {
     fn turns(n: usize) -> Vec<UiEvent> {
         let mut events = vec![UiEvent::ContextUsed { tokens: 1 }];
         for i in 0..n {
-            events.push(UiEvent::UserText { text: format!("u{i}"), at: None });
+            events.push(UiEvent::UserText { text: format!("u{i}"), at: None, sent_by: None, images: 0 });
             events.push(UiEvent::AssistantText { parent: None, block_id: format!("a{i}"), text: format!("a{i}") });
         }
         events
@@ -913,7 +946,7 @@ mod tests {
         let r = replay(&path);
         let kinds: Vec<String> = r.events.iter().map(|e| serde_json::to_value(e).unwrap()["kind"].as_str().unwrap().to_string()).collect();
         assert_eq!(kinds, vec!["user_text", "assistant_text", "tool_started", "edit_applied", "tool_finished", "assistant_text", "user_text"]);
-        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None });
+        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None, sent_by: None, images: 0 });
         let blocks: Vec<&str> = r.events.iter().filter_map(|e| match e {
             UiEvent::AssistantText { block_id, .. } => Some(block_id.as_str()),
             _ => None,
@@ -966,6 +999,62 @@ mod tests {
         std::fs::write(&path, body).unwrap();
         let texts: Vec<String> = replay(&path).events.into_iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text) } else { None }).collect();
         assert_eq!(texts, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_message_with_pictures_replays_with_how_many_and_pictures_alone_are_still_a_message() {
+        let img = || json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
+        let user = |content: Value| rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "message": {"role": "user", "content": content}}));
+        let assistant = |id: &str, text: &str| rec(json!({"type": "assistant", "uuid": id, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}));
+        let body = [
+            user(json!([img(), img(), {"type": "text", "text": "what is this?"}])),
+            assistant("a1", "A cat."),
+            user(json!([img()])),
+            assistant("a2", "Another cat."),
+            user(json!("just words")),
+            assistant("a3", "Ok."),
+            // What a tool read is not the user's picture: it sits inside a tool result.
+            user(json!([{"type": "tool_result", "tool_use_id": "t1", "content": [img()]}])),
+            // Pictures in injected meta content aren't the user's either.
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": [img()]}})),
+        ]
+        .join("\n");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("s.jsonl");
+        std::fs::write(&path, body).unwrap();
+        let events = replay(&path).events;
+        let prompts: Vec<(String, u32)> = events.iter().filter_map(|e| if let UiEvent::UserText { text, images, .. } = e { Some((text.clone(), *images)) } else { None }).collect();
+        assert_eq!(prompts, vec![("what is this?".to_string(), 2), (String::new(), 1), ("just words".to_string(), 0)]);
+        // Each answer comes after the message it answers, so the turns count right.
+        let order: Vec<&str> = events.iter().filter_map(|e| match e { UiEvent::UserText { .. } => Some("user"), UiEvent::AssistantText { .. } => Some("assistant"), _ => None }).collect();
+        assert_eq!(order, vec!["user", "assistant", "user", "assistant", "user", "assistant"]);
+        assert_eq!(page(events, None, 2).hidden, 1);
+    }
+
+    #[test]
+    fn a_stop_hooks_feedback_replays_between_the_answer_and_what_claude_did_for_the_hook() {
+        let assistant = |id: &str, text: &str| rec(json!({"type": "assistant", "uuid": id, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}));
+        let body = [
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "message": {"role": "user", "content": "any more reports?"}})),
+            assistant("a1", "Yes, 44 users."),
+            // As claude 2.1.308 writes it.
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "sdk-cli", "isMeta": true, "timestamp": "2026-10-28T07:26:11.127Z", "message": {"role": "user", "content": "Stop hook feedback:\nBefore you finish: save it."}})),
+            assistant("a2", "I saved one note."),
+        ]
+        .join("\n");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("s.jsonl");
+        std::fs::write(&path, body).unwrap();
+        let order: Vec<String> = replay(&path)
+            .events
+            .into_iter()
+            .filter_map(|e| match e {
+                UiEvent::UserText { text, .. } => Some(crate::hooks::post_text(&text).map_or(format!("user: {text}"), |h| format!("hook: {h}"))),
+                UiEvent::AssistantText { text, .. } => Some(format!("assistant: {text}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["user: any more reports?", "assistant: Yes, 44 users.", "hook: Before you finish: save it.", "assistant: I saved one note."]);
     }
 
     #[test]
@@ -1030,6 +1119,10 @@ mod tests {
         assert_eq!(typed("[Lantern note: only a note]"), Some("[Lantern note: only a note]".into()));
         // The moved note and a revert note can both come first.
         assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
+        // A Workflow switch's note repeats the whole prompt, blank lines and all: the title is still what was typed.
+        let settings = crate::args::settings_note(crate::args::Mode::Steps, false, &crate::args::HelperConfig { exe: "/x".into(), socket: "/s".into(), role: crate::args::Role::Normal, providers: vec![], project_notes: None });
+        assert_eq!(typed(&format!("{settings}\n\nbuild the login page")), Some("build the login page".into()));
+        assert_eq!(typed(&format!("{settings}\n\n[Lantern note: since your last message.]\n\nwhy?")), Some("why?".into()));
     }
 
     /// A transcript whose first records name `cwd`, with a typed prompt when `prompt` is Some (else only a meta record).

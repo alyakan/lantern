@@ -4,6 +4,7 @@ import type { SessionSummary } from "../types";
 import { countChanges, relativeTo } from "./diff";
 import { stepLabel, stepTarget } from "./activity";
 import { usageLine } from "./cost";
+import { outsideHooks } from "./hookItems";
 
 /** What the History menu does to a past session, for the folder it lists. Null where there's no folder to act in. */
 export interface SessionActions {
@@ -47,7 +48,8 @@ export function sessionMarkdown(title: string, items: ChatItem[], folder: string
     if (list.length) out.push(...list, "");
     list = [];
   };
-  for (const it of items) {
+  // A post-hook and what Claude did for it aren't part of the conversation as it was had.
+  for (const it of outsideHooks(items)) {
     if (it.type === "tool") {
       list.push(`- ${stepLine(it, folder)}`);
     } else if (it.type === "shell") {

@@ -35,7 +35,7 @@ Lantern updates itself: when a new release is out, "Update ready" appears under 
 - [All the features, with screenshots](docs/FEATURES.md)
 - [Building from source](#build-from-source)
 - [Contributing](CONTRIBUTING.md)
-- [License](LICENSE): MIT. Lantern is an independent project and is not affiliated with or endorsed by Anthropic.
+- [License](LICENSE): MIT. The phone app in [`mobile/`](mobile/LICENSE) is source-available under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0): free to read, run, change and share for non-commercial use; commercial use needs permission. Lantern is an independent project and is not affiliated with or endorsed by Anthropic.
 
 ## Build from source
 

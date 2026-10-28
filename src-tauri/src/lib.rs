@@ -5,10 +5,12 @@ pub mod changes;
 pub mod checks;
 pub mod cli_locator;
 pub mod diagnostics;
+pub mod endpoints;
 pub mod files;
 pub mod git;
 pub mod history;
 pub mod history_search;
+pub mod hooks;
 pub mod mcp_config;
 pub mod menu;
 pub mod menu_bar;
@@ -32,6 +34,7 @@ pub mod slots;
 pub mod offstream;
 pub mod outside;
 pub mod relocate;
+pub mod remote;
 pub mod roles;
 pub mod storage;
 pub mod stream_parser;
@@ -46,6 +49,7 @@ pub mod workdir;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
+use endpoints::GatewayLaunch;
 use provider::{ProviderId, ProviderInfo};
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
@@ -63,6 +67,8 @@ pub struct AppState {
     renames: Arc<titles::TitleStore>,
     /// "Always allow" rules for folders, saved in app data and shared by every chat.
     folder_rules: Arc<permission::rules::FolderRules>,
+    /// The endpoints chats can run on besides Anthropic's (Settings → Endpoints), saved in app data (see endpoints.rs).
+    endpoints: Arc<endpoints::EndpointStore>,
     /// Where each folder was before it moved (see relocate): its sessions are read from there too.
     relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
@@ -83,6 +89,10 @@ pub struct AppState {
     setups: setup::SetupStore,
     /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
     restore_points: std::sync::atomic::AtomicBool,
+    /// The pre- and post-hooks the user wrote, workspace-wide and per project (the window sends them, see hooks.rs).
+    hooks: std::sync::Mutex<hooks::HookTable>,
+    /// Where every chat's events leave from, and what is kept of them for a client joining late (see remote/).
+    remote: remote::Remote,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -165,27 +175,124 @@ async fn login_path(state: &AppState) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || cell.get_or_init(cli_locator::login_shell_path).clone()).await.ok().flatten()
 }
 
-/// Sends a chat's events to the UI, and lets the orchestra see them too (a worker finishing a turn wakes its main agent).
+/// The bus and hub, with the window tapped in (it is sent every chat event as `ui-event`, see remote::for_window), and
+/// Remote control's settings and devices from app data, with the Mac's key in the Keychain.
+fn window_remote(app: &AppHandle) -> remote::Remote {
+    // LANTERN_REMOTE_FILE: a dev run keeps its Remote control settings, paired phones and Mac key apart from the real
+    // app's, so trying things out never touches them.
+    let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
+    let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
+    // What the Mac did about each push (see remote/push_log.rs); a dev run keeps none.
+    if dev_file.is_none() {
+        if let Ok(dir) = app.path().app_data_dir() {
+            remote::push_log::set_path(dir.join("push.log"));
+        }
+    }
+    let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
+    let remote = remote::Remote::new(store, Box::new(remote::keys::Keychain { service }));
+    // The push key for the lock-screen cards is kept there too, as an item of its own.
+    remote.live.use_store(Arc::new(remote::live_activity::LiveKeychain { service }));
+    // Read once, off this thread, so that Settings (which asks for the key's id on every refresh) never goes to the Keychain.
+    let live = remote.live.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = live.signer();
+    });
+    let app = app.clone();
+    remote.tap_window(move |ev| {
+        let _ = app.emit("ui-event", &ev);
+    });
+    remote
+}
+
+/// Sends an event of chat `slot` out through the bus: to the window, the hub and any paired phone.
+fn publish(app: &AppHandle, slot: &str, event: ui_event::UiEvent) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.publish(slot, event);
+    }
+}
+
+/// Sends a chat's events out (see `publish`), and lets the orchestra see them too (a worker finishing a turn wakes its
+/// main agent).
 fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'static {
     let app = app.clone();
     move |ev| {
-        let _ = app.emit("ui-event", &ev);
-        if let Some(state) = app.try_state::<AppState>() {
-            // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
-            if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
-                if let Ok(slot) = state.slots.get(&ev.slot) {
-                    slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-            // The turn is over (or its claude is gone): files stop changing, so they can be restored.
-            if matches!(ev.event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
-                if let Ok(slot) = state.slots.get(&ev.slot) {
-                    slot.checkpoints.turn_ended();
-                }
-            }
-            state.orchestra.observe(&ev.slot, &ev.event);
+        let Some(state) = app.try_state::<AppState>() else {
+            publish(&app, &ev.slot, ev.event);
+            return;
+        };
+        // A turn that a post-hook follows is not over yet: its end is held back (see hooks.rs).
+        if let Some(event) = hooks_at(&app, &state, &ev.slot, ev.event) {
+            sent_out(&app, &state, &ev.slot, event);
         }
     }
+}
+
+/// Tells everyone of an event of chat `slot`, and what it means for the chat.
+fn sent_out(app: &AppHandle, state: &AppState, slot: &str, event: ui_event::UiEvent) {
+    publish(app, slot, event.clone());
+    // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
+    if matches!(event, ui_event::UiEvent::SessionEnded { .. }) {
+        if let Ok(s) = state.slots.get(slot) {
+            s.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    // The turn is over (or its claude is gone): files stop changing, so they can be restored.
+    if matches!(event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
+        if let Ok(s) = state.slots.get(slot) {
+            s.checkpoints.turn_ended();
+        }
+    }
+    state.orchestra.observe(slot, &event);
+}
+
+/// What the chat's hooks do with an event (see hooks.rs): a new conversation (a compaction, `/clear`) makes the next message
+/// carry the pre-hook again, and the end of a turn that the post-hook follows is held back, the hook sent in its place. What
+/// is left to tell everyone of is returned.
+fn hooks_at(app: &AppHandle, state: &AppState, slot: &str, event: ui_event::UiEvent) -> Option<ui_event::UiEvent> {
+    let Ok(s) = state.slots.get(slot) else { return Some(event) };
+    let (app, slot) = (app.clone(), slot.to_string());
+    route_hooks(&s, event, move |told| match told {
+        // The end of the turn that was held, which couldn't be followed: it ends as any other does.
+        ui_event::UiEvent::TurnDone { .. } => sent_out(&app, &app.state::<AppState>(), &slot, told),
+        _ => publish(&app, &slot, told),
+    })
+}
+
+/// `hooks_at`, for a chat's slot: `tell` is given what is to be told of later, off this thread (the post-hook's message
+/// once it is sent, and the end of the turn it was to follow if it can't be). What is to be told of now is returned.
+fn route_hooks(s: &Arc<Slot>, event: ui_event::UiEvent, tell: impl Fn(ui_event::UiEvent) + Send + Sync + 'static) -> Option<ui_event::UiEvent> {
+    use ui_event::UiEvent;
+    match event {
+        UiEvent::Compacted | UiEvent::ConversationReset => s.hooks.arm_pre(),
+        UiEvent::SessionEnded { .. } => s.hooks.session_ended(),
+        UiEvent::TurnDone { .. } => {
+            return match s.hooks.turn_ended(event) {
+                hooks::TurnEnd::Publish(end) => Some(*end),
+                hooks::TurnEnd::SendPost(message) => {
+                    let s = s.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let sent = match s.session.lock().await.as_mut() {
+                            Some(claude) => claude.send(&message).await,
+                            None => Err("No Claude session is running".into()),
+                        };
+                        match sent {
+                            // The window shows the hook where it was sent (as a message of Lantern's own, see sent_by).
+                            Ok(()) => tell(UiEvent::UserText { text: message, at: now_ms(), sent_by: Some("lantern".into()), images: 0 }),
+                            // Not sent: the user's turn ends now, as it would have without a post-hook.
+                            Err(_) => {
+                                if let Some(held) = s.hooks.post_failed() {
+                                    tell(held);
+                                }
+                            }
+                        }
+                    });
+                    None
+                }
+            };
+        }
+        _ => {}
+    }
+    Some(event)
 }
 
 /// What a provider can do (see Capabilities).
@@ -215,11 +322,30 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
     main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
-/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
-/// lowered them.
+/// Whether a restart into `cfg` changes what Claude was told about its Permissions or Workflow (`before`: the mode,
+/// whether it was on Auto, and the role it ran with; None: it never ran). Only Claude's prompt says them.
+fn settings_changed(before: Option<(Mode, bool, Role)>, cfg: &SessionConfig) -> bool {
+    let after = (cfg.mode, args::is_auto(cfg.mode, cfg.auto_approve), cfg.helper.role.clone());
+    cfg.provider == ProviderId::Claude && before.is_some_and(|b| b != after)
+}
+
+/// Whether a message can carry the settings note: not a slash command, which claude reads as one only at the very start
+/// of the message (`/clear` after a switch must still clear). The note waits for the next message instead.
+fn carries_settings_note(text: &str) -> bool {
+    !text.trim_start().starts_with('/')
+}
+
+/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker), and never Auto on a
+/// provider that has no auto mode, worker or not: Claude Code's auto mode on an endpoint's model would have that model approve
+/// its own commands, and a phone's Permissions switch (or an older window) asks for it as easily as any. True when that lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
-    let Some(ceiling) = ceiling else { return false };
-    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
+    let caps = capabilities_of(cfg.provider);
+    let (mode, auto) = match ceiling {
+        Some(ceiling) => args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &caps),
+        // No worker's ceiling: only a provider with no auto mode is held back, and Step by step stays Step by step, without its auto-approve.
+        None if !caps.supports_auto_mode => (if cfg.mode == Mode::Auto { Mode::Ask } else { cfg.mode }, false),
+        None => (cfg.mode, cfg.auto_approve),
+    };
     let lowered = (mode, auto) != (cfg.mode, cfg.auto_approve);
     cfg.mode = mode;
     cfg.auto_approve = auto;
@@ -233,7 +359,7 @@ fn worker_ceiling(state: &AppState, slot: &str) -> Option<Mode> {
 
 /// Tells the window a worker runs on Ask: its mode was lowered under it.
 fn told_ask(app: &AppHandle, slot: &str) {
-    let _ = app.emit("ui-event", SlotEvent { slot: slot.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+    publish(app, slot, ui_event::UiEvent::AgentMode { mode: "ask".into() });
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -253,9 +379,264 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
+    // Its claude restarts on Ask: it hears so with its next message, as a chat whose user switched does.
+    let note = args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper);
+    let claude = cfg.provider == ProviderId::Claude;
     if launch(app, worker, &s, cfg, false).await.is_ok() {
+        if claude {
+            *s.settings_note.lock().unwrap() = Some(note);
+        }
         told_ask(app, worker);
     }
+}
+
+/// The app, as the remote gateway needs it (see remote::gateway::Host): what a paired phone may ask, done the way the
+/// window's own commands do it.
+struct RemoteHost {
+    app: AppHandle,
+    mac_name: String,
+}
+
+/// The longest diff a phone is sent.
+const PHONE_DIFF_MAX: usize = 512 << 10;
+
+/// How many commands a chat may be running before a phone's is refused.
+const PHONE_SHELLS_MAX: usize = 4;
+/// How much of one phone-started command's output is kept and sent, in bytes; the rest is cut (see shell::capped).
+const PHONE_SHELL_OUTPUT_MAX: usize = 512 << 10;
+
+impl remote::gateway::Host for RemoteHost {
+    fn send(&self, slot: String, text: String, by: String, images: Vec<remote::protocol::RemoteImage>) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            send_user_message(&app, &state, &slot, &text, &by, &images, true).await.map(|_| ())
+        })
+    }
+
+    fn interrupt(&self, slot: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            stop_turn(&app, &slot).await;
+            Ok(())
+        })
+    }
+
+    fn pending(&self, slot: &str) -> Vec<permission::bridge::Pending> {
+        self.app.state::<AppState>().slots.get(slot).map(|s| s.bridge.pending()).unwrap_or_default()
+    }
+
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+        answer_prompt(&self.app.state::<AppState>(), slot, request_id, allow, message, updated_input, by)
+    }
+
+    fn wake(&self, slot: &str) -> Result<(), String> {
+        request_wake(&self.app, &self.app.state::<AppState>(), slot)
+    }
+
+    fn close(&self, slot: &str) -> Result<(), String> {
+        self.app.emit("remote-close-chat", remote::CloseRequest { slot: slot.to_string() }).map_err(|e| e.to_string())
+    }
+
+    fn shell_run(&self, slot: String, id: String, command: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let s = state.slots.get(&slot)?;
+            let folder = s.folder()?;
+            // Phones may not fill the Mac with commands: a chat runs a few at once, whoever started them.
+            if s.shells.running_count() >= PHONE_SHELLS_MAX {
+                return Err("This chat is running several commands already. Stop one first.".into());
+            }
+            // Before anything is said about it: refusing a running command's id after announcing it would end that command's card.
+            if s.shells.is_running(&id) {
+                return Err("A command with that id is running already.".into());
+            }
+            let path_env = login_path(&state).await;
+            let sink = slots::tagged(&slot, emitter(&app));
+            // The chat's window adds the block the output lands in before any of it arrives (it didn't start this one itself).
+            sink(ui_event::UiEvent::ShellStarted { id: id.clone(), command: command.clone() });
+            // Its output is cut off after a while: a command that never stops printing can't flood the phone (or the window).
+            if let Err(e) = s.shells.run(&id, &command, &folder, path_env.as_deref(), shell::capped(sink.clone(), PHONE_SHELL_OUTPUT_MAX)) {
+                sink(ui_event::UiEvent::ShellOutput { id: id.clone(), text: format!("{e}\n") });
+                sink(ui_event::UiEvent::ShellDone { id, code: Some(1), stopped: false });
+                return Err(e);
+            }
+            Ok(())
+        })
+    }
+
+    fn shell_input(&self, slot: String, id: String, text: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let shells = app.state::<AppState>().slots.get(&slot)?.shells.clone();
+            // Enter is added here: what comes from a phone is a line, never a key.
+            tauri::async_runtime::spawn_blocking(move || shells.input(&id, &format!("{text}\r"))).await.map_err(|e| e.to_string())?
+        })
+    }
+
+    fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
+        self.app.state::<AppState>().slots.get(slot)?.shells.stop(id);
+        Ok(())
+    }
+
+    fn projects(&self) -> remote::gateway::BoxFut<Vec<(String, String)>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            // The folders used in Claude lately, and those with a chat open: nothing else is a project to a phone.
+            let open: Vec<String> = app.state::<AppState>().remote.hub.chats().into_iter().filter_map(|c| c.folder).collect();
+            let recent = match projects_root() {
+                Ok(root) => tauri::async_runtime::spawn_blocking(move || history::recent_folders(&root, 8)).await.unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
+            remote::known_projects(&recent.into_iter().map(|r| r.path).collect::<Vec<_>>(), &open)
+        })
+    }
+
+    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
+    }
+
+    fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
+        self.app.emit("remote-set-workflow", remote::SetWorkflowRequest { slot: slot.to_string(), workflow: workflow.as_str() }).map_err(|e| e.to_string())
+    }
+
+    fn set_permissions(&self, slot: &str, permissions: remote::protocol::RemotePermissions) -> Result<(), String> {
+        self.app.emit("remote-set-permissions", remote::SetPermissionsRequest { slot: slot.to_string(), permissions: permissions.as_str() }).map_err(|e| e.to_string())
+    }
+
+    fn set_preset(&self, slot: &str, preset: &str) -> Result<(), String> {
+        self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
+    }
+
+    fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let claude = state.remote.claude_path().ok_or("Lantern doesn't know where Claude is yet. Open a chat in Lantern first.")?;
+            let path_env = login_path(&state).await;
+            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), &prompt).await
+        })
+    }
+
+    fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let s = app.state::<AppState>().slots.get(&slot)?;
+            // Only a file the chat changed: the tracker knows no other.
+            let d = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None)?;
+            let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(&path, &path).to_string();
+            Ok(if text.len() > PHONE_DIFF_MAX { format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)]) } else { text })
+        })
+    }
+
+    fn history(&self, slot: String, before: Option<usize>) -> remote::gateway::BoxFut<Result<history::Page, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let chat = state.remote.hub.chat(&slot).ok_or("That chat isn't open.")?;
+            let none = history::Page { events: vec![], hidden: 0 };
+            let (Some(folder), Some(session_id)) = (chat.folder, chat.session_id) else { return Ok(none) };
+            if !history::valid_id(&session_id) {
+                return Ok(none);
+            }
+            let (root, aliases) = (projects_root()?, aliases_for(&state, &folder));
+            tauri::async_runtime::spawn_blocking(move || {
+                let path = history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id)?;
+                Ok(history::page(history::replay(&path).events, before, history::PAGE_TURNS))
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        })
+    }
+
+    fn storage(&self) -> Result<remote::protocol::RemoteStorage, String> {
+        Ok(self.app.state::<AppState>().storage.phone_view().into())
+    }
+
+    fn storage_scan(&self) -> remote::gateway::BoxFut<Result<bool, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let path_env = login_path(&state).await;
+            Ok(state.storage.start_scan(path_env))
+        })
+    }
+
+    fn storage_clear(&self, ids: Vec<String>) -> remote::gateway::BoxFut<Result<(usize, u64), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let path_env = login_path(&state).await;
+            state.storage.phone_clear(&ids, path_env)
+        })
+    }
+
+    fn mac_name(&self) -> String {
+        self.mac_name.clone()
+    }
+
+    fn app_version(&self) -> String {
+        self.app.package_info().version.to_string()
+    }
+
+    fn hosts(&self) -> Vec<String> {
+        remote::local_addresses()
+    }
+}
+
+/// Stops what chat `slot`'s claude is doing (Stop in the window, or a phone's): the prompts it was waiting on can't be
+/// answered any more, and every client is told so.
+async fn stop_turn(app: &AppHandle, slot: &str) {
+    let state = app.state::<AppState>();
+    let Ok(s) = state.slots.get(slot) else { return };
+    if let Some(x) = s.session.lock().await.as_mut() {
+        x.interrupt().await;
+    }
+    for request_id in s.bridge.cancel_all() {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
+    }
+}
+
+/// Turns Remote control's listener on: the gateway, the Wi-Fi transport and Bonjour. Nothing if it is already on.
+async fn start_remote(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _one_at_a_time = state.remote.lifecycle.lock().await;
+    if state.remote.is_running() {
+        return Ok(());
+    }
+    let handle = app.clone();
+    let (mac, name) = tauri::async_runtime::spawn_blocking(move || (handle.state::<AppState>().remote.mac_key(), mac_name())).await.map_err(|e| e.to_string())?;
+    let mac = mac?;
+    let host = Arc::new(RemoteHost { app: app.clone(), mac_name: name.clone() });
+    let r = &state.remote;
+    let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone(), r.epoch);
+    let notify = app.clone();
+    gateway.on_change(Arc::new(move || {
+        // A phone came or went: also the moment to start the keep-awake hold again if its `caffeinate` was killed.
+        notify.state::<AppState>().remote.sync_awake();
+        let _ = notify.emit("remote-changed", ());
+    }));
+    let door = gateway.clone();
+    let (listener, port) = remote::transport::serve_lan(remote::port(), move |link| door.accept(link)).await?;
+    let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
+    let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
+    // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
+    let watching = gateway.clone();
+    let apns = Arc::new(remote::live_activity::ApnsHttp::new(r.live.clone())?);
+    let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), apns.clone(), Arc::new(move |slot| watching.watched(slot)));
+    let opened = notifier.clone();
+    gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
+    // The lock-screen cards of phones that registered one, kept right with pushes straight to Apple (see remote/live_activity.rs).
+    let cards = remote::live_activity::LiveActivities::new(r.store.clone(), r.hub.clone(), apns);
+    let (notifier_bus, cards_bus) = (r.bus.clone(), r.bus.clone());
+    // One task for both, so stopping Remote control stops both.
+    let task = tokio::spawn(async move {
+        tokio::join!(notifier.run(notifier_bus), cards.run(cards_bus));
+    });
+    state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task) });
+    Ok(())
 }
 
 /// The app, as the orchestra needs it (see orchestra::Host).
@@ -265,7 +646,7 @@ struct AppHost {
 
 impl orchestra::Host for AppHost {
     fn emit(&self, slot: &str, event: ui_event::UiEvent) {
-        let _ = self.app.emit("ui-event", SlotEvent { slot: slot.to_string(), event });
+        publish(&self.app, slot, event);
     }
 
     fn main_folder(&self, main: &str) -> Result<std::path::PathBuf, String> {
@@ -340,14 +721,14 @@ impl orchestra::Host for AppHost {
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
             // checked again now that it runs, so a restart that missed it can't leave it freer than its main agent.
             lower_worker(&self.app, &state, &req.slot, main_ceiling(&state, &parent_slot)).await;
-            send_text(&self.app, &req.slot, &s, &req.brief).await.map(|_| ())
+            send_text(&self.app, &req.slot, &s, &req.brief, Vec::new()).await.map(|_| ())
         })
     }
 
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
         Box::pin(async move {
             let s = self.app.state::<AppState>().slots.get(slot)?;
-            send_text(&self.app, slot, &s, &text).await.map(|_| ())
+            send_text(&self.app, slot, &s, &text, Vec::new()).await.map(|_| ())
         })
     }
 
@@ -407,6 +788,21 @@ impl orchestra::Host for AppHost {
     fn transcript(&self, folder: &std::path::Path, session_id: &str) -> Result<Vec<ui_event::UiEvent>, String> {
         let path = history::transcript_path(&projects_root()?, folder, session_id)?;
         Ok(history::replay(&path).events)
+    }
+
+    fn live_transcript<'a>(&'a self, worker: &'a str) -> Option<orchestra::Fut<'a, Result<Vec<ui_event::UiEvent>, String>>> {
+        let s = self.app.state::<AppState>().slots.get(worker).ok()?;
+        let provider = s.config.lock().unwrap().as_ref().map(|c| c.provider)?;
+        if provider != ProviderId::Codex {
+            return None;
+        }
+        Some(Box::pin(async move {
+            let mut session = s.session.lock().await;
+            match session.as_mut() {
+                Some(x) if x.is_running() => x.transcript().await,
+                _ => Err("This Codex worker isn't running, and its conversation is read from its running Codex: start it again (message_agent or the user) to read it.".into()),
+            }
+        }))
     }
 }
 
@@ -660,6 +1056,11 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
         slot.bridge.cancel_all();
         old.stop().await;
+        // A turn held back for a post-hook that was going to follow it is over now (the claude doing it is gone), and so is
+        // a post-hook waiting for a turn that won't end: the new claude starts with neither.
+        if let (Some(held), Some(state)) = (slot.hooks.post_failed(), app.try_state::<AppState>()) {
+            sent_out(app, &state, id, held);
+        }
     }
     slot.bridge.set_folder(&cfg.folder);
     // Set (or cleared) at every start of this chat's claude, so a slot that is reused never keeps the last one's scope.
@@ -681,6 +1082,11 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
     slot.claude_pid.store(started.pid(), std::sync::atomic::Ordering::SeqCst);
     started.initialize().await;
     *session = Some(started);
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.hub.opened(id, &cfg.folder.display().to_string());
+        // A chat on another provider than Claude's isn't part of what the phone's suggestions tell Claude about.
+        state.remote.hub.set_off_claude(id, cfg.provider != ProviderId::Claude);
+    }
     *slot.config.lock().unwrap() = Some(cfg);
     Ok(())
 }
@@ -691,6 +1097,9 @@ struct Settings {
     /// Which agent CLI runs the chat. Chats saved before there was a choice don't say, and are Claude's.
     #[serde(default)]
     provider: ProviderId,
+    /// For a gateway chat: the endpoint it runs on (its id, see endpoints.rs).
+    #[serde(default)]
+    endpoint: Option<String>,
     mode: Mode,
     model: Option<String>,
     effort: Option<String>,
@@ -741,12 +1150,56 @@ fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+/// The endpoint a gateway chat runs on and its model: `model` if the window named one, else the endpoint's first. An
+/// endpoint that is gone, or a model it has none of, is an error: such a chat never falls back to Anthropic's.
+fn pick_endpoint(endpoint: Option<endpoints::Endpoint>, model: Option<String>) -> Result<(endpoints::Endpoint, String), String> {
+    let endpoint = endpoint.ok_or("This chat runs on an endpoint that isn't set up any more, so it won't start on Claude instead. Add it back in Settings → Endpoints.")?;
+    let model = match model.or_else(|| endpoint.models.first().cloned()) {
+        Some(m) if endpoints::valid_endpoint_model(&m) => m,
+        Some(m) => return Err(format!("{m:?} is not a model id.")),
+        None => return Err(format!("{} has no models yet: add one in Settings → Endpoints.", endpoint.name)),
+    };
+    Ok((endpoint, model))
+}
+
+/// What a chat on endpoint `id` starts with, and the model it runs: `model` if the window named one, else the endpoint's
+/// first. Never a way to start on Anthropic instead: an endpoint that is gone, a model it has none of, a key that isn't set
+/// in the login shell, or a settings file with a credential of its own that would be sent in the key's place, each is an
+/// error in words.
+async fn gateway_for(state: &AppState, id: Option<&str>, model: Option<String>, folder: &std::path::Path) -> Result<(GatewayLaunch, String), String> {
+    let (endpoint, model) = pick_endpoint(id.and_then(|id| state.endpoints.get(id)), model)?;
+    let (home, project) = (std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(), folder.to_path_buf());
+    if let Some(why) = endpoints::settings_conflict(&home, &project) {
+        return Err(why);
+    }
+    let key = match &endpoint.key_env {
+        None => None,
+        Some(name) => {
+            let var = name.clone();
+            let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&var)).await.ok().flatten();
+            Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} needs {name}, which isn't set in your login shell. Set it in ~/.zshrc or ~/.zprofile, then start the chat again.", endpoint.name))?))
+        }
+    };
+    Ok((GatewayLaunch { id: endpoint.id, url: endpoint.url, key }, model))
+}
+
 /// A chat's config from what the window sent. A worker's mode is no freer than its main agent allows now, whatever the
 /// window asked for (see `cap_mode`).
 async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: String, settings: Settings, resume: Option<String>) -> Result<SessionConfig, String> {
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} no longer exists."));
     }
+    if settings.orchestrator {
+        lead_provider(settings.provider)?;
+    }
+    // A gateway chat's model is one of its endpoint's, and it has none of Claude's harness (no effort, advisor or subagent model).
+    let gateway = settings.provider == ProviderId::Gateway;
+    let (endpoint, model) = if gateway {
+        let (launch, model) = gateway_for(state, settings.endpoint.as_deref(), settings.model.clone(), std::path::Path::new(&folder)).await?;
+        (Some(launch), Some(model))
+    } else {
+        (None, checked_model(settings.model.clone())?)
+    };
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
     // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
     let notes = match &settings.worker {
@@ -760,10 +1213,10 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         mode: settings.mode,
         auto_approve: settings.auto_approve,
         resume,
-        model: checked_model(settings.model)?,
-        effort: checked_effort(settings.effort)?,
-        advisor: checked_model(settings.advisor)?,
-        subagent_model: checked_model(settings.subagent_model)?,
+        model,
+        effort: if gateway { None } else { checked_effort(settings.effort)? },
+        advisor: if gateway { None } else { checked_model(settings.advisor)? },
+        subagent_model: if gateway { None } else { checked_model(settings.subagent_model)? },
         helper: helper_config(
             slot,
             match (settings.orchestrator, settings.worker) {
@@ -774,6 +1227,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             notes,
         )?,
         path_env: login_path(state).await,
+        endpoint,
     };
     cap_mode(&mut cfg, ceiling);
     Ok(cfg)
@@ -828,6 +1282,94 @@ async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result
     .map_err(|e| e.to_string())?
 }
 
+/// An agent CLI the window can offer for a chat: what it can do, the models it takes, and where its program is (always None
+/// for Claude Code, which the window has already found; another provider is listed only when its program is).
+#[derive(serde::Serialize)]
+struct ProviderListing {
+    #[serde(flatten)]
+    info: ProviderInfo,
+    models: Vec<String>,
+    binary: Option<String>,
+    /// For a gateway: the endpoint this is (each one the user set up is its own choice); None for every CLI.
+    endpoint: Option<EndpointRef>,
+}
+
+#[derive(serde::Serialize)]
+struct EndpointRef {
+    id: String,
+    name: String,
+}
+
+/// Every provider the window may start a chat on: Claude Code, then each other whose CLI is installed, then each endpoint the
+/// user has set up (run by Claude Code, which the window has found: they have no program of their own to point at).
+#[tauri::command]
+async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderListing>, String> {
+    let endpoints = state.endpoints.list();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut all: Vec<ProviderListing> = ProviderId::all()
+            .into_iter()
+            .filter_map(|id| {
+                let models = id.provider().models().iter().map(|m| m.to_string()).collect();
+                // Claude Code is the one the window found already (where the user may have pointed it): not looked for again.
+                if id == ProviderId::Claude {
+                    return Some(ProviderListing { info: id.info(), models, binary: None, endpoint: None });
+                }
+                let binary = id.provider().locate(None).ok().map(|p| p.display().to_string());
+                binary.is_some().then(|| ProviderListing { info: id.info(), models, binary, endpoint: None })
+            })
+            .collect();
+        all.extend(endpoints.into_iter().map(|e| ProviderListing { info: ProviderId::Gateway.info(), models: e.models, binary: None, endpoint: Some(EndpointRef { id: e.id, name: e.name }) }));
+        all
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// An endpoint as Settings shows it: what was saved, and whether its key variable is set in the login shell (None: it has none).
+#[derive(serde::Serialize)]
+struct EndpointStatus {
+    #[serde(flatten)]
+    endpoint: endpoints::Endpoint,
+    key_set: Option<bool>,
+}
+
+#[tauri::command]
+async fn list_endpoints(state: State<'_, AppState>) -> Result<Vec<EndpointStatus>, String> {
+    let endpoints = state.endpoints.list();
+    tauri::async_runtime::spawn_blocking(move || {
+        endpoints
+            .into_iter()
+            .map(|endpoint| {
+                let key_set = endpoint.key_env.as_deref().map(|name| cli_locator::login_shell_var(name).is_some());
+                EndpointStatus { endpoint, key_set }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Saves the whole list (see EndpointStore::replace): an error is in words for the form.
+#[tauri::command]
+async fn save_endpoints(state: State<'_, AppState>, endpoints: Vec<endpoints::Endpoint>) -> Result<Vec<endpoints::Endpoint>, String> {
+    state.endpoints.replace(endpoints)
+}
+
+/// Asks an endpoint what models it serves, for the Fetch button: with its key if it names one that is set.
+#[tauri::command]
+async fn fetch_endpoint_models(url: String, key_env: Option<String>) -> Result<Vec<String>, String> {
+    // The same checks as saving it: only an http or https URL, and a key only over https or a local network.
+    let probe = endpoints::clean(endpoints::Endpoint { id: String::new(), name: "probe".into(), url, key_env, models: vec![] })?;
+    let key = match probe.key_env.clone() {
+        None => None,
+        Some(name) => {
+            let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&name)).await.ok().flatten();
+            Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} isn't set in your login shell.", probe.key_env.as_deref().unwrap_or("The key")))?))
+        }
+    };
+    endpoints::fetch_models(&probe.url, key.as_ref()).await
+}
+
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
@@ -837,6 +1379,8 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
     let provider = cfg.provider.info();
     let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
+    // A new conversation: its first message carries the pre-hook (see hooks.rs).
+    s.hooks.arm_pre();
     if lowered {
         told_ask(&app, &slot);
     }
@@ -847,6 +1391,16 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
 /// Stopping being a Lead is refused while it has agents, which would be left with nobody to report to.
+/// A team's Lead starts agents with Lantern's tools and the team is built on it, so for now it runs on Claude Code; the window
+/// never asks for another, and this keeps anything else from.
+fn lead_provider(provider: ProviderId) -> Result<(), String> {
+    if capabilities_of(provider).can_lead_team {
+        Ok(())
+    } else {
+        Err("A team's Lead runs on Claude Code: this chat's agent can't lead a team yet.".into())
+    }
+}
+
 fn role_after(role: &Role, team: Option<bool>, agents: usize) -> Result<Role, String> {
     match (role, team) {
         (Role::Worker { .. }, _) | (_, None) => Ok(role.clone()),
@@ -866,6 +1420,9 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
     let role = role_after(&cfg.helper.role, team, state.orchestra.workers_of(&slot).len())?;
+    if matches!(role, Role::Main) {
+        lead_provider(cfg.provider)?;
+    }
     cfg.mode = mode;
     cfg.effort = checked_effort(effort)?;
     if let Some(auto) = auto_approve {
@@ -877,7 +1434,13 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
+    // What it ran with before, to tell Claude when that changed (see args::settings_note).
+    let before = s.config.lock().unwrap().as_ref().map(|c| (c.mode, args::is_auto(c.mode, c.auto_approve), c.helper.role.clone()));
+    let note = settings_changed(before, &cfg).then(|| args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper));
     launch(&app, &slot, &s, cfg, false).await?;
+    if note.is_some() {
+        *s.settings_note.lock().unwrap() = note;
+    }
     // Registered as the Lead (or taken out of the team registry) once it runs as one; a worker's role never changes here.
     if team.is_some() && !matches!(role, Role::Worker { .. }) {
         enroll(&state, &slot, &s, &role);
@@ -901,6 +1464,9 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     let s = state.slots.get(&slot)?;
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+    if cfg.provider == ProviderId::Gateway {
+        return Err("A chat on an endpoint has no harness presets: it runs on the model it was started with.".into());
+    }
     cfg.model = checked_model(model)?;
     cfg.effort = checked_effort(effort)?;
     cfg.advisor = checked_model(advisor)?;
@@ -921,6 +1487,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
     state.orchestra.forget(&slot);
     state.asides.stop_slot(&slot).await;
+    state.remote.hub.closed(&slot);
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
@@ -978,8 +1545,18 @@ fn checked_model(model: Option<String>) -> Result<Option<String>, String> {
 /// Switches the chat's model in-band from its next turn on, and remembers it for restarts. None = Claude Code's default.
 #[tauri::command]
 async fn set_model(state: State<'_, AppState>, slot: String, model: Option<String>) -> Result<(), String> {
-    let model = checked_model(model)?;
-    let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
+    let Ok(s) = state.slots.get(&slot) else { return checked_model(model).map(|_| ()) };
+    // A chat on an endpoint is switched among that endpoint's models by its own ids, and never to "Claude Code's default": that
+    // is a Claude model the endpoint doesn't have.
+    let on_endpoint = s.config.lock().unwrap().as_ref().is_some_and(|c| c.provider == ProviderId::Gateway);
+    let model = if on_endpoint {
+        match model {
+            Some(m) if endpoints::valid_endpoint_model(&m) => Some(m),
+            _ => return Err("A chat on an endpoint always has one of its models.".into()),
+        }
+    } else {
+        checked_model(model)?
+    };
     let mut live = true;
     if let Some(cfg) = s.config.lock().unwrap().as_mut() {
         cfg.model = model.clone();
@@ -995,14 +1572,66 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
-async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
-    let s = state.slots.get(&slot)?;
+/// `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it.
+async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String, auto: Option<bool>) -> Result<usize, String> {
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &[], auto != Some(true)).await
+}
+
+/// Sends what the user typed (in the window, or on a paired phone: `sent_by`, with the `images` it attached) to chat `slot`.
+/// Every client is told of it first, so it comes before Claude's answer; the window, which shows its own messages already,
+/// isn't. The pictures go to Claude and nowhere else: clients are told only how many there were. `hooks`: the user's hooks
+/// apply to it (not to what Lantern sends in their place).
+async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage], hooks: bool) -> Result<usize, String> {
+    let s = state.slots.get(slot)?;
     // An agent that was put to sleep to save memory wakes for the user's message too.
-    state.orchestra.wake_agent(&slot).await?;
-    let turn = send_text(&app, &slot, &s, &text).await?;
+    state.orchestra.wake_agent(slot).await?;
+    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at: now_ms(), sent_by: Some(sent_by.to_string()), images: images.len() as u32 });
+    // Claude's own form of a picture in a message: a block that holds its bytes.
+    let blocks: Vec<serde_json::Value> = images.iter().map(|i| serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data}})).collect();
+    // The user's hooks (see hooks.rs): the pre-hook goes in front of what Claude is sent, not of what the chat shows, and the
+    // post-hook follows the turn. A team's agents have none: they work for their Lead.
+    let own = if hooks { hooks_of(state, slot, &s) } else { hooks::Resolved::default() };
+    let sent = if hooks { s.hooks.carry_pre(text, own.pre.as_deref()) } else { text.to_string() };
+    if hooks {
+        // Its reply is a page in Step by step, which the hook's reply would be read as: no post-hook there. A slash command
+        // (/clear, /compact) isn't followed by one either.
+        let steps = s.config.lock().unwrap().as_ref().is_some_and(|c| c.mode == Mode::Steps);
+        s.hooks.follow_with(own.post.filter(|_| !steps && hooks::carries_note(text)));
+    }
+    let turn = match send_text(app, slot, &s, &sent, blocks).await {
+        Ok(turn) => turn,
+        Err(e) => {
+            if sent != text {
+                s.hooks.arm_pre();
+            }
+            if hooks {
+                s.hooks.forget_post();
+            }
+            return Err(e);
+        }
+    };
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
-    state.orchestra.note_user_message(&slot, &text);
+    state.orchestra.note_user_message(slot, text);
     Ok(turn)
+}
+
+fn now_ms() -> Option<u64> {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
+}
+
+/// The hooks that apply to chat `slot`: those of its project. A team's agents have none (they work for their Lead).
+fn hooks_of(state: &AppState, slot: &str, s: &Slot) -> hooks::Resolved {
+    if state.orchestra.parent_of(slot).is_some() {
+        return hooks::Resolved::default();
+    }
+    s.folder().map(|f| state.hooks.lock().unwrap().resolve(&f.to_string_lossy())).unwrap_or_default()
+}
+
+/// The user's pre- and post-hooks, as they stand in Settings and in each project (the window sends them at launch and on
+/// every change; see hooks.rs).
+#[tauri::command]
+fn set_chat_hooks(state: State<'_, AppState>, table: hooks::HookTable) {
+    *state.hooks.lock().unwrap() = table;
 }
 
 /// Runs `f` (blocking) with the chat's restore points and the git checkout of its folder: an error says why there is none
@@ -1028,8 +1657,9 @@ where
     .map_err(|e| e.to_string())?
 }
 
-/// Sends `text` into the chat's claude as a new message and returns the turn's number.
-async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Result<usize, String> {
+/// Sends `text` (and the `images`, as Claude's own image blocks) into the chat's claude as a new message and returns the
+/// turn's number.
+async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images: Vec<serde_json::Value>) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
@@ -1048,7 +1678,14 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
         }
     }
     s.checkpoints.turn_started();
-    if let Err(e) = claude.send(text).await {
+    // The chat's Permissions or Workflow changed since its last message: Claude hears it with this one (the user's, or its
+    // Lead's for an agent). Put back if the message doesn't go, so the next one carries it.
+    let note = if carries_settings_note(text) { s.settings_note.lock().unwrap().take() } else { None };
+    let noted = note.as_ref().map(|note| format!("{note}\n\n{text}"));
+    if let Err(e) = claude.send_with(noted.as_deref().unwrap_or(text), images).await {
+        if let Some(note) = note {
+            s.settings_note.lock().unwrap().get_or_insert(note);
+        }
         s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
@@ -1145,8 +1782,9 @@ async fn orchestra_setup_answer(state: State<'_, AppState>, worker: String, answ
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
 #[tauri::command]
-async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>) -> Result<String, String> {
-    state.orchestra.spawn_for_user(&main, &task, name.as_deref(), &isolation, model.as_deref(), role).await
+#[allow(clippy::too_many_arguments)]
+async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>, provider: Option<String>) -> Result<String, String> {
+    state.orchestra.spawn_for_user_on(&main, &task, name.as_deref(), &isolation, model.as_deref(), role, provider.as_deref()).await
 }
 
 /// Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id.
@@ -1254,7 +1892,9 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         let cfg = cfg.as_ref().ok_or("No folder is open")?;
         // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
         let binary = match cfg.provider {
-            ProviderId::Claude => cfg.binary.clone(),
+            // (A gateway chat is Claude Code too: its MCP servers are the same ones.)
+            ProviderId::Claude | ProviderId::Gateway => cfg.binary.clone(),
+            ProviderId::Codex => return Err("MCP servers for Codex are set up in its own config (~/.codex/config.toml), not from here.".into()),
             #[cfg(test)]
             ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
         };
@@ -1526,12 +2166,8 @@ async fn stop_task(state: State<'_, AppState>, slot: String, task_id: String) ->
 }
 
 #[tauri::command]
-async fn interrupt(state: State<'_, AppState>, slot: String) -> Result<(), String> {
-    let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
-    if let Some(x) = s.session.lock().await.as_mut() {
-        x.interrupt().await;
-    }
-    s.bridge.cancel_all();
+async fn interrupt(app: AppHandle, slot: String) -> Result<(), String> {
+    stop_turn(&app, &slot).await;
     Ok(())
 }
 
@@ -1609,11 +2245,202 @@ async fn change_summary(
 }
 
 #[tauri::command]
-fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
-    if state.slots.get(&slot)?.bridge.respond(&request_id, allow, message, updated_input) {
+async fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
+    if answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP).is_ok() {
+        return Ok(());
+    }
+    // Not one of the bridge's: a card the agent raised in its own protocol (Codex's), which its session answers.
+    let s = state.slots.get(&slot)?;
+    if let Some(session) = s.session.lock().await.as_mut() {
+        if session.respond_permission(&request_id, allow).await {
+            state.remote.publish(&slot, ui_event::UiEvent::PermissionResolved { request_id, allow, by: remote::SENT_BY_DESKTOP.to_string() });
+            return Ok(());
+        }
+    }
+    Err("That permission request is no longer pending: it was answered already, or the agent stopped asking.".into())
+}
+
+/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does,
+/// and where a chat may run (Claude Code, and an endpoint or two; the window leaves out any whose questions a phone can't answer).
+#[tauri::command]
+fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>, providers: Option<Vec<remote::protocol::RemoteProvider>>) {
+    state.remote.hub.set_presets(presets);
+    state.remote.hub.set_providers(providers.unwrap_or_default());
+}
+
+/// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
+#[tauri::command]
+fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat>) {
+    state.remote.window_chats(&chats);
+}
+
+/// Settings › Remote control: whether it is on, and the paired devices.
+#[tauri::command]
+fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
+    state.remote.view()
+}
+
+/// The view after a change, with why it couldn't be saved when it couldn't (it holds until Lantern restarts).
+#[tauri::command]
+async fn remote_set_enabled(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<remote::RemoteView, String> {
+    let saved = state.remote.store.set_enabled(on);
+    if on {
+        // Couldn't listen (the port is taken, the Keychain said no): it is off again, unless another start got it going.
+        if let Err(e) = start_remote(&app).await {
+            if !state.remote.is_running() {
+                let _ = state.remote.store.set_enabled(false);
+            }
+            return Ok(state.remote.view_after::<()>(Err(e)));
+        }
+    } else {
+        let _one_at_a_time = state.remote.lifecycle.lock().await;
+        state.remote.stop();
+    }
+    Ok(state.remote.view_after(saved))
+}
+
+#[tauri::command]
+fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_show_titles(on))
+}
+
+#[tauri::command]
+fn remote_set_rich_notifications(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_rich_notifications(on))
+}
+
+/// Holds the Mac awake while Remote control is on, so a phone away from home can still reach it.
+#[tauri::command]
+fn remote_set_keep_awake(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.set_keep_awake(on))
+}
+
+/// Whether paired phones may use Auto (start a chat on it, or put a chat on it). Off by default.
+#[tauri::command]
+fn remote_set_allow_auto(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_allow_phone_auto(on))
+}
+
+/// The most a push key file may weigh (Apple's are about 250 bytes): anything bigger isn't one, and isn't read.
+const PUSH_KEY_FILE_MAX: u64 = 4096;
+
+/// Imports the push key (a .p8 file) for the lock-screen cards. It is checked (it must parse and sign), then kept in the
+/// Keychain; the file stays where it was, and nothing of it is shown or logged. Off the main thread: the Keychain may ask first.
+#[tauri::command]
+async fn remote_set_live_key(app: AppHandle, path: String, key_id: String, team_id: String) -> Result<remote::RemoteView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::Path::new(&path);
+        let meta = std::fs::metadata(path).map_err(|_| "Lantern couldn't open that file.".to_string())?;
+        if !meta.is_file() || meta.len() > PUSH_KEY_FILE_MAX {
+            return Err("That isn't a push key: it should be the .p8 file Apple gave you.".to_string());
+        }
+        let text = std::fs::read_to_string(path).map_err(|_| "That isn't a push key: it should be the .p8 file Apple gave you.".to_string())?;
+        let state = app.state::<AppState>();
+        state.remote.live.import(&key_id, &team_id, &text)?;
+        Ok(state.remote.view())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
+/// Keychain, which may ask the user first.
+#[tauri::command]
+async fn remote_pair(app: AppHandle) -> Result<remote::PairView, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().remote.pair(&remote::local_addresses(), &mac_name(), remote::now_ms())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn remote_pair_cancel(state: State<'_, AppState>) {
+    state.remote.store.cancel_offer();
+}
+
+/// Forgets a paired device: it can't connect again until it pairs again.
+#[tauri::command]
+fn remote_remove_device(state: State<'_, AppState>, id: String) -> remote::RemoteView {
+    let removed = state.remote.store.remove_device(&id);
+    state.remote.disconnect(&id);
+    state.remote.view_after(removed)
+}
+
+/// The Mac's name as the user set it (Sharing settings), for the phone to show.
+fn mac_name() -> String {
+    std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Mac".into())
+}
+
+/// Asks the window to wake an asleep chat for a paired phone (the window wakes chats: it has what they were restored
+/// with). Refused for a chat that isn't listed, or isn't asleep.
+fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), String> {
+    if !state.remote.wakeable(slot) {
+        return Err("That chat isn't asleep.".into());
+    }
+    app.emit("remote-wake", slot).map_err(|e| e.to_string())
+}
+
+/// How long the window has to open the chat a phone asked for, and then to list it where the phone can follow it.
+const NEW_CHAT_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
+/// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let (id, answer) = state.remote.expect_new_chat();
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider };
+    if let Err(e) = app.emit("remote-new-chat", &request) {
+        state.remote.forget_new_chat(&id);
+        return Err(e.to_string());
+    }
+    let slot = match tokio::time::timeout(NEW_CHAT_WAIT, answer).await {
+        Ok(Ok(result)) => result?,
+        _ => {
+            state.remote.forget_new_chat(&id);
+            // The window may have started it after all (it only answered late): don't invite a second one.
+            return Err("Lantern didn't answer in time. The chat may still have started on your Mac: look in your chats before trying again.".into());
+        }
+    };
+    // The window has made the chat; the phone may only follow it once the hub lists it.
+    let listed = tokio::time::timeout(NEW_CHAT_LISTED_WAIT, async {
+        while state.remote.hub.chat(&slot).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    })
+    .await;
+    listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
+}
+
+/// The window says where it found `claude`, for the calls the backend makes by itself (what to suggest on a phone).
+#[tauri::command]
+fn remote_claude_path(state: State<'_, AppState>, path: String) {
+    state.remote.set_claude(&path);
+}
+
+/// The window's answer to `remote-new-chat`: the slot of the chat it started, or why it didn't.
+#[tauri::command]
+fn remote_new_chat_done(state: State<'_, AppState>, id: String, slot: Option<String>, error: Option<String>) {
+    let result = match (slot, error) {
+        (Some(slot), None) if slots::valid_slot(&slot) => Ok(slot),
+        (_, Some(e)) => Err(e.chars().take(300).collect()),
+        _ => Err("Lantern didn't start that chat.".to_string()),
+    };
+    state.remote.new_chat_done(&id, result);
+}
+
+/// Answers a prompt of chat `slot` for whoever answered it (`by`: the window, or a paired phone). The first answer
+/// counts: every client is told it was answered, and a later answer is refused.
+fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+    if state.slots.get(slot)?.bridge.respond(request_id, allow, message, updated_input) {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending.".into())
+        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
     }
 }
 
@@ -2065,6 +2892,27 @@ fn folders_gone(folders: Vec<String>) -> Vec<String> {
     folders.into_iter().filter(|f| !std::path::Path::new(f).is_dir()).collect()
 }
 
+/// The file whose presence at launch asks for the open chats to come back by themselves, for a restart that doesn't go through
+/// the window (a script that swaps the app in place `touch`es it before opening Lantern again).
+const RESTORE_MARKER: &str = "restore-on-launch";
+/// How old the marker may be before it is taken for one a restart left behind long ago.
+const RESTORE_MARKER_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Whether the marker is there and recent, using it up either way so it asks for one launch only.
+fn take_marker(path: &std::path::Path, now: std::time::SystemTime) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    // Stamped a moment ahead of the clock counts as just now.
+    let fresh = meta.modified().ok().map(|at| now.duration_since(at).unwrap_or_default()).is_some_and(|age| age <= RESTORE_MARKER_MAX_AGE);
+    let _ = std::fs::remove_file(path);
+    fresh
+}
+
+/// Whether this launch follows a restart that asked for the chats back (see `RESTORE_MARKER`).
+#[tauri::command]
+fn take_restore_marker(app: AppHandle) -> bool {
+    app.path().app_data_dir().is_ok_and(|dir| take_marker(&dir.join(RESTORE_MARKER), std::time::SystemTime::now()))
+}
+
 /// Where each folder was before it moved, as Lantern recorded it.
 #[tauri::command]
 fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
@@ -2233,7 +3081,14 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            // Remote control left on: it listens again from launch.
+            if app.state::<AppState>().remote.store.saved().enabled {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = start_remote(&handle).await;
+                });
+            }
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());
@@ -2279,9 +3134,27 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            remote_window_chats,
+            remote_window_controls,
+            remote_settings,
+            remote_set_enabled,
+            remote_set_show_titles,
+            remote_set_rich_notifications,
+            remote_set_live_key,
+            remote_set_keep_awake,
+            remote_set_allow_auto,
+            remote_pair,
+            remote_pair_cancel,
+            remote_remove_device,
+            remote_new_chat_done,
+            remote_claude_path,
             claude_login,
             sidebar_menu,
             keep_awake,
+            list_providers,
+            list_endpoints,
+            save_endpoints,
+            fetch_endpoint_models,
             user_name,
             start_session,
             restart_session,
@@ -2327,6 +3200,7 @@ pub fn run() {
             merge_tests_split_command,
             set_auto_merge_tests,
             set_restore_points,
+            set_chat_hooks,
             orchestra_discard,
             run_shell,
             claude_request,
@@ -2383,6 +3257,7 @@ pub fn run() {
             open_session,
             relocations_list,
             folders_gone,
+            take_restore_marker,
             moved_folder_candidates,
             old_locations,
             known_folders,
@@ -2416,6 +3291,7 @@ pub fn run() {
                 // A setup still running in a worktree ends with Lantern.
                 setup::stop_all();
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.remote.awake.stop();
                     tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }
@@ -2432,8 +3308,186 @@ pub fn run() {
 }
 
 #[cfg(test)]
+mod hooks_flow_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::sync::mpsc;
+    use ui_event::UiEvent;
+
+    const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/stream/write_create_and_error.jsonl");
+
+    /// A claude that answers every message it is sent with one whole turn (the fixture's), and keeps what it was sent.
+    async fn chat_with_fake_claude(dir: &std::path::Path) -> (Arc<Slot>, mpsc::UnboundedReceiver<UiEvent>) {
+        let d = dir.display();
+        let body = format!("while IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat '{FIXTURE}'\ndone");
+        let fake = dir.join("fake-claude");
+        std::fs::write(&fake, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let slots = Slots::default();
+        let slot = slots.get_or_create("s1", dir, |_| {}, Arc::new(permission::rules::FolderRules::load(None)), |_| Arc::new(|pid| pid == std::process::id())).unwrap();
+        let cfg = session::SessionConfig {
+            provider: ProviderId::Claude,
+            binary: fake,
+            folder: dir.to_path_buf(),
+            mode: Mode::Ask,
+            auto_approve: false,
+            resume: None,
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            path_env: None,
+            endpoint: None,
+        };
+        // What the window and the phones are told: every event goes through the chat's hooks first, as the emitter does.
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (told, later) = (tx.clone(), tx);
+        let routed = slot.clone();
+        let sink: ui_event::Sink = Arc::new(move |ev| {
+            let later = later.clone();
+            if let Some(now) = route_hooks(&routed, ev, move |ev| {
+                let _ = later.send(ev);
+            }) {
+                let _ = told.send(now);
+            }
+        });
+        let session = Session::spawn(&cfg, sink, Arc::new(|_: &str, _: Option<String>| {})).unwrap();
+        *slot.session.lock().await = Some(session);
+        (slot, rx)
+    }
+
+    async fn until_turn_done(rx: &mut mpsc::UnboundedReceiver<UiEvent>) -> Vec<UiEvent> {
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let mut seen = vec![];
+            loop {
+                let ev = rx.recv().await.expect("the chat's events");
+                let done = matches!(ev, UiEvent::TurnDone { .. });
+                seen.push(ev);
+                if done {
+                    return seen;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the turn to end")
+    }
+
+    async fn stop(slot: &Arc<Slot>) {
+        let session = slot.session.lock().await.take();
+        if let Some(s) = session {
+            s.stop().await;
+        }
+    }
+
+    fn sent_to_claude(dir: &std::path::Path) -> Vec<String> {
+        let text = std::fs::read_to_string(dir.join("stdin.txt")).unwrap_or_default();
+        text.lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["message"]["content"][0]["text"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_post_hook_follows_the_users_turn_and_the_two_end_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        slot.hooks.follow_with(Some("Update the brain if needed".into()));
+        slot.session.lock().await.as_mut().unwrap().send("do it").await.unwrap();
+
+        let seen = until_turn_done(&mut rx).await;
+        // The hook was sent after the user's message, and the window was told where (as a message of Lantern's own).
+        assert_eq!(sent_to_claude(dir.path()), vec!["do it".to_string(), hooks::post_message("Update the brain if needed")]);
+        assert!(seen.iter().any(|e| matches!(e, UiEvent::UserText { text, sent_by: Some(by), .. } if hooks::post_text(text) == Some("Update the brain if needed") && by == "lantern")), "{seen:?}");
+        // Exactly one end for both turns, and it came after the hook's own events (the fixture's turn, twice).
+        assert_eq!(seen.iter().filter(|e| matches!(e, UiEvent::TurnDone { .. })).count(), 1);
+        let first_turn = seen.iter().position(|e| matches!(e, UiEvent::UserText { .. })).unwrap();
+        assert!(seen[..first_turn].iter().any(|e| matches!(e, UiEvent::ToolStarted { .. })), "the user's turn came first");
+        assert!(seen[first_turn..].iter().any(|e| matches!(e, UiEvent::ToolStarted { .. })), "and the hook's after it");
+        // Nothing more follows: it is not sent again.
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(400), rx.recv()).await.is_err(), "a second end");
+        assert_eq!(sent_to_claude(dir.path()).len(), 2);
+        // The next message, with no post-hook now, is one turn.
+        slot.hooks.follow_with(None);
+        slot.session.lock().await.as_mut().unwrap().send("again").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert_eq!(sent_to_claude(dir.path()).len(), 3);
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_turn_without_a_post_hook_ends_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        slot.session.lock().await.as_mut().unwrap().send("do it").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(300), rx.recv()).await.is_err());
+        assert_eq!(sent_to_claude(dir.path()), vec!["do it".to_string()]);
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_compaction_or_a_clear_brings_the_pre_hook_back_for_the_next_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, _rx) = chat_with_fake_claude(dir.path()).await;
+        assert_eq!(slot.hooks.carry_pre("hi", Some("check")), "hi", "not due until something arms it");
+        for ev in [UiEvent::Compacted, UiEvent::ConversationReset] {
+            assert!(route_hooks(&slot, ev, |_| {}).is_some(), "they are passed on");
+            assert!(slot.hooks.carry_pre("hi", Some("check")).ends_with("\n\nhi"), "the next message carries it");
+            assert_eq!(slot.hooks.carry_pre("hi", Some("check")), "hi", "and only that one");
+        }
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_ends_while_the_post_hook_runs_forgets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, _rx) = chat_with_fake_claude(dir.path()).await;
+        slot.hooks.follow_with(Some("save".into()));
+        let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        // Held, and the hook is sent into the fake claude, which answers it; but the chat ends first.
+        assert!(route_hooks(&slot, done.clone(), |_| {}).is_none());
+        assert!(route_hooks(&slot, UiEvent::SessionEnded { code: Some(1), stderr_tail: String::new() }, |_| {}).is_some());
+        assert_eq!(slot.hooks.post_failed(), None, "nothing is left waiting for a turn that will not end");
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_post_hook_that_cannot_be_sent_lets_the_users_turn_end_as_it_would_have() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        // No claude to send it into.
+        let gone = slot.session.lock().await.take().unwrap();
+        gone.stop().await;
+        slot.hooks.follow_with(Some("save".into()));
+        let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: Some(0.5), tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        let (told, mut told_rx) = mpsc::unbounded_channel();
+        assert!(route_hooks(&slot, done.clone(), move |ev| {
+            let _ = told.send(ev);
+        })
+        .is_none());
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(5), told_rx.recv()).await.unwrap().unwrap();
+        assert_eq!(ended, done);
+        assert!(rx.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A swap script's marker brings the chats back once, and one left from long ago (or none) doesn't.
+    #[test]
+    fn the_restore_marker_asks_once_and_only_while_it_is_recent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(RESTORE_MARKER);
+        let now = std::time::SystemTime::now();
+        assert!(!take_marker(&path, now));
+        std::fs::write(&path, "").unwrap();
+        assert!(take_marker(&path, now));
+        assert!(!path.exists());
+        assert!(!take_marker(&path, now));
+        std::fs::write(&path, "").unwrap();
+        assert!(!take_marker(&path, now + RESTORE_MARKER_MAX_AGE + std::time::Duration::from_secs(60)));
+        assert!(!path.exists());
+    }
 
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.
     #[test]
@@ -2479,7 +3533,32 @@ mod tests {
             subagent_model: None,
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
+            endpoint: None,
         }
+    }
+
+    #[test]
+    fn claude_is_told_when_a_restart_changes_its_permissions_or_workflow_and_not_otherwise() {
+        let normal = |mode, auto| SessionConfig { helper: HelperConfig { role: Role::Normal, ..config(mode, auto).helper }, ..config(mode, auto) };
+        let was = |mode, auto: bool| Some((mode, args::is_auto(mode, auto), Role::Normal));
+        // Step by step to Chat: the switch the chat that found this bug made.
+        assert!(settings_changed(was(Mode::Steps, true), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Ask, false), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Auto, false), &SessionConfig { helper: HelperConfig { role: Role::Main, ..config(Mode::Auto, false).helper }, ..config(Mode::Auto, false) }));
+        // The same settings again (a new effort, a restart after Stop), or Step by step on Auto put the same way: no note.
+        assert!(!settings_changed(was(Mode::Auto, false), &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Steps, true), &normal(Mode::Steps, true)));
+        // A chat that never ran has nothing to correct, and only Claude's prompt says these settings.
+        assert!(!settings_changed(None, &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Ask, false), &SessionConfig { provider: ProviderId::Fake, ..normal(Mode::Auto, false) }));
+    }
+
+    #[test]
+    fn a_slash_command_goes_without_the_settings_note_so_it_still_runs_as_one() {
+        assert!(!carries_settings_note("/clear"));
+        assert!(!carries_settings_note("  /incremental-dev build it"));
+        assert!(carries_settings_note("build it"));
+        assert!(carries_settings_note("what does /clear do?"));
     }
 
     /// The git tool is answered for a read-only agent and no one else, from the role Lantern started the chat with: the same
@@ -2512,6 +3591,26 @@ mod tests {
         assert_eq!(no_worker.mode, Mode::Auto);
     }
 
+    /// A provider with no auto mode never runs Auto, whoever asks: an endpoint's model would approve its own commands. A chat
+    /// that is no worker is capped too, and Claude's own is left as asked.
+    #[test]
+    fn a_chat_on_a_provider_with_no_auto_mode_is_never_left_on_auto() {
+        for provider in [ProviderId::Gateway, ProviderId::Codex] {
+            let mut auto = SessionConfig { provider, ..config(Mode::Auto, false) };
+            assert!(cap_mode(&mut auto, None), "{provider:?}");
+            assert_eq!((auto.mode, auto.auto_approve), (Mode::Ask, false), "{provider:?}");
+            let mut steps = SessionConfig { provider, ..config(Mode::Steps, true) };
+            assert!(cap_mode(&mut steps, None), "{provider:?}");
+            assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, false), "{provider:?}: Step by step stays, without its auto-approve");
+            // What it was on already isn't "lowered", and asking again changes nothing.
+            let mut ask = SessionConfig { provider, ..config(Mode::Ask, false) };
+            assert!(!cap_mode(&mut ask, None) && ask.mode == Mode::Ask, "{provider:?}");
+        }
+        let mut claude = SessionConfig { provider: ProviderId::Claude, ..config(Mode::Auto, true) };
+        assert!(!cap_mode(&mut claude, None));
+        assert_eq!((claude.mode, claude.auto_approve), (Mode::Auto, true));
+    }
+
     /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat
     /// only once its agents are gone. A worker's role is its Lead's, whatever is asked.
     #[test]
@@ -2526,6 +3625,13 @@ mod tests {
         for team in [Some(true), Some(false), None] {
             assert_eq!(role_after(&worker, team, 0), Ok(worker.clone()), "{team:?}");
         }
+    }
+
+    /// A team's Lead starts agents with Lantern's tools, which only Claude Code has: Codex is refused as one.
+    #[test]
+    fn only_a_provider_with_lanterns_tools_can_lead_a_team() {
+        assert!(lead_provider(ProviderId::Claude).is_ok());
+        assert!(lead_provider(ProviderId::Codex).unwrap_err().contains("Lead runs on Claude Code"));
     }
 
     /// Permissions mean the same in every workflow: a team whose Lead is on Auto (in Chat or Step by step terms) lets its
@@ -2545,6 +3651,39 @@ mod tests {
         assert_eq!(saved.worker.unwrap().branch.as_deref(), Some("lantern/w"));
         let older: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1"}}"#).unwrap();
         assert_eq!(older.worker.unwrap().branch, None);
+    }
+
+    /// The window builds its provider choices, capability hiding and model lists from this shape.
+    #[test]
+    fn a_provider_is_listed_with_its_id_capabilities_models_and_binary() {
+        let listing = ProviderListing { info: ProviderId::Claude.info(), models: ProviderId::Claude.provider().models().iter().map(|m| m.to_string()).collect(), binary: None, endpoint: None };
+        let v = serde_json::to_value(listing).unwrap();
+        assert_eq!(v["id"], "claude");
+        assert_eq!(v["capabilities"]["supports_auto_mode"], true);
+        assert_eq!(v["models"], serde_json::json!(["opus", "sonnet", "haiku"]));
+        assert!(v["binary"].is_null() && v["endpoint"].is_null());
+    }
+
+    #[test]
+    fn a_chat_on_an_endpoint_that_is_gone_or_has_no_model_never_starts_on_claude() {
+        let ep = |models: &[&str]| endpoints::Endpoint { id: "o".into(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: models.iter().map(|m| m.to_string()).collect() };
+        assert!(pick_endpoint(None, Some("opus".into())).unwrap_err().contains("won't start on Claude instead"));
+        assert!(pick_endpoint(Some(ep(&[])), None).unwrap_err().contains("has no models yet"));
+        assert!(pick_endpoint(Some(ep(&["qwen3:8b"])), Some("--bare".into())).unwrap_err().contains("not a model id"));
+        // No model named is the endpoint's first, never "Claude Code's default"; one it is told is used.
+        assert_eq!(pick_endpoint(Some(ep(&["qwen3:8b", "llama3"])), None).unwrap().1, "qwen3:8b");
+        assert_eq!(pick_endpoint(Some(ep(&["qwen3:8b"])), Some("openai/gpt-5".into())).unwrap().1, "openai/gpt-5");
+    }
+
+    /// An endpoint is its own choice in the window: a gateway with the endpoint's id and name, its models, and no program.
+    #[test]
+    fn an_endpoint_is_listed_as_a_gateway_with_its_models_and_what_it_cannot_do() {
+        let listing = ProviderListing { info: ProviderId::Gateway.info(), models: vec!["qwen3:8b".into()], binary: None, endpoint: Some(EndpointRef { id: "ollama".into(), name: "Ollama".into() }) };
+        let v = serde_json::to_value(listing).unwrap();
+        assert_eq!((v["id"].as_str(), v["endpoint"]["id"].as_str(), v["endpoint"]["name"].as_str()), (Some("gateway"), Some("ollama"), Some("Ollama")));
+        assert_eq!(v["models"], serde_json::json!(["qwen3:8b"]));
+        assert_eq!((v["capabilities"]["supports_auto_mode"].as_bool(), v["capabilities"]["can_lead_team"].as_bool(), v["capabilities"]["supports_skills"].as_bool()), (Some(false), Some(false), Some(true)));
+        assert!(v["binary"].is_null());
     }
 
     #[test]

@@ -1,0 +1,72 @@
+import { useEffect, useRef, type ReactNode } from "react";
+import { Animated, Modal, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LockCover } from "../shell/LockCover";
+import { useLockState } from "../shell/lockContext";
+import { SHEET_MAX } from "../view/layout";
+import { Glass } from "./Glass";
+import { run } from "./motion";
+import { useColors } from "./theme";
+
+/** How much of the screen's height a sheet may take. */
+const MOST = 0.88;
+/** How far the sheet floats in from the screen's sides and bottom, and how round its corners are (near the phone's own). */
+export const SHEET_INSET = 8;
+export const SHEET_RADIUS = 36;
+/** How much of the card's colour the glass keeps (hex alpha, about 72%): sheets are words to read, over whatever is behind. */
+export const SHEET_FILL = "b8";
+
+/**
+ * A bottom sheet over the whole screen, floating a little in from its edges: Liquid Glass with fully rounded corners on iOS 26,
+ * the solid card elsewhere (and for someone who asked for less transparency). The dark behind it fades in where it is, over the full height (the status bar
+ * too), and only the sheet rises: the system's own "slide" would carry the dark up with it. `children` is given `close`,
+ * which slides it away first and then calls `onClose`. With the keyboard up the sheet rides on top of it, following it
+ * frame by frame, and what shows under the sheet at the keyboard's rounded corners is the sheet's own colour, `fill`.
+ */
+export function Sheet({ onClose, fill, children }: { onClose: () => void; fill?: string; children: (close: () => void) => ReactNode }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  // Nothing under a floating sheet: at the keyboard's rounded corners what is behind shows, as around the rest of it.
+  const under = fill ?? "transparent";
+  const { height } = useWindowDimensions();
+  // The app lock's cover is drawn in here too: a sheet is a Modal of its own, and where it is on top the lock's isn't.
+  const lock = useLockState();
+  const covered = lock.ready && (lock.locked || lock.covered);
+  const p = useRef(new Animated.Value(0)).current;
+  const closing = useRef(false);
+  useEffect(() => {
+    run(p, 1, 300);
+  }, [p]);
+  const close = () => {
+    if (closing.current) return;
+    closing.current = true;
+    run(p, 0, 220, onClose);
+  };
+  return (
+    <Modal animationType="none" transparent statusBarTranslucent onRequestClose={close}>
+      <View style={{ flex: 1 }}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim, opacity: p }]}>
+          <Pressable accessibilityLabel="Close" onPress={close} style={StyleSheet.absoluteFill} />
+        </Animated.View>
+        {/* Taps above the sheet reach the dark behind it. */}
+        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={{ flex: 1, justifyContent: "flex-end", alignItems: "center" }}>
+          {/* The most it may take is a number: a percentage of a parent with no height of its own cuts the sheet short. On a tablet it goes no wider than SHEET_MAX, in the middle. */}
+          <Animated.View style={{ width: "100%", maxWidth: SHEET_MAX, maxHeight: height * MOST, flexShrink: 1, paddingHorizontal: SHEET_INSET, paddingBottom: SHEET_INSET, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>
+            <Glass fill={SHEET_FILL} lift={0.18} style={{ flexShrink: 1, borderRadius: SHEET_RADIUS, overflow: "hidden" }}>
+              {/* The sheet already floats above the home indicator: what is in it keeps only a little room at its bottom. */}
+              <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close)}</SafeAreaInsetsContext.Provider>
+            </Glass>
+            {/* Under the sheet, where the keyboard's rounded corners are: its colour, so there is no gap to see through. */}
+            <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: under }} />
+          </Animated.View>
+        </KeyboardAvoidingView>
+        {covered && (
+          <View style={StyleSheet.absoluteFill}>
+            <LockCover />
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
+}

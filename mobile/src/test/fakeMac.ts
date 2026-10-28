@@ -1,0 +1,134 @@
+/**
+ * A Mac for the phone's tests: it answers the phone's handshake with the message the real Mac's Noise (snow) recorded
+ * for the same keys (src/protocol/generated/noise-vectors.json), then speaks the protocol through a real Channel. The
+ * phone under test must use the case's keys and ephemeral (Connection's fixedEphemeral and newKey).
+ */
+import vectors from "../protocol/generated/noise-vectors.json";
+import type { ClientMessage } from "../protocol/generated/ClientMessage";
+import type { Request } from "../protocol/generated/Request";
+import type { ServerMessage } from "../protocol/generated/ServerMessage";
+import { Channel } from "../noise/channel";
+import { Handshake, keypairFrom, type Keypair } from "../noise/noise";
+import { utf8Decode, utf8Encode } from "../platform/utf8";
+import { queueLink, type Link, type Transport } from "../net/transport";
+
+const bytes = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+export type Case = (typeof vectors)[number];
+export const pairCase = vectors.find((v) => v.psk && !v.impostor)!;
+export const connectCase = vectors.find((v) => !v.psk && !v.impostor)!;
+/** A Mac with a key of its own that completes a pairing handshake: what a phone pinned to the real Mac must refuse. */
+export const impostorCase = vectors.find((v) => v.impostor)!;
+
+/** What the phone needs to replay a case: its key and ephemeral, and the Mac's key and the code's secret. */
+export const phoneKeys = (c: Case) => ({ device: keypairFrom(bytes(c.phone_static)) as Keypair, ephemeral: bytes(c.phone_ephemeral), macKey: keypairFrom(bytes(c.mac_static)).publicKey, secret: c.psk ? bytes(c.psk) : null });
+
+/** The Mac's side of the channel a case opens: the phone's two ciphers, swapped. */
+function macChannel(c: Case): Channel {
+  const k = phoneKeys(c);
+  const hs = k.secret ? Handshake.pair(k.device, k.macKey, k.secret, k.ephemeral) : Handshake.connect(k.device, k.macKey, k.ephemeral);
+  hs.write();
+  hs.read(bytes(c.messages[1]));
+  hs.write();
+  const { send, receive } = hs.finish();
+  return new Channel(receive, send);
+}
+
+export interface FakeMacOptions {
+  /** Which addresses answer (others are unreachable). */
+  reachable?: string[];
+  protocol?: number;
+  epoch?: number;
+  macName?: string;
+  /** The addresses its Welcome gives (an older Mac gives none: leave this out). */
+  hosts?: string[];
+  /** The Mac's answer to a request; an Error is sent back as the request's error. */
+  answer?: (req: Request) => unknown;
+}
+
+/** A transport that sends each address to its own fake Mac (an address with none is unreachable). */
+export function routeTransport(byHost: Record<string, FakeMac>): Transport {
+  return {
+    open: (host, port, waitMs) => {
+      const mac = byHost[host];
+      if (!mac) return Promise.reject(new Error(`Couldn't reach ${host}.`));
+      return mac.open(host, port, waitMs);
+    },
+  };
+}
+
+export class FakeMac implements Transport {
+  /** Every request the phone made, in order. */
+  readonly requests: Request[] = [];
+  readonly hellos: Extract<ClientMessage, { type: "hello" }>[] = [];
+  private live: { link: ReturnType<typeof queueLink>; channel: Channel | null }[] = [];
+  opened: string[] = [];
+  /** How long the phone said each address (in `opened`'s order) had to answer. */
+  openWaits: (number | undefined)[] = [];
+
+  constructor(
+    private readonly c: Case,
+    private readonly o: FakeMacOptions = {},
+  ) {}
+
+  async open(host: string, port: number, waitMs?: number): Promise<Link> {
+    this.opened.push(`${host}:${port}`);
+    this.openWaits.push(waitMs);
+    if (this.o.reachable && !this.o.reachable.includes(host)) throw new Error(`Couldn't reach ${host}.`);
+    const conn: { link: ReturnType<typeof queueLink>; channel: Channel | null } = { link: null!, channel: null };
+    let step = 0;
+    const toPhone = (f: Uint8Array) => queueMicrotask(() => conn.link.push(f));
+    conn.link = queueLink(
+      (frame) => {
+        step += 1;
+        if (step === 1) return; // the mode byte
+        if (step === 2) {
+          if (hex(frame) !== this.c.messages[0]) return conn.link.end();
+          return toPhone(bytes(this.c.messages[1]));
+        }
+        if (step === 3) {
+          if (hex(frame) !== this.c.messages[2]) return conn.link.end();
+          conn.channel = macChannel(this.c);
+          return;
+        }
+        const plain = conn.channel!.open(frame);
+        if (!plain) return;
+        const msg = JSON.parse(utf8Decode(plain)) as ClientMessage;
+        if (msg.type === "hello") {
+          this.hellos.push(msg);
+          this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, features: [], ...(this.o.hosts ? { hosts: this.o.hosts } : {}) } as ServerMessage);
+        } else {
+          this.requests.push(msg.request);
+          let ok: unknown = null;
+          let error: string | null = null;
+          try {
+            ok = this.o.answer?.(msg.request) ?? null;
+          } catch (e) {
+            error = (e as Error).message;
+          }
+          this.sendOn(conn, { type: "response", id: msg.id, ok, error });
+        }
+      },
+      () => {},
+    );
+    this.live.push(conn);
+    return conn.link.link;
+  }
+
+  private sendOn(conn: { link: ReturnType<typeof queueLink>; channel: Channel | null }, msg: ServerMessage) {
+    for (const f of conn.channel!.seal(utf8Encode(JSON.stringify(msg)))) queueMicrotask(() => conn.link.push(f));
+  }
+
+  /** Sends a message to the phone on the newest connection. */
+  push(msg: ServerMessage) {
+    const conn = this.live[this.live.length - 1];
+    if (conn?.channel) this.sendOn(conn, msg);
+  }
+
+  /** Drops every connection, as a Mac going to sleep would. */
+  dropAll() {
+    for (const c of this.live) c.link.end();
+    this.live = [];
+  }
+}

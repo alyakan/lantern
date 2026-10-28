@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
+import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand } from "../types";
+import { capabilitiesOf } from "../lib/provider";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
@@ -19,14 +20,17 @@ import { ThemePicker } from "./ThemePicker";
 import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
+import { EndpointsSettings, type EndpointsSettingsProps } from "./EndpointsSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
+import { RemoteControl } from "./RemoteControl";
 import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings";
+import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "hooks";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", hooks: "Hooks" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -56,12 +60,22 @@ interface Props {
   routines?: RoutinesSettingsProps;
   /** What happens after a pull request's checks run, per project, for the Pull requests page. */
   prChecks?: PrChecksSettingsProps;
+  /** The prompts run around the user's messages, for the Hooks page. */
+  hooks?: HooksSettingsProps;
+  /** The endpoints a chat can run on besides Anthropic's, for the Endpoints page. */
+  endpoints?: EndpointsSettingsProps;
+  /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
+  provider?: ProviderInfo | null;
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<SettingsTab>(open ?? "general");
+  const caps = capabilitiesOf(page.provider);
+  const [picked, setTab] = useState<SettingsTab>(open ?? "general");
+  // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
+  const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor);
+  const tab = offered(picked) ? picked : "general";
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -84,8 +98,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "routines", "mcp", "skills", "permissions", "prs", "updates"] as const)
-                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "prs" || prChecks))
+              {(["general", "harness", "endpoints", "routines", "hooks", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -98,12 +112,18 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <GeneralPage {...general} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
+            ) : tab === "endpoints" && endpoints ? (
+              <EndpointsSettings {...endpoints} />
             ) : tab === "routines" && routines ? (
               <RoutinesSettings {...routines} />
+            ) : tab === "hooks" && hooks ? (
+              <HooksSettings {...hooks} />
             ) : tab === "updates" && updates ? (
               <UpdatesPage {...updates} />
             ) : tab === "skills" ? (
               <SkillsPage {...page} />
+            ) : tab === "remote" ? (
+              <RemoteControl />
             ) : tab === "permissions" ? (
               <PermissionRules slot={page.slot} />
             ) : tab === "prs" && prChecks ? (

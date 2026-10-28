@@ -13,6 +13,14 @@ pub struct SlashCommand {
     pub argument_hint: String,
 }
 
+/// One line of the plan Claude keeps with TodoWrite. `status`: "pending", "in_progress" or "completed".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Todo {
+    pub content: String,
+    pub status: String,
+    pub active_form: String,
+}
+
 /// One check (a Reviewer, a QA tester…) in a `ReviewUpdate`. `state`: "waiting" (for a free slot), "running", "done", "failed"
 /// (it stopped before reporting) or "skipped" (the setting was switched off before it started). `findings` and `passed`
 /// come from the report's last line (`RESULT: pass` or `RESULT: issues 3`), and are None when it has none.
@@ -62,16 +70,27 @@ pub struct BackgroundTask {
     pub description: String,
 }
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
     SessionStarted { session_id: String, model: String, cwd: String, permission_mode: String, claude_version: String },
-    /// Something the user typed, and when (ms since the epoch, from the transcript). Live turns add these locally;
-    /// only history replay emits them.
+    /// Something the user typed, and when (ms since the epoch). History replay emits these; so does every message sent
+    /// live, with `sent_by`: who sent it ("desktop", or a paired phone's id). The window adds its own messages itself, so
+    /// it isn't sent the ones that say "desktop" (see remote::SENT_BY_DESKTOP).
     UserText {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         at: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sent_by: Option<String>,
+        /// How many pictures went with it (from a phone). The pictures themselves are never part of an event: they go to
+        /// Claude and nowhere else, so the window and the phones are only told how many.
+        #[serde(skip_serializing_if = "is_zero")]
+        images: u32,
     },
     Thinking { parent: Option<String> },
     TextDelta { parent: Option<String>, block_id: String, text: String },
@@ -141,12 +160,21 @@ pub enum UiEvent {
     Models { models: Vec<ModelOption> },
     /// `/clear` ran: the conversation starts over in the same process.
     ConversationReset,
+    /// The conversation was compacted (by `/compact`, or by Claude Code itself when the context was full): what came before
+    /// is a summary now. The chat shows nothing of it; the backend uses it to bring the pre-hook back (see hooks.rs).
+    Compacted,
     PermissionRequested { request_id: String, tool_name: String, input: Value },
     /// A prompt that can no longer be answered: the helper asking for it went away.
     PermissionWithdrawn { request_id: String },
+    /// A prompt was answered, and by whom ("desktop", or a paired phone's id): every other client's card for it closes.
+    /// The first answer is the one that counts; a later one is refused.
+    PermissionResolved { request_id: String, allow: bool, by: String },
     /// A request a rule allowed, with no card: the chat notes it in place of one. `scope` and `rule` say which rule.
     PermissionAutoAllowed { request_id: String, tool_name: String, input: Value, scope: Scope, rule: Rule },
     SessionEnded { code: Option<i32>, stderr_tail: String },
+    /// A command the user started from a paired phone (the window's own are started by the window, which adds its block
+    /// itself): the chat's window adds the block its output lands in, as for a command typed after "!" there.
+    ShellStarted { id: String, command: String },
     /// Output from a command the user ran from the chat box (see shell.rs).
     ShellOutput { id: String, text: String },
     /// That command ended: its exit code (None when a signal ended it), and whether the user stopped it.
@@ -208,6 +236,11 @@ pub enum UiEvent {
     /// The subscription's five-hour window: `used` from 0 to 1, when it resets (unix seconds), and the CLI's status for it
     /// ("allowed", "allowed_warning", "rejected"). For the whole account, so every chat reports the same.
     PlanUsage { used: f64, resets_at: Option<u64>, status: String },
+    /// The subscription's weekly (seven-day) window: `used` from 0 to 1 and when it resets (unix seconds). Said by the same
+    /// `rate_limit_event` as the five-hour one, and for the whole account too.
+    WeekUsage { used: f64, resets_at: Option<u64> },
+    /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
+    Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },
     ParseError { line: String },
 }

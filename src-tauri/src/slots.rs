@@ -39,6 +39,11 @@ pub struct Slot {
     pub checkpoints: crate::checkpoint::Checkpoints,
     /// The user chose to look at the chat's own folder even while it works in a worktree (see `view_folder`).
     pub view_main: std::sync::atomic::AtomicBool,
+    /// The chat's Permissions or Workflow changed: the note telling Claude so (see args::settings_note), sent with the
+    /// user's next message.
+    pub settings_note: Mutex<Option<String>>,
+    /// Whether the chat's pre-hook is due, and where its post-hook stands (see hooks.rs).
+    pub hooks: crate::hooks::SlotHooks,
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -73,7 +78,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default() });
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -225,6 +230,7 @@ mod tests {
             subagent_model: None,
             helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
             path_env: None,
+            endpoint: None,
         };
         let slots = Slots::default();
         let mut open = vec![];

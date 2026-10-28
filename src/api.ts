@@ -2,9 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
+import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
+import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset, WindowProvider } from "./lib/remoteChats";
+import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -71,6 +74,14 @@ export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
   /** Whether the claude at this path is logged in, and as whom; rejects when claude can't say. */
   claudeLogin: (claudePath: string) => invoke<ClaudeLogin>("claude_login", { claudePath }),
+  /** The providers a chat can run on: Claude Code, and each other whose CLI is installed. */
+  listProviders: () => invoke<ProviderListing[]>("list_providers"),
+  /** The endpoints the user set up (Settings → Endpoints), with whether each one's key variable is set in their login shell. */
+  listEndpoints: () => invoke<EndpointStatus[]>("list_endpoints"),
+  /** Saves the whole list; rejects, in words, with what to fix. Resolves to what was kept (ids made for new ones). */
+  saveEndpoints: (endpoints: Endpoint[]) => invoke<Endpoint[]>("save_endpoints", { endpoints }),
+  /** Asks an endpoint what models it serves; rejects, in words, when it can't say (then they are typed). */
+  fetchEndpointModels: (url: string, keyEnv: string | null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv }),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
   applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>
@@ -78,7 +89,8 @@ export const api = {
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
-  sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /** `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it. */
+  sendMessage: (slot: string, text: string, auto?: boolean) => invoke<number>("send_message", { slot, text, ...(auto ? { auto } : {}) }),
   /**
    * Asks a side question about the chat (`aside` names the popover's side chat, started by its first question): a read-only copy
    * of the chat's conversation answers it, as aside events. `model` null is the chat's own. Resolves to whether it has the
@@ -113,6 +125,8 @@ export const api = {
   setAgentLimit: (limit: number) => invoke<void>("set_agent_limit", { limit }),
   /** What the user saved for a project (its setup lines, its Run command): the backend runs them from here, never from a file in the project. */
   setProjectSetup: (folder: string, commands: string[], run: string | null) => invoke<void>("set_project_setup", { folder, commands, run }),
+  /** The pre- and post-hooks the user wrote, workspace-wide and per project: the backend applies them where a message goes out and a turn ends. */
+  setChatHooks: (table: HookTable) => invoke<void>("set_chat_hooks", { table }),
   /** What the project's files suggest for its setup and Run command. Only offered: nothing is saved until the user presses Save. */
   suggestSetup: (folder: string) => invoke<SetupSuggestion>("suggest_setup", { folder }),
   /** The user's answer on an agent whose setup failed: "start" it anyway, or run the setup "again"; or "stop" a setup that is running. */
@@ -121,7 +135,7 @@ export const api = {
   runProject: (slot: string, id: string) => invoke<void>("run_project", { slot, id }),
   closeWorker: (worker: string, agreed?: CloseAgreed) => invoke<void>("orchestra_close_worker", { worker, agreed: agreed ?? null }),
   /** Starts a worker for the main agent `main`, as the user's own doing (the main agent is told). Resolves to the worker's id. */
-  spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model, role: w.role ?? null }),
+  spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model, role: w.role ?? null, ...(w.provider ? { provider: w.provider } : {}) }),
   /** Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id. */
   setRoles: (main: string, roles: Role[]) => invoke<void>("orchestra_set_roles", { main, roles }),
   /** A team's "Review and test what an agent builds" setting, on its Lead (see src-tauri/src/orchestra/review.rs). */
@@ -215,6 +229,8 @@ export const api = {
   earlierEvents: (folder: string, sessionId: string, hidden: number) => invoke<HistoryPage>("earlier_events", { folder, sessionId, hidden }),
   /** Which of the folders no longer exist. */
   foldersGone: (folders: string[]) => invoke<string[]>("folders_gone", { folders }),
+  /** Whether a restart that didn't go through the window (a script swapping the app in place) asked for the chats back. */
+  takeRestoreMarker: () => invoke<boolean>("take_restore_marker"),
   /** Where each folder was before it moved, as Lantern recorded it. */
   relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
   /** The recent folders that are gone, each with the place it probably moved to. */
@@ -349,6 +365,43 @@ export const api = {
   onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
+  /** Settings › Remote control: whether it is on, and the paired phones. */
+  remoteSettings: () => invoke<RemoteView>("remote_settings"),
+  remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
+  remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  remoteSetRichNotifications: (on: boolean) => invoke<RemoteView>("remote_set_rich_notifications", { on }),
+  /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
+  remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
+  remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
+  /** Imports the push key (a .p8 file) for the phones' lock-screen cards: checked, then kept in the Keychain. Rejects, in words, when it isn't one. */
+  remoteSetLiveKey: (path: string, keyId: string, teamId: string) => invoke<RemoteView>("remote_set_live_key", { path, keyId, teamId }),
+  /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
+  remotePair: () => invoke<PairView>("remote_pair"),
+  remotePairCancel: () => invoke<void>("remote_pair_cancel"),
+  /** Forgets a paired phone: it can't connect again until it pairs again. */
+  remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
+  /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
+  remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** A phone connected or went: ask remoteSettings who is connected now. */
+  onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
+  /** A paired phone asked for an asleep chat: wake it where it is. */
+  onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
+  /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
+  onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
+  /** Which presets a phone may choose between (see lib/remoteChats.ts WindowPreset), and where it may start a chat (WindowProvider). */
+  remoteWindowControls: (presets: WindowPreset[], providers: WindowProvider[]) => invoke<void>("remote_window_controls", { presets, providers }),
+  /** A paired phone asked to put a chat on Ask or Auto: the window checks it (Auto only if Settings allows it) and switches it. */
+  onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
+  /** A paired phone asked to close a chat: the window checks it and closes it as the sidebar does. */
+  onRemoteClose: (cb: (r: RemoteClose) => void): Promise<UnlistenFn> => listen<RemoteClose>("remote-close-chat", (e) => cb(e.payload)),
+  /** A paired phone asked to put a chat on Chat or Step by step. */
+  onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
+  /** A paired phone asked to put a chat on one of the presets. */
+  onRemoteSetPreset: (cb: (r: RemoteSetPreset) => void): Promise<UnlistenFn> => listen<RemoteSetPreset>("remote-set-preset", (e) => cb(e.payload)),
+  /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
+  remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
+  /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */
+  remoteNewChatDone: (id: string, slot: string | null, error: string | null) => invoke<void>("remote_new_chat_done", { id, slot, error }),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };

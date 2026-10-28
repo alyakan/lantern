@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hasPendingPrompt, initialState, reducer, type State, type ToolItem } from "./store";
-import { chatState, isBusy } from "./sessions";
+import { chatState, firstPrompt, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
 const ev = (state: State, event: UiEvent) => reducer(state, { type: "ui_event", event });
@@ -226,6 +226,67 @@ describe("reducer", () => {
     const flavour = '[Lantern: this chat switched to Architecture. The user picked it. How Architecture works:\n\n{"nodes": [{"id": "a"}]}\n\n(end of Lantern\'s note)]';
     const s = ev(initialState, { kind: "user_text", text: `${page}\n\n${flavour}\n\nmap it` });
     expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
+  });
+
+  it("a message sent from a paired phone shows in the chat, and Claude is working on it", () => {
+    const s = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "ship it", at: 5, sent_by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "ship it", at: 5 });
+    expect(s).toMatchObject({ status: "running", thinking: true });
+    // A replayed message (no sender) doesn't start anything.
+    expect(ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "old" }).status).toBe("idle");
+  });
+
+  it("a post-hook is a note of Lantern's own, not a prompt, whether it was sent now or replayed", () => {
+    const sent = ev({ ...initialState, status: "running" }, { kind: "user_text", text: "[Lantern post-hook]\nUpdate the brain if needed", at: 9, sent_by: "lantern" });
+    expect(sent.items[0]).toEqual({ type: "hook", id: "h1", text: "Update the brain if needed", at: 9 });
+    expect(sent).toMatchObject({ status: "running", thinking: true });
+    // Replayed (no sender): shown the same, and it starts nothing.
+    const replayed = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "[Lantern post-hook]\nUpdate the brain if needed" });
+    expect(replayed.items[0]).toMatchObject({ type: "hook", text: "Update the brain if needed" });
+    expect(replayed.status).toBe("idle");
+    // It is not a prompt: it names no chat.
+    expect(firstPrompt(replayed)).toBeNull();
+  });
+
+  it("a Stop hook keeping Claude going is a hook too, so the answer before it stays the answer", () => {
+    const running = { ...initialState, status: "running" as const, items: [{ type: "user" as const, id: "u1", text: "any more reports?" }, { type: "assistant" as const, id: "m1", text: "Yes, 44 users." }] };
+    const after = ev(running, { kind: "user_text", text: "Stop hook feedback:\n[brain nudge]: Save what you learned.\n", at: 9 });
+    expect(after.items[2]).toEqual({ type: "hook", id: "h1", text: "Save what you learned.", at: 9 });
+    expect(after.status).toBe("running");
+  });
+
+  it("a compaction is Lantern's bookkeeping: the chat shows nothing of it", () => {
+    const s = { ...initialState, status: "running" as const };
+    expect(ev(s, { kind: "compacted" })).toEqual(s);
+  });
+
+  it("a phone's message with photos says how many, and photos alone are still a message", () => {
+    const s = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "what is this?", at: 5, sent_by: "phone-1", images: 2 });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "what is this?", images: 2 });
+    const alone = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "", at: 6, sent_by: "phone-1", images: 1 });
+    expect(alone.items[0]).toMatchObject({ type: "user", text: "", images: 1 });
+    expect(alone).toMatchObject({ status: "running", thinking: true });
+    // A message with none carries no count.
+    expect(ev(initialState, { kind: "user_text", text: "hi", sent_by: "phone-1" }).items[0]).not.toHaveProperty("images");
+  });
+
+  it("a prompt answered on a phone first closes its card here with that answer, and one answered here stays as it was", () => {
+    let s = ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} });
+    s = ev(s, { kind: "permission_resolved", request_id: "p1", allow: false, by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ type: "permission", id: "p1", decision: "denied" });
+    s = ev(s, { kind: "permission_requested", request_id: "p2", tool_name: "Bash", input: {} });
+    s = reducer(s, { type: "permission_decided", id: "p2", allow: true });
+    s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
+    expect(s.items[1]).toMatchObject({ id: "p2", decision: "allowed" });
+  });
+
+  it("a message replayed after a Workflow change shows without the backend's settings note, before a flavour note or alone", () => {
+    // The note repeats the whole new prompt, which mentions other notes and brackets of its own.
+    const settings = "[Lantern: this chat's Permissions or Workflow changed, and Claude was restarted on the same conversation. From here on:\n\nA message that starts with \"[Lantern: this chat switched to <Flavour>…]\" means …\n\n(end of Lantern's note)]";
+    const flavour = "[Lantern: this chat switched to Debug. The user picked it.]";
+    expect(ev(initialState, { kind: "user_text", text: `${settings}\n\n${flavour}\n\nit crashes` }).items[0]).toMatchObject({ type: "user", text: "it crashes", switchedTo: "debug" });
+    expect(ev(initialState, { kind: "user_text", text: `${settings}\n\nbuild it` }).items[0]).toMatchObject({ type: "user", text: "build it" });
+    expect(ev(initialState, { kind: "user_text", text: "[Lantern: something else]\n\nhi" }).items[0]).toMatchObject({ text: "[Lantern: something else]\n\nhi" });
   });
 
   it("a message replayed from a Learn (or explaining) chat is Build with Explain as you go on, and keeps it when sent", () => {

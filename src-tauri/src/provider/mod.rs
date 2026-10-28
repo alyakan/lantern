@@ -8,6 +8,11 @@
 
 pub mod claude;
 pub mod claude_session;
+pub mod codex;
+pub mod codex_events;
+pub mod codex_prompt;
+pub mod codex_session;
+pub mod gateway;
 
 use crate::session::{EditHook, Session, SessionConfig};
 use crate::ui_event::Sink;
@@ -20,6 +25,11 @@ use std::path::PathBuf;
 pub enum ProviderId {
     #[default]
     Claude,
+    /// OpenAI's Codex CLI, driven through `codex app-server`.
+    Codex,
+    /// Claude Code sent to an endpoint of the user's (see endpoints.rs). Not a CLI of its own, so not in `all()`: its choices
+    /// are the endpoints, which the window is told from the saved list.
+    Gateway,
     /// A stand-in with the capabilities of a CLI that has no auto mode, so tests can tell a provider's limits from Claude's.
     #[cfg(test)]
     Fake,
@@ -29,6 +39,8 @@ impl ProviderId {
     pub fn provider(self) -> &'static dyn Provider {
         match self {
             ProviderId::Claude => &claude::ClaudeProvider,
+            ProviderId::Codex => &codex::CodexProvider,
+            ProviderId::Gateway => &gateway::GatewayProvider,
             #[cfg(test)]
             ProviderId::Fake => &FakeProvider,
         }
@@ -37,7 +49,7 @@ impl ProviderId {
     /// Every provider this build knows, whether or not its CLI is installed.
     pub fn all() -> Vec<ProviderId> {
         #[allow(unused_mut)]
-        let mut all = vec![ProviderId::Claude];
+        let mut all = vec![ProviderId::Claude, ProviderId::Codex];
         #[cfg(test)]
         all.push(ProviderId::Fake);
         all
@@ -47,6 +59,8 @@ impl ProviderId {
     pub fn name(self) -> &'static str {
         match self {
             ProviderId::Claude => "claude",
+            ProviderId::Codex => "codex",
+            ProviderId::Gateway => "gateway",
             #[cfg(test)]
             ProviderId::Fake => "fake",
         }
@@ -73,6 +87,15 @@ pub struct Capabilities {
     pub supports_effort: bool,
     /// The model can be switched while the session runs; otherwise a change waits for the next start.
     pub model_switchable: bool,
+    /// Lantern's own tools reach it (its MCP server: the Network tab's requests, the orchestra's): a provider without them is
+    /// not asked to use them, and the window offers nothing that relies on them.
+    pub supports_lantern_tools: bool,
+    /// It can be the Lead of a team (start agents with Lantern's tools). For now only Claude Code can: a team is built on its Lead.
+    pub can_lead_team: bool,
+    /// A paired phone can see and answer the approval cards of a chat on it: they come through Claude Code's permission bridge, which
+    /// is what the phone reads. A provider that asks in its own protocol (Codex) isn't offered for a chat started from a phone, which
+    /// would stop at its first card with nobody able to answer it.
+    pub phone_approvals: bool,
 }
 
 /// A provider and what it can do, as the window is told.
@@ -115,7 +138,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false }
     }
 
     fn models(&self) -> &'static [&'static str] {
@@ -154,6 +177,15 @@ mod tests {
             assert_eq!(id.provider().id(), id);
             assert_eq!(id.info().capabilities, id.provider().capabilities());
         }
+    }
+
+    /// A gateway is Claude Code sent elsewhere, so it is saved by its own name, but it is no CLI of its own to look for.
+    #[test]
+    fn a_gateway_is_saved_as_itself_and_is_not_a_cli_to_find() {
+        assert_eq!(serde_json::to_string(&ProviderId::Gateway).unwrap(), "\"gateway\"");
+        assert_eq!(serde_json::from_str::<ProviderId>("\"gateway\"").unwrap(), ProviderId::Gateway);
+        assert_eq!(ProviderId::Gateway.provider().id(), ProviderId::Gateway);
+        assert!(!ProviderId::all().contains(&ProviderId::Gateway));
     }
 
     #[test]

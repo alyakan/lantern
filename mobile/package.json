@@ -1,0 +1,72 @@
+{
+  "name": "lantern-mobile",
+  "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "index.ts",
+  "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
+    "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
+    "@expo/ui": "~58.0.23",
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@shopify/flash-list": "2.3.2",
+    "expo": "~58.0.16",
+    "expo-build-properties": "~58.0.11",
+    "expo-camera": "~58.0.11",
+    "expo-clipboard": "~58.0.3",
+    "expo-constants": "~58.0.12",
+    "expo-crypto": "~58.0.7",
+    "expo-device": "~58.0.5",
+    "expo-font": "~58.0.9",
+    "expo-glass-effect": "~58.0.4",
+    "expo-haptics": "~58.0.7",
+    "expo-iap": "^6.1.1",
+    "expo-image-manipulator": "~58.0.15",
+    "expo-image-picker": "~58.0.10",
+    "expo-linking": "~58.0.13",
+    "expo-local-authentication": "~58.0.2",
+    "expo-notifications": "~58.1.5",
+    "expo-secure-store": "~58.0.2",
+    "expo-speech": "~58.0.3",
+    "expo-speech-recognition": "^58.0.0",
+    "expo-splash-screen": "~58.0.10",
+    "expo-status-bar": "~58.0.3",
+    "expo-widgets": "~58.0.23",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-keyboard-controller": "1.22.7",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-view-shot": "^6.2.1",
+    "react-native-worklets": "0.13.0",
+    "react-native-zeroconf": "^0.17.6"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "^14.1.0",
+    "@types/jest": "30.0.0",
+    "@types/react": "~19.3.0",
+    "jest": "~30.5.2",
+    "jest-expo": "~58.0.11",
+    "react-test-renderer": "^19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.ts"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@noble/.*|@shopify/flash-list|@expo-google-fonts/.*)"
+    ]
+  },
+  "private": true
+}

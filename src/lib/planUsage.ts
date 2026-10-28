@@ -34,17 +34,17 @@ export function usePlanUsage(): PlanUsage | null {
   return p;
 }
 
-/** "Plan usage: 42% · resets 14:30". */
+/** "Session 42% · resets 14:30". */
 export function planLine(p: PlanUsage): string {
-  const pct = `Plan usage: ${Math.round(p.used * 100)}%`;
+  const pct = `Session ${Math.round(p.used * 100)}%`;
   if (p.resetsAt === null) return pct;
   const at = new Date(p.resetsAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${pct} · resets ${at}`;
 }
 
-/** "Plan: 62% of the 5-hour window, resets in 1h 40m". */
+/** "Session: 62% of the 5-hour window, resets in 1h 40m". */
 export function planSentence(p: PlanUsage, now = Date.now()): string {
-  const pct = `Plan: ${Math.round(p.used * 100)}% of the 5-hour window`;
+  const pct = `Session: ${Math.round(p.used * 100)}% of the 5-hour window`;
   if (p.resetsAt === null) return pct;
   const left = p.resetsAt * 1000 - now;
   return left > 0 ? `${pct}, resets in ${elapsed(left)}` : `${pct}, resetting now`;

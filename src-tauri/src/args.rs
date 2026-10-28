@@ -257,6 +257,52 @@ pub fn valid_effort(e: &str) -> bool {
     EFFORT_LEVELS.contains(&e)
 }
 
+/// How the chat works, as its appended system prompt says it: Lantern's prompt with its Permissions and Workflow, then the
+/// Workflow's own instructions (Step by step's pages, a Lead's, an agent's). The project's notes are added after it.
+pub fn workflow_prompt(mode: Mode, auto_approve: bool, helper: &HelperConfig) -> String {
+    let mut prompt = lantern_prompt(mode, auto_approve, &helper.role);
+    if mode == Mode::Steps {
+        prompt.push_str("\n\n");
+        prompt.push_str(STEPS_PROMPT);
+    }
+    match &helper.role {
+        Role::Normal => {}
+        Role::Main => {
+            prompt.push_str("\n\n");
+            prompt.push_str(ORCHESTRATOR_PROMPT);
+            if !helper.providers.is_empty() {
+                prompt.push_str("\n\n");
+                prompt.push_str(&providers_note(&helper.providers));
+            }
+        }
+        Role::Worker { name, read_only } => {
+            prompt.push_str("\n\n");
+            prompt.push_str(&worker_prompt(name));
+            if *read_only {
+                prompt.push(' ');
+                prompt.push_str(READ_ONLY_PROMPT);
+            }
+        }
+    }
+    prompt
+}
+
+/// How the note `settings_note` makes starts: the frontend reads it off a replayed message by this start.
+pub const SETTINGS_NOTE_START: &str = "[Lantern: this chat's Permissions or Workflow changed";
+
+/// What ends a note that has blank lines of its own in it (the frontend's NOTE_END).
+pub const NOTE_END: &str = "(end of Lantern's note)]";
+
+/// Put before the first message after the chat's Permissions or Workflow changed. Its claude was restarted with the new
+/// prompt, but a resumed conversation can go on reading the prompt it started with (a chat switched from Step by step to
+/// Chat kept writing pages), so the new instructions come as a note too, the way a flavour switch does.
+pub fn settings_note(mode: Mode, auto_approve: bool, helper: &HelperConfig) -> String {
+    format!(
+        "{SETTINGS_NOTE_START}, and Claude was restarted on the same conversation. From here on these are your instructions from Lantern, in place of any earlier ones that say otherwise (an earlier Workflow's included):\n\n{}\n\n{NOTE_END}",
+        workflow_prompt(mode, auto_approve, helper)
+    )
+}
+
 /// Claude Code's command line (only the Claude provider calls this; Mode, Role and HelperConfig are every provider's).
 /// `auto_approve`: Permissions Auto on the Step by step workflow: Claude Code's auto mode approves actions instead of the
 /// in-app prompts; each page is reviewed anyway. Chat and Team say Auto with `Mode::Auto`, so they ignore it.
@@ -306,30 +352,7 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
             a.push(serde_json::json!({"permissions": {"ask": INLINE_AGENT_TOOLS}}).to_string());
         }
     }
-    let mut prompt = lantern_prompt(mode, auto_approve, &helper.role);
-    if steps {
-        prompt.push_str("\n\n");
-        prompt.push_str(STEPS_PROMPT);
-    }
-    match &helper.role {
-        Role::Normal => {}
-        Role::Main => {
-            prompt.push_str("\n\n");
-            prompt.push_str(ORCHESTRATOR_PROMPT);
-            if !helper.providers.is_empty() {
-                prompt.push_str("\n\n");
-                prompt.push_str(&providers_note(&helper.providers));
-            }
-        }
-        Role::Worker { name, read_only } => {
-            prompt.push_str("\n\n");
-            prompt.push_str(&worker_prompt(name));
-            if *read_only {
-                prompt.push(' ');
-                prompt.push_str(READ_ONLY_PROMPT);
-            }
-        }
-    }
+    let mut prompt = workflow_prompt(mode, auto_approve, helper);
     if let Some(notes) = helper.project_notes.as_deref().and_then(clean_project_notes) {
         prompt.push_str("\n\n");
         prompt.push_str(&project_notes_block(&notes));
@@ -405,7 +428,7 @@ fn subagent_advisor_hook() -> serde_json::Value {
 
 /// Adds `extra`'s top-level settings to the command line's `--settings`, merging into the one already there (Claude Code
 /// takes one `--settings`, so a second would replace it).
-fn add_settings(args: &mut Vec<String>, extra: serde_json::Value) {
+pub fn add_settings(args: &mut Vec<String>, extra: serde_json::Value) {
     let existing = args.iter().position(|x| x == "--settings");
     let mut merged = existing.and_then(|i| args.get(i + 1)).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).unwrap_or_else(|| serde_json::json!({}));
     if let (Some(into), Some(from)) = (merged.as_object_mut(), extra.as_object()) {
@@ -489,10 +512,41 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
     a
 }
 
+/// The tools that start other agents: a subagent inline, or a workflow's.
+pub const SUBAGENT_TOOLS: [&str; 3] = ["Agent", "Task", "Workflow"];
+
+/// `a` with subagents off (a harness preset can say so): their tools added to `--disallowedTools`, the one already there
+/// (a worker's) or a new one.
+pub fn without_subagents(a: &mut Vec<String>) {
+    match a.iter().position(|x| x == "--disallowedTools").map(|i| i + 1).filter(|i| *i < a.len()) {
+        Some(i) => {
+            let mut denied: Vec<String> = a[i].split(',').map(String::from).collect();
+            denied.extend(SUBAGENT_TOOLS.iter().filter(|t| !denied.iter().any(|d| d == *t)).map(|t| t.to_string()).collect::<Vec<_>>());
+            a[i] = denied.join(",");
+        }
+        None => {
+            a.push("--disallowedTools".into());
+            a.push(SUBAGENT_TOOLS.join(","));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::ProviderId;
+
+    #[test]
+    fn subagents_off_adds_their_tools_to_the_one_disallowed_list() {
+        let mut a = vec!["--model".to_string(), "sonnet".into()];
+        without_subagents(&mut a);
+        assert_eq!(value_after(&a, "--disallowedTools"), Some("Agent,Task,Workflow"));
+        // A worker already has one: it grows, and there is still only one.
+        let mut w = launch_args(Mode::Auto, false, None, None, None, None, &worker(true), &[]);
+        without_subagents(&mut w);
+        assert_eq!(w.iter().filter(|x| x.as_str() == "--disallowedTools").count(), 1);
+        assert_eq!(value_after(&w, "--disallowedTools"), Some("Agent,Task,Edit,Write,MultiEdit,NotebookEdit,Workflow"));
+    }
 
     #[test]
     fn the_advisor_is_a_flag_only_when_chosen() {
@@ -502,6 +556,24 @@ mod tests {
 
     fn helper() -> HelperConfig {
         HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, providers: vec![], project_notes: None }
+    }
+
+    #[test]
+    fn the_settings_note_repeats_the_new_workflow_prompt_and_ends_where_the_frontend_looks() {
+        let to_chat = settings_note(Mode::Auto, false, &helper());
+        assert!(to_chat.starts_with(SETTINGS_NOTE_START));
+        assert!(to_chat.ends_with("\n\n(end of Lantern's note)]"));
+        assert!(to_chat.contains("Permissions are Auto and its Workflow is Chat."));
+        assert!(to_chat.contains("in place of any earlier ones"));
+        assert!(!to_chat.contains(STEPS_PROMPT));
+        let to_steps = settings_note(Mode::Steps, false, &helper());
+        assert!(to_steps.contains("Permissions are Ask and its Workflow is Step by step.") && to_steps.contains(STEPS_PROMPT));
+        let lead = settings_note(Mode::Ask, false, &HelperConfig { role: Role::Main, ..helper() });
+        assert!(lead.contains(ORCHESTRATOR_PROMPT));
+        // The project's notes stay in the system prompt only: the note is about the settings.
+        let noted = HelperConfig { project_notes: Some("Use pnpm.".into()), ..helper() };
+        assert!(!settings_note(Mode::Auto, false, &noted).contains("Use pnpm."));
+        assert!(value_after(&build_args(Mode::Auto, false, None, None, None, &noted), "--append-system-prompt").unwrap().starts_with(&workflow_prompt(Mode::Auto, false, &noted)));
     }
 
     #[test]

@@ -111,7 +111,7 @@ impl StreamParser {
             "control_response" => initialize_events(&v),
             // `/clear` started a fresh conversation in the same process.
             "conversation_reset" => vec![UiEvent::ConversationReset],
-            "rate_limit_event" => plan_usage(&v).into_iter().collect(),
+            "rate_limit_event" => plan_usage(&v),
             _ => vec![UiEvent::Unknown { raw: v }],
         }
     }
@@ -157,6 +157,8 @@ impl StreamParser {
             }],
             "task_started" => vec![UiEvent::TaskStarted { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id") }],
             "task_notification" => vec![UiEvent::TaskEnded { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id"), status: str_of(v, "status"), summary: str_of(v, "summary") }],
+            // The conversation was compacted (not microcompact, which only trims old tool output): the chat shows nothing of it.
+            "compact_boundary" => vec![UiEvent::Compacted],
             // hooks, task updates, status, …: session bookkeeping, never conversation content
             _ => vec![],
         }
@@ -270,6 +272,7 @@ impl StreamParser {
                         description: str_of(input, "description"),
                         model: input["model"].as_str().map(String::from),
                     });
+                    let todos = (name == "TodoWrite").then(|| todos_of(input)).flatten().map(|items| UiEvent::Todos { parent: parent.clone(), items });
                     out.push(UiEvent::ToolStarted {
                         parent: parent.clone(),
                         tool_use_id: id,
@@ -277,6 +280,7 @@ impl StreamParser {
                         name,
                     });
                     out.extend(agent);
+                    out.extend(todos);
                 }
                 "server_tool_use" | "advisor_tool_result" => out.extend(self.advisor_block(block, parent.clone())),
                 _ => {}
@@ -286,6 +290,13 @@ impl StreamParser {
     }
 
     fn user(&mut self, v: &Value, parent: Option<String>) -> Vec<UiEvent> {
+        // A Stop hook of the user's kept Claude going: what follows is for the hook, not more of the answer.
+        if parent.is_none() {
+            if let Some(text) = crate::hooks::stop_feedback(&v["message"]) {
+                let at = v["timestamp"].as_str().and_then(crate::history::iso_ms);
+                return vec![UiEvent::UserText { text, at, sent_by: None, images: 0 }];
+            }
+        }
         let mut out = vec![];
         for block in v["message"]["content"].as_array().into_iter().flatten() {
             if block["type"] != "tool_result" {
@@ -418,13 +429,21 @@ fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals, main_model: Op
     }
 }
 
-/// How much of the plan's five-hour window is used, as a `rate_limit_event` says (the subscription's limit, shared by every
-/// chat and team). None when it doesn't say.
-fn plan_usage(v: &Value) -> Option<UiEvent> {
+/// How much of the plan's five-hour window and of its weekly window is used, as a `rate_limit_event` says (the subscription's
+/// limits, shared by every chat and team). Each only when it says.
+fn plan_usage(v: &Value) -> Vec<UiEvent> {
     let info = &v["rate_limit_info"];
-    let window = &info["unifiedWindows"]["five_hour"];
-    let used = window["utilization"].as_f64()?;
-    Some(UiEvent::PlanUsage { used, resets_at: window["resetsAt"].as_u64().or(info["resetsAt"].as_u64()), status: info["status"].as_str().unwrap_or("").to_string() })
+    let windows = &info["unifiedWindows"];
+    let mut out = Vec::new();
+    let five = &windows["five_hour"];
+    if let Some(used) = five["utilization"].as_f64() {
+        out.push(UiEvent::PlanUsage { used, resets_at: five["resetsAt"].as_u64().or(info["resetsAt"].as_u64()), status: info["status"].as_str().unwrap_or("").to_string() });
+    }
+    let week = &windows["seven_day"];
+    if let Some(used) = week["utilization"].as_f64() {
+        out.push(UiEvent::WeekUsage { used, resets_at: week["resetsAt"].as_u64() });
+    }
+    out
 }
 
 /// What an `initialize` reply offers: the slash commands (built-ins, custom commands, skills) and the models.
@@ -533,6 +552,30 @@ fn str_of(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
+/// The plan a TodoWrite call carries (its `todos`), at most 50 lines of 200 characters each; None when it has no list.
+/// A line with no words is left out, and a status Claude doesn't use becomes "pending".
+fn todos_of(input: &Value) -> Option<Vec<crate::ui_event::Todo>> {
+    let list = input.get("todos")?.as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|t| {
+                let content = truncate(str_of(t, "content").trim(), 200);
+                if content.is_empty() {
+                    return None;
+                }
+                let status = match str_of(t, "status").as_str() {
+                    s @ ("in_progress" | "completed") => s.to_string(),
+                    _ => "pending".to_string(),
+                };
+                let form = str_of(t, "activeForm");
+                let active_form = if form.trim().is_empty() { content.clone() } else { truncate(form.trim(), 200) };
+                Some(crate::ui_event::Todo { content, status, active_form })
+            })
+            .take(50)
+            .collect(),
+    )
+}
+
 /// Cuts `s` to `max` characters, appending `…` when anything was removed.
 pub fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -554,6 +597,26 @@ mod tests {
     fn parse_all(text: &str) -> Vec<UiEvent> {
         let mut p = StreamParser::default();
         text.lines().flat_map(|l| p.parse_line(l)).collect()
+    }
+
+    #[test]
+    fn a_todowrite_call_makes_a_plan_event_with_clean_lines() {
+        let line = serde_json::json!({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[
+            {"content":"Write tests","status":"in_progress","activeForm":"Writing tests"},
+            {"content":"  ","status":"pending","activeForm":"x"},
+            {"content":"Ship it","status":"weird"}
+        ]}}]}})
+        .to_string();
+        let events = parse_all(&line);
+        let plan: Vec<_> = events.iter().filter_map(|e| if let UiEvent::Todos { parent, items } = e { Some((parent.clone(), items.clone())) } else { None }).collect();
+        assert_eq!(plan.len(), 1);
+        let (parent, items) = &plan[0];
+        assert_eq!(parent, &None);
+        assert_eq!(items.iter().map(|t| (t.content.as_str(), t.status.as_str(), t.active_form.as_str())).collect::<Vec<_>>(), vec![("Write tests", "in_progress", "Writing tests"), ("Ship it", "pending", "Ship it")], "a blank line goes, an unknown status is pending, a missing activeForm is the line");
+        assert!(events.iter().any(|e| matches!(e, UiEvent::ToolStarted { name, .. } if name == "TodoWrite")), "the step is still there");
+        // Another tool's input with a `todos` field, or a TodoWrite with none, is no plan.
+        let other = serde_json::json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Other","input":{"todos":[{"content":"a"}]}},{"type":"tool_use","id":"t3","name":"TodoWrite","input":{}}]}}).to_string();
+        assert!(!parse_all(&other).iter().any(|e| matches!(e, UiEvent::Todos { .. })));
     }
 
     /// Shapes from a real CLI 2.1.293 run with --advisor and an Explore subagent (trimmed, paths changed).
@@ -798,10 +861,11 @@ mod tests {
 
     #[test]
     fn compaction_lines_are_bookkeeping_the_chat_ignores() {
-        // /compact writes a compact_boundary (or a microcompact one) before its result; neither is a chat event.
+        // /compact writes a compact_boundary (or a microcompact one) before its result. The chat shows neither; a compaction
+        // is told as an event of its own (the chat's hooks use it), a microcompact, which only trims old tool output, is not.
         let mut p = StreamParser::default();
         let boundary = r#"{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compact_metadata":{"trigger":"manual","pre_tokens":150000}}"#;
-        assert!(p.parse_line(boundary).is_empty());
+        assert_eq!(p.parse_line(boundary), vec![UiEvent::Compacted]);
         assert!(p.parse_line(r#"{"type":"system","subtype":"microcompact_boundary"}"#).is_empty());
         // A compaction with nothing to compact still ends with a result, so the turn ends.
         let done = p.parse_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"","duration_ms":81,"total_cost_usd":0,"modelUsage":{}}"#);
@@ -952,6 +1016,18 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_hook_keeping_claude_going_is_a_message_of_its_own() {
+        let mut p = StreamParser::default();
+        // As claude 2.1.308 sends it when an exit-2 Stop hook blocks the end of a turn.
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback:\n[brain nudge]: Save what you learned.\n"}]},"parent_tool_use_id":null,"timestamp":"2026-10-28T08:31:18.468Z","isSynthetic":true}"#;
+        let ev = p.parse_line(line);
+        assert!(matches!(&ev[..], [UiEvent::UserText { text, at: Some(_), sent_by: None, images: 0 }] if crate::hooks::post_text(text) == Some("Save what you learned.")), "{ev:?}");
+        // A subagent's is its own business.
+        let sub = line.replace(r#""parent_tool_use_id":null"#, r#""parent_tool_use_id":"toolu_1""#);
+        assert!(p.parse_line(&sub).is_empty());
+    }
+
+    #[test]
     fn background_tasks_come_as_the_whole_list() {
         let mut p = StreamParser::default();
         // As claude 2.1.284 sends it when a run_in_background command starts, and when it ends.
@@ -1016,8 +1092,10 @@ mod tests {
     fn the_plans_five_hour_window_is_read_from_a_rate_limit_event() {
         let mut p = StreamParser::default();
         let ev = p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792066200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.16,"resetsAt":1792066200},"seven_day":{"utilization":0.12,"resetsAt":1792393200}}}}"#);
-        assert!(matches!(ev.as_slice(), [UiEvent::PlanUsage { used, resets_at: Some(1792066200), status }] if (*used - 0.16).abs() < 1e-9 && status == "allowed"), "{ev:?}");
-        // One that doesn't say how full the window is shows nothing.
+        assert!(matches!(ev.as_slice(), [UiEvent::PlanUsage { used, resets_at: Some(1792066200), status }, UiEvent::WeekUsage { used: week, resets_at: Some(1792393200) }] if (*used - 0.16).abs() < 1e-9 && status == "allowed" && (*week - 0.12).abs() < 1e-9), "{ev:?}");
+        // One that says only the week is only the week, and one that says neither shows nothing.
+        let only_week = p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"seven_day":{"utilization":0.5,"resetsAt":1792393200}}}}"#);
+        assert!(matches!(only_week.as_slice(), [UiEvent::WeekUsage { resets_at: Some(1792393200), .. }]), "{only_week:?}");
         assert!(p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#).is_empty());
     }
 

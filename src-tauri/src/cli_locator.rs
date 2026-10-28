@@ -16,15 +16,54 @@ pub fn candidate_paths(home: &Path) -> Vec<PathBuf> {
 }
 
 pub fn locate(override_path: Option<&str>) -> Result<PathBuf, String> {
+    locate_cli("claude", override_path, candidate_paths, "Could not find the `claude` CLI. Install Claude Code, or enter its path.")
+}
+
+/// Where Codex is usually installed (npm's global bin, Homebrew, its own installer, the desktop app's bundled CLI).
+pub fn codex_candidate_paths(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".local/bin/codex"),
+        home.join(".npm-global/bin/codex"),
+        home.join(".bun/bin/codex"),
+        PathBuf::from("/opt/homebrew/bin/codex"),
+        PathBuf::from("/usr/local/bin/codex"),
+        PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
+    ]
+}
+
+/// How long a search that found no Codex stands: a main agent looks for it every time it starts, and without it each of
+/// those would wait on the login shell.
+const NOT_FOUND_FOR: Duration = Duration::from_secs(60);
+
+/// The Codex CLI: `override_path` when the user gave one, else the usual places, else the login shell's PATH.
+pub fn locate_codex(override_path: Option<&str>) -> Result<PathBuf, String> {
+    static NOT_FOUND: std::sync::Mutex<Option<(Instant, String)>> = std::sync::Mutex::new(None);
+    if override_path.map(str::trim).is_none_or(|p| p.is_empty()) {
+        if let Some((at, why)) = NOT_FOUND.lock().unwrap().as_ref() {
+            if at.elapsed() < NOT_FOUND_FOR {
+                return Err(why.clone());
+            }
+        }
+    }
+    let found = locate_cli("codex", override_path, codex_candidate_paths, "Could not find the `codex` CLI. Install Codex (npm i -g @openai/codex), or enter its path.");
+    if override_path.map(str::trim).is_none_or(|p| p.is_empty()) {
+        *NOT_FOUND.lock().unwrap() = found.as_ref().err().map(|why| (Instant::now(), why.clone()));
+    }
+    found
+}
+
+/// `name`'s executable: `override_path` when it's given, else one of the `candidates` (for the home folder), else what the
+/// login shell resolves `name` to.
+fn locate_cli(name: &str, override_path: Option<&str>, candidates: fn(&Path) -> Vec<PathBuf>, missing: &str) -> Result<PathBuf, String> {
     if let Some(p) = override_path.map(str::trim).filter(|p| !p.is_empty()) {
         let p = PathBuf::from(p);
         return if is_executable(&p) { Ok(p) } else { Err(format!("{} is not an executable file", p.display())) };
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "HOME is not set".to_string())?;
-    if let Some(p) = candidate_paths(&home).into_iter().find(|p| is_executable(p)) {
+    if let Some(p) = candidates(&home).into_iter().find(|p| is_executable(p)) {
         return Ok(p);
     }
-    from_login_shell().ok_or_else(|| "Could not find the `claude` CLI. Install Claude Code, or enter its path.".to_string())
+    from_login_shell(name).ok_or_else(|| missing.to_string())
 }
 
 const BEGIN: &str = "__LANTERN_BEGIN__";
@@ -85,8 +124,9 @@ fn shell_value(shell: &str, expr: &str, timeout: Duration) -> Option<String> {
     extract_marked(&String::from_utf8_lossy(&bytes))
 }
 
-fn from_login_shell() -> Option<PathBuf> {
-    let p = PathBuf::from(shell_value(&user_shell(), "\"$(command -v claude)\"", SHELL_TIMEOUT)?);
+/// `name` is one of this file's own constants, never user input: it goes into a shell command.
+fn from_login_shell(name: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(shell_value(&user_shell(), &format!("\"$(command -v {name})\""), SHELL_TIMEOUT)?);
     is_executable(&p).then_some(p)
 }
 
@@ -94,6 +134,16 @@ fn from_login_shell() -> Option<PathBuf> {
 /// but the user's hooks and MCP servers need node, Homebrew tools, and so on.
 pub fn login_shell_path() -> Option<String> {
     shell_value(&user_shell(), "\"$PATH\"", SHELL_TIMEOUT)
+}
+
+/// An environment variable as the user's terminal would have it (a key in ~/.zshrc, say): GUI apps launched from Finder have
+/// none of it. None when it isn't set or is empty, or `name` isn't a variable's name: it goes into a shell command, so
+/// nothing but capital letters, digits and '_' ever does.
+pub fn login_shell_var(name: &str) -> Option<String> {
+    if !crate::endpoints::valid_key_env(name) {
+        return None;
+    }
+    shell_value(&user_shell(), &format!("\"${{{name}}}\""), SHELL_TIMEOUT)
 }
 
 pub fn is_executable(p: &Path) -> bool {
@@ -111,6 +161,18 @@ mod tests {
         std::fs::write(&p, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
+    }
+
+    /// A key is read from the login shell by its name, and a name that isn't one is never put in a shell command.
+    #[test]
+    fn a_login_shell_variable_is_read_by_name_and_only_by_a_name() {
+        unsafe { std::env::set_var("LANTERN_TEST_LOGIN_KEY_7", "sk-test-value") };
+        assert_eq!(login_shell_var("LANTERN_TEST_LOGIN_KEY_7").as_deref(), Some("sk-test-value"));
+        assert_eq!(login_shell_var("LANTERN_TEST_UNSET_KEY_7"), None);
+        for bad in ["", "a", "A;touch /tmp/lantern-injected", "A$(id)", "A B", "A\"B"] {
+            assert_eq!(login_shell_var(bad), None, "{bad:?}");
+        }
+        assert!(!Path::new("/tmp/lantern-injected").exists());
     }
 
     #[test]
@@ -169,6 +231,19 @@ mod tests {
         assert!(shell_value(bg.to_str().unwrap(), "\"$PATH\"", std::time::Duration::from_secs(5)).is_some());
         // Under 5s, the job's own length, but with room for a loaded machine running the whole suite.
         assert!(started.elapsed() < std::time::Duration::from_millis(4500), "waited on the background job");
+    }
+
+    #[test]
+    fn codex_is_found_by_the_path_the_user_gives_and_by_its_usual_places() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = file_with_mode(dir.path(), "codex", 0o755);
+        assert_eq!(locate_codex(Some(p.to_str().unwrap())).unwrap(), p);
+        let not_exec = file_with_mode(dir.path(), "codex2", 0o644);
+        assert!(locate_codex(Some(not_exec.to_str().unwrap())).unwrap_err().contains("not an executable"));
+        let c = codex_candidate_paths(Path::new("/Users/x"));
+        assert!(c.contains(&PathBuf::from("/Users/x/.local/bin/codex")) && c.contains(&PathBuf::from("/opt/homebrew/bin/codex")));
+        // Claude's own places are unchanged.
+        assert!(candidate_paths(Path::new("/Users/x")).iter().all(|p| p.ends_with("claude")));
     }
 
     #[test]

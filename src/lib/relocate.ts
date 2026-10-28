@@ -8,6 +8,7 @@ export const FOLDER_RECORDS = [
   "settings.subagentsByFolder",
   "settings.promptHistory",
   "settings.harnessByFolder",
+  "settings.providerByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
   // The command typed for a project's tests, when Lantern can't tell how it is tested (the merge card's Run tests).
@@ -26,6 +27,8 @@ export const FOLDER_RECORDS = [
   // What to do once a pull request's checks run (Off, Tell me, Fix it myself), and how far each pull request's fixing has got.
   "prChecks.byFolder",
   "prChecks.loopByFolder",
+  // The project's own pre- and post-hook, in place of the workspace's (Settings → Hooks).
+  "settings.chatHooksByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */
@@ -48,6 +51,9 @@ export const NOT_FOLDER_KEYED = [
   "settings.harnessBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.
   "session.agentIds",
+  // The provider a session runs on (set only for one that isn't Claude's), and each other provider's model and effort.
+  "settings.providerBySession",
+  "settings.providerPrefs",
   "settings.model",
   "settings.effort",
   "settings.defaultModel",
@@ -58,6 +64,8 @@ export const NOT_FOLDER_KEYED = [
   "settings.harnessPresets",
   // Keep the Mac awake while Claude works (Settings → General).
   "settings.keepAwake",
+  // The pre- and post-hook for every project (Settings → Hooks).
+  "settings.chatHooks",
   "settings.theme",
   "settings.customTheme",
   "settings.textSize",

@@ -1,6 +1,7 @@
 import type { ChatItem } from "../store";
 import { basename } from "./diff";
 import { QUESTION_TOOL, readQuestions } from "./questions";
+import { outsideHooks } from "./hookItems";
 
 export interface Attention {
   /** Changes whenever there is something new to tell the user; the same key is never announced twice. */
@@ -24,9 +25,9 @@ function firstLine(markdown: string): string {
  * What the user should hear about when the window isn't in front: a turn that just ended, or a permission prompt
  * waiting for an answer. Null when the conversation doesn't need them (e.g. mid-turn, or a replayed session).
  */
-export function attentionFor(items: ChatItem[], folder: string | null, describe: (input: unknown) => string): Attention | null {
+export function attentionFor(items: ChatItem[], folder: string | null, describe: (input: unknown) => string, agent = "Claude"): Attention | null {
   const last = items[items.length - 1];
-  const title = folder ? `Claude · ${basename(folder)}` : "Claude";
+  const title = folder ? `${agent} · ${basename(folder)}` : agent;
   if (last?.type === "permission" && last.decision === null) {
     const input = (last.input ?? {}) as { plan?: string; steps?: string; action?: unknown };
     if (last.toolName === "ExitPlanMode") return { key: last.id, kind: "waiting", title, body: `Plan ready for review: ${firstLine(input.plan ?? "")}` };
@@ -43,8 +44,10 @@ export function attentionFor(items: ChatItem[], folder: string | null, describe:
   if (last?.type !== "turn") return null;
   if (last.stopped) return { key: last.id, kind: "stopped", title, body: "Stopped" };
   if (last.isError) return { key: last.id, kind: "failed", title, body: `Ended with an error${last.result ? `: ${firstLine(last.result)}` : ""}` };
-  // This turn's reply only: a turn that just ran tools has none, and an earlier turn's reply isn't news.
-  const turnStart = items.map((it) => it.type).lastIndexOf("user");
-  const reply = items.slice(turnStart + 1).reverse().find((it) => it.type === "assistant");
+  // This turn's reply only: a turn that just ran tools has none, and an earlier turn's reply isn't news. What Claude said
+  // doing a post-hook ("nothing to save") isn't the reply.
+  const answered = outsideHooks(items);
+  const turnStart = answered.map((it) => it.type).lastIndexOf("user");
+  const reply = answered.slice(turnStart + 1).reverse().find((it) => it.type === "assistant");
   return { key: last.id, kind: "finished", title, body: (reply?.type === "assistant" && firstLine(reply.text)) || "Done" };
 }

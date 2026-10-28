@@ -4,7 +4,7 @@ import { Md } from "./Md";
 import { MessageActions, type MessageAction } from "./MessageActions";
 import type { ChatItem, TestRunItem } from "../store";
 import type { NewRule } from "../types";
-import { groupItems, sameRow, type Row } from "../lib/activity";
+import { groupItems, sameRow, type HookRow, type Row } from "../lib/activity";
 import { draftOf } from "../lib/paste";
 import { workingVerb } from "../lib/verbs";
 import { friendlyNotes } from "../lib/wakeNote";
@@ -36,6 +36,22 @@ function NoteLine({ text }: { text: string }) {
         </button>
       )}
     </>
+  );
+}
+
+/** The post-hook sent after an answer, with what Claude did for it folded away; open while something in it waits for the user. */
+function HookCard({ row, render }: { row: HookRow; render: (row: Row) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const shown = open || row.waiting;
+  return (
+    <div className="hook-card">
+      <button type="button" className="hook-card-head" aria-expanded={shown} onClick={() => setOpen(!open)} title={shown ? "Hide what Claude did" : "Show what Claude did"}>
+        <span className="auto-turn-dot" aria-hidden />
+        <span className="hook-card-text">Post-hook: {row.text}</span>
+        <span className="hook-card-toggle">{shown ? "Hide" : "Show"}</span>
+      </button>
+      {shown && <div className="hook-card-body">{row.rows.map(render)}</div>}
+    </div>
   );
 }
 
@@ -171,6 +187,12 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
           <div className="msg user">
             <CollapsibleText>{row.text}</CollapsibleText>
           </div>
+          {/* The pictures went to Claude and not here: only that they were sent is known. */}
+          {!!row.images && (
+            <div className="msg-note" role="note">
+              {row.images === 1 ? "1 photo from your phone" : `${row.images} photos from your phone`}
+            </div>
+          )}
           <MessageActions text={row.text} align="end" actions={actions} />
         </>
       );
@@ -189,6 +211,8 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
         </>
       );
     }
+    case "hook":
+      return <HookCard row={row} render={(r) => <RowView key={r.id} row={r} folder={folder} latest={false} {...handlers} />} />;
     case "activity":
       return <ActivityGroup steps={row.steps} entries={row.entries} live={row.live} verb={verb} folder={folder} {...handlers} />;
     case "permission":

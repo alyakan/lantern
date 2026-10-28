@@ -75,4 +75,83 @@ describe("PermissionCard", () => {
     expect(container.textContent).toContain("Allowed by your rule: Bash: npm test …");
     expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
   });
+
+  describe("a chat on another agent (Codex)", () => {
+    const codex = { ...item, provider: "codex", input: { provider: "codex", command: "/bin/zsh -lc \"npm test\"", cwd: "/p/web", network: "registry.npmjs.org (https)", description: "needs the network", warnings: ["Has characters that can pass for another one: а (U+0430)."] } };
+
+    it("shows the command, where it runs, the network host and its reason as Codex's word, and the warnings", () => {
+      const onDecide = vi.fn();
+      const { container } = render(<PermissionCard item={codex} onDecide={onDecide} />);
+      expect(container.querySelector("pre")?.textContent).toBe('/bin/zsh -lc "npm test"');
+      expect(container.textContent).toContain("Runs in/p/web");
+      expect(container.textContent).toContain("Networkregistry.npmjs.org (https)");
+      expect(container.textContent).toContain("Codex says, and Lantern doesn't check: needs the network");
+      expect(container.textContent).toContain("⚠ Has characters that can pass for another one: а (U+0430).");
+      fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+      expect(onDecide).toHaveBeenCalledWith("perm-1", true);
+    });
+
+    it("never offers Always allow…: a rule would be Claude's", () => {
+      render(<PermissionCard item={codex} onDecide={() => {}} />);
+      expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
+      render(<PermissionCard item={{ ...codex, id: "p2", toolName: "Permissions", input: { permissions: "Use the network", cwd: "/p" } }} onDecide={() => {}} />);
+      expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
+    });
+
+    it("is chosen by the chat's provider: a Claude request claiming to be Codex's is a plain card with no invented folder", () => {
+      const { container } = render(<PermissionCard item={{ ...item, input: { command: "npm test", provider: "codex", cwd: "/safe", description: "harmless" } }} onDecide={() => {}} />);
+      expect(container.textContent).not.toContain("Runs in");
+      expect(container.textContent).not.toContain("harmless");
+    });
+
+    it("shows a long command cut, says so, and can't be allowed until all of it is shown", () => {
+      const command = `${Array.from({ length: 40 }, (_, i) => `echo ${i}`).join("\n")}\nrm -rf ~`;
+      const onDecide = vi.fn();
+      const { container } = render(<PermissionCard item={{ ...codex, input: { command } }} onDecide={onDecide} />);
+      expect(container.querySelector("pre")?.textContent).not.toContain("rm -rf ~");
+      expect(container.textContent).toContain("Shown cut: 41 lines");
+      const allow = screen.getByRole("button", { name: "Allow" });
+      expect(allow).toBeDisabled();
+      fireEvent.click(allow);
+      expect(onDecide).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+      expect(container.querySelector("pre")?.textContent).toBe(command);
+      expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled();
+    });
+
+    it("cuts a very long single line too, and keeps a short one whole", () => {
+      const { container, unmount } = render(<PermissionCard item={{ ...codex, input: { command: `echo hi${" ".repeat(3000)}; rm -rf ~` } }} onDecide={() => {}} />);
+      expect(container.textContent).toContain("Shown cut");
+      unmount();
+      render(<PermissionCard item={{ ...codex, input: { command: "echo hi" } }} onDecide={() => {}} />);
+      expect(screen.queryByText(/Shown cut/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled();
+    });
+
+    it("lists every file of a change, one to a line", () => {
+      const files = Array.from({ length: 30 }, (_, i) => `Create /p/f${i}.txt`).join("\n");
+      const { container } = render(<PermissionCard item={{ ...codex, toolName: "Write", input: { file_path: files } }} onDecide={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+      expect(container.querySelector("pre")?.textContent).toBe(files);
+    });
+
+    it("can't be allowed when it says nothing of what it would do", () => {
+      render(<PermissionCard item={{ ...codex, input: { provider: "codex" } }} onDecide={() => {}} />);
+      expect(screen.getByText("Codex didn't say what this would do. Deny it.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Allow" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    });
+
+    it("says what a network or stdin request is, which has no command of its own", () => {
+      render(<PermissionCard item={{ ...codex, input: { action: "Network access", network: "evil.example (https)", cwd: "/p" } }} onDecide={() => {}} />);
+      expect(screen.getByText("Network access")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled();
+    });
+
+    it("keeps how many lines it had once decided", () => {
+      const { container } = render(<PermissionCard item={{ ...codex, decision: "allowed", input: { command: "echo a\nrm -rf ~" } }} onDecide={() => {}} />);
+      expect(container.textContent).toContain("✓ Allowed");
+      expect(container.textContent).toContain("echo a (+1 more lines)");
+    });
+  });
 });

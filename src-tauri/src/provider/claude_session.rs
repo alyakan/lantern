@@ -1,6 +1,7 @@
 //! A running `claude` process: stream-json lines in and out, and the control requests on the same pipes.
 
-use crate::args::{enabled_plugins, launch_args, Role, ADVISOR_REVIEW_ENV};
+use crate::args::{add_settings, enabled_plugins, launch_args, Role, ADVISOR_REVIEW_ENV};
+use crate::endpoints::gateway_env;
 use crate::session::{EditHook, SessionConfig};
 use crate::stream_parser::StreamParser;
 use crate::ui_event::{Sink, UiEvent};
@@ -12,7 +13,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
-const STDERR_TAIL_BYTES: usize = 4000;
+pub(super) const STDERR_TAIL_BYTES: usize = 4000;
 
 /// One running `claude` process.
 pub struct ClaudeSession {
@@ -49,7 +50,26 @@ fn command(cfg: &SessionConfig) -> Command {
     let worker = matches!(cfg.helper.role, Role::Worker { .. });
     // A worker starts with none of the user's plugins: which those are is read from their settings (see launch_args).
     let plugins = if worker { std::env::var_os("HOME").map(|home| enabled_plugins(std::path::Path::new(&home), &cfg.folder)).unwrap_or_default() } else { vec![] };
-    cmd.args(launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins)).current_dir(&cfg.folder);
+    let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
+    // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
+    // go there, a command line is readable by any process), and the token and what to take out in the environment.
+    // Subagents off: claude starts without the tools that start them.
+    if cfg.subagent_model.as_deref() == Some(crate::session::SUBAGENTS_OFF) {
+        crate::args::without_subagents(&mut args);
+    }
+    let gateway = cfg.endpoint.as_ref().zip(cfg.model.as_deref()).map(|(g, model)| gateway_env(g, model));
+    if let Some(g) = &gateway {
+        add_settings(&mut args, g.settings.clone());
+    }
+    cmd.args(args).current_dir(&cfg.folder);
+    if let Some(g) = &gateway {
+        for k in g.remove {
+            cmd.env_remove(k);
+        }
+        for (k, v) in &g.set {
+            cmd.env(k, v);
+        }
+    }
     // A chat whose advisor checks its risky changes doesn't also have the security-guidance plugin review every stop and
     // commit on another model.
     if cfg.advisor.is_some() && !worker {
@@ -57,8 +77,15 @@ fn command(cfg: &SessionConfig) -> Command {
             cmd.env(k, v);
         }
     }
-    if let Some(m) = &cfg.subagent_model {
-        cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+    match cfg.subagent_model.as_deref() {
+        // No subagents, so no model for them, whatever Lantern itself was started with.
+        Some(crate::session::SUBAGENTS_OFF) => {
+            cmd.env_remove("CLAUDE_CODE_SUBAGENT_MODEL");
+        }
+        Some(m) => {
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+        }
+        None => {}
     }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
@@ -184,7 +211,17 @@ impl ClaudeSession {
     }
 
     pub async fn send(&mut self, text: &str) -> Result<(), String> {
-        let msg = serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}});
+        self.send_with(text, Vec::new()).await
+    }
+
+    /// Writes a user message: the `images` (Claude's image blocks, which read best before the words) and then `text`, when
+    /// there are any words.
+    pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
+        let mut content = images;
+        if !text.is_empty() || content.is_empty() {
+            content.push(serde_json::json!({"type": "text", "text": text}));
+        }
+        let msg = serde_json::json!({"type": "user", "message": {"role": "user", "content": content}});
         let mut guard = self.stdin.lock().await;
         let stdin = guard.as_mut().ok_or("The Claude session is not running")?;
         stdin.write_all(format!("{msg}\n").as_bytes()).await.map_err(|e| format!("Could not send to claude: {e}"))?;
@@ -263,12 +300,12 @@ impl ClaudeSession {
 }
 
 /// Signals claude's process group (its pid is the group id, see `process_group` in spawn).
-fn signal_group(pid: u32, sig: libc::c_int) {
+pub(super) fn signal_group(pid: u32, sig: libc::c_int) {
     unsafe { libc::kill(-(pid as libc::pid_t), sig) };
 }
 
 /// Writes one line to claude's stdin. False if it's closed or the write fails.
-async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool {
+pub(super) async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool {
     let mut guard = stdin.lock().await;
     match guard.as_mut() {
         Some(s) => s.write_all(format!("{line}\n").as_bytes()).await.is_ok() && s.flush().await.is_ok(),
@@ -282,7 +319,7 @@ const READ_ERRORS: u32 = 100;
 /// The next line of a pipe, or None once it's closed. Bytes that aren't UTF-8 are replaced rather than ending the
 /// read: a pipe that stops being drained blocks claude, and the chat would sit "running" forever. A read that fails is
 /// tried again, but a pipe that only ever fails is as good as closed, or this would never end.
-async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
+pub(super) async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
     let mut failed = 0;
     loop {
         buf.clear();
@@ -323,7 +360,7 @@ fn offstream_source(tool_use_id: &str, dir: Option<&str>, folder: &std::path::Pa
     Some(crate::offstream::Source::Agent { tool_use_id: tool_use_id.into(), subagents: transcript.with_extension("").join("subagents") })
 }
 
-fn push_tail(tail: &mut String, line: &str) {
+pub(super) fn push_tail(tail: &mut String, line: &str) {
     tail.push_str(line);
     tail.push('\n');
     if tail.len() > STDERR_TAIL_BYTES {
@@ -368,6 +405,7 @@ mod tests {
             subagent_model: None,
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
             path_env: None,
+            endpoint: None,
         }
     }
 
@@ -444,6 +482,84 @@ mod tests {
         let bare = command(&config("/bin/claude".into(), dir.path(), None));
         assert_eq!(bare.as_std().get_envs().count(), 0);
         assert!(!bare.as_std().get_args().any(|a| a == "--advisor" || a == "--resume"));
+    }
+
+    /// A gateway chat: the token is in the environment and never on the command line (any process of the user reads that),
+    /// and the place to go and every model slot are in the one `--settings`, merged with what a Lead already has there.
+    #[test]
+    fn a_gateway_chat_is_started_with_its_token_in_the_environment_and_its_models_in_settings() {
+        use crate::endpoints::{GatewayLaunch, Secret};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("/bin/claude".into(), dir.path(), Some("sess-1"));
+        cfg.provider = crate::provider::ProviderId::Gateway;
+        cfg.model = Some("qwen3-coder:30b".into());
+        cfg.endpoint = Some(GatewayLaunch { id: "ollama".into(), url: "http://localhost:11434".into(), key: Some(Secret::new("sk-secret-value".into())) });
+        let cmd = command(&cfg);
+        let cmd = cmd.as_std();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(!args.iter().any(|a| a.contains("sk-secret-value")), "no secret on the command line");
+        assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1, "Claude Code takes one --settings");
+        let settings: serde_json::Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+        assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], "http://localhost:11434");
+        assert_eq!(settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3-coder:30b");
+        assert_eq!(args[args.iter().position(|a| a == "--model").unwrap() + 1], "qwen3-coder:30b");
+        let envs: std::collections::HashMap<String, Option<String>> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(envs["ANTHROPIC_AUTH_TOKEN"].as_deref(), Some("sk-secret-value"));
+        // What the user's shell may have set that would redirect it, or send as another credential, is removed (None = removed).
+        for gone in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"] {
+            assert_eq!(envs.get(gone), Some(&None), "{gone}");
+        }
+        // A Lead's own settings are kept beside it, not replaced.
+        let mut lead = cfg.clone();
+        lead.helper.role = crate::args::Role::Main;
+        let args: Vec<String> = command(&lead).as_std().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1);
+        let settings: serde_json::Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+        assert!(settings["permissions"]["ask"].is_array() && settings["env"]["ANTHROPIC_MODEL"] == "qwen3-coder:30b");
+    }
+
+    /// Real `claude` against an Anthropic-compatible endpoint, started as a gateway chat is: it answers from that endpoint, on
+    /// the endpoint's model, for two turns, and the server's own log (`LANTERN_LIVE_GATEWAY_LOG`) shows that EVERY request it
+    /// got named the chosen model (a colon-and-slash id, passed through unchanged) and carried no Anthropic credential. Run by
+    /// hand (it needs `claude` and the server in /tmp/gw-probe/bin/fake_gateway.py, and reads the user's own login without using it):
+    /// `LANTERN_LIVE_GATEWAY_URL=http://127.0.0.1:18083 LANTERN_LIVE_GATEWAY_LOG=/tmp/gw-probe/log-d.jsonl cargo test live_gateway -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn live_gateway_chat_answers_from_the_endpoint() {
+        use crate::endpoints::GatewayLaunch;
+        let (Ok(url), Ok(log)) = (std::env::var("LANTERN_LIVE_GATEWAY_URL"), std::env::var("LANTERN_LIVE_GATEWAY_LOG")) else { return };
+        let claude = std::env::var("LANTERN_LIVE_CLAUDE").unwrap_or_else(|_| format!("{}/.local/bin/claude", std::env::var("HOME").unwrap()));
+        const MODEL: &str = "openai/qwen3-coder:30b";
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(claude.into(), dir.path(), None);
+        cfg.provider = crate::provider::ProviderId::Gateway;
+        cfg.model = Some(MODEL.into());
+        cfg.endpoint = Some(GatewayLaunch { id: "fake".into(), url, key: None });
+        let (sink, mut rx) = channel_sink();
+        let hook: EditHook = Arc::new(|_: &str, _: Option<String>| {});
+        let mut s = Session::spawn(&cfg, sink, hook).unwrap();
+        s.initialize().await;
+        let mut tokens = Vec::new();
+        for message in ["say hello", "and say it again"] {
+            s.send(message).await.unwrap();
+            let said = tokio::time::timeout(Duration::from_secs(90), next_matching(&mut rx, |e| matches!(e, UiEvent::AssistantText { .. }))).await.expect("no reply from the endpoint");
+            let UiEvent::AssistantText { text, .. } = said else { unreachable!() };
+            assert!(text.contains("fake gateway"), "{text}");
+            let UiEvent::TurnDone { tokens: used, session_tokens, .. } = next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await else { unreachable!() };
+            tokens.push((used, session_tokens));
+        }
+        s.stop().await;
+        // What the window would show of use: tokens, from the result's own usage, for a model Claude Code has no price for.
+        assert!(tokens.iter().all(|(_, session)| *session > 0), "no usage reached the window: {tokens:?}");
+        // Every request the server got, the background ones included, was for the chosen model and not as the user's login.
+        let seen: Vec<serde_json::Value> = std::fs::read_to_string(&log).unwrap().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let posts: Vec<&serde_json::Value> = seen.iter().filter(|r| r["m"] == "POST" && r["path"].as_str().is_some_and(|p| p.starts_with("/v1/messages"))).collect();
+        assert!(posts.len() >= 2, "{seen:?}");
+        for r in &posts {
+            assert_eq!(r["model"], MODEL, "{r}");
+            assert!(!r["auth"].to_string().contains("sk-ant"), "an Anthropic credential reached the endpoint: {r}");
+        }
+        eprintln!("{} requests, models {:?}, usage {tokens:?}", seen.len(), posts.iter().map(|r| r["model"].as_str().unwrap_or("-")).collect::<std::collections::BTreeSet<_>>());
     }
 
     #[tokio::test]
@@ -553,6 +669,29 @@ done"#,
     }
 
     #[tokio::test]
+    async fn pictures_are_written_as_image_blocks_before_the_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("while IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat '{FIXTURE}'\ndone"));
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let block = serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
+        s.send_with("what is this?", vec![block.clone()]).await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        // A picture alone is a message of one block, with no empty text after it; words alone are as they always were.
+        s.send_with("", vec![block.clone()]).await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        s.send("just words").await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        let stdin = std::fs::read_to_string(dir.path().join("stdin.txt")).unwrap();
+        let sent: Vec<serde_json::Value> = stdin.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(sent[0]["message"]["content"], serde_json::json!([block, {"type": "text", "text": "what is this?"}]));
+        assert_eq!(sent[1]["message"]["content"], serde_json::json!([block]));
+        assert_eq!(sent[2]["message"]["content"], serde_json::json!([{"type": "text", "text": "just words"}]));
+        s.stop().await;
+    }
+
+    #[tokio::test]
     async fn unexpected_exit_emits_session_ended_with_stderr() {
         let dir = tempfile::tempdir().unwrap();
         let fake = script(dir.path(), "echo 'boom: not logged in' >&2\nexit 3");
@@ -596,6 +735,22 @@ done"#,
         let (args, sub) = seen.split_once('|').unwrap();
         assert!(args.ends_with("--advisor opus"), "{args}");
         assert_eq!(sub, "haiku");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn subagents_off_starts_claude_without_the_tool_and_no_subagent_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"${{CLAUDE_CODE_SUBAGENT_MODEL-unset}}\" > {d}/seen.txt\ncat > /dev/null"));
+        let (sink, _rx) = channel_sink();
+        let mut cfg = config(fake, dir.path(), None);
+        cfg.subagent_model = Some(crate::session::SUBAGENTS_OFF.into());
+        let s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        let seen = wait_for_file(&dir.path().join("seen.txt")).await;
+        let (args, sub) = seen.split_once('|').unwrap();
+        assert!(args.contains("--disallowedTools Agent,Task,Workflow"), "{args}");
+        assert_eq!(sub, "unset");
         s.stop().await;
     }
 
