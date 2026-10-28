@@ -25,7 +25,7 @@ import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
-import { control, fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { barButton, control, fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
@@ -821,7 +821,7 @@ function StopButton({ onPress }: { onPress: () => void }) {
   const colors = useColors();
   return (
     <PopIn>
-      <PressScale accessibilityRole="button" accessibilityLabel="Stop" accessibilityHint="Stops what Claude is doing" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Stop" accessibilityHint="Stops what Claude is doing" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: colors.onInk }} />
       </PressScale>
     </PopIn>
@@ -873,7 +873,7 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
   };
   return (
     <Animated.View style={{ transform: [{ scale: spring }] }}>
-      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, overflow: "hidden" }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
         <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
             <Txt variant="heading" tone={colors.isDark ? "on-ink" : "white"}>
@@ -909,8 +909,8 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
   }, [listening, breath]);
   const ink = colors.ink2;
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={listening ? "Stop dictating" : "Dictate"} accessibilityState={{ selected: listening }} onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-      {listening && <Animated.View pointerEvents="none" style={{ position: "absolute", width: 40, height: 40, borderRadius: 20, backgroundColor: colors.stop, opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.32] }) }} />}
+    <PressScale accessibilityRole="button" accessibilityLabel={listening ? "Stop dictating" : "Dictate"} accessibilityState={{ selected: listening }} onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+      {listening && <Animated.View pointerEvents="none" style={{ position: "absolute", width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: colors.stop, opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.32] }) }} />}
       <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? colors.stop : "transparent" }}>
         {listening ? (
           <View accessibilityElementsHidden style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: colors.white }} />
@@ -941,7 +941,7 @@ function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onP
       haptic="light"
       scaleTo={0.88}
       opacity={off ? 0.4 : 1}
-      style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}
+      style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}
     >
       <View accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
         <View style={{ position: "absolute", width: 12, height: 2, borderRadius: 1, backgroundColor: colors.ink2 }} />
