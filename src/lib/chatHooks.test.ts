@@ -77,4 +77,10 @@ describe("postText", () => {
     expect(postText(`${POST_PREFIX}update the brain`)).toBe("update the brain");
     expect(postText("update the brain")).toBeNull();
   });
+
+  it("reads a Stop hook's feedback as a post-hook, without an exit-2 hook's command", () => {
+    expect(postText("Stop hook feedback:\nBefore you finish: save it.")).toBe("Before you finish: save it.");
+    expect(postText("Stop hook feedback:\n[brain nudge]: Before you finish: save it.\n")).toBe("Before you finish: save it.");
+    expect(postText("My stop hook feedback:\nno")).toBeNull();
+  });
 });

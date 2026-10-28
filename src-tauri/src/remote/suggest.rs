@@ -110,7 +110,8 @@ pub fn digests(hub: &SessionHub) -> Vec<Digest> {
             let last = |pick: fn(&UiEvent) -> Option<&str>| kept.iter().rev().find_map(|e| pick(&e.event)).map(|t| clip(t, SAID_CHARS)).filter(|t| !t.is_empty());
             let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             Digest {
-                said: last(|e| if let UiEvent::UserText { text, .. } = e { Some(text) } else { None }),
+                // A hook's message isn't what the user said.
+                said: last(|e| if let UiEvent::UserText { text, .. } = e { crate::hooks::post_text(text).is_none().then_some(text.as_str()) } else { None }),
                 replied: last(|e| if let UiEvent::AssistantText { text, .. } = e { Some(text) } else { None }),
                 slot: c.slot,
                 title: c.title.map(|t| clip(&t, 120)).unwrap_or_default(),

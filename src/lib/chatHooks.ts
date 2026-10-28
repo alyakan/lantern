@@ -32,8 +32,17 @@ export const POST_PREFIX = "[Lantern post-hook]\n";
 
 export const NO_HOOKS: HookTable = { pre: { text: "", on: false }, post: { text: "", on: false }, projects: {} };
 
-/** The post-hook in a message, or null when it isn't one. */
-export const postText = (message: string): string | null => (message.startsWith(POST_PREFIX) ? message.slice(POST_PREFIX.length) : null);
+/** What Claude Code's message starts with when a Stop hook of the user's keeps Claude going (hooks.rs STOP_PREFIX). */
+export const STOP_PREFIX = "Stop hook feedback:\n";
+
+/** The post-hook in a message, or null when it isn't one. A Stop hook's feedback counts as one (without an exit-2 hook's `[command]: `). */
+export function postText(message: string): string | null {
+  if (message.startsWith(POST_PREFIX)) return message.slice(POST_PREFIX.length);
+  if (!message.startsWith(STOP_PREFIX)) return null;
+  const reason = message.slice(STOP_PREFIX.length);
+  const cut = reason.startsWith("[") ? reason.indexOf("]: ") : -1;
+  return (cut >= 0 ? reason.slice(cut + 3) : reason).trimEnd();
+}
 
 const readHook = (raw: unknown): Hook | undefined => {
   if (!raw || typeof raw !== "object") return undefined;

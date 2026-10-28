@@ -485,7 +485,7 @@ pub fn started_in(path: &Path) -> Option<String> {
 }
 
 /// A transcript timestamp ("2026-09-28T18:40:24.309Z") as ms since the epoch.
-fn iso_ms(s: &str) -> Option<u64> {
+pub(crate) fn iso_ms(s: &str) -> Option<u64> {
     let (date, time) = s.strip_suffix('Z')?.split_once('T')?;
     let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
     let (y, m, day) = (d.next()??, d.next()??, d.next()??);
@@ -543,6 +543,13 @@ pub fn replay(path: &Path) -> Replay {
     let mut parser = StreamParser::default();
     let mut events = Vec::new();
     for r in records(path) {
+        // A Stop hook's feedback is written as meta, but it splits the answer from what Claude did for the hook.
+        if r["type"] == "user" && r["isMeta"] == true && r["isSidechain"] != true {
+            if let Some(text) = crate::hooks::stop_feedback(&r["message"]) {
+                events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None, images: 0 });
+                continue;
+            }
+        }
         if !in_conversation(&r) {
             continue;
         }
@@ -1022,6 +1029,32 @@ mod tests {
         let order: Vec<&str> = events.iter().filter_map(|e| match e { UiEvent::UserText { .. } => Some("user"), UiEvent::AssistantText { .. } => Some("assistant"), _ => None }).collect();
         assert_eq!(order, vec!["user", "assistant", "user", "assistant", "user", "assistant"]);
         assert_eq!(page(events, None, 2).hidden, 1);
+    }
+
+    #[test]
+    fn a_stop_hooks_feedback_replays_between_the_answer_and_what_claude_did_for_the_hook() {
+        let assistant = |id: &str, text: &str| rec(json!({"type": "assistant", "uuid": id, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}));
+        let body = [
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "message": {"role": "user", "content": "any more reports?"}})),
+            assistant("a1", "Yes, 44 users."),
+            // As claude 2.1.308 writes it.
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "sdk-cli", "isMeta": true, "timestamp": "2026-10-28T07:26:11.127Z", "message": {"role": "user", "content": "Stop hook feedback:\nBefore you finish: save it."}})),
+            assistant("a2", "I saved one note."),
+        ]
+        .join("\n");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("s.jsonl");
+        std::fs::write(&path, body).unwrap();
+        let order: Vec<String> = replay(&path)
+            .events
+            .into_iter()
+            .filter_map(|e| match e {
+                UiEvent::UserText { text, .. } => Some(crate::hooks::post_text(&text).map_or(format!("user: {text}"), |h| format!("hook: {h}"))),
+                UiEvent::AssistantText { text, .. } => Some(format!("assistant: {text}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["user: any more reports?", "assistant: Yes, 44 users.", "hook: Before you finish: save it.", "assistant: I saved one note."]);
     }
 
     #[test]

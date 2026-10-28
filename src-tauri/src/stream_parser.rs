@@ -290,6 +290,13 @@ impl StreamParser {
     }
 
     fn user(&mut self, v: &Value, parent: Option<String>) -> Vec<UiEvent> {
+        // A Stop hook of the user's kept Claude going: what follows is for the hook, not more of the answer.
+        if parent.is_none() {
+            if let Some(text) = crate::hooks::stop_feedback(&v["message"]) {
+                let at = v["timestamp"].as_str().and_then(crate::history::iso_ms);
+                return vec![UiEvent::UserText { text, at, sent_by: None, images: 0 }];
+            }
+        }
         let mut out = vec![];
         for block in v["message"]["content"].as_array().into_iter().flatten() {
             if block["type"] != "tool_result" {
@@ -1006,6 +1013,18 @@ mod tests {
             let line = serde_json::json!({"type": "system", "subtype": sub, "session_id": "s", "tasks": []}).to_string();
             assert!(p.parse_line(&line).is_empty(), "{sub} should be ignored");
         }
+    }
+
+    #[test]
+    fn a_stop_hook_keeping_claude_going_is_a_message_of_its_own() {
+        let mut p = StreamParser::default();
+        // As claude 2.1.308 sends it when an exit-2 Stop hook blocks the end of a turn.
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Stop hook feedback:\n[brain nudge]: Save what you learned.\n"}]},"parent_tool_use_id":null,"timestamp":"2026-10-28T08:31:18.468Z","isSynthetic":true}"#;
+        let ev = p.parse_line(line);
+        assert!(matches!(&ev[..], [UiEvent::UserText { text, at: Some(_), sent_by: None, images: 0 }] if crate::hooks::post_text(text) == Some("Save what you learned.")), "{ev:?}");
+        // A subagent's is its own business.
+        let sub = line.replace(r#""parent_tool_use_id":null"#, r#""parent_tool_use_id":"toolu_1""#);
+        assert!(p.parse_line(&sub).is_empty());
     }
 
     #[test]

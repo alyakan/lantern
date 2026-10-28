@@ -700,7 +700,8 @@ impl<'a> Session<'a> {
         // waiting on a prompt is still going.
         if self.gw.hub.chat(slot).is_some_and(|c| matches!(c.status, super::hub::ChatStatus::Working | super::hub::ChatStatus::NeedsYou)) {
             if let Some(Since::Events(kept) | Since::TooOld { kept }) = self.gw.hub.since(slot, 0) {
-                let start = kept.iter().rposition(|e| matches!(e.event, UiEvent::UserText { .. })).unwrap_or(0);
+                // From the message the user sent: a hook's message after it is still that turn's.
+                let start = kept.iter().rposition(|e| matches!(&e.event, UiEvent::UserText { text, .. } if crate::hooks::post_text(text).is_none())).unwrap_or(0);
                 let live: Vec<RemoteEvent> = kept[start..].iter().filter(|e| e.seq <= seq).filter_map(|e| protocol::to_remote_for(&e.event, extras)).collect();
                 events = merge_current_turn(events, live);
             }

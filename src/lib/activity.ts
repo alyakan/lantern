@@ -37,9 +37,9 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
       flush(false);
       rows.push(it);
     } else if (it.type === "hook") {
-      // What came before it is the user's turn, as far as it went; the hook's work follows.
-      rows.push(...foldTurn(turn, false));
-      turn = [];
+      // What came before it is the user's turn, as far as it went, or an earlier hook's work (a Stop hook that blocked
+      // twice, or one before Lantern's post-hook); this hook's work follows.
+      flush(false);
       hook = { item: it, items: [] };
     } else if (hook) {
       // The turn's closing note ends the hook's work (and stays in the conversation, outside the hook's row).
