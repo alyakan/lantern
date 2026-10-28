@@ -36,7 +36,10 @@ export function PanelMenu({ value, onPick }: { value: Panel; onPick?: (p: Panel)
         <Txt variant="heading" accessibilityRole="header">
           {label}
         </Txt>
-        <Chevron open={open} color={colors.ink2} />
+        {/* Down while closed, as a menu's is; up while it is open. */}
+        <View style={{ transform: [{ rotate: open ? "180deg" : "0deg" }] }}>
+          <Chevron open color={colors.ink2} />
+        </View>
       </PressScale>
       {open && (
         <View accessibilityRole="menu" style={[{ position: "absolute", top: 32, left: -8, minWidth: 200, backgroundColor: colors.card, borderRadius: radius.inner, borderWidth: 1, borderColor: colors.rule, paddingVertical: 4 }, shadow.card]}>
