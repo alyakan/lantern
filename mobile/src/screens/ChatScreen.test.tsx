@@ -1034,6 +1034,30 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(screen.queryByText("What changed")).toBeNull());
   });
 
+  it("lists every file the chat changed from the title bar, each opening its diff", async () => {
+    const more: RemoteEvent[] = [...turn, { kind: "tool_started", tool_use_id: "t9", name: "Write", summary: "notes.md" }, { kind: "file_edited", tool_use_id: "t9", path: "/p/docs/notes.md", created: true, added: 4, removed: 0 }];
+    const { lastOf } = await withSession(more, {}, { diff: "--- /p/Cargo.toml\n+++ /p/Cargo.toml\n@@ -3 +3 @@\n-version = \"0.1.52\"\n+version = \"0.1.53\"\n" });
+    await fireEvent.press(screen.getByRole("button", { name: "Changes: 2 files changed" }));
+    expect(screen.getByText("2 files · +5 −1")).toBeTruthy();
+    // The newest first, and open on it.
+    await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/docs/notes.md" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Cargo.toml, 1 added, 1 removed" }));
+    await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" }));
+    await waitFor(() => expect(screen.getByText("+version = \"0.1.53\"")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByText("2 files · +5 −1")).toBeNull());
+  });
+
+  it("has no Changes button before anything changed", async () => {
+    await withSession(turn.slice(0, 2));
+    expect(screen.queryByRole("button", { name: /^Changes/ })).toBeNull();
+  });
+
+  it("has no Changes button where a pane beside the chat shows them", async () => {
+    await withSession(turn, { changesButton: false });
+    expect(screen.queryByRole("button", { name: /^Changes/ })).toBeNull();
+  });
+
   it("says why a diff couldn't be read", async () => {
     await withSession(turn, {}, { diff: new Error("That file wasn't changed in this chat.") });
     await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
