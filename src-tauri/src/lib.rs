@@ -16,6 +16,9 @@ pub mod menu;
 pub mod menu_bar;
 pub mod merge_tests;
 pub mod navigation;
+pub mod dashboard;
+pub mod dashboard_run;
+pub mod dashboard_tools;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -72,6 +75,8 @@ pub struct AppState {
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
     /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// Which dashboards are trusted, the runs of their forms, and what is running now (see dashboard_run.rs).
+    dashboards: Arc<dashboard_run::Runner>,
     /// The Storage tab's scan, and what Claude's storage_* tools read and mark (see storage/mod.rs).
     storage: Arc<storage::Storage>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
@@ -827,11 +832,22 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // So are the storage_* tools (see storage/mod.rs): they share the bridge call, and are told apart by name.
     let storage = state.storage.clone();
     let login = state.login_path.clone();
+    // And the dashboard_* tools (see dashboard_tools.rs): a run is asked of the user by the helper before it gets here.
+    let dashboards = state.dashboards.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
+        let dashboards = dashboards.clone();
         Box::pin(async move {
+            if dashboard_tools::OPS.contains(&tool.as_str()) {
+                let path_env = tauri::async_runtime::spawn_blocking(move || login.get_or_init(cli_locator::login_shell_path).clone()).await.unwrap_or_default();
+                let (allow, text) = match dashboard_tools::call(&dashboards, folder, &tool, &input, path_env).await {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             let result = tauri::async_runtime::spawn_blocking(move || {
                 if storage::TOOLS.contains(&tool.as_str()) {
                     storage.call(&tool, &input, login.get_or_init(cli_locator::login_shell_path).clone())
@@ -849,6 +865,108 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
         })
     }));
     Ok(slot)
+}
+
+/// The folder's dashboards (`.lantern/dashboards/*.json`), each as a checked spec or the issues found in it.
+#[tauri::command]
+async fn dashboards_list(folder: String) -> Result<Vec<dashboard::Dashboard>, String> {
+    tauri::async_runtime::spawn_blocking(move || dashboard::load(std::path::Path::new(&folder))).await.map_err(|e| e.to_string())
+}
+
+/// Which of the folder's dashboards are trusted, what is running, and the history of runs.
+#[tauri::command]
+fn dashboards_state(state: State<'_, AppState>, folder: String) -> dashboard_run::State {
+    state.dashboards.state(&permission::rules::folder_key(std::path::Path::new(&folder)))
+}
+
+/// Trusts a dashboard as the user saw it (the hash they were shown); refused if the file has changed since.
+#[tauri::command]
+async fn dashboard_trust(state: State<'_, AppState>, folder: String, file: String, hash: String) -> Result<(), String> {
+    let runner = state.dashboards.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        runner.trust(&permission::rules::folder_key(root), root, &file, &hash)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Each form's command in a dashboard, with `~` expanded and its program found on the PATH commands run with: what the user
+/// reads before trusting it.
+#[tauri::command]
+async fn dashboard_commands(state: State<'_, AppState>, folder: String, file: String) -> Result<Vec<dashboard_run::CommandInfo>, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        Ok(dashboard_run::commands(&found, root, path_env.as_deref()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The list a select's options command printed the last time it ran for this dashboard file, and for the values chosen so far of the
+/// fields it depends on (null if never). Runs nothing: opening the tab must not run code, since a script the dashboard calls may
+/// have changed since the user trusted the file.
+#[tauri::command]
+async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String, values: dashboard_run::Values) -> Result<Option<dashboard_run::CachedList>, String> {
+    let runner = state.dashboards.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        runner.options_cached(&permission::rules::folder_key(root), root, &file, &form, &field, &values)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs a select's options command now and keeps its list, for a dashboard the user trusted. Only from a click: Trust, Reload, Retry.
+#[tauri::command]
+async fn dashboard_load_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String, values: dashboard_run::Values) -> Result<dashboard_run::CachedList, String> {
+    let path_env = login_path(&state).await;
+    let root = std::path::Path::new(&folder);
+    state.dashboards.load_options(&permission::rules::folder_key(root), root, &file, &form, &field, &values, path_env).await
+}
+
+/// What pressing a form's button would run, with the values in: shown to the user before it does.
+#[tauri::command]
+async fn dashboard_preview(state: State<'_, AppState>, folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
+    let runner = state.dashboards.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        runner.preview_for(&permission::rules::folder_key(root), root, &file, &form, &values)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs a form of a trusted dashboard and returns the run. The user's own press of the button, after its confirm.
+#[tauri::command]
+async fn dashboard_run(state: State<'_, AppState>, folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Run, String> {
+    let runner = state.dashboards.clone();
+    let path_env = login_path(&state).await;
+    let root = std::path::Path::new(&folder);
+    runner.run(&permission::rules::folder_key(root), root, &file, &form, values, path_env).await
+}
+
+/// One kept run with its output, for a history entry the user opened.
+#[tauri::command]
+fn dashboard_run_detail(state: State<'_, AppState>, folder: String, id: String) -> Option<dashboard_run::Run> {
+    state.dashboards.run_detail(&permission::rules::folder_key(std::path::Path::new(&folder)), &id)
+}
+
+#[tauri::command]
+fn dashboard_stop(state: State<'_, AppState>, folder: String, file: String, form: String) -> bool {
+    state.dashboards.stop(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form)
+}
+
+#[tauri::command]
+fn dashboard_delete_run(state: State<'_, AppState>, folder: String, id: String) -> bool {
+    state.dashboards.delete_run(&permission::rules::folder_key(std::path::Path::new(&folder)), &id)
+}
+
+#[tauri::command]
+fn dashboard_clear_runs(state: State<'_, AppState>, folder: String, file: String, form: String) {
+    state.dashboards.clear_runs(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form);
 }
 
 /// The Network tab's rows for a folder, with its watches and whether Network Monitor is running.
@@ -2942,6 +3060,11 @@ pub fn run() {
             network.set_on_change(move || {
                 let _ = handle.emit("network-changed", ());
             });
+            let dashboards = Arc::new(dashboard_run::Runner::load(app.path().app_data_dir().ok().map(|d| d.join("dashboards.json"))));
+            let handle = app.handle().clone();
+            dashboards.set_on_change(move || {
+                let _ = handle.emit("dashboards-changed", ());
+            });
             let handle = app.handle().clone();
             let for_in_use = app.handle().clone();
             let storage = Arc::new(storage::Storage::new(
@@ -2958,7 +3081,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -3044,6 +3167,18 @@ pub fn run() {
             aside_stop,
             aside_stop_answering,
             orchestra_approve_merge,
+            dashboards_list,
+            dashboards_state,
+            dashboard_trust,
+            dashboard_commands,
+            dashboard_options,
+            dashboard_load_options,
+            dashboard_preview,
+            dashboard_run,
+            dashboard_run_detail,
+            dashboard_stop,
+            dashboard_delete_run,
+            dashboard_clear_runs,
             network_state,
             network_response,
             network_unwatch,

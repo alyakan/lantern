@@ -521,6 +521,125 @@ export interface NetworkView {
   items: NetworkItem[];
 }
 
+/** A problem found in a dashboard file, where it is (like `panels[0].fields[2].default`; empty for the whole file) and what's wrong. */
+export interface DashboardIssue {
+  path: string;
+  message: string;
+}
+
+export type DashboardFieldKind = "text" | "number" | "select" | "multiselect" | "toggle";
+
+export interface DashboardField {
+  id: string;
+  type: DashboardFieldKind;
+  label?: string;
+  required: boolean;
+  /** A string, number, boolean or list of strings, matching the type. */
+  default?: string | number | boolean | string[];
+  /** Select and multiselect only. */
+  options?: string[];
+  /** Select and multiselect only, instead of `options`: a command whose last line of output is a JSON list of strings, run when the form opens. */
+  optionsFrom?: { command: string[]; dependsOn?: string[] };
+  /** Number only. */
+  min?: number;
+  max?: number;
+}
+
+export interface DashboardAction {
+  /** The program, then its arguments; `{field}` stands for that field's value. */
+  command: string[];
+  /** Shown, with the values in, before the command runs. */
+  confirm?: string;
+  output: "json" | "text";
+}
+
+export type DashboardPanel =
+  | { type: "form"; id: string; title?: string; fields: DashboardField[]; action: DashboardAction }
+  /** `of` is the id of the form it belongs to. */
+  | { type: "result" | "history"; id?: string; title?: string; of: string };
+
+export interface DashboardSpec {
+  title: string;
+  panels: DashboardPanel[];
+}
+
+/** One file in a folder's `.lantern/dashboards/`: its checked spec, or why it isn't one. Lantern checks; the UI only renders. */
+export interface Dashboard {
+  file: string;
+  /** SHA-256 of the exact bytes that were checked; what trusting a dashboard pins. */
+  hash: string;
+  spec: DashboardSpec | null;
+  issues: DashboardIssue[];
+}
+
+/** What a form's fields were set to: field id to a string, number, boolean or list of strings. */
+export type DashboardValues = Record<string, string | number | boolean | string[]>;
+
+/** One run of a dashboard form, as kept in the history. */
+export interface DashboardRun {
+  id: string;
+  file: string;
+  form: string;
+  /** Milliseconds since 1970. */
+  started_at: number;
+  duration_ms: number;
+  /** Null when a signal ended it (stopped or timed out) rather than the command exiting. */
+  exit_code: number | null;
+  stopped: boolean;
+  timed_out: boolean;
+  inputs: DashboardValues;
+  /** The program and arguments that ran, with the values in. */
+  args: string[];
+  stdout: string;
+  stderr: string;
+  /** More than the kept amount was printed; the start is missing. */
+  truncated: boolean;
+  /** For a form whose output is "json": the last line of stdout, when it parsed as an object or a list. */
+  output: Record<string, unknown> | unknown[] | null;
+}
+
+/** A run without its output, as the history list has it; the output is fetched (`dashboardRunDetail`) for the one opened. */
+export type DashboardRunSummary = Pick<DashboardRun, "id" | "file" | "form" | "started_at" | "duration_ms" | "exit_code" | "stopped" | "timed_out" | "inputs">;
+
+/** What the Dashboard tab knows about a folder besides its files. */
+export interface DashboardState {
+  /** Hashes of the dashboards the user trusted; one whose hash isn't here asks first. */
+  trusted: string[];
+  running: { file: string; form: string }[];
+  /** Newest first. */
+  runs: DashboardRunSummary[];
+}
+
+/** One form's command as the trust card shows it: what would run, before any value is in. */
+export interface DashboardCommand {
+  form: string;
+  title?: string;
+  /** "action": what the form's button runs. "options": what loads a select's options by itself when the form opens. */
+  kind: "action" | "options";
+  /** For "options": the field whose options it loads. */
+  field?: string;
+  /** For "options": the fields whose chosen values it takes (a `{field}` in the command), so the list is one per value. */
+  depends_on?: string[];
+  /** The program and arguments as written, `~` as the home folder; `{field}` stands for that field's value. */
+  command: string[];
+  /** Where the program is on disk; null with `error` saying why not. */
+  program: string | null;
+  error: string | null;
+}
+
+/** The list a select's options command printed the last time it ran for this dashboard file. */
+export interface DashboardOptionsList {
+  options: string[];
+  /** Milliseconds since 1970. */
+  loaded_at: number;
+}
+
+/** What pressing a form's button will run, worked out by the code that runs it. */
+export interface DashboardPreview {
+  args: string[];
+  confirm: string | null;
+}
+
 export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
 /** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
 export type StorageRisk = "safe" | "review" | "blocked";

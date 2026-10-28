@@ -8,6 +8,8 @@ pub const REPRODUCE: &str = "Reproduce";
 pub const APPROVAL: &str = "Approval";
 /// The tool (on Lantern's MCP server) that asks for it.
 pub const APPROVAL_TOOL: &str = "request_approval";
+/// The tool that runs a dashboard's form, after an approval card of its own.
+pub const DASHBOARD_RUN: &str = "dashboard_run";
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Write};
@@ -119,6 +121,11 @@ impl Server {
             // Answered by the app (it reads Network Monitor on loopback, or the Storage scan), for any chat: the storage
             // tools use the same call, told apart by name, and a scan waits at most a few seconds for itself.
             t if crate::network::TOOLS.contains(&t) || crate::storage::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
+            // Running a dashboard form: the app works out what it would do, the user is asked with a card, and only on a yes does
+            // the app run exactly that (see dashboard_tools.rs). Never answered without the card, whatever the rules say.
+            DASHBOARD_RUN => self.dashboard_run(args, ask),
+            // The other dashboard tools read and show; the app answers them like the network ones.
+            t if crate::dashboard_tools::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             // The user's yes or no to one named action, for any chat. Nothing is remembered and Lantern runs nothing: the model
             // does the action only on a yes, and only that one. Anything but a clear answer is not a yes.
             APPROVAL_TOOL => match ApprovalArgs::parse(args) {
@@ -150,6 +157,43 @@ impl Server {
                 result_json(format!("Lantern has no tool \"{other}\". Its tools here are: {}.", listed.join(", ")), true)
             }
         }
+    }
+}
+
+impl Server {
+    /// `dashboard_run`: ask the app what the run would do, show the user that on an approval card (its text, never the model's),
+    /// and on a yes ask the app to run the ticket it made, which runs exactly that and nothing else.
+    fn dashboard_run(&self, args: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Value {
+        use crate::dashboard_tools::{prepare_input, PREPARE, RUN_TICKET};
+        let app = |tool: &str, input: Value| ask(BridgeRequest { tool_name: tool.into(), input, tool_use_id: None, orchestra: false, network: true, review: false, git: false });
+        let input = match prepare_input(args) {
+            Ok(input) => input,
+            Err(text) => return result_json(format!("{text} Nothing ran."), true),
+        };
+        let prepared = app(PREPARE, input);
+        if !prepared.allow {
+            return app_result(DASHBOARD_RUN, prepared);
+        }
+        let Some(plan) = prepared.message.as_deref().and_then(|m| serde_json::from_str::<Value>(m).ok()) else {
+            return result_json("Lantern couldn't work out what that run would do, so nothing ran.".into(), true);
+        };
+        let Some(ticket) = plan["ticket"].as_str() else {
+            return result_json("Lantern couldn't work out what that run would do, so nothing ran.".into(), true);
+        };
+        // The card has the same limits as any approval: one line, plain text with nothing that hides or reorders it.
+        let card = match ApprovalArgs::parse(&json!({"action": plan["action"], "details": plan["details"]})) {
+            Ok(card) => card,
+            Err(text) => return result_json(format!("Lantern can't show that run on an approval card ({text}), so nothing ran."), true),
+        };
+        let resp = ask(BridgeRequest::permission(APPROVAL.into(), card.input(), None));
+        if resp.failed {
+            return result_json("Lantern couldn't show the approval card, so nothing ran. Ask the user in your message, and do not run it until they say yes.".into(), true);
+        }
+        if !resp.allow {
+            let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
+            return json!({"content": [{"type": "text", "text": format!("The user declined to run {}, so nothing ran.{note}", json!(card.action))}]});
+        }
+        app_result(DASHBOARD_RUN, app(RUN_TICKET, json!({"ticket": ticket})))
     }
 }
 
@@ -190,7 +234,7 @@ pub const APPROVAL_ACTION_MAX: usize = 120;
 pub const APPROVAL_DETAILS_MAX: usize = 2000;
 
 /// Marks that reorder or hide text, which no text a user approves from may carry.
-fn hides_text(c: char) -> bool {
+pub(crate) fn hides_text(c: char) -> bool {
     matches!(c, '\u{00ad}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}')
 }
 
@@ -576,6 +620,141 @@ mod tests {
         assert!(socket_down(BridgeRequest::permission("Reproduce".into(), json!({}), None)).failed);
     }
 
+    // MARK: dashboard_run
+
+    fn dashboard_call(args: Value) -> Value {
+        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "dashboard_run", "arguments": args}})
+    }
+
+    type Calls = std::cell::RefCell<Vec<(String, Value, bool)>>;
+
+    /// An app that answers a dashboard run's three asks as scripted, and records each: (tool name, input, flagged as a network call).
+    fn app<'a>(calls: &'a Calls, plan: BridgeResponse, card: BridgeResponse, run: BridgeResponse) -> impl Fn(BridgeRequest) -> BridgeResponse + 'a {
+        move |req| {
+            calls.borrow_mut().push((req.tool_name.clone(), req.input.clone(), req.network));
+            match req.tool_name.as_str() {
+                "dashboard_prepare" => plan.clone(),
+                APPROVAL => card.clone(),
+                "dashboard_run_ticket" => run.clone(),
+                other => panic!("the app was asked for {other}"),
+            }
+        }
+    }
+
+    fn said(allow: bool, text: &str) -> BridgeResponse {
+        BridgeResponse { allow, message: Some(text.into()), updated_input: None, failed: false }
+    }
+
+    fn plan(details: &str) -> BridgeResponse {
+        said(true, &json!({"ticket": "t1", "action": "Run “Create org” from staging.json", "details": details}).to_string())
+    }
+
+    fn names(calls: &Calls) -> Vec<String> {
+        calls.borrow().iter().map(|c| c.0.clone()).collect()
+    }
+
+    #[test]
+    fn a_dashboard_run_asks_the_app_then_the_user_then_runs_what_the_app_made_a_ticket_for() {
+        let calls = Calls::default();
+        // Claude's own `ticket`, `action` and `details` are not read.
+        let msg = dashboard_call(json!({"file": "staging.json", "form": "org", "values": {"staging": "7"}, "ticket": "mine", "action": "Read a file", "details": "harmless"}));
+        let r = handle_message(&msg, &app(&calls, plan("Creates an org on staging 7\n\nCommand:\npython3 x.py"), said(true, "go ahead"), said(true, "RAN: exit code 0"))).unwrap();
+        assert_eq!(r["result"]["content"][0]["text"], "RAN: exit code 0");
+        assert!(r["result"]["isError"] == false);
+        assert_eq!(names(&calls), ["dashboard_prepare", APPROVAL, "dashboard_run_ticket"]);
+        let calls = calls.borrow();
+        // The app is asked about exactly the file, form and values; the card is the app's text; the run is the app's ticket.
+        assert_eq!((calls[0].1.clone(), calls[0].2), (json!({"file": "staging.json", "form": "org", "values": {"staging": "7"}}), true));
+        assert_eq!((calls[1].1.clone(), calls[1].2), (json!({"action": "Run “Create org” from staging.json", "details": "Creates an org on staging 7\n\nCommand:\npython3 x.py"}), false));
+        assert_eq!((calls[2].1.clone(), calls[2].2), (json!({"ticket": "t1"}), true));
+    }
+
+    #[test]
+    fn a_declined_dashboard_run_never_asks_the_app_to_run_anything() {
+        let calls = Calls::default();
+        let msg = dashboard_call(json!({"file": "staging.json", "form": "org"}));
+        let r = handle_message(&msg, &app(&calls, plan("d"), said(false, "not on 9"), said(true, "RAN"))).unwrap();
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("declined to run \"Run “Create org” from staging.json\", so nothing ran.") && text.contains("Their note: not on 9"), "{text}");
+        assert!(r["result"].get("isError").is_none());
+        assert_eq!(names(&calls), ["dashboard_prepare", APPROVAL]);
+    }
+
+    #[test]
+    fn a_dashboard_run_the_app_refuses_shows_no_card() {
+        let calls = Calls::default();
+        let msg = dashboard_call(json!({"file": "staging.json", "form": "org"}));
+        let refusal = said(false, "The user hasn't trusted this version of the dashboard yet, and only they can. Nothing ran.");
+        let r = handle_message(&msg, &app(&calls, refusal, said(true, "yes"), said(true, "RAN"))).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("hasn't trusted"));
+        assert_eq!(names(&calls), ["dashboard_prepare"]);
+    }
+
+    #[test]
+    fn a_card_that_could_not_be_shown_or_would_hide_its_text_runs_nothing() {
+        let msg = dashboard_call(json!({"file": "staging.json", "form": "org"}));
+        // The card didn't show: not a yes.
+        let calls = Calls::default();
+        let failed = BridgeResponse { allow: false, message: None, updated_input: None, failed: true };
+        let r = handle_message(&msg, &app(&calls, plan("d"), failed, said(true, "RAN"))).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("so nothing ran"));
+        assert_eq!(names(&calls), ["dashboard_prepare", APPROVAL]);
+        // Text that reorders what follows it can't go on a card the user approves from.
+        let calls = Calls::default();
+        let r = handle_message(&msg, &app(&calls, plan("Command:\nrm \u{202e}txt.exe"), said(true, "yes"), said(true, "RAN"))).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("can't show that run on an approval card"));
+        assert_eq!(names(&calls), ["dashboard_prepare"]);
+        // An answer that isn't a plan is no run either.
+        let calls = Calls::default();
+        let r = handle_message(&msg, &app(&calls, said(true, "not json"), said(true, "yes"), said(true, "RAN"))).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert_eq!(names(&calls), ["dashboard_prepare"]);
+    }
+
+    #[test]
+    fn a_dashboard_run_without_a_file_and_form_asks_nobody() {
+        for args in [json!({}), json!({"file": "a.json"}), json!({"file": "a.json", "form": "f", "values": [1]})] {
+            let calls = Calls::default();
+            let r = handle_message(&dashboard_call(args), &app(&calls, plan("d"), said(true, "y"), said(true, "RAN"))).unwrap();
+            assert_eq!(r["result"]["isError"], true);
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().ends_with("Nothing ran."));
+            assert!(names(&calls).is_empty());
+        }
+    }
+
+    #[test]
+    fn the_apps_two_dashboard_asks_are_not_tools_the_model_can_call() {
+        for name in ["dashboard_prepare", "dashboard_run_ticket"] {
+            let calls = Calls::default();
+            let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": name, "arguments": {"ticket": "t1", "file": "a.json", "form": "f"}}});
+            let r = handle_message(&msg, &app(&calls, plan("d"), said(true, "y"), said(true, "RAN"))).unwrap();
+            assert_eq!(r["result"]["isError"], true);
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().starts_with(&format!("Lantern has no tool \"{name}\"")));
+            assert!(names(&calls).is_empty(), "{name} reached the app");
+        }
+        let listed = tool_names(&handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap());
+        assert!(listed.contains(&"dashboard_run".to_string()) && !listed.iter().any(|n| n == "dashboard_prepare" || n == "dashboard_run_ticket"));
+    }
+
+    #[test]
+    fn reading_dashboards_goes_to_the_app_without_a_card() {
+        for tool in ["dashboard_spec", "dashboard_result"] {
+            let seen = std::cell::RefCell::new(None);
+            let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": tool, "arguments": {"limit": 2}}});
+            let r = handle_message(&msg, &|req| {
+                *seen.borrow_mut() = Some(req);
+                said(true, "the answer")
+            })
+            .unwrap();
+            assert_eq!(r["result"]["content"][0]["text"], "the answer");
+            let req = seen.borrow().clone().unwrap();
+            assert_eq!((req.tool_name.as_str(), req.input["limit"].clone(), req.network, req.orchestra), (tool, json!(2), true, false));
+        }
+    }
+
     fn approval_call(args: Value) -> Value {
         json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "request_approval", "arguments": args}})
     }
@@ -709,7 +888,7 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("Lantern has no tool \"frobnicate\". Its tools here are: steps_guide, review_target, request_approval, network_requests"), "{text}");
-        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("storage_suggest."), "{text}");
+        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("dashboard_run."), "{text}");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
         let approve = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "approve").unwrap().clone();
         assert_eq!(approve["description"], "Internal: Claude Code's permission prompt. Lantern calls it for the CLI; never call it yourself.");
@@ -729,7 +908,7 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).collect();
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).chain(crate::dashboard_tools::TOOLS.iter().copied()).collect();
         assert_eq!(tool_names(&handle_message_as(&list, &allow_all, Offer::default()).unwrap()), every_chats);
         let names = tool_names(&handle_message_as(&list, &allow_all, LEAD).unwrap());
         assert_eq!(names[..every_chats.len()], every_chats);
