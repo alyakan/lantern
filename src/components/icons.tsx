@@ -298,3 +298,10 @@ export const PlayIcon = () => (
     <path d="M2 1.2v8.6L8.6 5.5z" />
   </svg>
 );
+
+// An arrow pointing left: Back to the previous chat.
+export const BackIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M12 7H2.5M6.5 2.8 2.3 7l4.2 4.2" />
+  </svg>
+);
