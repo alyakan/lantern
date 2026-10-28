@@ -27,7 +27,7 @@ import { SearchBar, type BarSearch } from "./SearchBar";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsBar, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
@@ -320,7 +320,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "summary":
           return <SummaryRow row={row} onFiles={setFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page":
-          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} onAction={(a) => reply(row.item.id, a)} />;
+          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
           return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
@@ -550,7 +550,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         }
       />
   );
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  // The newest page's buttons go at its end, and stay while the step is talked about (until one is pressed, or Claude is at work).
+  const heading = paged ? [...pages[pages.length - 1].rows].reverse().find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page") : undefined;
+  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, a)} /> : null;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (

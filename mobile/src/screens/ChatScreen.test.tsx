@@ -988,6 +988,33 @@ describe("Step by step's pages", () => {
       expect(screen.getByTestId("step-pager")).toBeTruthy();
     });
 
+    it("shows a long page whole: it has the screen to itself", async () => {
+      const long = `${"The tests cover the context menu fix and the release notes. ".repeat(8)}And the last line.`;
+      await steps([{ kind: "assistant_text", block_id: "p1", text: `# Step 1 of 2 — Bump the version\n\n${long}` }]);
+      expect(screen.getByText(/And the last line\./)).toBeTruthy();
+      expect(screen.queryByText("Show the whole page")).toBeNull();
+    });
+
+    it("keeps the newest page's buttons at its end while the step is talked about", async () => {
+      const { lastOf } = await steps([
+        ...run,
+        { kind: "user_text", text: "Why the changelog?", at: 3, sent_by: "desktop" },
+        { kind: "assistant_text", block_id: "r", text: "So the release notes have it." },
+        { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
+      ]);
+      expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy();
+      // Once on the page: at its end, not in its heading card as well.
+      expect(screen.getAllByRole("button", { name: "Commit, next" })).toHaveLength(1);
+      await fireEvent.press(screen.getByRole("button", { name: "Commit, next" }));
+      await waitFor(() => expect(lastOf("send")).toMatchObject({ text: "Next. Commit this step first." }));
+      expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
+    });
+
+    it("has no buttons while Claude is at work on the page", async () => {
+      await withSession(run, {}, {}, { workflow: "steps", status: "working" });
+      expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
+    });
+
     it("is a plain chat in any other workflow", async () => {
       await withSession(run);
       expect(screen.getByTestId("chat-list")).toBeTruthy();

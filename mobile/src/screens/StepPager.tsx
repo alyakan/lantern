@@ -37,6 +37,13 @@ export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBot
     shown.current = index;
     list.current?.scrollToIndex({ index, animated: true });
   }, [index]);
+  // A page on screen stays on screen when the width changes (the chats slid in beside it, the tablet turned).
+  const laidOut = useRef(width);
+  useEffect(() => {
+    if (laidOut.current === width) return;
+    laidOut.current = width;
+    list.current?.scrollToOffset({ offset: shown.current * width, animated: false });
+  }, [width]);
   return (
     <View style={{ flex: 1 }} onLayout={(e) => setWidth(e.nativeEvent.layout.width || screen)}>
       <FlatList
