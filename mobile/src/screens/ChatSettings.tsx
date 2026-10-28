@@ -20,6 +20,17 @@ import { contextOf, usageOf } from "../view/plan";
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
 export const SWITCH_WAIT_MS = 20_000;
 
+/** How a Step by step chat is shown on this phone. */
+export interface PagesChoice {
+  on: boolean;
+  onChange: (on: boolean) => void;
+}
+
+const SHOW: Option[] = [
+  { value: "pages", label: "Pages", hint: "One page at a time, side by side, as on the Mac" },
+  { value: "list", label: "One list", hint: "The whole chat as one list of messages" },
+];
+
 interface Option {
   value: string;
   label: string;
@@ -54,7 +65,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 }
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
@@ -89,6 +100,24 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
                         selected={o.value === chat.workflow}
                         onPick={() => {
                           onWorkflow(o.value);
+                          close();
+                        }}
+                      />
+                    ))}
+                  </>
+                )}
+                {pages && (
+                  <>
+                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
+                      Show
+                    </Txt>
+                    {SHOW.map((o) => (
+                      <OptionRow
+                        key={o.value}
+                        option={o}
+                        selected={(o.value === "pages") === pages.on}
+                        onPick={() => {
+                          pages.onChange(o.value === "pages");
                           close();
                         }}
                       />
@@ -161,7 +190,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
  * only offered while the chat is doing nothing; "Switching…" stays in the line until the chat says it changed.
  * `children` draws the title and what is under it, given the settings line (null when there is none).
  */
-export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
+export function ChatSettings({ slot, chat, plan, context, pages, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; /** For a Step by step chat: pages or one list. */ pages?: PagesChoice; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
   const { sync } = useController();
   const { supported, controls, reload } = useControls();
   const [open, setOpen] = useState(false);
@@ -231,6 +260,7 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
           onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
           // Another provider than Claude's has no Auto mode, and the Mac's presets are Claude Code's models: neither is offered for its chat.
           modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? (provider ? noAutoOn(provider) : autoNote(controls)) : null) }))}
+          pages={pages}
           presets={provider ? [] : (controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
           onMode={(v) => v !== chat.permissions && pick("mode", v)}
           onPreset={(v) => v !== chat.preset && pick("preset", v)}

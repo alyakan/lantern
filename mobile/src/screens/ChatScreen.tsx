@@ -19,9 +19,10 @@ import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
-import { PagesButton, StepNav, StepPager } from "./StepPager";
+import { StepNav, StepPager } from "./StepPager";
 import { changedFiles } from "../view/changes";
 import { ChangesPane } from "./ChangesPane";
+import { ChangesIcon, PanelMenu } from "./PanelMenu";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -393,7 +394,25 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
           </PressScale>
         )}
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
-        <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
+        <ChatSettings
+          slot={slot}
+          chat={chat}
+          plan={plan}
+          context={view.context}
+          pages={
+            stepsChat
+              ? {
+                  on: !asList,
+                  onChange: (on) => {
+                    setAsList(!on);
+                    setPicked(null);
+                  },
+                }
+              : undefined
+          }
+          onProblem={setProblem}
+          onClosed={onBack}
+        >
           {(line) => (
             // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass).
             <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
@@ -412,28 +431,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
             </Glass>
           )}
         </ChatSettings>
-        {changesButton && changed.length > 0 && (
-          <PressScale accessibilityRole="button" accessibilityLabel={`Changes: ${changed.length} ${changed.length === 1 ? "file" : "files"} changed`} onPress={() => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.9}>
-            <Glass style={{ height: control, borderRadius: control / 2, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Txt variant="small" style={{ fontWeight: "700" }}>
-                Changes
-              </Txt>
-              <Txt variant="small" tone="ink2" style={{ fontWeight: "700" }}>
-                {changed.length}
-              </Txt>
+        {changesButton && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={() => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.88}>
+            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
+              <ChangesIcon color={colors.ink} />
             </Glass>
           </PressScale>
         )}
       </View>
-      {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} onChatView={() => setAsList(true)} />}
-      {stepsChat && asList && pages.length > 0 && (
-        <PagesButton
-          onPress={() => {
-            setAsList(false);
-            setPicked(null);
-          }}
-        />
-      )}
+      {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} />}
 
       {banner && (
         <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -641,7 +647,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
         />
       )}
       <Modal visible={changesOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setChangesOpen(false)}>
-        <ChangesPane slot={slot} inSheet hideLabel="Close" onHide={() => setChangesOpen(false)} />
+        <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" />} onHide={() => setChangesOpen(false)} />
       </Modal>
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
