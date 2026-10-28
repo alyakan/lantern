@@ -31,7 +31,7 @@ pub const HANDSHAKES_AT_ONCE: usize = 4;
 pub const TEXT_MAX: usize = 100_000;
 /// About how big a page of a Reset is, in bytes of JSON.
 const PAGE_BYTES: usize = 512 << 10;
-/// How many slow requests (what Claude suggests, a chat starting) one phone may have going at once. They run beside the
+/// How many slow requests (what Claude suggests, a chat starting, a reviewed file's diff) one phone may have going at once. They run beside the
 /// phone's other requests and its chats' events, not in front of them, so a phone waiting on Claude isn't stuck.
 pub const SLOW_AT_ONCE: usize = 3;
 /// The longest first message a phone may start a chat with (the menu bar panel's limit, in characters).
@@ -129,6 +129,9 @@ pub trait Host: Send + Sync + 'static {
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
+    /// A file of what the chat is reviewing, as a unified diff of the pull request or branch: `path` is relative to the
+    /// repository or absolute in it (checked by `reviewed_path`), and a file outside the repository is refused.
+    fn review_diff(&self, slot: String, path: String, target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>>;
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
     /// shown yet (see history::page).
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
@@ -251,6 +254,21 @@ impl Gateway {
     }
 
     /// What Claude suggests for the chats as they are (see suggest.rs): the answer to Request::Suggest.
+    /// A reviewed file's diff (Request::ReviewDiff). Slow the first time for a pull request (gh and git fetch it), so it runs
+    /// beside the phone's other requests.
+    async fn review_diff(&self, slot: String, path: String) -> Result<serde_json::Value, String> {
+        self.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+        let path = reviewed_path(&path)?.to_string();
+        let host = self.host.clone();
+        match self.hub.review_target(&slot) {
+            Some(target) => host.review_diff(slot, path, target).await,
+            // Not reviewing anything that Lantern knows of: the chat's own change to the file, as Diff gives it. A review
+            // started before Lantern last restarted is one (what it reviews is only known from the call as it happens).
+            None => host.diff(slot, path).await.map_err(|e| format!("{e} (If this chat is reviewing a pull request or a branch: Lantern forgets which when it restarts, until Claude says it again.)")),
+        }
+        .map(serde_json::Value::String)
+    }
+
     async fn suggest(&self, refresh: bool) -> Result<serde_json::Value, String> {
         let host = self.host.clone();
         let projects = host.projects().await;
@@ -610,10 +628,11 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::NewChat { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
+                        Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider).await) }));
@@ -856,6 +875,7 @@ impl<'a> Session<'a> {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
             }
+            Request::ReviewDiff { slot, path } => self.gw.review_diff(slot, path).await,
             Request::StepOutput { slot, tool_use_id } => {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
@@ -993,6 +1013,20 @@ mod erased {
     }
 }
 
+/// A reviewed file's path as a phone sends it (from the review's page): relative to the repository, or absolute. Never a
+/// way out of it ("..") or a character a path has no business holding; the host then only reads it inside the repository.
+pub fn reviewed_path(path: &str) -> Result<&str, String> {
+    let bad = || "That isn't a file of this review.".to_string();
+    let p = path.trim();
+    if p.is_empty() || p.len() > 1024 || p.chars().any(char::is_control) {
+        return Err(bad());
+    }
+    if std::path::Path::new(p).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(bad());
+    }
+    Ok(p)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1032,6 +1066,8 @@ pub(crate) mod tests {
         /// How long the model takes to answer, and a chat started from a phone takes to open.
         pub suggest_delay: Mutex<Duration>,
         pub new_chat_delay: Mutex<Duration>,
+        /// How long a reviewed file's diff takes (a pull request fetched the first time).
+        pub review_delay: Mutex<Duration>,
     }
 
     impl Host for FakeHost {
@@ -1125,6 +1161,13 @@ pub(crate) mod tests {
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
+        }
+        fn review_diff(&self, _: String, path: String, target: super::super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
+            let delay = *self.review_delay.lock().unwrap();
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok(format!("review {path} pr={:?} base={:?}", target.pr, target.base))
+            })
         }
         fn history(&self, _: String, _: Option<usize>) -> BoxFut<Result<crate::history::Page, String>> {
             let h = self.history.lock().unwrap().clone();
@@ -1571,6 +1614,32 @@ pub(crate) mod tests {
         assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
         assert!(p.ask(Request::Diff { slot: "z".into(), path: "/etc/passwd".into() }).await.1.is_some());
         assert!(p.ask(Request::Wake { slot: "unknown".into() }).await.1.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_reviewed_files_diff_comes_from_what_the_chat_reviews_or_else_its_own_edits() {
+        let r = rig();
+        r.hub.asleep("z", "/p", Some("Review".into()), Some("s".into()));
+        let (_, mut p) = paired(&r).await;
+        // Not reviewing anything yet: the chat's own change, as Diff.
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 1, event: UiEvent::ReviewTarget { pr: Some(512), base: None } });
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=Some(512) base=None")));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 2, event: UiEvent::ReviewTarget { pr: None, base: Some("feat/core".into()) } });
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=None base=Some(\"feat/core\")")));
+        // Never a way out of the repository, and only a chat that is open.
+        for bad in ["../secrets", "src/../../etc/passwd", "", "a\nb"] {
+            assert!(p.ask(Request::ReviewDiff { slot: "z".into(), path: bad.into() }).await.1.is_some(), "{bad:?}");
+        }
+        assert!(p.ask(Request::ReviewDiff { slot: "unknown".into(), path: "src/lib.rs".into() }).await.1.is_some());
+    }
+
+    #[test]
+    fn a_reviewed_path_is_a_path_in_the_repository() {
+        assert_eq!(reviewed_path(" src/a.rs "), Ok("src/a.rs"));
+        assert_eq!(reviewed_path("/Users/me/repo/src/a.rs"), Ok("/Users/me/repo/src/a.rs"));
+        assert!(reviewed_path("../a").is_err());
+        assert!(reviewed_path(&"x".repeat(2000)).is_err());
     }
 
     #[tokio::test]
@@ -2168,6 +2237,19 @@ pub(crate) mod tests {
         *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(600);
         let (_, mut p) = paired(&r).await;
         p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None, provider: None } });
+        p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
+        let order = heard_until(&mut p, &[100, 101]).await;
+        assert_eq!(order, vec!["answer 101".to_string(), "answer 100".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_reviewed_file_slow_to_fetch_doesnt_stop_that_phone_either() {
+        let r = rig();
+        r.hub.asleep("z", "/p", Some("Review".into()), Some("s".into()));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 1, event: UiEvent::ReviewTarget { pr: Some(512), base: None } });
+        *r.host.review_delay.lock().unwrap() = Duration::from_millis(600);
+        let (_, mut p) = paired(&r).await;
+        p.send(&ClientMessage::Request { id: 100, request: Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() } });
         p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
         let order = heard_until(&mut p, &[100, 101]).await;
         assert_eq!(order, vec!["answer 101".to_string(), "answer 100".to_string()]);

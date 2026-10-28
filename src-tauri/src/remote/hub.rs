@@ -63,6 +63,13 @@ pub enum Since {
     TooOld { kept: Vec<BusEvent> },
 }
 
+/// What a chat is reviewing: a pull request (`pr`), or the checked-out branch against `base` (None: Lantern finds it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewTarget {
+    pub pr: Option<u64>,
+    pub base: Option<String>,
+}
+
 #[derive(Default)]
 struct Log {
     entries: VecDeque<(BusEvent, usize)>,
@@ -97,6 +104,8 @@ struct Log {
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
     todos: Option<Vec<crate::ui_event::Todo>>,
+    /// What the chat is reviewing, as its last review_target call said (a phone asks for a reviewed file's diff from it).
+    review: Option<ReviewTarget>,
     /// The tokens the chat holds, and its model's context size once a turn's result said it.
     context: Option<u64>,
     window: Option<u64>,
@@ -195,8 +204,9 @@ impl Log {
             UiEvent::AgentAsleep { asleep } => self.asleep = *asleep,
             UiEvent::ConversationReset => {
                 self.first_prompt = None;
-                (self.todos, self.context) = (None, None);
+                (self.todos, self.context, self.review) = (None, None, None);
             }
+            UiEvent::ReviewTarget { pr, base } => self.review = Some(ReviewTarget { pr: *pr, base: base.clone() }),
             UiEvent::ContextUsed { tokens } => self.context = Some(*tokens),
             UiEvent::Commands { commands } => self.commands = Some(commands.clone()),
             UiEvent::Todos { parent: None, items } => self.todos = Some(items.clone()),
@@ -506,6 +516,11 @@ impl SessionHub {
         out
     }
 
+    /// What the chat is reviewing (its last review_target call), if it said.
+    pub fn review_target(&self, slot: &str) -> Option<ReviewTarget> {
+        self.chats.lock().unwrap().get(slot)?.review.clone()
+    }
+
     /// The chat's own title, when it has one: never the stand-in made from the first thing the user said, which would put their
     /// words on a lock screen.
     pub fn real_title(&self, slot: &str) -> Option<String> {
@@ -594,6 +609,18 @@ mod tests {
             Since::Events(e) => e.into_iter().map(|e| e.event).collect(),
             Since::TooOld { .. } => panic!("expected events"),
         }
+    }
+
+    #[test]
+    fn a_chat_remembers_what_it_reviews_until_its_conversation_starts_again() {
+        let hub = hub();
+        assert_eq!(hub.review_target("a"), None);
+        feed(&hub, "a", vec![UiEvent::ReviewTarget { pr: Some(7), base: None }]);
+        assert_eq!(hub.review_target("a"), Some(ReviewTarget { pr: Some(7), base: None }));
+        feed(&hub, "a", vec![UiEvent::ReviewTarget { pr: None, base: Some("main".into()) }]);
+        assert_eq!(hub.review_target("a"), Some(ReviewTarget { pr: None, base: Some("main".into()) }));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.review_target("a"), None);
     }
 
     #[test]
