@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
-import { chat, connected, makeController, renderWith } from "../test/render";
+import { chat, connected, connectedWithControls, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
@@ -979,13 +979,23 @@ describe("Step by step's pages", () => {
       expect(screen.getByText("Done · 4 of 4")).toBeTruthy();
     });
 
-    it("can be read as one chat, and back as pages", async () => {
-      await steps();
-      await fireEvent.press(screen.getByRole("button", { name: "Show as one chat" }));
-      expect(screen.getByTestId("chat-list")).toBeTruthy();
+    it("can be read as one list, and back as pages, from the chat's settings (no button for it beside the pages)", async () => {
+      const { controller } = makeController();
+      attachSession(controller, { controls: { allow_auto: false, presets: [] } }, ["controls", "workflow"]);
+      const c = chat({ workflow: "steps", permissions: "ask" });
+      await renderWith(<ChatScreen {...handlers()} />, { chats: [c], events: { a: run }, connection: connectedWithControls }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+      expect(screen.queryByRole("button", { name: /Show as/ })).toBeNull();
+      const show = async (label: string) => {
+        await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
+        await waitFor(() => expect(screen.getByText("Show")).toBeTruthy());
+        await fireEvent.press(screen.getByRole("radio", { name: label }));
+      };
+      await show("One list");
+      await waitFor(() => expect(screen.getByTestId("chat-list")).toBeTruthy());
       expect(screen.queryByTestId("step-pager")).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Show as pages" }));
-      expect(screen.getByTestId("step-pager")).toBeTruthy();
+      await show("Pages");
+      await waitFor(() => expect(screen.getByTestId("step-pager")).toBeTruthy());
     });
 
     it("shows a long page whole: it has the screen to itself", async () => {
@@ -1037,8 +1047,12 @@ describe("what a turn changed", () => {
   it("lists every file the chat changed from the title bar, each opening its diff", async () => {
     const more: RemoteEvent[] = [...turn, { kind: "tool_started", tool_use_id: "t9", name: "Write", summary: "notes.md" }, { kind: "file_edited", tool_use_id: "t9", path: "/p/docs/notes.md", created: true, added: 4, removed: 0 }];
     const { lastOf } = await withSession(more, {}, { diff: "--- /p/Cargo.toml\n+++ /p/Cargo.toml\n@@ -3 +3 @@\n-version = \"0.1.52\"\n+version = \"0.1.53\"\n" });
-    await fireEvent.press(screen.getByRole("button", { name: "Changes: 2 files changed" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
     expect(screen.getByText("2 files · +5 −1")).toBeTruthy();
+    // The sheet's heading is a menu of what it can show: only Changes for now.
+    await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }]);
+    await fireEvent.press(screen.getByRole("menuitem"));
     // The newest first, and open on it.
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/docs/notes.md" }));
     await fireEvent.press(screen.getByRole("button", { name: "Cargo.toml, 1 added, 1 removed" }));
@@ -1048,9 +1062,10 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(screen.queryByText("2 files · +5 −1")).toBeNull());
   });
 
-  it("has no Changes button before anything changed", async () => {
+  it("has the Changes icon before anything changed, and says so in it", async () => {
     await withSession(turn.slice(0, 2));
-    expect(screen.queryByRole("button", { name: /^Changes/ })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
+    expect(screen.getByText("Nothing changed in this chat yet.")).toBeTruthy();
   });
 
   it("has no Changes button where a pane beside the chat shows them", async () => {

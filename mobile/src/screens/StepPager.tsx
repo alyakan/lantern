@@ -81,8 +81,8 @@ function Arrow({ label, flip, on, onPress, children }: { label: string; flip?: b
   );
 }
 
-/** Under the title: which page is on screen, the way to the one before and after, and back to the chat as one list. */
-export function StepNav({ pages, index, onIndex, fresh, onChatView }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; /** A page came while an older one was on screen. */ fresh: boolean; onChatView: () => void }) {
+/** Under the title: which page is on screen, and the way to the one before and after. (Reading it as one list is in the chat's settings.) */
+export function StepNav({ pages, index, onIndex, fresh }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; /** A page came while an older one was on screen. */ fresh: boolean }) {
   const page = pages[index];
   const last = pages.length - 1;
   return (
@@ -104,28 +104,6 @@ export function StepNav({ pages, index, onIndex, fresh, onChatView }: { pages: S
           <Arrow label="Next page" flip on={index < last} onPress={() => onIndex(index + 1)} />
         )}
       </Glass>
-      <PressScale accessibilityRole="button" accessibilityLabel="Show as one chat" onPress={onChatView} hitSlop={6} scaleTo={0.92}>
-        <Glass style={{ height: control - 4, borderRadius: (control - 4) / 2, paddingHorizontal: 14, justifyContent: "center" }}>
-          <Txt variant="small" style={{ fontWeight: "700" }}>
-            Chat
-          </Txt>
-        </Glass>
-      </PressScale>
-    </View>
-  );
-}
-
-/** In the chat as one list: the way back to its pages. */
-export function PagesButton({ onPress }: { onPress: () => void }) {
-  return (
-    <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, paddingBottom: 8 }}>
-      <PressScale accessibilityRole="button" accessibilityLabel="Show as pages" onPress={onPress} hitSlop={6} scaleTo={0.92}>
-        <Glass style={{ height: control - 4, borderRadius: (control - 4) / 2, paddingHorizontal: 14, justifyContent: "center" }}>
-          <Txt variant="small" style={{ fontWeight: "700" }}>
-            Pages
-          </Txt>
-        </Glass>
-      </PressScale>
     </View>
   );
 }
