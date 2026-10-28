@@ -142,6 +142,14 @@ describe("the post-hook", () => {
     expect(kinds).toEqual(["user", "assistant", "hook", "assistant"]);
     expect(items(s)[2]).toEqual({ kind: "hook", id: "hook-u-1-ship it", text: "Update the brain if needed" });
   });
+
+  it("keeps the first hook's place when a second comes in the same turn (a Stop hook, then the post-hook)", () => {
+    const stop: RemoteEvent = { kind: "hook_turn", text: "Before you finish: save it." };
+    const post: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    const said = (id: string, text: string) => ({ kind: "assistant_text", block_id: id, text }) as RemoteEvent;
+    const s = run([...turn.slice(0, 5), stop, said("h1", "Saved."), post, said("h2", "Nothing more.")].map((e, i) => event("a", i + 1, e)));
+    expect(items(s).map((it) => it.kind)).toEqual(["user", "assistant", "hook", "assistant", "assistant"]);
+  });
 });
 
 describe("a message sent from this phone", () => {

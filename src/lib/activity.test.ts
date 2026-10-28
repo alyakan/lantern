@@ -47,6 +47,26 @@ describe("groupItems", () => {
     expect(rows[2]).toMatchObject({ id: "m1" });
   });
 
+  it("keeps each of two hooks in one turn as its own row, and the answer before them as the reply", () => {
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "any more reports?" },
+      tool("t1", "Bash"),
+      say("m1", "Yes, 44 users."),
+      { type: "hook", id: "h1", text: "Before you finish: save it." },
+      tool("t2", "Bash"),
+      say("m2", "I saved one note."),
+      { type: "hook", id: "h2", text: "Update the brain if needed" },
+      tool("t3", "Bash"),
+      say("m3", "Nothing more to save."),
+      done,
+    ];
+    const rows = groupItems(items);
+    expect(rows.map((r) => r.type)).toEqual(["user", "activity", "assistant", "hook", "hook", "turn"]);
+    expect(rows[2]).toMatchObject({ id: "m1" });
+    expect((rows[3] as Extract<Row, { type: "hook" }>).rows.map((r) => r.id)).toEqual(["a:t2", "m2"]);
+    expect((rows[4] as Extract<Row, { type: "hook" }>).rows.map((r) => r.id)).toEqual(["a:t3", "m3"]);
+  });
+
   it("says a post-hook is waiting when a prompt in it has no answer, and is live while its turn runs", () => {
     const ask: ChatItem = { type: "permission", id: "p1", toolName: "Bash", input: { command: "brain add" }, decision: null };
     const items: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, say("m1", "Done."), { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash", { status: "running" }), ask];
