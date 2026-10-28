@@ -279,7 +279,7 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutpu
 });
 
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
-export const PageRow = memo(function PageRow({ row, answered, onAction, mark, paged = false }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string; /** On a page of its own (Step by step's pages): shown whole, and its buttons are at the end of the page, not here. */ paged?: boolean }) {
+export const PageRow = memo(function PageRow({ row, answered, onAction, mark, paged = false, onFile }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** A file its turn edited was tapped (named in its words, or in the list under it). */ onFile?: (path: string) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string; /** On a page of its own (Step by step's pages): shown whole, and its buttons are at the end of the page, not here. */ paged?: boolean }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const { page } = row;
@@ -295,13 +295,28 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
         <Txt variant="heading">
           <Marked text={page.title} mark={mark} />
         </Txt>
-        {!!body && <Markdown text={body} mark={mark} />}
+        {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} />}
         {page.body.length >= 260 && !paged && (
           <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">
               {cut ? "Show the whole page" : "Show less"}
             </Txt>
           </Pressable>
+        )}
+        {/* On a page of its own, the files the step changed, each a link to its change: whether or not its words name them. */}
+        {paged && onFile && row.files.length > 0 && (
+          <View style={{ marginTop: 6, gap: 2 }}>
+            <Txt variant="tiny" tone="ink3" accessibilityRole="header" style={{ fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Changed in this step
+            </Txt>
+            {row.files.map((f) => (
+              <Pressable key={f} accessibilityRole="link" accessibilityLabel={f.split("/").pop() ?? f} accessibilityHint="Shows what changed in this file" onPress={() => onFile(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
+                <Txt variant="small" tone="cobalt" numberOfLines={1} ellipsizeMode="head" style={{ textDecorationLine: "underline" }}>
+                  {f.split("/").slice(-3).join("/")}
+                </Txt>
+              </Pressable>
+            ))}
+          </View>
         )}
         {row.live && !answered && !paged && page.actions.length > 0 && (
           <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>

@@ -1025,6 +1025,24 @@ describe("Step by step's pages", () => {
       expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
     });
 
+    it("links the files a step changed: named in its words, and listed under it", async () => {
+      const built: RemoteEvent[] = [
+        { kind: "user_text", text: "Next. Commit this step first.", at: 2, sent_by: "desktop" },
+        { kind: "tool_started", tool_use_id: "e1", name: "Edit", summary: "TimeoutScheduler.swift" },
+        { kind: "file_edited", tool_use_id: "e1", path: "/p/App/Sources/TimeoutScheduler.swift", created: false, added: 9, removed: 2 },
+        { kind: "tool_finished", tool_use_id: "e1", is_error: false },
+        { kind: "assistant_text", block_id: "s5", text: "# Step 5 of 14 — Move the timeout scheduler\n\nIt now lives in `Sources/TimeoutScheduler.swift`." },
+        { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
+      ];
+      const { lastOf } = await withSession(built, {}, { diff: "--- a\n+++ b\n+moved" }, { workflow: "steps" });
+      await fireEvent.press(screen.getByText("Sources/TimeoutScheduler.swift"));
+      await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/App/Sources/TimeoutScheduler.swift" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+      expect(screen.getByText("Changed in this step")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("link", { name: "TimeoutScheduler.swift" }));
+      await waitFor(() => expect(screen.getByText("+moved")).toBeTruthy());
+    });
+
     it("is a plain chat in any other workflow", async () => {
       await withSession(run);
       expect(screen.getByTestId("chat-list")).toBeTruthy();

@@ -361,7 +361,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
             const open = row === newest && !answered.has(row.item.id) && !working;
             return <ReviewFilePage kicker={row.page.kicker} file={file} verdicts={open ? verdicts[row.item.id] : (sentVerdicts(row, file) ?? verdicts[row.item.id])} onVerdict={open ? (i, v) => pickVerdict(row.item.id, i, v) : undefined} onOpen={setReviewed} />;
           }
-          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onAction={(a) => reply(row.item.id, a)} />;
+          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
         case "steps":
           return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
