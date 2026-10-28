@@ -18,6 +18,8 @@ import { projectColorOf } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
+import { pageOfKey, stepPagesOf } from "../view/stepPages";
+import { PagesButton, StepNav, StepPager } from "./StepPager";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -25,7 +27,7 @@ import { SearchBar, type BarSearch } from "./SearchBar";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsBar, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
@@ -118,6 +120,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
+  // Step by step reads a page at a time, side by side, as on the Mac (or as one list, if asked). The page on screen: none
+  // means the newest, followed as pages come; `of` is how many there were when another was picked, so a new one is said.
+  const stepsChat = chat?.workflow === "steps";
+  const [asList, setAsList] = useState(false);
+  const pages = useMemo(() => (stepsChat ? stepPagesOf(rows) : []), [stepsChat, rows]);
+  const paged = stepsChat && !asList && pages.length > 0;
+  const [picked, setPicked] = useState<{ index: number; of: number } | null>(null);
+  const pageAt = picked ? Math.min(picked.index, pages.length - 1) : pages.length - 1;
+  const freshPage = !!picked && pages.length > picked.of;
+  const toPage = (i: number) => setPicked(i >= pages.length - 1 ? null : { index: i, of: pages.length });
   // Opening the search (nothing typed yet) changes none of these, so the list isn't drawn again then, while the keyboard comes.
   const query = find?.query ?? null;
   const matches = useMemo(() => (query === null ? NO_MATCHES : findRows(rows, query)), [rows, query]);
@@ -127,10 +139,19 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // The chat goes to each match as it is chosen (and to the newest as the search finds it).
   const hereRef = useRef(here);
   hereRef.current = here;
+  const pagedRef = useRef(paged);
+  pagedRef.current = paged;
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
   const hereKey = here?.key;
   useEffect(() => {
     const m = hereRef.current;
-    if (m) list.current?.scrollToIndex({ index: m.index, animated: true, viewPosition: 0.3 });
+    if (!m) return;
+    // On pages, a match is found by going to its page.
+    if (pagedRef.current) {
+      const i = pageOfKey(pagesRef.current, m.key);
+      if (i >= 0) setPicked(i >= pagesRef.current.length - 1 ? null : { index: i, of: pagesRef.current.length });
+    } else list.current?.scrollToIndex({ index: m.index, animated: true, viewPosition: 0.3 });
   }, [hereKey]);
   const step = (dir: 1 | -1) => {
     if (!find) return;
@@ -299,7 +320,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "summary":
           return <SummaryRow row={row} onFiles={setFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page":
-          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} onAction={(a) => reply(row.item.id, a)} />;
+          return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
           return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
@@ -385,6 +406,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           )}
         </ChatSettings>
       </View>
+      {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} onChatView={() => setAsList(true)} />}
+      {stepsChat && asList && pages.length > 0 && (
+        <PagesButton
+          onPress={() => {
+            setAsList(false);
+            setPicked(null);
+          }}
+        />
+      )}
 
       {banner && (
         <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -520,6 +550,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         }
       />
   );
+  // The newest page's buttons go at its end, and stay while the step is talked about (until one is pressed, or Claude is at work).
+  const heading = paged ? [...pages[pages.length - 1].rows].reverse().find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page") : undefined;
+  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, a)} /> : null;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (
@@ -527,14 +561,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         {el}
       </KeyboardStickyView>
     ) : null;
-  const jump = away && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
+  const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
           <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
-            {listEl}
+            {body}
           </View>
           {riding(jump)}
           {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
@@ -556,7 +590,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         <>
           {head}
           <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
-            {listEl}
+            {body}
             {riding(jump)}
           </View>
           <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>

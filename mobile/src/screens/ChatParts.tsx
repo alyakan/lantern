@@ -279,12 +279,12 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutpu
 });
 
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
-export const PageRow = memo(function PageRow({ row, answered, onAction, mark }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string }) {
+export const PageRow = memo(function PageRow({ row, answered, onAction, mark, paged = false }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string; /** On a page of its own (Step by step's pages): shown whole, and its buttons are at the end of the page, not here. */ paged?: boolean }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const { page } = row;
   // A page is cut short unless it was opened or a search is marking it (the words looked for may be in the part cut).
-  const cut = page.body.length >= 260 && !open && !mark;
+  const cut = page.body.length >= 260 && !open && !mark && !paged;
   const body = cut ? `${page.body.slice(0, 240).trimEnd()}…` : page.body;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
@@ -296,14 +296,14 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark }: 
           <Marked text={page.title} mark={mark} />
         </Txt>
         {!!body && <Markdown text={body} mark={mark} />}
-        {page.body.length >= 260 && (
+        {page.body.length >= 260 && !paged && (
           <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">
               {cut ? "Show the whole page" : "Show less"}
             </Txt>
           </Pressable>
         )}
-        {row.live && !answered && page.actions.length > 0 && (
+        {row.live && !answered && !paged && page.actions.length > 0 && (
           <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
             {page.actions.map((a) => (
               <Button key={a.label} label={a.label} kind={a.primary ? "ink" : "ghost"} style={{ flex: 1 }} onPress={() => onAction(a)} />
@@ -314,6 +314,17 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark }: 
     </View>
   );
 });
+
+/** The newest page's buttons, at the end of the page: they stay while the step is talked about, until one is pressed. */
+export function PageActionsBar({ actions, onAction }: { actions: PageAction[]; onAction: (a: PageAction) => void }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: space.lg, paddingTop: 14 }}>
+      {actions.map((a) => (
+        <Button key={a.label} label={a.label} kind={a.primary ? "ink" : "ghost"} style={{ flex: 1 }} onPress={() => onAction(a)} />
+      ))}
+    </View>
+  );
+}
 
 /** Who answered a prompt, in words: you, the Mac, or another phone. */
 export function answeredBy(by: string | null, me: string | null): string {
