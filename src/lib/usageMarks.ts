@@ -15,6 +15,8 @@ export interface Marks {
   marks: Mark[];
   /** Where an even pace would have the bar now (0 to 1), or null when the reset isn't known. */
   pace: number | null;
+  /** The middle of each step of the window (0 to 1 along the bar, and when): where a day's name goes. */
+  middles: Mark[];
 }
 
 /**
@@ -22,10 +24,12 @@ export interface Marks {
  * first hour, second hour, …: not its start or end), and where an even pace would be by `now`.
  */
 export function windowMarks(resetsAt: number | null, windowSecs: number, stepSecs: number, now = Date.now()): Marks {
-  if (resetsAt === null) return { marks: [], pace: null };
+  if (resetsAt === null) return { marks: [], pace: null, middles: [] };
   const start = resetsAt - windowSecs;
   const marks: Mark[] = [];
   for (let t = stepSecs; t < windowSecs; t += stepSecs) marks.push({ at: t / windowSecs, when: start + t });
+  const middles: Mark[] = [];
+  for (let t = stepSecs / 2; t < windowSecs; t += stepSecs) middles.push({ at: t / windowSecs, when: start + t });
   const gone = now / 1000 - start;
-  return { marks, pace: Math.min(1, Math.max(0, gone / windowSecs)) };
+  return { marks, pace: Math.min(1, Math.max(0, gone / windowSecs)), middles };
 }

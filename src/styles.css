@@ -2727,7 +2727,7 @@ button.plan-meter { display: inline-flex; align-items: center; gap: 12px; height
 button.plan-meter:hover { background: var(--bg-hover); }
 button.plan-meter svg { width: 10px; height: 10px; opacity: 0.6; }
 /* A window in the title bar: its word and percentage over a thin bar, each window in its own colour. */
-.mini-meter { display: inline-flex; flex-direction: column; gap: 3px; min-width: 64px; font-size: calc(11.5px * var(--font-scale)); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mini-meter { display: inline-flex; flex-direction: column; gap: 3px; min-width: 64px; color: var(--text-2); font-weight: 400; font-size: calc(11.5px * var(--font-scale)); line-height: 1.1; font-variant-numeric: tabular-nums; }
 .mini-meter.warn { color: var(--warn); }
 .mini-meter.stop { color: var(--del); font-weight: 600; }
 .mini-meter-track { position: relative; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }

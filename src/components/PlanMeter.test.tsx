@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { planLevel, planLine, planSentence, setPlanUsage } from "../lib/planUsage";
 import type { UsageRow } from "../lib/usage";
 import { setWeekUsage } from "../lib/weekUsage";
-import { HOUR_SECS, SESSION_SECS, windowMarks } from "../lib/usageMarks";
+import { DAY_SECS, HOUR_SECS, SESSION_SECS, windowMarks } from "../lib/usageMarks";
 import { PlanMeter } from "./PlanMeter";
 
 const row = (over: Partial<UsageRow>): UsageRow => ({ slot: "s1", name: "Fix the login", project: "acme-api", state: "idle", cost: 0, tokens: 0, models: [], ...over });
@@ -95,7 +95,7 @@ describe("the session and week bars", () => {
     const [session, week] = Array.from(container.querySelectorAll(".usage-bar"));
     expect(session.querySelectorAll(".usage-bar-tick")).toHaveLength(4);
     expect(week.querySelectorAll(".usage-bar-tick")).toHaveLength(6);
-    expect(week.querySelectorAll(".usage-bar-days span")).toHaveLength(6);
+    expect(week.querySelectorAll(".usage-bar-days span")).toHaveLength(7);
     // Three of five hours gone, three and a half of seven days.
     expect(parseFloat((session.querySelector(".usage-bar-pace") as HTMLElement).style.left)).toBeCloseTo(60, 1);
     expect(parseFloat((week.querySelector(".usage-bar-pace") as HTMLElement).style.left)).toBeCloseTo(50, 1);
@@ -111,6 +111,10 @@ describe("windowMarks", () => {
     expect(marks[0].when).toBe(reset - SESSION_SECS + 3600);
     expect(pace).toBeCloseTo(0.2);
     expect(windowMarks(reset, SESSION_SECS, HOUR_SECS, (reset + 10) * 1000).pace).toBe(1);
-    expect(windowMarks(null, SESSION_SECS, HOUR_SECS)).toEqual({ marks: [], pace: null });
+    expect(windowMarks(null, SESSION_SECS, HOUR_SECS)).toEqual({ marks: [], pace: null, middles: [] });
+    // A week's days are named at their middles: seven, each a day after the last.
+    const days = windowMarks(reset, 7 * DAY_SECS, DAY_SECS).middles;
+    expect(days.map((d) => d.at)).toEqual([0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5].map((x) => x / 7));
+    expect(days[1].when - days[0].when).toBe(DAY_SECS);
   });
 });

@@ -163,13 +163,6 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   return (
     <header className="topbar" data-tauri-drag-region>
       <div className="topbar-side" data-tauri-drag-region>
-        {back && (
-          <div className="toolbar-group">
-            <button className="icon topbar-back" aria-label="Back to the previous chat" title="Back to the previous chat (⌘[)" onClick={back}>
-              <BackIcon />
-            </button>
-          </div>
-        )}
         {sidebar && (
           <div className="toolbar-group">
             <button className="icon sidebar-toggle" aria-label={showSidebarLabel(sidebar.needs)} title={`Show sidebar${sidebarShortcut}`} onClick={sidebar.onShow}>
@@ -179,6 +172,13 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
                   {sidebar.needs}
                 </span>
               )}
+            </button>
+          </div>
+        )}
+        {back && (
+          <div className="toolbar-group">
+            <button className="icon topbar-back" aria-label="Back to the previous chat" title="Back to the previous chat (⌘[)" onClick={back}>
+              <BackIcon />
             </button>
           </div>
         )}

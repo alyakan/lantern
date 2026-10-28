@@ -53,9 +53,9 @@ fn command(cfg: &SessionConfig) -> Command {
     let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
     // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
     // go there, a command line is readable by any process), and the token and what to take out in the environment.
-    // Subagents off: claude starts without the tool that starts them ("Task" in claude 2.1.308, "Agent" in some versions).
+    // Subagents off: claude starts without the tools that start them.
     if cfg.subagent_model.as_deref() == Some(crate::session::SUBAGENTS_OFF) {
-        args.push("--disallowedTools=Agent,Task".into());
+        crate::args::without_subagents(&mut args);
     }
     let gateway = cfg.endpoint.as_ref().zip(cfg.model.as_deref()).map(|(g, model)| gateway_env(g, model));
     if let Some(g) = &gateway {
@@ -749,7 +749,7 @@ done"#,
         let s = Session::spawn(&cfg, sink, no_edits()).unwrap();
         let seen = wait_for_file(&dir.path().join("seen.txt")).await;
         let (args, sub) = seen.split_once('|').unwrap();
-        assert!(args.contains("--disallowedTools=Agent,Task"), "{args}");
+        assert!(args.contains("--disallowedTools Agent,Task,Workflow"), "{args}");
         assert_eq!(sub, "unset");
         s.stop().await;
     }

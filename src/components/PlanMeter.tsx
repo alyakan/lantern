@@ -119,9 +119,9 @@ function UsageBar({ label, used, level, sentence, marks, unit }: { label: string
         ))}
         {marks.pace !== null && <span className="usage-bar-pace" style={{ left: `${marks.pace * 100}%` }} title={`An even pace would be at ${pct(marks.pace)}% now`} />}
       </div>
-      {unit === "day" && marks.marks.length > 0 && (
+      {unit === "day" && marks.middles.length > 0 && (
         <div className="usage-bar-days" aria-hidden>
-          {marks.marks.map((m) => (
+          {marks.middles.map((m) => (
             <span key={m.when} style={{ left: `${m.at * 100}%` }}>
               {new Date(m.when * 1000).toLocaleDateString([], { weekday: "short" })}
             </span>
