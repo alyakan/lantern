@@ -1533,6 +1533,20 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_question_is_answered_in_the_phones_own_words() {
+        // A card as Claude asks it, answered with "Something else" rather than an option.
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let input = json!({"questions": [{"question": "Which buttons should become rounded pills?", "header": "Scope", "multiSelect": false, "options": [{"label": "All Mac text buttons (Recommended)", "description": "Change the base `button` rule."}, {"label": "The phone app's buttons", "description": "Change buttons in the mobile app."}]}]});
+        *r.host.pending.lock().unwrap() = vec![Pending { request_id: "q1".into(), tool_name: answers::QUESTION_TOOL.into(), input: input.clone(), at: 1 }];
+        let (_, mut p) = paired(&r).await;
+        let typed = "The phone’s, and the second of two stacked is a link";
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "q1".into(), allow: true, message: None, answers: Some([("Which buttons should become rounded pills?".to_string(), typed.to_string())].into()) }).await;
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(r.host.answered.lock().unwrap()[0].2.as_ref().unwrap()["answers"], json!({"Which buttons should become rounded pills?": typed}));
+    }
+
+    #[tokio::test]
     async fn the_waiting_list_spans_every_chat_oldest_first_with_long_inputs_cut() {
         let r = rig();
         r.hub.opened("a", "/p");

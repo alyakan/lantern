@@ -18,12 +18,37 @@ pub fn with_answers(tool_name: &str, original: &Value, answers: &BTreeMap<String
     }
     let Some(input) = original.as_object() else { return Err("That question can't be answered here.".into()) };
     let questions: Vec<&str> = input.get("questions").and_then(Value::as_array).map(|qs| qs.iter().filter_map(|q| q.get("question").and_then(Value::as_str)).collect()).unwrap_or_default();
-    if answers.is_empty() || answers.iter().any(|(q, a)| !questions.contains(&q.as_str()) || a.len() > ANSWER_MAX) {
+    if answers.is_empty() {
         return Err("Those answers aren't to this question.".into());
     }
+    let mut out_answers = serde_json::Map::new();
+    for (key, a) in answers {
+        let asked = asked_as(&questions, key).filter(|_| a.len() <= ANSWER_MAX).ok_or("Those answers aren't to this question.")?;
+        // Two answers to one question is not an answer.
+        if out_answers.insert(asked.to_string(), Value::String(a.clone())).is_some() {
+            return Err("Those answers aren't to this question.".into());
+        }
+    }
     let mut out = input.clone();
-    out.insert("answers".into(), Value::Object(answers.iter().map(|(q, a)| (q.clone(), Value::String(a.clone()))).collect()));
+    out.insert("answers".into(), Value::Object(out_answers));
     Ok(Value::Object(out))
+}
+
+/// The question asked that a phone's `key` is to, in Claude's own words. The phone was shown it with the spaces around it
+/// trimmed (mobile/src/view/prompts.ts), and a long one cut short (protocol::trimmed), so either of those is it too, as
+/// long as it is that one question alone (two long ones may read the same, cut short).
+fn asked_as<'a>(questions: &[&'a str], key: &str) -> Option<&'a str> {
+    if let Some(q) = questions.iter().copied().find(|q| *q == key) {
+        return Some(q);
+    }
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let shown_as = |q: &str| q.trim() == key || super::protocol::trimmed(&Value::String(q.to_string())).as_str().is_some_and(|shown| shown.trim() == key);
+    let mut matches = questions.iter().copied().filter(|q| shown_as(q));
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 #[cfg(test)]
@@ -57,6 +82,35 @@ mod tests {
         assert!(with_answers(QUESTION_TOOL, &question(), &answers(&[])).is_err(), "no answers is no answer");
         assert!(with_answers(QUESTION_TOOL, &question(), &answers(&[("Which theme?", &"x".repeat(ANSWER_MAX + 1))])).is_err());
         assert!(with_answers(QUESTION_TOOL, &json!("not an object"), &answers(&[("Which theme?", "Dark")])).is_err());
+    }
+
+    #[test]
+    fn a_question_the_phone_was_shown_trimmed_is_answered_in_claudes_own_words() {
+        let spaced = json!({"questions": [{"question": "  Which theme?\n", "options": [{"label": "Dark"}]}]});
+        let out = with_answers(QUESTION_TOOL, &spaced, &answers(&[("Which theme?", "my own words")])).unwrap();
+        assert_eq!(out["answers"], json!({"  Which theme?\n": "my own words"}));
+
+        let long = "q".repeat(super::super::protocol::INPUT_TEXT_MAX + 50);
+        let shown = super::super::protocol::trimmed(&json!(long.clone())).as_str().unwrap().to_string();
+        let out = with_answers(QUESTION_TOOL, &json!({"questions": [{"question": long.clone()}]}), &answers(&[(&shown, "yes")])).unwrap();
+        assert_eq!(out["answers"][long.as_str()], "yes");
+    }
+
+    #[test]
+    fn two_answers_to_one_question_or_a_blank_key_are_refused() {
+        let spaced = json!({"questions": [{"question": "Which theme?"}]});
+        assert!(with_answers(QUESTION_TOOL, &spaced, &answers(&[("Which theme?", "a"), (" Which theme? ", "b")])).is_err());
+        assert!(with_answers(QUESTION_TOOL, &json!({"questions": [{"question": "   "}]}), &answers(&[("", "a")])).is_err());
+    }
+
+    #[test]
+    fn two_long_questions_that_read_the_same_cut_short_are_not_guessed_between() {
+        let start = "q".repeat(super::super::protocol::INPUT_TEXT_MAX);
+        let (a, b) = (format!("{start} first?"), format!("{start} second?"));
+        let shown = super::super::protocol::trimmed(&json!(a.clone())).as_str().unwrap().to_string();
+        assert!(with_answers(QUESTION_TOOL, &json!({"questions": [{"question": a.clone()}, {"question": b}]}), &answers(&[(&shown, "yes")])).is_err());
+        let out = with_answers(QUESTION_TOOL, &json!({"questions": [{"question": a.clone()}, {"question": "Other?"}]}), &answers(&[(&a, "yes")])).unwrap();
+        assert_eq!(out["answers"][a.as_str()], "yes", "its whole words are still that one question");
     }
 
     #[test]

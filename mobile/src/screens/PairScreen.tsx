@@ -172,7 +172,7 @@ export function ConfirmLink({ link, onCancel, onDone }: { link: string; onCancel
               else onDone();
             }}
           />
-          <Button label="Cancel" kind="ghost" onPress={onCancel} />
+          <Button label="Cancel" kind="ghost" link onPress={onCancel} />
         </>
       )}
     </View>

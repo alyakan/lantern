@@ -189,7 +189,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
                 {`Clear ${totals.count} item${totals.count === 1 ? "" : "s"} on your Mac, about ${bytesText(totals.bytes)}? ${totals.trashBytes > 0 ? `${bytesText(totals.trashBytes)} of it goes to the Trash, which frees no room until it is emptied. ` : ""}The Mac checks each one again first and skips any that changed. Caches and build output come back by themselves.`}
               </Txt>
               <Button label={`Clear ${bytesText(totals.bytes)}`} kind="ink" onPress={() => void clear()} />
-              <Button label="Cancel" kind="ghost" onPress={() => setConfirming(false)} />
+              <Button label="Cancel" kind="ghost" link onPress={() => setConfirming(false)} />
             </View>
           ) : (
             canClear && <Button label={`Clear safe items (${bytesText(totals?.bytes ?? 0)})`} kind="ink" onPress={() => void askClear()} accessibilityHint="Asks for Face ID, then shows what it will clear." />
@@ -199,7 +199,8 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
               The scan is more than an hour old, so scan again before clearing.
             </Txt>
           )}
-          <Button label="Close" kind="ghost" onPress={close} />
+          {/* While a clear is being confirmed, Cancel is the way out: a second one would sit as loud as Clear. */}
+          {!(confirming && totals) && <Button label="Close" kind="ghost" onPress={close} />}
         </View>
       )}
     </Sheet>

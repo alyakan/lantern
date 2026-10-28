@@ -44,7 +44,7 @@ export function CloseChatSheet({ title, why, onConfirm, onClose }: { title: stri
               }}
             />
           )}
-          <Button label={why ? "OK" : "Keep it"} kind="ghost" disabled={busy} onPress={close} />
+          <Button label={why ? "OK" : "Keep it"} kind="ghost" link={!why} disabled={busy} onPress={close} />
         </View>
       )}
     </Sheet>

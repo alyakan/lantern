@@ -21,15 +21,18 @@ export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProp
 
 type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
 
-/** A button at least as tall as a touch target; the label says what happens. */
-export function Button({ label, onPress, kind = "ink", disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
+/**
+ * A pill at least as tall as a touch target; the label says what happens. `link`: the second of two stacked, as
+ * underlined words in the kind's colour with no pill around them, so the main one is plainly the one to press.
+ */
+export function Button({ label, onPress, kind = "ink", link = false, disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; link?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
   // "hi" is the highlighter: dark words on yellow (white ones can't be read on it).
   // A regular's main buttons are Ember too.
   const regular = useRegular();
   const colors = useColors();
-  const bg = { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
-  // On "hi" the words are dark in either appearance: they are on yellow.
-  const fg = kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
+  const bg = link ? "transparent" : { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // On "hi" the words are dark in either appearance: they are on yellow. A link has no fill, so its words are the page's.
+  const fg = link ? (kind === "night-stop" ? "night-stop" : kind.startsWith("night") ? "white" : "ink") : kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (
     <PressScale
       accessibilityRole="button"
@@ -39,9 +42,9 @@ export function Button({ label, onPress, kind = "ink", disabled, style, accessib
       disabled={disabled}
       onPress={onPress}
       opacity={disabled ? 0.4 : 1}
-      style={[{ minHeight: MIN_TARGET, borderRadius: radius.inner, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
+      style={[{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
     >
-      <Txt variant="body" tone={fg} style={{ fontWeight: "700" }}>
+      <Txt variant="body" tone={fg} style={link ? { fontWeight: "600", textDecorationLine: "underline" } : { fontWeight: "700" }}>
         {label}
       </Txt>
     </PressScale>
