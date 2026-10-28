@@ -29,6 +29,8 @@ const CATALOGUE = [
   { id: "canvas-fit", title: "Fit the Canvas to Everyone", group: "View", key: "0" },
   { id: "canvas-next-agent", title: "Next Agent on the Canvas", group: "View", key: "]" },
   { id: "canvas-previous-agent", title: "Previous Agent on the Canvas", group: "View", key: "[" },
+  // Back to the chat shown before this one (see chatHistory.ts); the canvas's ⌘[ comes first while it has focus.
+  { id: "go-back", title: "Back to the Previous Chat", group: "View", key: "[", skipInEditor: true },
   { id: "session-history", title: "Chat History", group: "View", key: "k", menu: true, skipInEditor: true },
   { id: "find-file", title: "Find File…", group: "Search", key: "p", menu: true, native: true },
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },
@@ -108,18 +110,27 @@ export function runAction(id: string): boolean {
   return true;
 }
 
-/** The catalogue action a ⌘ keystroke names, if any. Option keys are left to the page, and so is Ctrl unless the action is a ⌃⌘ one. */
-export function actionForKey(e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean }): ActionDef | undefined {
-  if (!e.metaKey || e.altKey) return undefined;
+type KeyPress = { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean };
+
+/** The catalogue actions a ⌘ keystroke names, in catalogue order. Option keys are left to the page, and so is Ctrl unless the action is a ⌃⌘ one. */
+export function actionsForKey(e: KeyPress): ActionDef[] {
+  if (!e.metaKey || e.altKey) return [];
   const key = e.key.toLowerCase();
-  return ACTIONS.find((a) => a.key === key && !!a.shift === !!e.shiftKey && !!a.ctrl === !!e.ctrlKey);
+  return ACTIONS.filter((a) => a.key === key && !!a.shift === !!e.shiftKey && !!a.ctrl === !!e.ctrlKey);
 }
 
+/** The first catalogue action a ⌘ keystroke names, if any. */
+export const actionForKey = (e: KeyPress): ActionDef | undefined => actionsForKey(e)[0];
+
+// A key two actions share (⌘[: the canvas's previous agent, else Back) runs the first that is enabled now.
 function onKeyDown(e: KeyboardEvent) {
-  const def = actionForKey(e);
-  if (!def) return;
-  if (def.skipInEditor && document.activeElement?.closest(".monaco-editor")) return;
-  if (runAction(def.id)) e.preventDefault();
+  for (const def of actionsForKey(e)) {
+    if (def.skipInEditor && document.activeElement?.closest(".monaco-editor")) continue;
+    if (runAction(def.id)) {
+      e.preventDefault();
+      return;
+    }
+  }
 }
 
 let listening = false;

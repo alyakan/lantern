@@ -14,6 +14,8 @@ export interface Harness {
 }
 
 export const DEFAULT_HARNESS = "default";
+/** A harness's subagent model that turns subagents off: claude starts without the tool that starts them (session.rs SUBAGENTS_OFF). */
+export const SUBAGENTS_OFF = "off";
 export const CUSTOM_HARNESS = "custom";
 
 /** Standard runs as before (the app's model and effort, Claude Code's own advisor setting); the rest are presets. */
@@ -76,7 +78,7 @@ const name = modelName;
 /** One line about what it does: "Sonnet · Opus advisor · Haiku subagents". */
 export function summary(h: Harness): string {
   if (h.id === DEFAULT_HARNESS) return "Your model and effort, Claude Code's own settings";
-  const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent ? `${name(h.subagent)} subagents` : null];
+  const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent === SUBAGENTS_OFF ? "no subagents" : h.subagent ? `${name(h.subagent)} subagents` : null];
   return parts.filter(Boolean).join(" · ");
 }
 

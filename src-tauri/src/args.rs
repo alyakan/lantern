@@ -509,10 +509,41 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
     a
 }
 
+/// The tools that start other agents: a subagent inline, or a workflow's.
+pub const SUBAGENT_TOOLS: [&str; 3] = ["Agent", "Task", "Workflow"];
+
+/// `a` with subagents off (a harness preset can say so): their tools added to `--disallowedTools`, the one already there
+/// (a worker's) or a new one.
+pub fn without_subagents(a: &mut Vec<String>) {
+    match a.iter().position(|x| x == "--disallowedTools").map(|i| i + 1).filter(|i| *i < a.len()) {
+        Some(i) => {
+            let mut denied: Vec<String> = a[i].split(',').map(String::from).collect();
+            denied.extend(SUBAGENT_TOOLS.iter().filter(|t| !denied.iter().any(|d| d == *t)).map(|t| t.to_string()).collect::<Vec<_>>());
+            a[i] = denied.join(",");
+        }
+        None => {
+            a.push("--disallowedTools".into());
+            a.push(SUBAGENT_TOOLS.join(","));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::ProviderId;
+
+    #[test]
+    fn subagents_off_adds_their_tools_to_the_one_disallowed_list() {
+        let mut a = vec!["--model".to_string(), "sonnet".into()];
+        without_subagents(&mut a);
+        assert_eq!(value_after(&a, "--disallowedTools"), Some("Agent,Task,Workflow"));
+        // A worker already has one: it grows, and there is still only one.
+        let mut w = launch_args(Mode::Auto, false, None, None, None, None, &worker(true), &[]);
+        without_subagents(&mut w);
+        assert_eq!(w.iter().filter(|x| x.as_str() == "--disallowedTools").count(), 1);
+        assert_eq!(value_after(&w, "--disallowedTools"), Some("Agent,Task,Edit,Write,MultiEdit,NotebookEdit,Workflow"));
+    }
 
     #[test]
     fn the_advisor_is_a_flag_only_when_chosen() {

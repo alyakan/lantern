@@ -561,7 +561,7 @@ describe("a file change waiting on you", () => {
 describe("the plan usage on Home", () => {
   it("opens the usage in full when pressed", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], plan: { used: 0.4, resetsAt: null, status: "allowed" } });
-    await fireEvent.press(screen.getByRole("button", { name: /Plan usage: 40 percent/ }));
-    expect(await screen.findByText("Plan usage")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: /Session: 40 percent/ }));
+    expect(await screen.findByText("Usage")).toBeTruthy();
   });
 });

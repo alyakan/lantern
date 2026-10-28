@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Harness } from "../lib/harness";
+import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, SUBAGENTS_OFF, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Harness } from "../lib/harness";
 import { EFFORT_LEVELS, effortLabel } from "../lib/effort";
 
 export interface HarnessSettingsProps {
@@ -81,7 +81,7 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
   );
 }
 
-function ModelSelect({ label, value, options, none, onChange }: { label: string; value: string | null; options: string[]; none: string; onChange: (v: string | null) => void }) {
+function ModelSelect({ label, value, options, none, labels = {}, onChange }: { label: string; value: string | null; options: string[]; none: string; labels?: Record<string, string>; onChange: (v: string | null) => void }) {
   // A full model id kept as it is, alongside the families.
   const extra = value && !options.includes(value) ? [value] : [];
   return (
@@ -91,7 +91,7 @@ function ModelSelect({ label, value, options, none, onChange }: { label: string;
         <option value="">{none}</option>
         {[...options, ...extra].map((m) => (
           <option key={m} value={m}>
-            {FAMILY_LABEL[m as keyof typeof FAMILY_LABEL] ?? m}
+            {labels[m] ?? FAMILY_LABEL[m as keyof typeof FAMILY_LABEL] ?? m}
           </option>
         ))}
       </select>
@@ -126,10 +126,10 @@ function HarnessEditor({ h, fallbackModel, onChange, onRemove }: { h: Harness; f
         </select>
       </label>
       <ModelSelect label="Advisor" value={h.advisor} options={advisors} none="No advisor" onChange={(advisor) => set({ advisor })} />
-      <ModelSelect label="Subagents" value={h.subagent} options={FAMILIES} none="Each subagent's own" onChange={(subagent) => set({ subagent })} />
+      <ModelSelect label="Subagents" value={h.subagent} options={[...FAMILIES, SUBAGENTS_OFF]} none="Each subagent's own" labels={{ [SUBAGENTS_OFF]: "Off: main model and advisor only" }} onChange={(subagent) => set({ subagent })} />
       <p className="settings-muted wide">
         An advisor has to be at least as strong as the main model, so only those are offered. Subagents can't take an effort of their own; their model applies to every subagent, unless one asks
-        for a specific model itself.
+        for a specific model itself. Off starts Claude without subagents, so only the main model and its advisor do the work.
       </p>
       {usesFable(h) && <p className="settings-notice wide">Fable on some plans needs a one-time consent first: run /model fable in Claude Code and choose to continue.</p>}
       {onRemove && (

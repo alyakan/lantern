@@ -56,7 +56,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
       <HStack spacing={8}>
         {asks !== "" ? <Text modifiers={[font({ size: 13, weight: "semibold" }), foregroundStyle(hue)]}>{asks}</Text> : null}
         <Spacer />
-        {plan >= 0 ? <Text modifiers={[font({ size: 12 }), monospacedDigit(), foregroundStyle(planColour)]}>{`Plan ${plan}%`}</Text> : null}
+        {plan >= 0 ? <Text modifiers={[font({ size: 12 }), monospacedDigit(), foregroundStyle(planColour)]}>{`Session ${plan}%`}</Text> : null}
       </HStack>
     ) : null;
   const status = working ? (

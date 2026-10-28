@@ -52,6 +52,7 @@ import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/the
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
+import { useChatHistory } from "./lib/chatHistory";
 import type { PaletteEntry } from "./lib/palette";
 import { newVersionToShow, notesFor, rememberNotes, versionsWithNotes } from "./lib/whatsNew";
 import { NEW_ISSUE_URL } from "./lib/bugReport";
@@ -548,6 +549,9 @@ export default function App() {
     const folder = chats.slots[shown].folder;
     if (folder) setLastFolder(folder);
   };
+  // Back (the title bar's arrow, ⌘[): the chats shown before this one, newest first, those still open.
+  const chatHistory = useChatHistory(active, (slot) => !!chats.slots[slot], (slot) => switchTo(slot));
+  useAction("go-back", chatHistory.goBack, chatHistory.canGoBack);
 
   /**
    * The chat to start something new in: the one on screen if it's still empty, otherwise a new one (and the current
@@ -2626,6 +2630,7 @@ export default function App() {
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
+          back={chatHistory.canGoBack ? chatHistory.goBack : undefined}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}

@@ -48,7 +48,7 @@ describe("the plan usage", () => {
   it("says how much of the window is used and when it resets", async () => {
     await renderWith(<UsageRow plan={{ used: 0.42, resetsAt: Date.now() / 1000 + 130 * 60 + 30, status: "allowed" }} />);
     expect(screen.getByText("42% used")).toBeTruthy();
-    expect(screen.getByLabelText(/Plan usage: 42 percent of the five-hour window used\. Resets in 2 h/)).toBeTruthy();
+    expect(screen.getByLabelText(/Session: 42 percent of the five-hour window used\. Resets in 2 h/)).toBeTruthy();
   });
 
   it("says the limit is reached", async () => {
@@ -60,7 +60,7 @@ describe("the plan usage", () => {
 describe("the usage on Home and the context in a chat", () => {
   it("shows the plan usage as a line with when it resets", async () => {
     await renderWith(<UsageStrip plan={{ used: 0.3, resetsAt: Date.now() / 1000 + 45 * 60 + 5, status: "allowed" }} />);
-    expect(screen.getByText("Plan · 30% used")).toBeTruthy();
+    expect(screen.getByText("Session · 30% used")).toBeTruthy();
     expect(screen.getByText("Resets in 45 min")).toBeTruthy();
   });
 

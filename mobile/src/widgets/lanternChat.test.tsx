@@ -86,7 +86,7 @@ describe("the lock-screen card", () => {
 
   it("shows the plan's usage, grey until 80%, yellow from there and red at the limit", () => {
     const colourOf = (plan: number) => {
-      const t = all(draw({ plan }).banner, "Text").find((n) => texts(n) [0] === `Plan ${plan}%`)!;
+      const t = all(draw({ plan }).banner, "Text").find((n) => texts(n) [0] === `Session ${plan}%`)!;
       return t.props.modifiers.find((m: { name: string }) => m.name === "foregroundStyle").args[0];
     };
     expect(colourOf(43)).toBe("#8E8E93");
@@ -105,6 +105,6 @@ describe("the lock-screen card", () => {
   it("has the extra lines in the expanded view too, and every part is present", () => {
     const out = draw({ title: "T", steps_done: 1, steps_total: 2, plan: 10 });
     for (const part of ["banner", "compactLeading", "compactTrailing", "minimal", "expandedLeading", "expandedTrailing", "expandedBottom"]) expect(out[part]).toBeTruthy();
-    expect(texts(out.expandedBottom)).toEqual(expect.arrayContaining(["lantern", "T", "1 of 2 steps", "Plan 10%"]));
+    expect(texts(out.expandedBottom)).toEqual(expect.arrayContaining(["lantern", "T", "1 of 2 steps", "Session 10%"]));
   });
 });

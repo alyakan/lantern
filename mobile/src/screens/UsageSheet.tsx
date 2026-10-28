@@ -26,10 +26,10 @@ export function UsageSheet({ plan, onClose }: { plan: PlanUsage; onClose: () => 
       {(close) => (
         <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10 }]}>
           <Txt variant="heading" accessibilityRole="header">
-            Plan usage
+            Usage
           </Txt>
           <Txt variant="body">
-            {five.tone === "stop" ? "The five-hour limit is reached." : `${five.percent}% of the five-hour window is used.`} {five.resets}
+            {five.tone === "stop" ? "Session: the five-hour limit is reached." : `Session: ${five.percent}% of the five-hour window is used.`} {five.resets}
           </Txt>
           {week && (
             <Txt variant="body" tone="ink2">
