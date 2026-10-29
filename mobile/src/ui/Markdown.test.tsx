@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { Markdown } from "./Markdown";
+import { Markdown, pathNamed } from "./Markdown";
 import { lightColors } from "./theme";
 
 const table = ["| Step | Status | Time |", "|:--|:-:|--:|", "| Bump the version | **done** | 3 s |", "| Run `npm test` | passed | 41 s |", "| Open the PR | pending | |"].join("\n");
@@ -234,6 +234,22 @@ describe("what a chat search looks for, marked in the words", () => {
     await render(<Markdown text={text} files={["/Users/me/App/Flow.swift"]} onFile={onFile} />);
     await fireEvent.press(screen.getByRole("link"));
     expect(onFile).toHaveBeenCalledWith("/Users/me/App/Flow.swift");
+  });
+
+  it("opens a path in code even when the turn did not edit that file", async () => {
+    const onFile = jest.fn();
+    // A script's edit, or a step shown again later, is not in the turn's list: the Mac is asked, and says if it has no such file.
+    await render(<Markdown text="`App/Sensors/Pairing.swift:82`: `removeDevice` is gone." files={[]} onFile={onFile} />);
+    await fireEvent.press(screen.getByRole("link"));
+    expect(onFile).toHaveBeenCalledWith("App/Sensors/Pairing.swift");
+    expect(screen.queryAllByRole("link")).toHaveLength(1);
+  });
+
+  it("knows a path to a file from other code", () => {
+    expect(pathNamed("a/b/Home.swift:42")).toBe("a/b/Home.swift");
+    expect(pathNamed("./src/app.ts")).toBe("src/app.ts");
+    expect(pathNamed("/Users/me/App/Flow.swift:3:9")).toBe("/Users/me/App/Flow.swift");
+    for (const code of ["self.value", "Home.swift", "a/b", "a/b/Home", "../a/b.ts", "see a/b.ts", "isOn.toggle()", "https://x.com/a.md", "a/b/c.weird"]) expect(pathNamed(code)).toBeNull();
   });
 
   it("shows just a file link's words where nothing can open it", async () => {

@@ -202,6 +202,38 @@ pub fn diff_sides(folder: &Path, path: &Path) -> Result<(Option<String>, Option<
     }
 }
 
+/// Both sides of a file a message names that the chat's tracker never saw (a `python` or `sed` edit, an old step, a file it only read).
+/// The phone asks from outside the Mac, so what git ignores (`.env`, build output), the `.git` folder and files too big for a diff stay shut.
+pub fn named_sides(folder: &Path, path: &Path) -> Result<(Option<String>, Option<String>), String> {
+    // The volume may not care about case (APFS), so `.GIT` is git too.
+    let in_git = |p: &Path| p.components().any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".git"));
+    if in_git(path) {
+        return Err("That file is part of git itself.".into());
+    }
+    // What is on disk is judged before anything of it is read: inside the folder, not git's own, not ignored (git never
+    // calls a tracked file ignored), not a folder, small, and text.
+    if let (Ok(root), Ok(real)) = (folder.canonicalize(), path.canonicalize()) {
+        if real.starts_with(&root) {
+            if in_git(&real) {
+                return Err("That file is part of git itself.".into());
+            }
+            if real.is_dir() {
+                return Err("That is a folder.".into());
+            }
+            if git(folder, &["check-ignore", "-q", "--", &real.to_string_lossy()]).is_some() {
+                return Err("That file is ignored by git, so it isn't shown.".into());
+            }
+            if std::fs::metadata(&real).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
+                return Err("That file is too big to show.".into());
+            }
+            if !looks_textual(&real) {
+                return Err("That file isn't text.".into());
+            }
+        }
+    }
+    diff_sides(folder, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +340,33 @@ mod tests {
         }
         assert_eq!(diff_sides(&root, &root.join("edited.txt")).unwrap(), (Some("before\n".into()), Some("after\n".into())));
         assert_eq!(diff_sides(&root, &root.join("gone.txt")).unwrap(), (Some("gone\n".into()), None));
+    }
+
+    #[test]
+    fn a_named_file_is_shown_unless_git_ignores_it_or_it_is_git_itself() {
+        let dir = repo();
+        let d = dir.path();
+        std::fs::write(d.join(".gitignore"), ".env\n").unwrap();
+        sh(d, &["add", ".gitignore"]);
+        sh(d, &["commit", "-qm", "ignore"]);
+        std::fs::write(d.join(".env"), "SECRET=1\n").unwrap();
+        std::fs::write(d.join("new.txt"), "new\n").unwrap();
+        std::fs::write(d.join("edited.txt"), "after\n").unwrap();
+        assert_eq!(named_sides(d, &d.join("kept.txt")).unwrap(), (Some("kept\n".into()), Some("kept\n".into())));
+        assert_eq!(named_sides(d, &d.join("edited.txt")).unwrap(), (Some("before\n".into()), Some("after\n".into())));
+        assert_eq!(named_sides(d, &d.join("new.txt")).unwrap(), (None, Some("new\n".into())));
+        assert_eq!(named_sides(d, &d.join("nope.txt")).unwrap(), (None, None));
+        assert!(named_sides(d, &d.join(".env")).is_err());
+        assert!(named_sides(d, &d.join(".git/config")).is_err());
+        assert!(named_sides(d, &d.join(".GIT/config")).is_err());
+        assert!(named_sides(d, &d.join("../x.txt")).is_err());
+        // Too big, not text, and a folder are refused before they are read.
+        std::fs::write(d.join("big.txt"), vec![b'a'; (MAX_BYTES + 1) as usize]).unwrap();
+        std::fs::write(d.join("blob.bin"), [0u8, 1, 2, 3]).unwrap();
+        std::fs::create_dir(d.join("dir")).unwrap();
+        for refused in ["big.txt", "blob.bin", "dir"] {
+            assert!(named_sides(d, &d.join(refused)).is_err(), "{refused}");
+        }
     }
 
     #[test]

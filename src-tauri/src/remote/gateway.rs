@@ -269,6 +269,13 @@ impl Gateway {
         .map(serde_json::Value::String)
     }
 
+    /// A file's change in a chat (Request::Diff). For a file the chat never edited the Mac asks git, so it runs beside the
+    /// phone's other requests, with no limit of its own: a sheet of changed files asks for several at once.
+    async fn file_diff(&self, slot: String, path: String) -> Result<serde_json::Value, String> {
+        self.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+        self.host.clone().diff(slot, path).await.map(serde_json::Value::String)
+    }
+
     async fn suggest(&self, refresh: bool) -> Result<serde_json::Value, String> {
         let host = self.host.clone();
         let projects = host.projects().await;
@@ -633,6 +640,7 @@ impl<'a> Session<'a> {
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
                         Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
+                        Request::Diff { slot, path } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path).await) })),
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider).await) }));

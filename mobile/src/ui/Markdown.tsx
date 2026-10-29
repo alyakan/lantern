@@ -56,6 +56,16 @@ export function fileNamed(code: string, files: string[]): string | null {
   return files.find((f) => f === name || f.endsWith(`/${name.replace(/^\.?\//, "")}`)) ?? null;
 }
 
+/** What a path to a file in the words ends in; a word like `self.value` or `isOn.toggle` is not one. */
+const FILE_EXT = /\.(?:swift|kt|kts|java|mm?|hpp?|cc?|cpp|rs|go|py|rb|tsx?|jsx?|mjs|cjs|json|ya?ml|toml|md|mdx|txt|html|css|scss|sh|zsh|plist|xcconfig|pbxproj|xib|storyboard|strings|stringsdict|xcstrings|gradle|sql|lock|xml|csv|php|cs|vue|svelte|dart|exs?|lua|graphql)$/i;
+
+/** The path a bit of code in the words names, whether or not the chat edited it ("a/b/Home.swift:42" is "a/b/Home.swift"): a folder and a file with a known ending, no more. */
+export function pathNamed(code: string): string | null {
+  const name = code.trim().replace(/:\d+(?:[:-]\d+)?$/, "");
+  if (!name.includes("/") || /\s/.test(name) || name.includes("..") || !FILE_EXT.test(name)) return null;
+  return /^(?:\/|\.\/)?(?:[\w@+.-]+\/)+[\w@+-][\w@+.-]*$/.test(name) ? name.replace(/^\.\//, "") : null;
+}
+
 /** `inLink`: these are a link's words, so code in them is not a second link. */
 function Spans({ spans, tone, mark, inLink = false }: { spans: Span[]; tone: Tone; mark?: string; inLink?: boolean }) {
   const accent = useAccent();
@@ -67,7 +77,8 @@ function Spans({ spans, tone, mark, inLink = false }: { spans: Span[]; tone: Ton
       {spans.map((s, i) => {
         switch (s.kind) {
           case "code": {
-            const file = links && !inLink ? fileNamed(s.text, links.files) : null;
+            // An edited file by its end, else a path to any file (the Mac says if it has none): a script's edit or an earlier step's file is not in the list.
+            const file = links && !inLink ? (fileNamed(s.text, links.files) ?? pathNamed(s.text)) : null;
             return (
               <Text
                 key={i}
