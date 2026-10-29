@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
+import { movePanes } from "../ui/motion";
+import { CrossFade, Rise, SidePane } from "../ui/Presence";
 import { space, useColors } from "../ui/theme";
 import { useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
@@ -21,7 +23,7 @@ export interface TabletDetailProps {
   decide: { slot: string; requestId: string } | null;
   /** Whether the chats are beside the chat ("split") or away until asked for ("overlay"). */
   layout: "overlay" | "split";
-  /** The chats are slid in over the chat: they have a button of their own then, and the chat's is out of sight. */
+  /** The chats are slid in over the chat: they have a button of their own then, and the chat's is under them. */
   chatsOpen: boolean;
   onShowChats: () => void;
   onBack: () => void;
@@ -30,7 +32,11 @@ export interface TabletDetailProps {
   onStartNew?: (project: string | null) => void;
 }
 
-/** What a tablet shows beside the chats: the chat they picked, in a column that reads well, or a word to pick one. */
+/**
+ * What a tablet shows beside the chats: the chat they picked, in a column that reads well, or a word to pick one. Nothing here
+ * cuts from one thing to the next: another chat is under the last as it fades away, the Changes pane slides in and out at the
+ * right with the chat making room for it, and a decision rises over its chat and goes back down.
+ */
 export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onReview, onStartNew }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -41,37 +47,48 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const [changesOpen, setChangesOpen] = useState(true);
   const changed = slot ? changedFiles((views[slot] ?? emptyView).items) : [];
   const room = hasRoomForChanges(layout, width) && changed.length > 0;
-  if (!slot) {
-    return (
-      <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
-        <Txt variant="heading">Pick a chat</Txt>
-        <Txt variant="body" tone="ink2" style={{ textAlign: "center" }}>
-          {layout === "split" ? "Choose one from the list, or start a new one." : "Open the list of chats, then choose one or start a new one."}
-        </Txt>
-        {layout === "overlay" && <Button label="Show chats" onPress={onShowChats} />}
-      </View>
-    );
-  }
+  const toggleChanges = (open: boolean) => {
+    movePanes();
+    setChangesOpen(open);
+  };
+  const main = slot ? (
+    <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
+      {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
+      <ChatScreen key={slot} slot={slot} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+    </View>
+  ) : (
+    <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
+      <Txt variant="heading">Pick a chat</Txt>
+      <Txt variant="body" tone="ink2" style={{ textAlign: "center" }}>
+        {layout === "split" ? "Choose one from the list, or start a new one." : "Open the list of chats, then choose one or start a new one."}
+      </Txt>
+      {layout === "overlay" && <Button label="Show chats" onPress={onShowChats} />}
+    </View>
+  );
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper, flexDirection: "row" }}>
       <View style={{ flex: 1 }}>
-        <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
-          {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-          <ChatScreen key={slot} slot={slot} changesPane={room ? { shown: changesOpen, onToggle: () => setChangesOpen((o) => !o) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
-        </View>
+        {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
+        <CrossFade id={slot ?? ""}>
+          <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
+        </CrossFade>
       </View>
-      {room && changesOpen && (
-        <View style={{ width: CHANGES_WIDTH, borderLeftWidth: 1, borderLeftColor: colors.rule }}>
-          <ChangesPane key={slot} slot={slot} onHide={() => setChangesOpen(false)} />
-        </View>
-      )}
-      {decide && (
-        <View testID="decision-pane" style={[StyleSheet.absoluteFill, { backgroundColor: colors.night }]}>
+      <SidePane shown={!!slot && room && changesOpen} width={CHANGES_WIDTH} style={{ borderLeftWidth: 1, borderLeftColor: colors.rule, backgroundColor: colors.paper }}>
+        {slot && (
+          <CrossFade id={slot}>
+            <View style={{ flex: 1, backgroundColor: colors.paper }}>
+              <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} />
+            </View>
+          </CrossFade>
+        )}
+      </SidePane>
+      <Rise testID="decision-pane" shown={!!decide} style={{ backgroundColor: colors.night }}>
+        {decide && (
           <View style={{ flex: 1, width: "100%", maxWidth: DECISION_MAX, alignSelf: "center" }}>
             <DecideScreen key={decide.requestId} slot={decide.slot} requestId={decide.requestId} onClose={onBack} />
           </View>
-        </View>
-      )}
+        )}
+      </Rise>
     </View>
   );
 }
