@@ -214,7 +214,7 @@ function Breath({ size }: { size: number }) {
       pointerEvents="none"
       style={{
         position: "absolute",
-        left: 0,
+        right: 0,
         bottom: 0,
         width: size,
         height: size,
@@ -228,11 +228,14 @@ function Breath({ size }: { size: number }) {
   );
 }
 
-/** What the grown tools circle holds: Search, the other tools, and the way out. */
+/** How wide a tool's button gets, where the row has room to spare (an iPad's). */
+const CHIP_MAX = 120;
+
+/** What the grown tools circle holds: Search, the other tools, and the way out (at the right, where the circle was). */
 function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; onSearch?: () => void; onPick: (tool: BarTool) => void; onClose: () => void }) {
   const colors = useColors();
   const chip = (label: string, onPress: () => void, disabled?: boolean, hint?: string) => (
-    <PressScale key={label} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} haptic="select" scaleTo={0.92} opacity={disabled ? 0.35 : 1} style={{ flex: 1 }}>
+    <PressScale key={label} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} haptic="select" scaleTo={0.92} opacity={disabled ? 0.35 : 1} style={{ flex: 1, maxWidth: CHIP_MAX }}>
       <View style={{ height: 32, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", paddingHorizontal: 6, backgroundColor: `${colors.ink}12` }}>
         <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700" }}>
           {label}
@@ -241,7 +244,7 @@ function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; 
     </PressScale>
   );
   return (
-    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 6 }}>
+    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
       {onSearch && chip("Search", onSearch, false, "Searches this chat")}
       {tools.map((t) => chip(t.label, () => onPick(t), t.disabled, t.hint))}
       <RoundButton label="Close tools" onPress={onClose}>
@@ -285,7 +288,8 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opening]);
   const hasCircle = !!search && circle;
-  const hasTools = !!tools;
+  // (A chat with no tools but Search has the plain search circle: no row of one.)
+  const hasTools = !!tools?.length;
   const stops = working && !!onStop;
   // The tools' row is out. Search there closes it and opens the search in the same breath, so the circle stays grown between them.
   const [tray, setTray] = useState(false);
@@ -399,7 +403,7 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     else setOpening(true);
   };
   const label = stops ? "Stop" : hasTools ? "Tools" : "Search this chat";
-  const hint = stops ? (hasTools ? "Stops what Claude is doing. Hold for the tools." : "Stops what Claude is doing") : hasTools ? "Search, compact and more" : undefined;
+  const hint = stops ? (hasTools ? "Stops what Claude is doing. Hold for the tools." : "Stops what Claude is doing. Hold to search.") : hasTools ? "Search, compact and more" : undefined;
 
   return (
     <View>
@@ -440,7 +444,7 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
             importantForAccessibility={typing && !expanded && !stops ? "no-hide-descendants" : "auto"}
             style={{ position: "absolute", right: 0, bottom: 0, width, height: size, opacity: shown }}
           >
-            {stops && !expanded && <Breath size={size} />}
+            {stops && !grown && <Breath size={size} />}
             {/* While it is a circle the whole of it is the button; once it is the field it is not (its own buttons are), and it says nothing of being one. */}
             <PressScale
               accessible={!expanded}
@@ -449,8 +453,8 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
               accessibilityHint={expanded ? undefined : hint}
               disabled={expanded}
               onPress={press}
-              // Held while it is Stop, it opens the tools all the same.
-              onLongPress={stops && hasTools ? () => setTray(true) : undefined}
+              // Held while it is Stop, it opens the tools all the same (or, with none, the search).
+              onLongPress={stops ? () => (hasTools ? setTray(true) : setOpening(true)) : undefined}
               scaleTo={0.94}
               haptic="light"
               style={{ flex: 1 }}
@@ -458,8 +462,9 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
               <Glass style={{ flex: 1, borderRadius: size / 2 }}>
                 {hasTools && (
                   <>
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width: size, height: size, borderRadius: size / 2, backgroundColor: colors.ink, opacity: dark }} />
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: (size - 20) / 2, top: (size - 20) / 2, opacity: glyphFade }}>
+                    {/* (Placed from the right: the circle grows leftwards from its right edge, and these stay over where the circle was.) */}
+                    <Animated.View pointerEvents="none" style={{ position: "absolute", right: 0, top: 0, width: size, height: size, borderRadius: size / 2, backgroundColor: colors.ink, opacity: dark }} />
+                    <Animated.View pointerEvents="none" style={{ position: "absolute", right: (size - 20) / 2, top: (size - 20) / 2, opacity: glyphFade }}>
                       <ToolsGlyph work={work} />
                     </Animated.View>
                     <Animated.View style={{ position: "absolute", left: 6, right: 6, top: 0, bottom: 0, flexDirection: "row", alignItems: "center", display: grown && layer === "tray" ? "flex" : "none", opacity: trayFade }}>

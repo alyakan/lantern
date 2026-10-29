@@ -692,7 +692,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const list = useListInput(text, setText);
   const query = slashQuery(text);
   const matches = query === null || commands.length === 0 ? [] : matchCommands(commands, query);
-  // On an iPad's keyboard, Return sends (queued while Claude works, as the link above the bar does) and Shift+Return is the new line.
+  // On an iPad's keyboard, Return sends (queued while Claude works, as Send does then) and Shift+Return is the new line.
   // Not while a sheet is over the box (the box may still have the keyboard behind it), and a half-typed "/command" is completed to
   // the first match rather than sent.
   useReturnToSend(typing && !choosing && !marking, () => {

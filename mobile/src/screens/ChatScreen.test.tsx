@@ -658,12 +658,27 @@ describe("a chat", () => {
       alert.mockRestore();
     });
 
-    it("has no Compact or Clear in Step by step, whose pages they would cut across", async () => {
+    it("has no Compact or Clear in Step by step, whose pages they would cut across: with nothing else, the circle is the search's alone", async () => {
       await withSession(turn, {}, {}, { workflow: "steps" });
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(screen.getByLabelText("Search")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+    });
+
+    it("searches straight away when Stop is held in a chat with no other tools", async () => {
+      await withSession(turn, {}, {}, { workflow: "steps", status: "working" });
+      await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
+      expect(screen.getByLabelText("Search")).toBeTruthy();
+    });
+
+    it("waits for the turn to end before Compact or Clear, as the Mac does", async () => {
+      const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
+      await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
+      expect(screen.getByRole("button", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
+      expect(screen.getByRole("button", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      expect(lastOf("send")).toBeUndefined();
     });
 
     it("offers To-dos only from a Mac that keeps them, and opens this chat's list", async () => {

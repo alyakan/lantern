@@ -355,17 +355,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     void sync.send(slot, text);
   };
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
-  // Step by step, whose pages they would cut across); Clear asks first, as the Mac does. To-dos opens this project's list.
+  // Step by step, whose pages they would cut across, and not during a turn, which the Mac waits for too); Clear asks first, as the
+  // Mac does. To-dos opens this project's list.
   const [todosOpen, setTodosOpen] = useState(false);
   const barTools: BarTool[] = [
     ...(stepsChat
       ? []
       : [
-          { label: "Compact", hint: "Summarises the chat so far to free up context", disabled: !online, onPress: () => void sync.send(slot, "/compact") },
+          { label: "Compact", hint: working ? "Once Claude has finished its turn" : "Summarises the chat so far to free up context", disabled: !online || working, onPress: () => void sync.send(slot, "/compact") },
           {
             label: "Clear",
-            hint: "Starts the conversation afresh",
-            disabled: !online,
+            hint: working ? "Once Claude has finished its turn" : "Starts the conversation afresh",
+            disabled: !online || working,
             onPress: () =>
               Alert.alert("Clear this conversation?", "Claude forgets this conversation. The files it changed stay as they are.", [
                 { text: "Keep it", style: "cancel" },
