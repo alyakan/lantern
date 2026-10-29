@@ -4,7 +4,7 @@ import { readPage } from "./pages";
 
 const user = (id: string, text: string): Row => ({ key: `u-${id}`, kind: "user", item: { kind: "user", id, text, at: 1 } as never, showTime: false });
 const said = (id: string, text: string): Row => ({ key: `a-${id}`, kind: "assistant", item: { kind: "assistant", id, text } as never, files: [] });
-const page = (id: string, text: string, live = false): Row => ({ key: `a-${id}`, kind: "page", item: { kind: "assistant", id, text } as never, page: readPage(text)!, live });
+const page = (id: string, text: string, live = false): Row => ({ key: `a-${id}`, kind: "page", item: { kind: "assistant", id, text } as never, page: readPage(text)!, live, files: [] });
 
 describe("Step by step's pages, as the phone pages through them", () => {
   it("starts a page at each heading, with what came after it on that page", () => {

@@ -20,7 +20,7 @@ export interface StepChip {
 export type Row =
   | { key: string; kind: "user"; item: Extract<Item, { kind: "user" }>; /** Its time is shown: the first message of its day, or one a while after the one before. */ showTime: boolean }
   | { key: string; kind: "assistant"; item: Extract<Item, { kind: "assistant" }>; /** The files its turn edited: a path in the words that names one opens its diff. */ files: string[] }
-  | { key: string; kind: "page"; item: Extract<Item, { kind: "assistant" }>; page: Page; live: boolean }
+  | { key: string; kind: "page"; item: Extract<Item, { kind: "assistant" }>; page: Page; live: boolean; /** The files its turn edited (a Build step's): named in its words, each is a link to its change. */ files: string[] }
   | { key: string; kind: "summary"; item: Extract<Item, { kind: "assistant" }>; chips: StepChip[]; durationMs: number | null; files: string[] }
   | { key: string; kind: "steps"; chips: StepChip[]; /** How long the turn took, when it ended and this is its last row of steps ("42 s"). */ took: string | null }
   | { key: string; kind: "prompt"; item: Extract<Item, { kind: "prompt" }> }
@@ -270,7 +270,7 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
       }
       case "assistant": {
         const page = readPage(item.text);
-        if (page && !item.streaming) return void rows.push({ key: `a-${item.id}`, kind: "page", item, page, live: livePage(items, i) });
+        if (page && !item.streaming) return void rows.push({ key: `a-${item.id}`, kind: "page", item, page, live: livePage(items, i), files: files[i] ?? NO_FILES });
         const summary = summaryOf(items, i);
         if (summary) return void rows.push({ key: `a-${item.id}`, kind: "summary", item, ...summary, files: files[i] ?? NO_FILES });
         return void rows.push({ key: `a-${item.id}`, kind: "assistant", item, files: files[i] ?? NO_FILES });
