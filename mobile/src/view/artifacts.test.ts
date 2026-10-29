@@ -54,6 +54,7 @@ describe("the page for the web view", () => {
 
   it("lets nothing load but the page itself", () => {
     expect(isOwnPage("about:blank")).toBe(true);
-    for (const url of ["https://example.com/", "http://127.0.0.1:9/", "file:///etc/passwd", "data:text/html,x", "javascript:alert(1)", "lantern://x"]) expect(isOwnPage(url)).toBe(false);
+    expect(isOwnPage("about:blank#top")).toBe(true);
+    for (const url of ["about:srcdoc", "about:blank?x=1", "https://example.com/","http://127.0.0.1:9/", "file:///etc/passwd", "data:text/html,x", "javascript:alert(1)", "lantern://x"]) expect(isOwnPage(url)).toBe(false);
   });
 });

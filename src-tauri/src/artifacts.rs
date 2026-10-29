@@ -399,7 +399,7 @@ pub fn read_for_phone(folder: &Path, name: &str) -> Result<String, String> {
 
 /// `html` with what makes a web view reach a server on its own taken out: every `<link`, `<base` and `<meta` tag (preconnect,
 /// dns-prefetch, prefetch, preload, a stylesheet from elsewhere, a refresh to another page), and every `href`, `src`, `srcset`, `action`, `formaction`,
-/// `poster`, `ping`, `data`, `background`, `manifest` and `profile` attribute that doesn't point at the page itself (`#...`)
+/// `poster`, `ping`, `data`, `background`, `manifest`, `profile` and `srcdoc` attribute that doesn't point at the page itself (`#...`)
 /// or carry its data inline (`data:`). Plain text replacement of the exact tokens, not a parse: a parse can disagree with
 /// the web view about where a tag begins (a comment, a quote that never closes), and a token the web view reads is a token
 /// this sees. A page's own words that look like these are changed too, which is the price.
@@ -409,7 +409,7 @@ pub fn defuse(html: &str) -> String {
     static ATTRS: OnceLock<regex::Regex> = OnceLock::new();
     let tags = TAGS.get_or_init(|| regex::Regex::new(r"(?i)<(link|base|meta)\b").unwrap());
     let attrs = ATTRS.get_or_init(|| {
-        regex::Regex::new(r#"(?i)(^|[^A-Za-z0-9_-])((?:[A-Za-z]+:)?(?:href|src|srcset|action|formaction|poster|ping|data|background|manifest|profile))(\s*=\s*)(["']?)(#|data:)?"#).unwrap()
+        regex::Regex::new(r#"(?i)(^|[^A-Za-z0-9_-])((?:[A-Za-z]+:)?(?:href|src|srcset|action|formaction|poster|ping|data|background|manifest|profile|srcdoc))(\s*=\s*)(["']?)(#|data:)?"#).unwrap()
     });
     let html = tags.replace_all(html, "<x-$1");
     attrs
@@ -455,12 +455,12 @@ mod tests {
     #[test]
     fn a_phone_gets_every_kind_with_the_ways_a_page_reaches_a_server_on_its_own_taken_out() {
         let dir = folder();
-        let page = r##"<!doctype html><meta http-equiv="refresh" content="0;url=http://evil.test/"><LINK rel=preconnect href="http://evil.test"><base href="http://evil.test/"><a href="https://evil.test/x">x</a><a href='#top'>top</a><img src="data:image/png;base64,AA=="><img src=http://evil.test/p.png><svg><use xlink:href="#a"/><image xlink:href="http://evil.test/i.png"/></svg><form action=http://evil.test><button formaction="http://evil.test">go</button></form><a data-src="x" href = "http://evil.test">y</a>"##;
+        let page = r##"<!doctype html><meta http-equiv="refresh" content="0;url=http://evil.test/"><LINK rel=preconnect href="http://evil.test"><base href="http://evil.test/"><a href="https://evil.test/x">x</a><a href='#top'>top</a><img src="data:image/png;base64,AA=="><img src=http://evil.test/p.png><svg><use xlink:href="#a"/><image xlink:href="http://evil.test/i.png"/></svg><form action=http://evil.test><button formaction="http://evil.test">go</button></form><a data-src="x" href = "http://evil.test">y</a><iframe srcdoc="&lt;link rel=preconnect href=http://evil.test&gt;"></iframe><IFRAME SRCDOC='&#60;link rel=preconnect&#62;'></IFRAME>"##;
         fs::write(dir.path().join(DIR).join("page.html"), page).unwrap();
         fs::write(dir.path().join(DIR).join("notes.md"), "# notes\n[a link](https://example.com)").unwrap();
         fs::write(dir.path().join(DIR).join("flow.mmd"), "graph TD; A-->B").unwrap();
         let html = read_for_phone(dir.path(), "page.html").unwrap();
-        for gone in ["<link", "<LINK", "<base", "<meta", " href=\"http", " href = \"http", " src=http", "xlink:href=\"http", " action=http", " formaction=\"http"] {
+        for gone in ["<link", "<LINK", "<base", "<meta", " href=\"http", " href = \"http", " src=http", "xlink:href=\"http", " action=http", " formaction=\"http", " srcdoc=", " SRCDOC="] {
             assert!(!html.contains(gone), "{gone:?} is still in {html}");
         }
         // Its own fragments and its inline data stay, and a word that only looks like an attribute is left alone.

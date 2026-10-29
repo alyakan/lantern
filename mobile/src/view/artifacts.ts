@@ -85,7 +85,7 @@ export function artifactDocument(body: string, p: Palette): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${PAGE_POLICY}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${themeCss(p)}${base}</style></head><body>${body}</body></html>`;
 }
 
-/** Whether a load the web view asks for is the page itself (nothing else may load or open from it). */
+/** Whether a load the web view asks for is the page itself, or a place in it (nothing else may load or open from it). */
 export function isOwnPage(url: string): boolean {
-  return url === "about:blank" || url.startsWith("about:srcdoc");
+  return url === "about:blank" || url.startsWith("about:blank#");
 }
