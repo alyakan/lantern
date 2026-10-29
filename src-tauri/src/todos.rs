@@ -289,7 +289,9 @@ fn main_folder(folder: &Path) -> Option<PathBuf> {
 
 impl Store {
     pub fn load(path: Option<PathBuf>) -> Self {
-        let lists = path.as_deref().map(read_lists).unwrap_or_default();
+        let mut lists = path.as_deref().map(read_lists).unwrap_or_default();
+        // A chat's slot id is only good while Lantern runs (the next run numbers its chats again): its title stays as a label.
+        lists.values_mut().flatten().for_each(|t| t.chat = None);
         Self { path, lists: Mutex::new(lists), on_change: Mutex::new(None) }
     }
 
@@ -619,6 +621,10 @@ mod tests {
         // It comes back after a restart, and only the user can read the file.
         let again = Store::load(Some(dir.path().join("todos.json")));
         assert_eq!(again.list("/p"), s.list("/p"));
+        // A link to a chat is for this run only; its title stays.
+        s.link_chat("/p", &b.id, "s3", Some("Chat".into())).unwrap();
+        let after = Store::load(Some(dir.path().join("todos.json"))).list("/p")[0].clone();
+        assert_eq!((after.chat, after.chat_title.as_deref()), (None, Some("Chat")));
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(dir.path().join("todos.json")).unwrap().permissions().mode() & 0o777, 0o600);
     }

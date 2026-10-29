@@ -51,6 +51,8 @@ import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./l
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
+import { parseTodoCommand, todoPrompt, useTodos, type Todo, type TodoReminder } from "./lib/todos";
+import { TodoDoneBar, type TodoChat } from "./components/TodosTab";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import { useChatHistory } from "./lib/chatHistory";
 import type { PaletteEntry } from "./lib/palette";
@@ -571,6 +573,50 @@ export default function App() {
   const startFresh = (folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
     if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first, undefined, review);
   };
+
+  // To-dos (see lib/todos.ts). A chat started from an item (its ▶) is linked to it, and asks "Mark done?" when a turn ends;
+  // `asked` is how far the chat was when the user said "Not yet", so it asks again after the next turn.
+  const [todoChats, setTodoChats] = useState<Record<string, { folder: string; id: string; asked: number }>>({});
+  const [todosOpenKey, setTodosOpenKey] = useState(0);
+  const startTodo = (folder: string, todo: Todo) => {
+    if (!state.claudePath) return;
+    const slot = takeSlot();
+    startIn(slot, folder, false, false, todoPrompt(todo));
+    setTodoChats((all) => ({ ...all, [slot]: { folder, id: todo.id, asked: -1 } }));
+    void api.todosEdit(folder, { op: "link", id: todo.id, chat: slot, title: todo.title }).catch(() => {});
+  };
+  // "/todo …" in the message box adds to the project's list instead of going to Claude, and shows it in the Todos tab.
+  const addTodoFromBox = (text: string): boolean => {
+    const cmd = parseTodoCommand(text);
+    if (!cmd) return false;
+    if (!state.folder) {
+      dispatch({ type: "failed", text: "Open a folder first: a to-do belongs to a project." });
+      return true;
+    }
+    if (!cmd.title) {
+      setTodosOpenKey((k) => k + 1);
+      return true;
+    }
+    api.todosEdit(state.folder, { op: "add", title: cmd.title, due: cmd.due }).then(
+      () => setTodosOpenKey((k) => k + 1),
+      (e) => dispatch({ type: "failed", text: errText(e) }),
+    );
+    return true;
+  };
+  const todoList = useTodos(state.folder);
+  // A to-do's reminder went off (the backend pushes it to phones too): one notification per project.
+  useEffect(() => {
+    const unlisten = api
+      .onTodosRemind((due: TodoReminder[]) => {
+        const byProject = new Map<string, TodoReminder[]>();
+        for (const r of due) byProject.set(r.key, [...(byProject.get(r.key) ?? []), r]);
+        for (const [key, list] of byProject) notify(basename(key), list.length === 1 ? `Due: ${list[0].todo.title}` : `${list.length} to-dos are due`, "waiting");
+      })
+      .catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
 
   /**
    * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
@@ -2517,6 +2563,8 @@ export default function App() {
     });
   };
   const updateOffer = update && !updateLater ? { version: update.version, busy: Object.values(chats.slots).filter(isBusy).length, onRestart: restartToUpdate, onLater: () => setUpdateLater(true) } : undefined;
+  // The chats open now, for an item's link in the Todos tab.
+  const todoChatList: Record<string, TodoChat> = Object.fromEntries(Object.entries(chats.slots).map(([slot, s]) => [slot, { title: chats.agents[slot]?.name ?? chatTitle(s, titles), working: isBusy(s) }]));
   const composer = (
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
@@ -2525,6 +2573,7 @@ export default function App() {
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && hero && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
       onSend={(text, draft) => {
+        if (addTodoFromBox(text)) return;
         // Starting something new instead: the chats from last time aren't offered any more.
         if (hero) setOffer([]);
         sendIn(active, text, draft);
@@ -2583,10 +2632,21 @@ export default function App() {
   // The project's Run command in the title bar, for a chat that isn't on the canvas (the canvas cards have their own).
   const topRun = !showCanvas && state.folder && !state.setup && state.status !== "starting" ? runCommandOf(setupBy, projectFolderOf(active)) : null;
   // A worker's setup, and the project's Run command, above the chat box.
-  const chatExtras = (state.setup || state.run) && (
+  // The to-do this chat was started on, still open, once a turn has ended since the user last said "Not yet".
+  const todoLink = todoChats[active];
+  const todoOnScreen = todoLink && todoLink.folder === state.folder ? todoList.listing?.items.find((t) => t.id === todoLink.id && !t.done) : undefined;
+  const askTodo = !!todoOnScreen && state.status === "idle" && state.items.length > 0 && state.items.length > todoLink.asked && state.items.some((i) => i.type === "assistant");
+  const chatExtras = (state.setup || state.run || askTodo) && (
     <div className="chat-extras">
       {state.setup && <SetupNotice key={active} card={state.setup} onAnswer={(answer) => doing.answerSetup(active, answer)} onClose={() => void closeFull(active)} />}
       {state.run && <RunPanel key={state.run.id} run={state.run} onStop={() => doing.stopRun(active)} onRestart={() => doing.run(active)} onClose={() => doing.closeRun(active)} />}
+      {askTodo && todoOnScreen && (
+        <TodoDoneBar
+          todo={todoOnScreen}
+          onDone={() => void todoList.edit({ op: "done", id: todoOnScreen.id, done: true }).catch((e) => dispatch({ type: "failed", text: errText(e) }))}
+          onNotYet={() => setTodoChats((all) => ({ ...all, [active]: { ...todoLink, asked: state.items.length } }))}
+        />
+      )}
     </div>
   );
   // "Close agent" on a full-size card whose setup failed: nothing to lose closes at once, else the user is asked.
@@ -2741,6 +2801,7 @@ export default function App() {
                 follow={state.follow}
                 refreshKey={state.editCount}
                 lastEdit={{ slot: active, path: state.lastEdited, count: state.claudeEdits }}
+                todos={{ chats: todoChatList, onStart: state.claudePath && state.folder ? (todo) => startTodo(state.folder!, todo) : undefined, onOpenChat: switchTo, openKey: todosOpenKey || undefined }}
                 onSaved={() => syncChanges(active)}
                 // Sent now when Claude is free, queued behind the turn when it's working.
                 onSummarizeRequest={

@@ -8,6 +8,7 @@ import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset,
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
+import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
@@ -310,6 +311,16 @@ export const api = {
   artifactsRead: (folder: string, name: string) => invoke<string>("artifacts_read", { folder, name }),
   /** The theme `lantern.css` gives artifacts, as CSS variables. */
   artifactsTheme: (vars: Record<string, string>) => invoke<void>("artifacts_theme", { vars }),
+  /** The user's to-do list for the folder's project (its repository's, shared by worktrees). */
+  todosList: (folder: string) => invoke<TodoListing>("todos_list", { folder }),
+  /** How many to-dos are open and overdue in each folder's project. */
+  todosCounts: (folders: string[]) => invoke<Record<string, TodoCount>>("todos_counts", { folders }),
+  /** One edit of the folder's project's list by the user; answers with the list after it. */
+  todosEdit: (folder: string, edit: TodoEdit) => invoke<TodoListing>("todos_edit", { folder, edit }),
+  /** A project's to-do list changed (the user, Claude, or a reminder going off). */
+  onTodosChanged: (cb: (key: string) => void): Promise<UnlistenFn> => listen<string>("todos-changed", (e) => cb(e.payload)),
+  /** To-do reminders that just went off, for the window to post. */
+  onTodosRemind: (cb: (due: TodoReminder[]) => void): Promise<UnlistenFn> => listen<TodoReminder[]>("todos-remind", (e) => cb(e.payload)),
   /** The folder's dashboards (`.lantern/dashboards/*.json`), each checked: a spec to render, or the issues in the file. */
   dashboardsList: (folder: string) => invoke<Dashboard[]>("dashboards_list", { folder }),
   /** Which of the folder's dashboards are trusted, what is running, and the history of runs. */
