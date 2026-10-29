@@ -14,6 +14,7 @@ import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
+import { useReturnToSend } from "../ui/useReturnToSend";
 import { useDictation } from "../ui/useDictation";
 import { useAttachments } from "../ui/useAttachments";
 import type { ImageSource } from "../platformImages";
@@ -685,6 +686,10 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
     attach.clear();
     setText("");
   };
+  // On an iPad's keyboard, Return sends (queued while Claude works, as the link above the bar does) and Shift+Return is the new line.
+  useReturnToSend(typing, () => {
+    if (ready) submit();
+  });
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
   const query = slashQuery(text);
