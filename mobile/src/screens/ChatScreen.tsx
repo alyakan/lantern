@@ -8,7 +8,7 @@ import { useConnectionState, useController, useDeviceId, useSyncState } from "..
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
-import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
+import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
 import { control, radius, space, useColors } from "../ui/theme";
@@ -110,6 +110,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const connection = useConnectionState();
   const me = useDeviceId();
   const insets = useSafeAreaInsets();
+  // Whether the chats' button came after the chat opened (the chats were unpinned), rather than being there from the start.
+  const firstLead = useRef(lead);
+  const sidebarLeadLate = lead === "sidebar" && firstLead.current !== "sidebar";
   // On iOS 26 the list runs under the header and the message box: how much room they take.
   const glass = useGlass();
   const [top, setTop] = useState(0);
@@ -425,14 +428,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </PressScale>
         )}
         {lead === "sidebar" && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={8} scaleTo={0.88} opacity={leadHidden ? 0 : 1}>
-            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-              {/* A window with its side panel: the chats. */}
-              <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
-                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
-              </View>
-            </Glass>
-          </PressScale>
+          // It pops in when the chats are unpinned and go away (not when the chat opens with them away: then it was just there).
+          // While they are slid in it stays where it is, under them, so they cover and uncover it as they move.
+          <PopIn glass animate={sidebarLeadLate}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
+              <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
+                {/* A window with its side panel: the chats. */}
+                <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
+                  <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
+                </View>
+              </Glass>
+            </PressScale>
+          </PopIn>
         )}
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings

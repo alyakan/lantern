@@ -19,7 +19,7 @@ import { hasNotes, noteAction, notesId, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { ChatToast, type ToastShown } from "../ui/ChatToast";
 import { Button, Txt } from "../ui/components";
-import { FadeSlideIn } from "../ui/motion";
+import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
@@ -132,6 +132,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   // are beside it). From there the chat's own button, or a pull from the edge, slides them in again.
   const togglePin = () => {
     const next = !pinned;
+    // The chat's room changes as the column moves: it is laid out again on the column's curve, so the two move as one.
+    movePanes();
     setPinned(next);
     void saveSidebarPinned(next);
     setChatsOpen(false);
@@ -192,6 +194,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
   // instead of stacking on it (and, slid in, the column goes away).
   const openChat = (slot: string) => {
+    // The Changes pane may come or go with the chat (one has changed files, the other not): the chat's room glides with it.
+    if (tablet) movePanes();
     go({ type: tablet ? "jump_to_chat" : "open_chat", slot });
     setChatsOpen(false);
   };
