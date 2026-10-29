@@ -21,10 +21,14 @@ import { projectColorOf, projectTint } from "../view/home";
 export interface Draft {
   text: string;
   project?: string;
+  /** The project by its folder's name, when only that is known (a chat's): the sheet finds its folder in the Mac's list. */
+  projectName?: string | null;
   continueChat?: { slot: string; title: string };
 }
 
 export interface NewChatProps {
+  /** The project to start in, by its folder's name (a chat's own project): picked once the Mac's list is here. */
+  initialProjectName?: string | null;
   /** A draft to start from (a suggestion's), which the user may change. */
   initialText?: string;
   /** The project to start in (a suggestion's), when the Mac lists it. */
@@ -42,7 +46,7 @@ export interface NewChatProps {
  * The models are the project's own unless a preset is chosen. Only a project the user already works in on the Mac is
  * offered (the Mac decides, whatever is sent).
  */
-export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
+export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, onClose, onStarted }: NewChatProps) {
   const colors = useColors();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
@@ -86,7 +90,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
         if (!live) return;
         // Listed by name so the list stays put; the one used last (the Mac's first) is still the one picked.
         setProjects([...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
-        setProject((now) => (now && list.some((p) => p.id === now) ? now : (list[0]?.id ?? null)));
+        setProject((now) => (now && list.some((p) => p.id === now) ? now : (list.find((p) => p.name === initialProjectName)?.id ?? list[0]?.id ?? null)));
       },
       (e: Error) => {
         if (!live) return;

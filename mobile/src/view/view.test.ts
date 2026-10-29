@@ -188,9 +188,13 @@ describe("Step by step's pages", () => {
     expect(readPage("# Switch to Debug — a crash")!.actions[1].reply).toBe("Start Debug.");
   });
 
-  it("gives other pages Next, and the last ones none", () => {
+  it("gives other pages Next, the Done page what to do next on the phone itself, and the Summary none", () => {
     expect(readPage("# Plan complete — 5 steps")!.actions.map((a) => a.reply)).toEqual(["Next"]);
-    expect(readPage("# Done — built it")!.actions).toEqual([]);
+    // Nothing is sent to Claude for either: one opens the changes, the other a new chat.
+    expect(readPage("# Done — built it")!.actions).toEqual([
+      { label: "Review the changes", reply: null, primary: false, go: "changes" },
+      { label: "Start something new", reply: null, primary: true, go: "new" },
+    ]);
     expect(readPage("# Summary — all")!.actions).toEqual([]);
   });
 

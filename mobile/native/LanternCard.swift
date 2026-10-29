@@ -262,8 +262,9 @@ struct LanternCardBanner: View {
           Text(look.subtitle)
             .font(.system(size: 13))
             .foregroundColor(Color.white.opacity(0.65))
-            .lineLimit(1)
+            .lineLimit(2)
             .minimumScaleFactor(0.85)
+            .fixedSize(horizontal: false, vertical: true)
         }
         Spacer(minLength: 8)
         VStack(alignment: .trailing, spacing: 4) {
@@ -332,7 +333,7 @@ struct LanternExpandedBottom: View {
     VStack(alignment: .leading, spacing: 8) {
       VStack(alignment: .leading, spacing: 2) {
         Text(look.props.project).font(.system(size: 16, weight: .bold)).foregroundColor(.white).lineLimit(1)
-        Text(look.subtitle).font(.system(size: 13)).foregroundColor(Color.white.opacity(0.65)).lineLimit(1)
+        Text(look.subtitle).font(.system(size: 13)).foregroundColor(Color.white.opacity(0.65)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
       }
       LanternSteps(look: look)
     }

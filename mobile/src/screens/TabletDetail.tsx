@@ -26,10 +26,12 @@ export interface TabletDetailProps {
   onShowChats: () => void;
   onBack: () => void;
   onReview: (slot: string, requestId: string) => void;
+  /** The Done page's "Start something new", on the chat's project (its folder's name). */
+  onStartNew?: (project: string | null) => void;
 }
 
 /** What a tablet shows beside the chats: the chat they picked, in a column that reads well, or a word to pick one. */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onReview }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onReview, onStartNew }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -55,7 +57,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
           {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-          <ChatScreen key={slot} slot={slot} changesPane={room ? { shown: changesOpen, onToggle: () => setChangesOpen((o) => !o) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} />
+          <ChatScreen key={slot} slot={slot} changesPane={room ? { shown: changesOpen, onToggle: () => setChangesOpen((o) => !o) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
         </View>
       </View>
       {room && changesOpen && (

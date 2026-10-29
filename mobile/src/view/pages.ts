@@ -11,6 +11,8 @@ export interface PageAction {
   /** What is sent to Claude when it is pressed (null: it only dismisses). */
   reply: string | null;
   primary: boolean;
+  /** Done on the phone itself, not sent to Claude: open what the chat changed, or start a new chat in its project. It stays pressable. */
+  go?: "changes" | "new";
 }
 
 export interface Page {
@@ -71,6 +73,11 @@ function actionsFor(kind: PageKind, m: RegExpExecArray): PageAction[] {
       ];
     }
     case "done":
+      // The end of a Build: what the Mac's "What next?" offers that the phone can do by itself.
+      return [
+        { label: "Review the changes", reply: null, primary: false, go: "changes" },
+        { label: "Start something new", reply: null, primary: true, go: "new" },
+      ];
     case "summary":
       return [];
     default:

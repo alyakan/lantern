@@ -53,6 +53,8 @@ export interface ChatProps {
   leadHidden?: boolean;
   /** The Changes button opens what the chat changed in a sheet; with this it shows or hides them in a pane beside the chat instead (`shown` says which). */
   changesPane?: { shown: boolean; onToggle: () => void };
+  /** The Done page's "Start something new": opens the new-chat sheet on this chat's project (its folder's name; null when it has none). */
+  onStartNew?: (project: string | null) => void;
 }
 
 /** How long "Caught up on 14 events" stays up. */
@@ -89,7 +91,7 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onStartNew }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -268,6 +270,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     });
 
   const reply = (id: string, a: PageAction) => {
+    // The Done page's own buttons: they open something here and the page can still be answered.
+    if (a.go === "changes") return changesPane ? (changesPane.shown ? undefined : changesPane.onToggle()) : setChangesOpen(true);
+    if (a.go === "new") return onStartNew?.(chat?.project ?? null);
     setAnswered((s) => new Set(s).add(id));
     if (a.reply) void sync.send(slot, a.reply);
   };
@@ -619,7 +624,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (

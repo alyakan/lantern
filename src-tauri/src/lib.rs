@@ -294,6 +294,7 @@ fn route_hooks(s: &Arc<Slot>, event: ui_event::UiEvent, tell: impl Fn(ui_event::
     match event {
         UiEvent::Compacted | UiEvent::ConversationReset => s.hooks.arm_pre(),
         UiEvent::SessionEnded { .. } => s.hooks.session_ended(),
+        UiEvent::AssistantText { parent: None, ref text, .. } => s.hooks.said(text),
         UiEvent::TurnDone { .. } => {
             return match s.hooks.turn_ended(event) {
                 hooks::TurnEnd::Publish(end) => Some(*end),
@@ -1655,10 +1656,15 @@ async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: 
     let own = if hooks { hooks_of(state, slot, &s) } else { hooks::Resolved::default() };
     let sent = if hooks { s.hooks.carry_pre(text, own.pre.as_deref()) } else { text.to_string() };
     if hooks {
-        // Its reply is a page in Step by step, which the hook's reply would be read as: no post-hook there. A slash command
-        // (/clear, /compact) isn't followed by one either.
+        // In Step by step a page's reply would be read as a page: there it follows the Done page only (the end of the flow).
+        // A slash command (/clear, /compact) isn't followed by one either.
         let steps = s.config.lock().unwrap().as_ref().is_some_and(|c| c.mode == Mode::Steps);
-        s.hooks.follow_with(own.post.filter(|_| !steps && hooks::carries_note(text)));
+        let post = own.post.filter(|_| hooks::carries_note(text));
+        if steps {
+            s.hooks.follow_after_done(post);
+        } else {
+            s.hooks.follow_with(post);
+        }
     }
     let turn = match send_text(app, slot, &s, &sent, blocks).await {
         Ok(turn) => turn,
