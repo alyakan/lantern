@@ -71,6 +71,8 @@ export const NOT_FOLDER_KEYED = [
   "settings.textSize",
   // Asking before a team starts while another is working.
   "settings.warnSecondTeam",
+  // Whether the sidebar orders a project's chats by recent activity.
+  "settings.sortChatsByActivity",
   "review.collapsed",
   "review.canvasPanel",
   "review.ratio",

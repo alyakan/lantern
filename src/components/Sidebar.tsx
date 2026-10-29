@@ -476,6 +476,35 @@ interface Reorder {
   moves: Moves;
 }
 
+/**
+ * A folded project as the collapsed bar draws it: one square for the project, not one for each chat. It carries the most
+ * pressing mark among its chats (needs you, then working, then unread) and is the current one when a chat of it is on
+ * screen. Pressing it unfolds the project.
+ */
+function FoldedBar({ group, color, onUnfold }: { group: CompactGroup; color: string; onUnfold: () => void }) {
+  const marks = group.chips.map(markOf);
+  const mark = marks.includes("waiting") ? "waiting" : marks.includes("running") ? "running" : marks.includes("unread") ? "unread" : null;
+  const current = group.chips.some((c) => c.active);
+  const count = `${group.chips.length} open ${group.chips.length === 1 ? "chat" : "chats"}`;
+  const label = `${group.label}, folded, ${count}${group.needs > 0 ? `, ${group.needs} ${group.needs === 1 ? "needs" : "need"} you` : ""}`;
+  return (
+    <ul className="sb-group" aria-label={group.label} style={{ "--pc": color } as CSSProperties}>
+      <li>
+        <button className={`sb-row${current ? " current" : ""}`} aria-label={label} aria-current={current ? "true" : undefined} onClick={onUnfold}>
+          <span className={`sb-chip${current ? " current" : ""}`} aria-hidden>
+            <span className="sb-initials">{group.initials}</span>
+            {mark && <span className={`sb-mark ${mark}`} />}
+          </span>
+          <span className="sb-text" aria-hidden>
+            <span className="sb-title">{group.label}</span>
+            <span className={`sb-status ${mark ?? ""}`}>{count}</span>
+          </span>
+        </button>
+      </li>
+    </ul>
+  );
+}
+
 /** A project's squares as the collapsed bar draws them (no agents, no titles): also what a folded project unfolds into as the open pane closes. */
 function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: string; h: SidebarHandlers; closer: Closer }) {
   return (
@@ -553,11 +582,11 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
           ))}
         </ul>
       ) : (
-        // A folded project's squares are in the bar: they unfold as the pane closes and fold away as it opens, not pop in or out.
+        // A folded project's square is in the bar: it unfolds as the pane closes and folds away as it opens, not pops in or out.
         phase && (
           <div className={`sb-unfold${phase === "opening" ? " folding" : ""}`} aria-hidden>
             <div className="sb-away-in">
-              <BarGroup group={group} color={color} h={h} closer={closer} />
+              <FoldedBar group={group} color={color} onUnfold={onToggle} />
             </div>
           </div>
         )
@@ -579,7 +608,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * on screen is filled with it and has a bar beside it. A team is one square, for its Lead, with the team's combined state.
  *
  * Open (pinned beside the chat, or over it), the same pane lists the open chats and teams under a header for each project
- * (agents nested under their team, the chats working now first and then the most recently active) and nothing else: past chats are in History, which the
+ * (agents nested under their team, in the order they were opened, or with the setting on the chats working now first and then the most recently active) and nothing else: past chats are in History, which the
  * button under New opens. Chats close from the pane: a × on a row, "Close chat" in the menu of a right click, and "Close
  * finished chats" in a project's ⋯.
  *
@@ -941,7 +970,7 @@ export function Sidebar(props: Props) {
                   <span className="sb-project-initials">{group.initials}</span>
                   <span className="sb-project-name">{group.label}</span>
                 </div>
-                <BarGroup group={group} color={PROJECT_COLORS[colors[group.folder]]} h={h} closer={closer} />
+                {isExpanded(group) ? <BarGroup group={group} color={PROJECT_COLORS[colors[group.folder]]} h={h} closer={closer} /> : <FoldedBar group={group} color={PROJECT_COLORS[colors[group.folder]]} onUnfold={() => toggle(group)} />}
               </Fragment>
             ))
           )}

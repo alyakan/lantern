@@ -181,10 +181,10 @@ function teamRecency(members: { live: boolean; at: number }[]): { live: boolean;
 /**
  * Every open chat grouped by the project it is in. A team's Lead is one row with its agents under it (an agent is never
  * listed on its own, whatever its worktree's folder is); a chat with no folder yet isn't listed. Within a project the
- * chats are ordered by recent activity: the ones working now first, then the rest newest first. Needing you changes the
- * dot and the count, not the place.
+ * chats keep the order they were opened in, or with `byActivity` are ordered by recent activity: the ones working now
+ * first, then the rest newest first. Needing you changes the dot and the count, not the place.
  */
-export function openProjects(chats: Chats, opts: { titles: Record<string, string>; drafts: Record<string, string>; unread: Record<string, number>; pinned: Record<string, string[]> }): Record<string, ProjectOpen> {
+export function openProjects(chats: Chats, opts: { titles: Record<string, string>; drafts: Record<string, string>; unread: Record<string, number>; pinned: Record<string, string[]>; byActivity?: boolean }): Record<string, ProjectOpen> {
   const out: Record<string, ProjectOpen> = {};
   const recency = new Map<string, { live: boolean; at: number }>();
   const pinnedIn = (folder: string | null, id: string | null) => !!folder && !!id && (opts.pinned[folder] ?? []).includes(id);
@@ -235,9 +235,10 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
       project.target ??= { slot: first, team: slot };
     }
   }
-  // Working now first, then newest first; a stable sort keeps chats with the same time in the order they were opened.
+  // Only when asked to: otherwise a chat keeps its place, so opening one never moves it. Working now first, then newest
+  // first; a stable sort keeps chats with the same time in the order they were opened.
   const rank = (slot: string) => recency.get(slot) ?? { live: false, at: 0 };
-  for (const project of Object.values(out)) project.items.sort((a, b) => Number(rank(b.slot).live) - Number(rank(a.slot).live) || rank(b.slot).at - rank(a.slot).at);
+  if (opts.byActivity) for (const project of Object.values(out)) project.items.sort((a, b) => Number(rank(b.slot).live) - Number(rank(a.slot).live) || rank(b.slot).at - rank(a.slot).at);
   return out;
 }
 

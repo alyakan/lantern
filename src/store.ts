@@ -832,9 +832,10 @@ export function reducer(state: State, action: Action): State {
       if (state.status === "asleep") return state;
       // An event it doesn't know leaves the chat as it is (and isn't counted as Claude doing something).
       const next = applyEvent(state, action.event);
-      // A dev server's output and a setup command's progress aren't Claude doing something.
+      // A dev server's output and a setup command's progress aren't Claude doing something, nor is a claude that has just
+      // started (opening an asleep chat) saying what it can do.
       const ev = action.event;
-      const aside = ev.kind === "agent_setup" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
+      const aside = ev.kind === "agent_setup" || ev.kind === "session_started" || ev.kind === "commands" || ev.kind === "models" || ev.kind === "mcp_tools" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
       return next === state ? state : { ...next, activityAt: aside ? state.activityAt : Date.now() };
     }
     case "claude_found":

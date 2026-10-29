@@ -156,6 +156,9 @@ export interface GeneralSettingsProps {
   /** Whether starting a team asks first while another is working. */
   warnTeams?: boolean;
   onWarnTeams?: (on: boolean) => void;
+  /** Whether the sidebar moves a chat up its project when it does something. */
+  sortByActivity?: boolean;
+  onSortByActivity?: (on: boolean) => void;
 }
 
 type PageProps = Omit<Props, "open" | "onClose">;
@@ -167,7 +170,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 ];
 
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams }: GeneralSettingsProps) {
+function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const quiet = useQuietMinutes();
@@ -383,6 +386,15 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />
             <span>Ask before starting a team while another is working</span>
           </label>
+        )}
+        {onSortByActivity && (
+          <>
+            <label className="general-option">
+              <input type="checkbox" checked={sortByActivity ?? false} onChange={(e) => onSortByActivity(e.target.checked)} />
+              <span>Move a chat up the sidebar when it does something</span>
+            </label>
+            <span className="settings-muted">Off, chats stay where they are in their project (in the order you opened them) and opening one never moves it. On, the chats working now come first, then the rest with the most recent activity first.</span>
+          </>
         )}
       </section>
     </>

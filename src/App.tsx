@@ -2305,7 +2305,9 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
-  const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
+  // Whether a project's chats move up the list when they do something (Settings → General); off, they keep their places.
+  const [sortByActivity, setSortByActivity] = usePersistentState<boolean>("settings.sortChatsByActivity", false);
+  const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy, byActivity: sortByActivity });
   // The menu bar panel (another window) lists the open chats: told when they change, and when the panel asks.
   const menuBarList = menuBarChats(openByProject);
   const menuBarKey = JSON.stringify(menuBarList);
@@ -2796,7 +2798,7 @@ export default function App() {
             },
           }}
           endpoints={{ onSaved: () => void api.listProviders().then(setProviderList, () => {}) }}
-          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
+          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams, sortByActivity, onSortByActivity: setSortByActivity }}
           routines={{
             ...routines,
             loadProjects: () => api.recentFolders().then((recent) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => ({ folder: p.folder, label: p.label }))),
