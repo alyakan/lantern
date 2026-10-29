@@ -430,6 +430,16 @@ describe("reducer", () => {
     expect(s.sessionId).toBe("s-1");
   });
 
+  it("a claude that has just started saying what it can do isn't the chat doing something, but a message is", () => {
+    const woken = { ...running, activityAt: null };
+    const started = ev(woken, { kind: "session_started", session_id: "s-1", model: "m", cwd: "/p", permission_mode: "ask", claude_version: "2" });
+    expect(started.activityAt).toBeNull();
+    expect(ev(started, { kind: "commands", commands: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "models", models: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "mcp_tools", tools: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "assistant_text", parent: null, block_id: "m:0", text: "Hi" } as UiEvent).activityAt).not.toBeNull();
+  });
+
   it("history_loaded replaces the conversation with the replayed session", () => {
     const old = ev({ ...running, status: "idle", items: [{ type: "user", id: "u9", text: "old" }] }, tool("old"));
     const hunks = [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, lines: ["-a", "+b"] }];

@@ -671,6 +671,55 @@ describe("the collapsed sidebar", () => {
     expect(square(/Fix restore mode/)).not.toHaveAttribute("aria-current");
   });
 
+  describe("a folded project", () => {
+    const fold = (...folders: string[]) => localStorage.setItem("sidebar.expanded", JSON.stringify(Object.fromEntries(folders.map((f) => [f, false]))));
+    const squares = (name: string) => within(screen.getByRole("list", { name })).getAllByRole("button");
+
+    it("is one square for the project, not one for each chat, and the others keep theirs", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      expect(squares("lantern").map((b) => b.querySelector(".sb-initials")?.textContent)).toEqual(["LA"]);
+      expect(squares("network-monitor").map((b) => b.querySelector(".sb-initials")?.textContent)).toEqual(["RP"]);
+    });
+
+    it("has no mark and isn't lit when nothing in it works, needs you or is on screen", async () => {
+      fold(MONITOR);
+      bar();
+      await screen.findByRole("list", { name: "network-monitor" });
+      const [only] = squares("network-monitor");
+      expect(only.querySelectorAll(".sb-mark")).toHaveLength(0);
+      expect(only).not.toHaveAttribute("aria-current");
+      expect(only).toHaveAccessibleName("network-monitor, folded, 1 open chat");
+    });
+
+    it("carries the most pressing mark of its chats (needs you over working over unread), and says how many need you", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      const [only] = squares("lantern");
+      expect(Array.from(only.querySelectorAll(".sb-mark")).map((m) => m.className)).toEqual(["sb-mark waiting"]);
+      expect(only).toHaveAccessibleName("lantern, folded, 6 open chats, 1 needs you");
+    });
+
+    it("is lit while one of its chats is on screen", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      expect(squares("lantern")[0]).toHaveAttribute("aria-current", "true");
+      expect(squares("lantern")[0]).toHaveClass("current");
+    });
+
+    it("unfolds into its chats when its square is pressed", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      fireEvent.click(squares("lantern")[0]);
+      expect(squares("lantern")).toHaveLength(6);
+      expect(JSON.parse(localStorage.getItem("sidebar.expanded")!)).toEqual({ [LANTERN]: true });
+    });
+  });
+
   it("has the title, the project and the status as each row's name, and keeps the title and status beside the square", async () => {
     bar();
     await screen.findByRole("list", { name: "lantern" });
