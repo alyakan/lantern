@@ -760,7 +760,7 @@ pub enum Request {
     /// ignores any id that isn't (a Review or Blocked item, a project, the Trash). Refused for a scan older than an hour. The
     /// phone asks Face ID and a swipe first, with the list shown.
     StorageClear { ids: Vec<String> },
-    /// The user's own to-do list for a project (a folder Projects lists, or the project a reminder named), as RemoteUserTodos.
+    /// The user's own to-do list for a project (a folder Projects lists, or the token a reminder's push named it by), as RemoteUserTodos.
     /// Not Claude's plan (RemoteEvent::Todos). Only sent to a Mac whose Welcome lists "todos" in `features`.
     Todos { project: String },
     /// One change to that list, by the user on the phone; the answer is the list after it.

@@ -54,8 +54,9 @@ describe("the to-do sheet", () => {
   });
 
   it("opens on the project a reminder named, even one that isn't among the recent ones", async () => {
-    const { lastOf } = await open({ project: "/Users/me/old", name: "old", items: [item("x")] }, "/Users/me/old");
-    expect(lastOf("todos")).toEqual({ op: "todos", project: "/Users/me/old" });
+    const { asked } = await open({ project: "/Users/me/old", name: "old", items: [item("x")] }, "0123456789abcdef");
+    // Asked by the push's token first, then by the folder the Mac named.
+    expect(asked.filter((r) => r.op === "todos")).toEqual([{ op: "todos", project: "0123456789abcdef" }, { op: "todos", project: "/Users/me/old" }]);
     expect(screen.getByText("To-dos: old")).toBeTruthy();
     expect(screen.getByText("old")).toBeTruthy();
   });

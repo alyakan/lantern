@@ -10,7 +10,7 @@ import { Button, Chip, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
-import { dueText, shownTodos, tomorrowMorning, validDay } from "../view/todos";
+import { dueText, isProjectToken, shownTodos, tomorrowMorning, validDay } from "../view/todos";
 
 /**
  * The user's own to-do list for a project, kept on the Mac (shared by the project's worktrees): tick things off, add one with an
@@ -57,6 +57,8 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
       if (live.current) {
         setList(next);
         setProblem(null);
+        // A reminder named the project by its token: from here on it is the folder the Mac said.
+        if (isProjectToken(project)) setProject(next.project);
       }
     } catch (e) {
       if (live.current) setProblem((e as Error).message || "Couldn't reach your Mac.");

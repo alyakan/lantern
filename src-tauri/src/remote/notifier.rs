@@ -317,13 +317,13 @@ fn todo_words(project: &str, titles: &[&str], show_titles: bool) -> (String, Str
 }
 
 /// A reminder straight to Apple: one per project, with Snooze, Tomorrow and Done when it is about one item. The app reads
-/// `body`: the kind, the project whose list a tap opens, and the item.
-fn todo_alert(key: &str, title: &str, body: &str, todo: Option<&str>) -> Alert {
-    let mut aps = serde_json::json!({"alert": {"title": title, "body": body}, "sound": "default", "thread-id": format!("todo:{key}")});
+/// `body`: the kind, the project whose list a tap opens (as a token: no path goes out, see todos::push_token), and the item.
+fn todo_alert(project: &str, title: &str, body: &str, todo: Option<&str>) -> Alert {
+    let mut aps = serde_json::json!({"alert": {"title": title, "body": body}, "sound": "default", "thread-id": format!("todo:{project}")});
     if todo.is_some() {
         aps["category"] = CATEGORY_TODO.into();
     }
-    let mut data = serde_json::json!({"slot": "", "kind": Kind::Todo, "project": key});
+    let mut data = serde_json::json!({"slot": "", "kind": Kind::Todo, "project": project});
     if let Some(id) = todo {
         data["todo"] = id.into();
     }
@@ -352,15 +352,16 @@ impl Notifier {
             let titles: Vec<&str> = todos.iter().map(|t| t.title.as_str()).collect();
             let (title, body) = todo_words(&project, &titles, saved.show_titles);
             let one = (todos.len() == 1).then(|| todos[0].id.as_str());
+            let token = crate::todos::push_token(key);
             let (apple, expo): (Vec<&&Device>, Vec<&&Device>) = devices.iter().partition(|d| d.push_token.as_deref().is_some_and(is_apns_token));
             if !expo.is_empty() {
                 let messages = expo
                     .iter()
-                    .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: String::new(), kind: Kind::Todo, project: Some(key.to_string()), todo: one.map(str::to_string) }, sound: "default" })
+                    .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: String::new(), kind: Kind::Todo, project: Some(token.clone()), todo: one.map(str::to_string) }, sound: "default" })
                     .collect();
                 note(&format!("to-do to Expo: {}", if self.sender.send(messages).await.is_ok() { "sent" } else { "not sent" }));
             }
-            let alert = todo_alert(key, &title, &body, one);
+            let alert = todo_alert(&token, &title, &body, one);
             for device in apple {
                 if let Ok(reply) = self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
                     if reply.gone() {
@@ -616,8 +617,10 @@ pub(crate) mod tests {
         r.notifier.remind(&[reminder("/code/app", "SECRET-TITLE")]).await;
         let sent = r.pushed();
         assert_eq!((sent[0].title.as_str(), sent[0].body.as_str()), ("app", "A to-do is due."));
-        assert_eq!(sent[0].data, PushData { slot: String::new(), kind: Kind::Todo, project: Some("/code/app".into()), todo: Some("id-12".into()) });
-        assert!(!serde_json::to_string(&sent).unwrap().contains("SECRET"));
+        assert_eq!(sent[0].data, PushData { slot: String::new(), kind: Kind::Todo, project: Some(crate::todos::push_token("/code/app")), todo: Some("id-12".into()) });
+        // No path goes out: the project is a token the Mac maps back.
+        let json = serde_json::to_string(&sent).unwrap();
+        assert!(!json.contains("SECRET") && !json.contains("/code"), "{json}");
         r.store.set_show_titles(true).unwrap();
         r.notifier.remind(&[reminder("/code/app", "Call the bank")]).await;
         assert_eq!(r.pushed()[1].body, "Due: Call the bank");
@@ -635,7 +638,9 @@ pub(crate) mod tests {
         r.notifier.remind(&[reminder("/code/app", "x")]).await;
         let (_, body) = &r.alerts()[0];
         assert_eq!(body["aps"]["category"], "lantern_todo");
-        assert_eq!((body["body"]["kind"].as_str(), body["body"]["project"].as_str(), body["body"]["todo"].as_str()), (Some("todo"), Some("/code/app"), Some("id-1")));
+        let token = crate::todos::push_token("/code/app");
+        assert_eq!((body["body"]["kind"].as_str(), body["body"]["project"].as_str(), body["body"]["todo"].as_str()), (Some("todo"), Some(token.as_str()), Some("id-1")));
+        assert!(!body.to_string().contains("/code"), "{body}");
         r.notifier.remind(&[reminder("/code/app", "a"), reminder("/code/app", "b")]).await;
         assert!(r.alerts()[1].1["aps"]["category"].is_null());
     }

@@ -38,14 +38,15 @@ describe("the buttons notifications have", () => {
 });
 
 describe("a reminder's buttons", () => {
-  const reminder = (action: string, data: unknown = { slot: "", kind: "todo", project: "/Users/me/app", todo: "ab12" }) => response(action, data);
+  const token = "0123456789abcdef";
+  const reminder = (action: string, data: unknown = { slot: "", kind: "todo", project: token, todo: "ab12" }) => response(action, data);
 
   it("put the reminder off an hour or to tomorrow, or tick the item off, on the project the push named", async () => {
     const { h, calls } = host();
     expect(await runButton(reminder(ACTION_TODO_SNOOZE), h, new Set())).toEqual({ kind: "todo", edit: "snooze" });
     expect(await runButton(reminder(ACTION_TODO_DONE), h, new Set())).toEqual({ kind: "todo", edit: "done" });
-    expect(calls[0]).toMatch(/^todo \/Users\/me\/app \{"op":"snooze","id":"ab12","until":\d+\}$/);
-    expect(calls[1]).toBe('todo /Users/me/app {"op":"done","id":"ab12","done":true}');
+    expect(calls[0]).toMatch(/^todo 0123456789abcdef \{"op":"snooze","id":"ab12","until":\d+\}$/);
+    expect(calls[1]).toBe('todo 0123456789abcdef {"op":"done","id":"ab12","done":true}');
     await runButton(reminder(ACTION_TODO_TOMORROW), h, new Set());
     const until = JSON.parse(calls[2].split(" ").slice(2).join(" ")).until;
     expect(new Date(until).getHours()).toBe(9);
@@ -62,9 +63,9 @@ describe("a reminder's buttons", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("does nothing with a push that names no item or a project that isn't a folder", async () => {
+  it("does nothing with a push that names no item, or names its project by anything but a token", async () => {
     const { h, calls } = host();
-    for (const data of [{ kind: "todo", project: "/p" }, { kind: "todo", project: "relative", todo: "ab" }, { kind: "needs_you", slot: "a", project: "/p", todo: "ab" }]) {
+    for (const data of [{ kind: "todo", project: token }, { kind: "todo", project: "/Users/me/app", todo: "ab" }, { kind: "needs_you", slot: "a", project: token, todo: "ab" }]) {
       expect((await runButton(reminder(ACTION_TODO_DONE, data), h, new Set())).kind).toBe("failed");
     }
     expect(calls).toEqual([]);

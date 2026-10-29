@@ -255,6 +255,13 @@ pub fn tomorrow_morning(now: u64) -> u64 {
     if t < 0 { now + 24 * 3600 * 1000 } else { t as u64 * 1000 }
 }
 
+/// A project's name in a push: short, and saying nothing about where it is (a push goes through Apple or Expo). The Mac maps it
+/// back to the project when a phone asks over its own encrypted connection.
+pub fn push_token(key: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(key.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
 /// The project a folder belongs to: its repository's main folder (shared by its worktrees), else the folder itself.
 pub fn list_key(folder: &Path) -> String {
     let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
@@ -273,13 +280,18 @@ fn main_folder(folder: &Path) -> Option<PathBuf> {
         let text = std::fs::read_to_string(&dot).ok()?;
         let gitdir = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
         let gitdir = if Path::new(gitdir).is_absolute() { PathBuf::from(gitdir) } else { dir.join(gitdir) };
-        let common = match std::fs::read_to_string(gitdir.join("commondir")) {
-            Ok(c) => {
+        // A worktree's folder in the repository points back at this `.git` (as git checks): a `.git` file from anywhere else
+        // (a downloaded archive) can't make this folder part of another project.
+        let back = std::fs::read_to_string(gitdir.join("gitdir")).ok().map(|b| PathBuf::from(b.trim()));
+        let points_back = back.is_some_and(|b| std::fs::canonicalize(&b).ok() == std::fs::canonicalize(&dot).ok());
+        let common = match std::fs::read_to_string(gitdir.join("commondir")).ok().filter(|_| points_back) {
+            Some(c) => {
                 let c = c.trim();
                 if Path::new(c).is_absolute() { PathBuf::from(c) } else { gitdir.join(c) }
             }
-            // A submodule's .git file points at its own repository: the folder is its project.
-            Err(_) => return Some(dir.to_path_buf()),
+            // A submodule's .git file points at its own repository, and one that doesn't point back is no worktree: the folder is
+            // its own project.
+            None => return Some(dir.to_path_buf()),
         };
         let common = std::fs::canonicalize(&common).ok()?;
         return Some(if common.file_name().is_some_and(|n| n == ".git") { common.parent()?.to_path_buf() } else { common });
@@ -738,13 +750,28 @@ mod tests {
         std::fs::write(main.join(".git/worktrees/feat/commondir"), "../..\n").unwrap();
         let tree = dir.path().join("repo-feat");
         std::fs::create_dir_all(&tree).unwrap();
+        std::fs::write(main.join(".git/worktrees/feat/gitdir"), format!("{}\n", tree.join(".git").display())).unwrap();
         std::fs::write(tree.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/feat").display())).unwrap();
         let main_key = list_key(&main);
         assert_eq!(list_key(&tree), main_key);
         assert_eq!(list_key(&main.join("src")), main_key);
+        // A `.git` file that names that repository without the repository naming it back (one from an archive) is its own project.
+        let stray = dir.path().join("download");
+        std::fs::create_dir_all(&stray).unwrap();
+        std::fs::write(stray.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/feat").display())).unwrap();
+        assert_eq!(list_key(&stray), std::fs::canonicalize(&stray).unwrap().display().to_string());
         let plain = dir.path().join("notes");
         std::fs::create_dir_all(&plain).unwrap();
         assert_eq!(list_key(&plain), std::fs::canonicalize(&plain).unwrap().display().to_string());
+    }
+
+    #[test]
+    fn a_push_token_names_a_project_without_its_path() {
+        let t = push_token("/Users/someone/work/secret-repo");
+        assert_eq!(t.len(), 16);
+        assert!(t.chars().all(|c| c.is_ascii_hexdigit()) && !t.contains("secret"));
+        assert_eq!(t, push_token("/Users/someone/work/secret-repo"));
+        assert_ne!(t, push_token("/Users/someone/work/other"));
     }
 
     #[test]

@@ -769,14 +769,18 @@ impl<'a> Session<'a> {
         self.gw.hub.chat(slot).map(|_| ()).ok_or_else(|| "That chat isn't open on your Mac.".to_string())
     }
 
-    /// A project whose to-dos a phone may read and change: one it may start a chat in, or one that has a list.
-    async fn todo_project(&self, project: &str) -> Result<(), String> {
+    /// A project whose to-dos a phone may read and change: one it may start a chat in, or one that has a list, named by its folder
+    /// or by the token a reminder's push carried (todos::push_token). The folder it stands for.
+    async fn todo_project(&self, project: &str) -> Result<String, String> {
         let host = &self.gw.host;
-        if host.todo_projects().iter().any(|p| p == project) || host.projects().await.iter().any(|(f, _)| f == project) {
-            Ok(())
-        } else {
-            Err("That isn't one of your projects on this Mac.".into())
+        let lists = host.todo_projects();
+        if let Some(key) = lists.iter().find(|k| *k == project || crate::todos::push_token(k) == project) {
+            return Ok(key.clone());
         }
+        if host.projects().await.iter().any(|(f, _)| f == project) {
+            return Ok(project.to_string());
+        }
+        Err("That isn't one of your projects on this Mac.".into())
     }
 
     async fn handle(&mut self, link: &Link, channel: &mut Channel, request: Request) -> Result<serde_json::Value, String> {
@@ -920,11 +924,11 @@ impl<'a> Session<'a> {
             }
             // A project the phone may start a chat in, or one with a list (a reminder named it): no other folder is read.
             Request::Todos { project } => {
-                self.todo_project(&project).await?;
+                let project = self.todo_project(&project).await?;
                 host.todos(&project).map(|v| json(&v))
             }
             Request::TodoEdit { project, edit } => {
-                self.todo_project(&project).await?;
+                let project = self.todo_project(&project).await?;
                 host.todo_edit(&project, edit).map(|v| json(&v))
             }
             Request::Storage => host.storage().map(|v| json(&v)),
@@ -1089,6 +1093,9 @@ pub(crate) mod tests {
         /// What it was asked about storage ("scan", or "clear:" and the ids), and the disk it says it has.
         pub storage_asked: Mutex<Vec<String>>,
         pub storage_on: Mutex<bool>,
+        /// The projects with a to-do list, and the projects it was asked for the list of.
+        pub todo_lists: Mutex<Vec<String>>,
+        pub todos_asked: Mutex<Vec<String>>,
         pub history: Mutex<Vec<UiEvent>>,
         /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
         pub projects: Mutex<Vec<(String, String)>>,
@@ -1160,6 +1167,13 @@ pub(crate) mod tests {
         fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
             self.switched.lock().unwrap().push(format!("{slot}:shell-stop:{id}"));
             Ok(())
+        }
+        fn todo_projects(&self) -> Vec<String> {
+            self.todo_lists.lock().unwrap().clone()
+        }
+        fn todos(&self, project: &str) -> Result<protocol::RemoteUserTodos, String> {
+            self.todos_asked.lock().unwrap().push(project.to_string());
+            Ok(protocol::RemoteUserTodos { project: project.into(), name: "x".into(), items: vec![] })
         }
         fn projects(&self) -> BoxFut<Vec<(String, String)>> {
             let p = self.projects.lock().unwrap().clone();
@@ -1959,9 +1973,15 @@ pub(crate) mod tests {
             let (_, err, _) = p.ask(Request::TodoEdit { project: project.into(), edit: protocol::RemoteTodoEdit::Delete { id: "x".into() } }).await;
             assert_eq!(err.as_deref(), Some("That isn't one of your projects on this Mac."), "{project}");
         }
-        // A project goes through to the host (which here has no lists).
+        // A project goes through to the host; so does a list's push token, as the folder it stands for (and no other token).
+        *r.host.todo_lists.lock().unwrap() = vec!["/Users/me/old".into()];
         let (_, err, _) = p.ask(Request::Todos { project: "/Users/me/app".into() }).await;
-        assert_eq!(err.as_deref(), Some(NO_TODOS));
+        assert!(err.is_none(), "{err:?}");
+        let (_, err, _) = p.ask(Request::Todos { project: crate::todos::push_token("/Users/me/old") }).await;
+        assert!(err.is_none(), "{err:?}");
+        let (_, err, _) = p.ask(Request::Todos { project: crate::todos::push_token("/Users/me/elsewhere") }).await;
+        assert!(err.is_some());
+        assert_eq!(*r.host.todos_asked.lock().unwrap(), ["/Users/me/app", "/Users/me/old"]);
         assert!(protocol::FEATURES.contains(&"todos"));
     }
 

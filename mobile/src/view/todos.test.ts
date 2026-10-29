@@ -26,10 +26,13 @@ describe("to-dos on the phone", () => {
   });
 
   it("reads a reminder's push, and nothing else", () => {
-    expect(todoOfNotification({ kind: "todo", project: "/Users/me/app", todo: "ab12" })).toEqual({ project: "/Users/me/app", todo: "ab12" });
-    expect(todoOfNotification({ kind: "todo", project: "/Users/me/app" })).toEqual({ project: "/Users/me/app", todo: null });
-    expect(todoOfNotification({ kind: "todo", project: "/p", todo: "../x" })).toEqual({ project: "/p", todo: null });
+    const token = "0123456789abcdef";
+    expect(todoOfNotification({ kind: "todo", project: token, todo: "ab12" })).toEqual({ project: token, todo: "ab12" });
+    expect(todoOfNotification({ kind: "todo", project: token })).toEqual({ project: token, todo: null });
+    expect(todoOfNotification({ kind: "todo", project: token, todo: "../x" })).toEqual({ project: token, todo: null });
     expect(todoOfNotification({ kind: "needs_you", slot: "a" })).toBeNull();
+    // A path, or anything else, isn't a project a push names.
+    expect(todoOfNotification({ kind: "todo", project: "/Users/me/app" })).toBeNull();
     expect(todoOfNotification({ kind: "todo", project: "app" })).toBeNull();
     expect(todoOfNotification(null)).toBeNull();
   });

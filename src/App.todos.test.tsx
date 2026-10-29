@@ -53,14 +53,14 @@ describe("to-dos in the app", () => {
     expect(await screen.findByRole("button", { name: "Renew the cert" })).toBeInTheDocument();
   });
 
-  it("starts a chat on an item with ▶, then asks whether it is done once Claude has answered", async () => {
+  it("starts a chat on an item with ▶ (one Claude added goes in fenced as data), then asks whether it is done once Claude has answered", async () => {
     const calls = await launch();
     await settle();
     const box = screen.getByRole("textbox", { name: "Message to Claude" });
     fireEvent.change(box, { target: { value: "/todo" } });
     fireEvent.keyDown(box, { key: "Enter" });
     fireEvent.click(await screen.findByRole("button", { name: "Start a chat on “Write the release notes for 0.1.82”" }));
-    await waitFor(() => expect(calls.some(([c, a]) => c === "send_message" && /^Work on this to-do from my list: Write the release notes/.test(String(a?.text)))).toBe(true));
+    await waitFor(() => expect(calls.some(([c, a]) => c === "send_message" && /^Work on this to-do from my list\. You added it[\s\S]*<todo-data>\nWrite the release notes for 0\.1\.82\n\nMention the Todos tab\.\n<\/todo-data>/.test(String(a?.text)))).toBe(true));
     await waitFor(() => expect(edits(calls)).toContainEqual(expect.objectContaining({ op: "link", id: "t2" })));
     // The mock's turn asks to run its tests first; the question isn't asked while Claude still works.
     const allow = await screen.findByRole("button", { name: "Allow" }, { timeout: 30_000 });

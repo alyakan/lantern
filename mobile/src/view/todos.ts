@@ -40,11 +40,14 @@ export function validDay(text: string): boolean {
   return day.getFullYear() === y && day.getMonth() === mo - 1 && day.getDate() === d;
 }
 
-/** What a reminder's push says it is about: the project whose list a tap opens, and the item (when it was one). */
+/** A project as a reminder's push names it: a token the Mac maps back (no path goes through Apple or Expo). */
+export const isProjectToken = (s: string) => /^[0-9a-f]{16}$/.test(s);
+
+/** What a reminder's push says it is about: the project whose list a tap opens (its token), and the item (when it was one). */
 export function todoOfNotification(data: unknown): { project: string; todo: string | null } | null {
   if (!data || typeof data !== "object") return null;
   const d = data as { kind?: unknown; project?: unknown; todo?: unknown };
-  if (d.kind !== "todo" || typeof d.project !== "string" || !d.project.startsWith("/") || d.project.length > 1024 || d.project.includes("\0")) return null;
+  if (d.kind !== "todo" || typeof d.project !== "string" || !isProjectToken(d.project)) return null;
   const todo = typeof d.todo === "string" && /^[0-9a-f]{1,32}$/.test(d.todo) ? d.todo : null;
   return { project: d.project, todo };
 }

@@ -206,7 +206,7 @@ describe("Settings › Remote control", () => {
 
   it("chat titles in notifications are off until turned on", async () => {
     render(<RemoteControl now={() => 0} />);
-    const titles = await screen.findByRole("checkbox", { name: "Show chat titles in notifications" });
+    const titles = await screen.findByRole("checkbox", { name: "Show chat and to-do titles in notifications" });
     expect(titles).not.toBeChecked();
     fireEvent.click(titles);
     await waitFor(() => expect(calls).toContainEqual({ cmd: "titles", args: true }));
