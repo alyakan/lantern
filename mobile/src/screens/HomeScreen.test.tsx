@@ -2,6 +2,8 @@ import { Platform, StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ControllerContext } from "../shell/hooks";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { resetSeen } from "../seen";
 import { resetPins } from "../pins";
@@ -277,22 +279,38 @@ describe("Home's chats by project", () => {
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
   });
 
-  it("marks the chat that is open by underlining it with a line of the accent, and no background, in the list and in a card", async () => {
+  it("marks the chat that is open with a bar of the accent down its left, and no background, in the list and in a card", async () => {
     const chats = [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 })];
     const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
     const style = (el: { props: { style?: unknown } }) => StyleSheet.flatten(el.props.style as never) as Record<string, unknown>;
     const first = () => screen.getByRole("button", { name: /^First/ });
-    const underline = () => style(within(first()).getByTestId("selected-underline", { hidden: true }));
-    // Only the open one has the line, along the bottom of the row from where its content starts to where it ends.
-    expect(screen.getAllByTestId("selected-underline", { hidden: true })).toHaveLength(1);
-    expect(underline()).toMatchObject({ position: "absolute", bottom: 0, height: 2, left: style(first()).paddingHorizontal, right: style(first()).paddingHorizontal });
-    expect(underline().backgroundColor).toBeTruthy();
+    // Only the open one has the bar, down the left edge of its row.
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
+    expect(style(within(first()).getByTestId("selected-bar", { hidden: true }))).toMatchObject({ position: "absolute", left: 0, width: 3 });
+    expect(screen.queryByTestId("selected-underline", { hidden: true })).toBeNull();
     // No wash on the row (it did not clip to the row's shape), the open one or any other.
     expect(style(first()).backgroundColor).toBeUndefined();
     expect(style(screen.getByRole("button", { name: /^Second/ })).backgroundColor).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    expect(screen.getAllByTestId("selected-underline", { hidden: true })).toHaveLength(1);
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
     expect(style(screen.getByRole("button", { name: "First" })).backgroundColor).toBeUndefined();
+    await view.unmount();
+  });
+
+  it("moves the bar to the next chat that is opened, leaving it on one chat at a time", async () => {
+    const chats = [chat({ slot: "a", title: "First", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", active_at: NOW - 2_000 })];
+    const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
+    expect(within(screen.getByRole("button", { name: /^First/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    await view.rerender(
+      <SafeAreaProvider>
+        <ControllerContext.Provider value={view.controller}>
+          <HomeScreen {...handlers()} selectedSlot="b" />
+        </ControllerContext.Provider>
+      </SafeAreaProvider>,
+    );
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
+    expect(within(screen.getByRole("button", { name: /^Second/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: /^First/ })).queryByTestId("selected-bar", { hidden: true })).toBeNull();
     await view.unmount();
   });
 

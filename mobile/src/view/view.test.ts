@@ -109,14 +109,14 @@ describe("the Home screen", () => {
     );
     const g = groups(list);
     expect(g.map((x) => [x.project, x.rows.map((r) => r.slot), x.needsYou])).toEqual([
-      ["beta", ["b1", "b2"], 1],
       ["alpha", ["a2", "a1"], 0],
+      ["beta", ["b1", "b2"], 1],
       ["", ["n1"], 0],
     ]);
     expect(groups([])).toEqual([]);
   });
 
-  it("puts the projects with a chat that needs you first, then those with one working, the newest first, and never lets a quiet one go above them", () => {
+  it("keeps the projects in name order, whatever their chats are doing: one that needs you or is working does not move up", () => {
     const list = rows(
       [
         chat({ slot: "a", project: "alpha", status: "working", active_at: 900 }),
@@ -130,18 +130,12 @@ describe("the Home screen", () => {
       null,
       { a: 400, d: 450 },
     );
-    expect(groups(list).map((x) => x.project)).toEqual(["echo", "charlie", "delta", "alpha", "beta", ""]);
+    expect(groups(list).map((x) => x.project)).toEqual(["alpha", "beta", "charlie", "delta", "echo", ""]);
   });
 
-  it("holds the working projects where they are as their chats work, and moves one up when something in it starts to need you", () => {
-    const at = (aActive: number, status: "idle" | "working" | "needs_you") => groups(rows([chat({ slot: "a", project: "alpha", status: "working", active_at: aActive }), chat({ slot: "z", project: "zed", status, active_at: 50 })], 9000, null, { a: 100, z: 200 })).map((x) => x.project);
-    // Alpha's events move its activity, not its place.
-    expect(at(300, "idle")).toEqual(["alpha", "zed"]);
-    expect(at(900, "idle")).toEqual(["alpha", "zed"]);
-    // Zed's chat starts to need you: it goes above, and when it is answered and idle again it goes back down.
-    expect(at(900, "needs_you")).toEqual(["zed", "alpha"]);
-    // Both working: the one that started last is first.
-    expect(at(900, "working")).toEqual(["zed", "alpha"]);
+  it("does not move a project when a chat in it starts to need you or is answered", () => {
+    const at = (status: "idle" | "working" | "needs_you") => groups(rows([chat({ slot: "a", project: "alpha", status: "working", active_at: 900 }), chat({ slot: "z", project: "zed", status, active_at: 50 })], 9000, null, { a: 100, z: 200 })).map((x) => x.project);
+    for (const status of ["idle", "working", "needs_you"] as const) expect(at(status)).toEqual(["alpha", "zed"]);
   });
 
   it("keeps the projects where they are however the chats move, whatever the case of their names", () => {
