@@ -8,7 +8,7 @@ import { useConnectionState, useController, useSyncState } from "../shell/hooks"
 import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
-import { FadeSlideIn, PressScale, PulseDot, skips } from "../ui/motion";
+import { FadeSlideIn, PressScale, PulseDot, run, skips } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
 import { Glide } from "../ui/Glide";
@@ -129,7 +129,51 @@ interface RowSwipe {
 }
 
 /** `inset`: the space on either side of the row (the page's, unless the row sits in a card that has its own). `background`: what is behind the row (the page, or its card). */
-function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl, selected = false, background, swipe }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number; selected?: boolean; background: string; swipe?: RowSwipe }) {
+/** Where the open chat is among the rows as drawn (top to bottom), so its bar can travel from one to the next. */
+interface Place {
+  /** This row's place, the open chat's, and where the open chat was before (-1: none or not in the list). */
+  at: number;
+  selectedAt: number;
+  previousAt: number;
+}
+
+/** How long the open chat's bar takes to shrink away, and to grow in (a beat later, so it reads as one bar travelling). */
+const BAR_MS = 200;
+const BAR_DELAY = 90;
+/** How tall the bar is, at most, and how far in from the row's top and bottom it stops. */
+const BAR_INSET = 10;
+
+/**
+ * The bar down the left of the open chat. It is not drawn again on the next chat, it travels: the one that was open shrinks
+ * away toward the chat that is open now, and that one grows in from the side the last one was on. Which side is told by where
+ * the rows are (`place`). A row that is open when it first appears just has it.
+ */
+function OpenBar({ selected, place, color }: { selected: boolean; place: Place; color: string }) {
+  const s = useRef(new Animated.Value(selected ? 1 : 0)).current;
+  const [h, setH] = useState(0);
+  // Which edge it holds to while it grows or shrinks: the side of the chat it came from or goes to.
+  const [side, setSide] = useState<"above" | "below" | "middle">("middle");
+  const was = useRef(selected);
+  useEffect(() => {
+    if (was.current === selected) return;
+    was.current = selected;
+    const other = selected ? place.previousAt : place.selectedAt;
+    setSide(other < 0 || place.at < 0 ? "middle" : other < place.at ? "above" : "below");
+    s.stopAnimation();
+    if (selected) run(s, 1, BAR_MS, undefined, BAR_DELAY);
+    else run(s, 0, BAR_MS);
+    // Only when it becomes open or stops being open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+  const reach = side === "above" ? -h / 2 : side === "below" ? h / 2 : 0;
+  return (
+    <View accessibilityElementsHidden pointerEvents="none" testID={selected ? "selected-bar" : undefined} onLayout={(e) => setH(e.nativeEvent.layout.height)} style={{ position: "absolute", left: 0, top: BAR_INSET, bottom: BAR_INSET, width: 3 }}>
+      <Animated.View style={{ flex: 1, borderRadius: 1.5, backgroundColor: color, opacity: s.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 1] }), transform: [{ translateY: s.interpolate({ inputRange: [0, 1], outputRange: [reach, 0] }) }, { scaleY: s.interpolate({ inputRange: [0, 1], outputRange: [0.05, 1] }) }] }} />
+    </View>
+  );
+}
+
+function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl, selected = false, place = { at: -1, selectedAt: -1, previousAt: -1 }, background, swipe }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number; selected?: boolean; place?: Place; background: string; swipe?: RowSwipe }) {
   const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
@@ -139,8 +183,8 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   const status = row.unread ? ", unread" : row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   const body = (
     <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}${row.preview ? `, ${row.preview}` : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
-      {/* The chat you are in: underlined with a line of the accent, from where the row's content starts to where it ends. */}
-      {selected && <View accessibilityElementsHidden testID="selected-underline" style={{ position: "absolute", left: pad, right: pad, bottom: 0, height: 2, borderRadius: 1, backgroundColor: accent }} />}
+      {/* The chat you are in: a bar of the accent down the row's left, which travels to the next chat you open. */}
+      <OpenBar selected={selected} place={place} color={accent} />
       <View>
         <Tile letter={row.initial} bg={bg} fg={fg} />
         {/* Something new in it: a dot on the tile (cut out from the page behind it), and the title in bold below. */}
@@ -239,7 +283,7 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
  * the chats away when pressed, and the chats under it. The shadow is on the outer view, since clipping the corners would
  * clip it too.
  */
-function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, swipeFor, selectedSlot }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void; swipeFor: (r: Row) => RowSwipe; selectedSlot?: string | null }) {
+function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, swipeFor, selectedSlot, placeOf }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void; swipeFor: (r: Row) => RowSwipe; selectedSlot?: string | null; placeOf: (slot: string) => Place }) {
   const colors = useColors();
   const name = group.project || "No project";
   const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
@@ -265,7 +309,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, swipeFor,
             // Every chat is held in from the card's edges (the row has 8 of its own inside, so the open chat's wash has room around
             // what is on it); no lines between one and the next.
             <View key={r.slot} testID={`card-row-${r.slot}`} style={{ marginHorizontal: CARD_INSET - 8 }}>
-              <ChatRow row={r} index={i} showProject={false} inset={8} background={colors.card} swipe={swipeFor(r)} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
+              <ChatRow row={r} index={i} showProject={false} inset={8} background={colors.card} swipe={swipeFor(r)} selected={r.slot === selectedSlot} place={placeOf(r.slot)} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
             </View>
           ))}
       </View>
@@ -362,6 +406,16 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // What is searched for narrows the list; while it is, the rest of Home (what waits on you) steps aside.
   const asked = searching ? query.trim() : "";
   const shown = asked ? list.filter((r) => matches(r, asked)) : list;
+  // The rows as drawn, top to bottom (a folded card's are not there): the open chat's bar travels by where they are.
+  const order = (grouping === "project" ? groups(shown).filter((g) => !folded.includes(g.project)).flatMap((g) => g.rows) : sections(shown).flatMap((x) => x.rows)).map((r) => r.slot);
+  const selectedAt = selectedSlot ? order.indexOf(selectedSlot) : -1;
+  // Where the open chat was before this one: set once this render is on the screen.
+  const lastAt = useRef(-1);
+  const previousAt = lastAt.current;
+  useEffect(() => {
+    lastAt.current = selectedAt;
+  }, [selectedAt]);
+  const placeOf = (slot: string): Place => ({ at: order.indexOf(slot), selectedAt, previousAt });
 
   const swipeFor = (r: Row): RowSwipe => ({
     open: openSlot === r.slot,
@@ -475,7 +529,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </Txt>
           </View>
         ) : grouping === "project" ? (
-          groups(shown).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} swipeFor={swipeFor} selectedSlot={selectedSlot} />)
+          groups(shown).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} swipeFor={swipeFor} selectedSlot={selectedSlot} placeOf={placeOf} />)
         ) : (
           // Labelled stretches (Pinned, Waiting on you, Working, Earlier) once there is more than one of them.
           (() => {
@@ -485,7 +539,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
               <Fragment key={s.key}>
                 {parts.length > 1 && <SectionLabel label={s.label} count={s.rows.length} />}
                 {s.rows.map((r) => (
-                  <ChatRow key={r.slot} row={r} index={n++} background={colors.paper} swipe={swipeFor(r)} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />
+                  <ChatRow key={r.slot} row={r} index={n++} background={colors.paper} swipe={swipeFor(r)} selected={r.slot === selectedSlot} place={placeOf(r.slot)} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />
                 ))}
               </Fragment>
             ));
