@@ -1907,6 +1907,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "artifacts_list":
           return {
             key: "mock",
+            scripts: true,
             items: [
               { name: "auth-flow.mmd", path: `${a.folder}/.lantern/artifacts/auth-flow.mmd`, kind: "mermaid", modified: Date.now() - 60_000, size: 80 },
               { name: "report.md", path: `${a.folder}/.lantern/artifacts/report.md`, kind: "markdown", modified: Date.now() - 3_600_000, size: 60 },

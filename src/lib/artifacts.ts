@@ -16,6 +16,8 @@ export interface Artifact {
 export interface ArtifactListing {
   /** The key the folder's HTML and SVG are served under. */
   key: string;
+  /** Whether HTML may run its scripts: only once WebRTC is off in the window (scripts could otherwise reach a server through it). */
+  scripts: boolean;
   /** Newest first. */
   items: Artifact[];
 }

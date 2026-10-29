@@ -2258,6 +2258,7 @@ dependencies = [
  "ignore",
  "libc",
  "muda",
+ "objc2",
  "qrcode",
  "regex",
  "reqwest",

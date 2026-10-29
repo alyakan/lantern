@@ -10,6 +10,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 use tauri::http::{header, Response, StatusCode};
@@ -78,6 +79,8 @@ pub struct Artifact {
 pub struct Listing {
     /// The key the folder's frames are served under.
     pub key: String,
+    /// Whether HTML may run its scripts: only once WebRTC is off in the window (see `switch_off_webrtc`).
+    pub scripts: bool,
     /// Newest first.
     pub items: Vec<Artifact>,
 }
@@ -87,9 +90,16 @@ pub struct Listing {
 pub struct Artifacts {
     keys: Mutex<HashMap<String, PathBuf>>,
     theme: Mutex<Vec<(String, String)>>,
+    webrtc_off: AtomicBool,
 }
 
 impl Artifacts {
+    /// Whether artifacts' scripts may run: the policy blocks every request a page makes, but not WebRTC, which can reach any
+    /// server; so scripts wait until WebRTC is off in the window.
+    pub fn scripts_allowed(&self) -> bool {
+        self.webrtc_off.load(Ordering::SeqCst)
+    }
+
     /// The folder's key, made the first time it's asked for. Keys last until Lantern quits.
     pub fn key_for(&self, folder: &Path) -> Result<String, String> {
         let mut keys = self.keys.lock().unwrap();
@@ -156,6 +166,40 @@ impl Artifacts {
 enum Served {
     Theme,
     File(PathBuf, &'static str),
+}
+
+/// Switches WebRTC off in the window's WebKit (a private preference, checked before it's set): a frame made after this has
+/// no `RTCPeerConnection`, so an artifact's script can't send what it holds to a STUN or TURN server. Scripts are allowed
+/// only once it is done; elsewhere, or when WebKit doesn't have the preference, artifacts' HTML is shown without them.
+pub fn switch_off_webrtc(window: &tauri::WebviewWindow, artifacts: std::sync::Arc<Artifacts>) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window.with_webview(move |webview| {
+            use objc2::runtime::AnyObject;
+            use objc2::{msg_send, sel};
+            // SAFETY: on macOS `inner` is the window's WKWebView, and this runs on the main thread. Each message is one
+            // WKWebView and WKPreferences answer; the private setter is sent only if the preferences respond to it.
+            let off = unsafe {
+                let view = webview.inner() as *mut AnyObject;
+                let config: *mut AnyObject = msg_send![view, configuration];
+                let prefs: *mut AnyObject = msg_send![config, preferences];
+                let responds: bool = msg_send![prefs, respondsToSelector: sel!(_setPeerConnectionEnabled:)];
+                if responds {
+                    let _: () = msg_send![prefs, _setPeerConnectionEnabled: false];
+                    let enabled: bool = msg_send![prefs, _peerConnectionEnabled];
+                    !enabled
+                } else {
+                    false
+                }
+            };
+            artifacts.webrtc_off.store(off, Ordering::SeqCst);
+            if !off {
+                eprintln!("[artifacts] couldn't switch WebRTC off: artifacts' HTML is shown without its scripts");
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, artifacts);
 }
 
 /// `path`, resolved, if it really is inside the folder's artifacts folder (not through a symlink out of it).

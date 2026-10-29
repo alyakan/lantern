@@ -939,7 +939,7 @@ async fn artifacts_list(state: State<'_, AppState>, folder: String) -> Result<ar
     let root = std::path::PathBuf::from(&folder);
     let key = state.artifacts.key_for(&root)?;
     let items = tauri::async_runtime::spawn_blocking(move || artifacts::list(&root)).await.map_err(|e| e.to_string())?;
-    Ok(artifacts::Listing { key, items })
+    Ok(artifacts::Listing { key, scripts: state.artifacts.scripts_allowed(), items })
 }
 
 /// A Markdown or Mermaid artifact's text, for the app to draw.
@@ -3199,6 +3199,9 @@ pub fn run() {
             menu::refresh(app.handle(), Vec::new())?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
+            if let Some(window) = app.get_webview_window("main") {
+                artifacts::switch_off_webrtc(&window, app.state::<AppState>().artifacts.clone());
+            }
             Ok(())
         })
         // Lantern ends with its main window. The menu bar panel is a window too (hidden), which would otherwise keep the app, its

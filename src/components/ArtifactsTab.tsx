@@ -101,7 +101,7 @@ export function ArtifactsTab({ folder, refreshKey, open }: { folder: string; ref
           ↻
         </button>
       </div>
-      <Viewer key={`${folder}\n${current.name}`} folder={folder} artifactKey={data.key} artifact={current} theme={theme} />
+      <Viewer key={`${folder}\n${current.name}`} folder={folder} artifactKey={data.key} scripts={data.scripts} artifact={current} theme={theme} />
     </>
   );
 }
@@ -112,12 +112,13 @@ function title(a: Artifact): string {
   return file.replace(/\.[^.]+$/, "") || file;
 }
 
-function Viewer({ folder, artifactKey, artifact, theme }: { folder: string; artifactKey: string; artifact: Artifact; theme: number }) {
+function Viewer({ folder, artifactKey, scripts, artifact, theme }: { folder: string; artifactKey: string; scripts: boolean; artifact: Artifact; theme: number }) {
   if (artifact.kind === "html" || artifact.kind === "svg") {
     return (
       <div className="artifact-body">
+        {!scripts && artifact.kind === "html" && <div className="tests-note">This page's scripts are off: Lantern couldn't switch WebRTC off, which they could reach the internet through.</div>}
         {/* Scripts run, with an opaque origin: no app, no files, no network (the scheme's own policy), no popups, forms or navigating the app. */}
-        <iframe className="artifact-frame" title={artifact.name} sandbox="allow-scripts" referrerPolicy="no-referrer" src={artifactUrl(artifactKey, artifact.name, artifact.modified * 1000 + theme)} />
+        <iframe className="artifact-frame" title={artifact.name} sandbox={scripts ? "allow-scripts" : ""} referrerPolicy="no-referrer" src={artifactUrl(artifactKey, artifact.name, artifact.modified * 1000 + theme)} />
       </div>
     );
   }

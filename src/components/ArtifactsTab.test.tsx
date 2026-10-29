@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resol
 vi.mock("./FullDiff", () => ({ default: () => null }));
 
 const item = (name: string, kind: Artifact["kind"], modified = 1_000): Artifact => ({ name, path: `/p/.lantern/artifacts/${name}`, kind, modified, size: 10 });
-const listing = (...items: Artifact[]): ArtifactListing => ({ key: "k1", items });
+const listing = (...items: Artifact[]): ArtifactListing => ({ key: "k1", scripts: true, items });
 
 beforeEach(() => {
   vi.mocked(api.artifactsList).mockReset();
@@ -38,6 +38,14 @@ describe("ArtifactsTab", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("src")).toMatch(/^lantern-artifact:\/\/localhost\/k1\/maps\/auth%20flow\.html\?v=\d+$/);
     expect(api.artifactsTheme).toHaveBeenCalledWith(expect.objectContaining({ "--color-scheme": "light" }));
+  });
+
+  it("shows HTML without its scripts, and says so, when WebRTC couldn't be switched off", async () => {
+    vi.mocked(api.artifactsList).mockResolvedValue({ ...listing(item("page.html", "html")), scripts: false });
+    render(<ArtifactsTab folder="/p" refreshKey={0} />);
+    const frame = await screen.findByTitle("page.html");
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(screen.getByText(/scripts are off/)).toBeInTheDocument();
   });
 
   it("draws Markdown in the app, not in a frame, and lets you pick another artifact", async () => {
