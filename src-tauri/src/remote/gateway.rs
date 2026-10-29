@@ -2432,7 +2432,7 @@ pub(crate) mod tests {
         let remote = crate::remote::Remote::default();
         let door = r.gw.clone();
         let (listener, port) = crate::remote::transport::serve_lan(0, move |link| door.accept(link)).await.unwrap();
-        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None, notifier: None });
+        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None, notifier: None, pusher: None });
         let (_, mut p) = paired(&r).await;
         assert!(remote.is_running());
         remote.stop();
