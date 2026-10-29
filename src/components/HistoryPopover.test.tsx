@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HistoryPopover } from "./HistoryPopover";
+import { createRoot } from "react-dom/client";
 import type { SessionActions } from "../lib/sessionActions";
 import type { ChatHit, ChatSearchResults } from "../types";
 
@@ -149,6 +150,35 @@ describe("History", () => {
     fireEvent.mouseDown(toggle);
     expect(p.onClose).toHaveBeenCalledTimes(2);
     toggle.remove();
+  });
+
+  it("closes on an Escape pressed the instant it appears, before React's effects have run", async () => {
+    // The app shows History from a promise, outside act, so its passive effects run in a later task. An Escape that came
+    // in between went to a document with no listener yet and left History open (App.sidebar's History test flaked on it).
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const wasAct = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const container = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(container);
+    const onClose = vi.fn();
+    const shown = new Promise<void>((resolve) => {
+      const seen = new MutationObserver(() => {
+        if (!container.querySelector('[role="dialog"]')) return;
+        seen.disconnect();
+        fireEvent.keyDown(document, { key: "Escape" });
+        resolve();
+      });
+      seen.observe(container, { childList: true, subtree: true });
+    });
+    try {
+      root.render(<HistoryPopover projects={projects} exclude={[]} load={async (f) => sessions[f]} loadOld={async () => []} actionsFor={() => null} onBring={() => {}} onNewChat={() => {}} onOpen={() => {}} onClose={onClose} />);
+      await shown;
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      root.unmount();
+      container.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = wasAct;
+    }
   });
 
   it("says so when no project has a past chat, or the chats can't be read", async () => {
