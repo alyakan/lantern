@@ -85,6 +85,7 @@ fn check_shell(id: &str, command: Option<&str>) -> Result<(), String> {
 const TEAM_ON_MAC: &str = "A team is started on your Mac.";
 
 const NO_STORAGE: &str = "This Mac can't show its storage.";
+const NO_TODOS: &str = "This Mac has no to-do lists.";
 
 /// The most ids a phone may name in one clear: a little over what it is ever shown.
 const STORAGE_IDS_MAX: usize = 80;
@@ -146,6 +147,17 @@ pub trait Host: Send + Sync + 'static {
     /// Starts clearing these items in the background, those of them the Mac finds safe now: how many, and about how many bytes.
     fn storage_clear(&self, _ids: Vec<String>) -> BoxFut<Result<(usize, u64), String>> {
         Box::pin(async { Err(NO_STORAGE.to_string()) })
+    }
+    /// The user's to-do list for a project (see todos.rs), and one change to it by the user. A host without lists says so.
+    fn todos(&self, _project: &str) -> Result<protocol::RemoteUserTodos, String> {
+        Err(NO_TODOS.into())
+    }
+    fn todo_edit(&self, _project: &str, _edit: protocol::RemoteTodoEdit) -> Result<protocol::RemoteUserTodos, String> {
+        Err(NO_TODOS.into())
+    }
+    /// The projects that have a to-do list (their keys): a reminder names one of them, which a phone may then open.
+    fn todo_projects(&self) -> Vec<String> {
+        Vec::new()
     }
     fn mac_name(&self) -> String;
     fn app_version(&self) -> String;
@@ -757,6 +769,20 @@ impl<'a> Session<'a> {
         self.gw.hub.chat(slot).map(|_| ()).ok_or_else(|| "That chat isn't open on your Mac.".to_string())
     }
 
+    /// A project whose to-dos a phone may read and change: one it may start a chat in, or one that has a list, named by its folder
+    /// or by the token a reminder's push carried (todos::push_token). The folder it stands for.
+    async fn todo_project(&self, project: &str) -> Result<String, String> {
+        let host = &self.gw.host;
+        let lists = host.todo_projects();
+        if let Some(key) = lists.iter().find(|k| *k == project || crate::todos::push_token(k) == project) {
+            return Ok(key.clone());
+        }
+        if host.projects().await.iter().any(|(f, _)| f == project) {
+            return Ok(project.to_string());
+        }
+        Err("That isn't one of your projects on this Mac.".into())
+    }
+
     async fn handle(&mut self, link: &Link, channel: &mut Channel, request: Request) -> Result<serde_json::Value, String> {
         let host = self.gw.host.clone();
         let json = |v: &dyn erased::Ser| v.to_json();
@@ -895,6 +921,15 @@ impl<'a> Session<'a> {
                 let offer = self.gw.store.start_offer(super::now_ms())?;
                 let link = super::pairing::pairing_link(&self.gw.mac.public, &offer, &host.hosts(), super::port(), &host.mac_name());
                 Ok(json(&protocol::PairOffer { modules: super::pairing::qr_modules(&link)?, link, expires_at: offer.expires_at }))
+            }
+            // A project the phone may start a chat in, or one with a list (a reminder named it): no other folder is read.
+            Request::Todos { project } => {
+                let project = self.todo_project(&project).await?;
+                host.todos(&project).map(|v| json(&v))
+            }
+            Request::TodoEdit { project, edit } => {
+                let project = self.todo_project(&project).await?;
+                host.todo_edit(&project, edit).map(|v| json(&v))
             }
             Request::Storage => host.storage().map(|v| json(&v)),
             Request::StorageScan => host.storage_scan().await.map(|started| json(&started)),
@@ -1058,6 +1093,9 @@ pub(crate) mod tests {
         /// What it was asked about storage ("scan", or "clear:" and the ids), and the disk it says it has.
         pub storage_asked: Mutex<Vec<String>>,
         pub storage_on: Mutex<bool>,
+        /// The projects with a to-do list, and the projects it was asked for the list of.
+        pub todo_lists: Mutex<Vec<String>>,
+        pub todos_asked: Mutex<Vec<String>>,
         pub history: Mutex<Vec<UiEvent>>,
         /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
         pub projects: Mutex<Vec<(String, String)>>,
@@ -1129,6 +1167,13 @@ pub(crate) mod tests {
         fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
             self.switched.lock().unwrap().push(format!("{slot}:shell-stop:{id}"));
             Ok(())
+        }
+        fn todo_projects(&self) -> Vec<String> {
+            self.todo_lists.lock().unwrap().clone()
+        }
+        fn todos(&self, project: &str) -> Result<protocol::RemoteUserTodos, String> {
+            self.todos_asked.lock().unwrap().push(project.to_string());
+            Ok(protocol::RemoteUserTodos { project: project.into(), name: "x".into(), items: vec![] })
         }
         fn projects(&self) -> BoxFut<Vec<(String, String)>> {
             let p = self.projects.lock().unwrap().clone();
@@ -1917,6 +1962,30 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_phone_reads_and_changes_the_todos_of_its_projects_only() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        let (_, mut p) = paired(&r).await;
+        // A folder that isn't one of the projects is refused before the Mac's lists are asked.
+        for project in ["/Users/me", "/etc", "/Users/me/app/../.."] {
+            let (_, err, _) = p.ask(Request::Todos { project: project.into() }).await;
+            assert_eq!(err.as_deref(), Some("That isn't one of your projects on this Mac."), "{project}");
+            let (_, err, _) = p.ask(Request::TodoEdit { project: project.into(), edit: protocol::RemoteTodoEdit::Delete { id: "x".into() } }).await;
+            assert_eq!(err.as_deref(), Some("That isn't one of your projects on this Mac."), "{project}");
+        }
+        // A project goes through to the host; so does a list's push token, as the folder it stands for (and no other token).
+        *r.host.todo_lists.lock().unwrap() = vec!["/Users/me/old".into()];
+        let (_, err, _) = p.ask(Request::Todos { project: "/Users/me/app".into() }).await;
+        assert!(err.is_none(), "{err:?}");
+        let (_, err, _) = p.ask(Request::Todos { project: crate::todos::push_token("/Users/me/old") }).await;
+        assert!(err.is_none(), "{err:?}");
+        let (_, err, _) = p.ask(Request::Todos { project: crate::todos::push_token("/Users/me/elsewhere") }).await;
+        assert!(err.is_some());
+        assert_eq!(*r.host.todos_asked.lock().unwrap(), ["/Users/me/app", "/Users/me/old"]);
+        assert!(protocol::FEATURES.contains(&"todos"));
+    }
+
+    #[tokio::test]
     async fn a_mac_with_no_storage_says_so_and_lists_the_feature_only_when_it_has_it() {
         let r = rig();
         let (_, mut p) = paired(&r).await;
@@ -2432,7 +2501,7 @@ pub(crate) mod tests {
         let remote = crate::remote::Remote::default();
         let door = r.gw.clone();
         let (listener, port) = crate::remote::transport::serve_lan(0, move |link| door.accept(link)).await.unwrap();
-        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None, notifier: None });
+        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None, notifier: None, pusher: None });
         let (_, mut p) = paired(&r).await;
         assert!(remote.is_running());
         remote.stop();

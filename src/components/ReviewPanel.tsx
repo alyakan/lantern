@@ -9,6 +9,8 @@ import { ChecksTab, hasChecks } from "./ChecksTab";
 import { DashboardTab } from "./DashboardTab";
 import { ArtifactsTab } from "./ArtifactsTab";
 import { artifactName } from "../lib/artifacts";
+import { TodosTab, type TodoChat } from "./TodosTab";
+import { useTodoCounts, type Todo } from "../lib/todos";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
 import type { NetworkItem } from "../types";
@@ -77,6 +79,8 @@ interface Props {
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** The file the chat's latest edit was to, in which chat (`slot`), and its count of edits: an artifact Claude writes opens in Artifacts. */
   lastEdit?: { slot: string; path: string | null; count: number };
+  /** The Todos tab: the chats open now (an item's linked chat), how to start a chat on an item, and how to open a chat. */
+  todos?: { chats: Record<string, TodoChat>; onStart?: (todo: Todo) => void; onOpenChat: (slot: string) => void; openKey?: number };
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
   /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
@@ -163,7 +167,10 @@ export function ReviewPanel(props: Props) {
     }
   });
   const artifactOpen = useArtifactEdits(props.lastEdit, props.folder, () => setTab("artifacts"));
+  useRequest("todos", props.todos?.openKey, () => setTab("todos"));
+  const todoCount = useTodoCounts(props.folder ? [props.folder] : [])[props.folder ?? ""];
   const badges: Partial<Record<Tab, TabBadge>> = {};
+  if (todoCount && todoCount.open > 0) badges.todos = { text: `${todoCount.open}`, failed: todoCount.overdue > 0, attention: todoCount.overdue > 0 };
   if (count > 0) badges.changes = { text: `${count}`, failed: false, attention: false };
   if (latestRun?.outcome === "failed") badges.tests = { text: `${latestRun.failed || "!"}`, failed: true, attention: true };
   if (checkTotals && checkTotals.total > 0) badges.checks = { text: `${checkTotals.failed || checkTotals.total}`, failed: checkTotals.failed > 0, attention: checkTotals.failed > 0 };
@@ -307,6 +314,11 @@ export function ReviewPanel(props: Props) {
           {props.folder ? <ArtifactsTab folder={props.folder} refreshKey={props.refreshKey} open={artifactOpen} /> : <TabEmpty title="Artifacts">Open a folder to see its artifacts.</TabEmpty>}
         </div>
       )}
+      {tab === "todos" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("todos")}>
+          {props.folder ? <TodosTab folder={props.folder} chats={props.todos?.chats ?? {}} onStart={props.todos?.onStart} onOpenChat={props.todos?.onOpenChat ?? (() => {})} /> : <TabEmpty title="To-dos">Open a folder to see its project's to-dos.</TabEmpty>}
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
@@ -335,6 +347,7 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
   dashboard: "This folder's dashboards: forms whose buttons run commands, with their results and history",
+  todos: "Your to-do list for this project, with due dates and reminders",
   artifacts: "Pages Claude made to show you something (maps, flows, charts, reports), from .lantern/artifacts/",
 };
 

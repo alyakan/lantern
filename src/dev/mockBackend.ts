@@ -1507,6 +1507,15 @@ async function stressDrive() {
 }
 
 /** `providers`: installs the second, fake provider whatever the address says (the address's `&providers` otherwise). */
+const mockTodoLists: Record<string, import("../lib/todos").Todo[]> = {};
+function mockTodos(folder: string): import("../lib/todos").Todo[] {
+  return (mockTodoLists[folder] ??= [
+    { id: "t1", title: "Renew the staging certificate", done: false, created_at: Date.now() - 86_400_000, created_by: "user", due: { date: "2026-01-05", time: null } },
+    { id: "t2", title: "Write the release notes for 0.1.82", note: "Mention the Todos tab.", done: false, created_at: Date.now(), created_by: "claude", chat_title: "Release prep" },
+    { id: "t3", title: "Answer the PR review on #317", done: true, created_at: Date.now() - 3_600_000, created_by: "user", done_by: "claude", done_at: Date.now() - 600_000, chat_title: "PR review" },
+  ]);
+}
+
 export function installMockBackend(options: { providers?: boolean; endpoints?: boolean } = {}) {
   SECOND_PROVIDER = options.providers ?? new URLSearchParams(location.search).has("providers");
   mockEndpoints = (options.endpoints ?? new URLSearchParams(location.search).has("endpoints")) ? [{ id: "ollama", name: "Ollama", url: "http://localhost:11434", key_env: null, models: ["qwen3:8b", "llama3"] }] : [];
@@ -1917,6 +1926,29 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return a.name === "auth-flow.mmd" ? "flowchart LR\n  App --> Gateway --> Auth\n  Auth --> DB[(Users)]" : "# Weekly report\n\n- 12 pull requests merged\n- 2 releases";
         case "artifacts_theme":
           return null;
+        // An in-memory to-do list per folder, with one overdue item and one Claude added, to show the tab's states.
+        case "todos_list":
+          return { key: String(a.folder), items: mockTodos(String(a.folder)) };
+        case "todos_counts":
+          return Object.fromEntries((a.folders as string[]).map((f) => {
+            const items = mockTodos(f).filter((t) => !t.done);
+            return [f, { open: items.length, overdue: items.filter((t) => t.due && t.due.date < new Date().toISOString().slice(0, 10)).length }];
+          }));
+        case "todos_edit": {
+          const folder = String(a.folder);
+          const items = mockTodos(folder);
+          const e = a.edit as { op: string; id?: string; title?: string; due?: unknown; done?: boolean; ids?: string[]; patch?: Record<string, unknown>; until?: number; chat?: string };
+          const find = () => items.find((t) => t.id === e.id)!;
+          if (e.op === "add") items.splice(items.filter((t) => !t.done).length, 0, { id: `m${Date.now()}`, title: String(e.title), done: false, created_at: Date.now(), created_by: "user", due: (e.due as never) ?? null });
+          else if (e.op === "done") Object.assign(find(), { done: e.done, done_by: e.done ? "user" : null, done_at: e.done ? Date.now() : null });
+          else if (e.op === "update") Object.assign(find(), e.patch);
+          else if (e.op === "delete") items.splice(items.indexOf(find()), 1);
+          else if (e.op === "clear_done") mockTodoLists[folder] = items.filter((t) => !t.done);
+          else if (e.op === "reorder") mockTodoLists[folder] = [...e.ids!.map((id) => items.find((t) => t.id === id)!), ...items.filter((t) => !e.ids!.includes(t.id))];
+          else if (e.op === "snooze") find().snoozed_until = e.until;
+          else if (e.op === "link") find().chat = e.chat;
+          return { key: folder, items: mockTodos(folder) };
+        }
         case "dashboards_list":
           // The same spec the Rust tests check, plus one file that doesn't check out.
           return [

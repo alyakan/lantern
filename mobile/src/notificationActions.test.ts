@@ -1,4 +1,4 @@
-import { ACTION_ALLOW, ACTION_DENY, ACTION_REPLY, CATEGORIES, CATEGORY_DECIDE, CATEGORY_REPLY, connectedWithin, requestIdOfNotification, runButton, TAP, type ActionHost, type Link, type ResponseLike } from "./notificationActions";
+import { ACTION_ALLOW, ACTION_DENY, ACTION_REPLY, ACTION_TODO_DONE, ACTION_TODO_SNOOZE, ACTION_TODO_TOMORROW, CATEGORIES, CATEGORY_DECIDE, CATEGORY_REPLY, CATEGORY_TODO, connectedWithin, requestIdOfNotification, runButton, TAP, type ActionHost, type Link, type ResponseLike } from "./notificationActions";
 
 function host(over: Partial<ActionHost> = {}) {
   const calls: string[] = [];
@@ -8,6 +8,7 @@ function host(over: Partial<ActionHost> = {}) {
     connected: async () => true,
     answer: async (slot, id, allow) => void calls.push(`answer ${slot} ${id} ${allow}`),
     send: async (slot, text) => void calls.push(`send ${slot} ${text}`),
+    todoEdit: async (project, edit) => void calls.push(`todo ${project} ${JSON.stringify(edit)}`),
     tell: async (title, body) => void told.push([title, body]),
     ...over,
   };
@@ -31,8 +32,43 @@ describe("the buttons notifications have", () => {
   });
 
   it("are filed under the names the Mac's push uses", () => {
-    expect(CATEGORIES.map((c) => c.identifier)).toEqual([CATEGORY_DECIDE, CATEGORY_REPLY]);
-    expect([CATEGORY_DECIDE, CATEGORY_REPLY]).toEqual(["lantern_decide", "lantern_reply"]);
+    expect(CATEGORIES.map((c) => c.identifier)).toEqual([CATEGORY_DECIDE, CATEGORY_REPLY, CATEGORY_TODO]);
+    expect([CATEGORY_DECIDE, CATEGORY_REPLY, CATEGORY_TODO]).toEqual(["lantern_decide", "lantern_reply", "lantern_todo"]);
+  });
+});
+
+describe("a reminder's buttons", () => {
+  const token = "0123456789abcdef";
+  const reminder = (action: string, data: unknown = { slot: "", kind: "todo", project: token, todo: "ab12" }) => response(action, data);
+
+  it("put the reminder off an hour or to tomorrow, or tick the item off, on the project the push named", async () => {
+    const { h, calls } = host();
+    expect(await runButton(reminder(ACTION_TODO_SNOOZE), h, new Set())).toEqual({ kind: "todo", edit: "snooze" });
+    expect(await runButton(reminder(ACTION_TODO_DONE), h, new Set())).toEqual({ kind: "todo", edit: "done" });
+    expect(calls[0]).toMatch(/^todo 0123456789abcdef \{"op":"snooze","id":"ab12","until":\d+\}$/);
+    expect(calls[1]).toBe('todo 0123456789abcdef {"op":"done","id":"ab12","done":true}');
+    await runButton(reminder(ACTION_TODO_TOMORROW), h, new Set());
+    const until = JSON.parse(calls[2].split(" ").slice(2).join(" ")).until;
+    expect(new Date(until).getHours()).toBe(9);
+  });
+
+  it("asks for the phone unlocked before Done but not before putting it off, and Done respects Lantern's lock", async () => {
+    const button = (id: string) => CATEGORIES.flatMap((c) => c.actions).find((a) => a.identifier === id)!;
+    expect(button(ACTION_TODO_DONE).options.isAuthenticationRequired).toBe(true);
+    expect(button(ACTION_TODO_SNOOZE).options.isAuthenticationRequired).toBe(false);
+    const { h, calls, told } = host({ lockOn: async () => true });
+    expect((await runButton(reminder(ACTION_TODO_DONE), h, new Set())).kind).toBe("failed");
+    expect(told[0][1]).toMatch(/locked/);
+    expect((await runButton(reminder(ACTION_TODO_SNOOZE), h, new Set())).kind).toBe("todo");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does nothing with a push that names no item, or names its project by anything but a token", async () => {
+    const { h, calls } = host();
+    for (const data of [{ kind: "todo", project: token }, { kind: "todo", project: "/Users/me/app", todo: "ab" }, { kind: "needs_you", slot: "a", project: token, todo: "ab" }]) {
+      expect((await runButton(reminder(ACTION_TODO_DONE, data), h, new Set())).kind).toBe("failed");
+    }
+    expect(calls).toEqual([]);
   });
 });
 

@@ -20,6 +20,7 @@ pub mod artifacts;
 pub mod dashboard;
 pub mod dashboard_run;
 pub mod dashboard_tools;
+pub mod todos;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -78,6 +79,8 @@ pub struct AppState {
     network: Arc<network::Monitor>,
     /// Which dashboards are trusted, the runs of their forms, and what is running now (see dashboard_run.rs).
     dashboards: Arc<dashboard_run::Runner>,
+    /// The user's to-do lists, one per project (see todos.rs).
+    todos: Arc<todos::Store>,
     /// The folders whose artifacts the `lantern-artifact:` scheme serves, by key, and the theme they get (see artifacts.rs).
     artifacts: Arc<artifacts::Artifacts>,
     /// The Storage tab's scan, and what Claude's storage_* tools read and mark (see storage/mod.rs).
@@ -617,6 +620,33 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn todos(&self, project: &str) -> Result<remote::protocol::RemoteUserTodos, String> {
+        let store = &self.app.state::<AppState>().todos;
+        let key = todos::list_key(std::path::Path::new(project));
+        Ok(phone_todos(&key, store.list(&key)))
+    }
+
+    fn todo_edit(&self, project: &str, edit: remote::protocol::RemoteTodoEdit) -> Result<remote::protocol::RemoteUserTodos, String> {
+        use remote::protocol::RemoteTodoEdit as E;
+        let store = &self.app.state::<AppState>().todos;
+        let key = todos::list_key(std::path::Path::new(project));
+        let edit = match edit {
+            E::Add { title, due_date, due_time } => {
+                let due = due_date.filter(|d| !d.is_empty()).map(|d| todos::parse_due(&match due_time.filter(|t| !t.is_empty()) { Some(t) => format!("{d} {t}"), None => d })).transpose()?;
+                TodoEdit::Add { title, note: None, due }
+            }
+            E::Done { id, done } => TodoEdit::Done { id, done },
+            E::Snooze { id, until } => TodoEdit::Snooze { id, until },
+            E::Delete { id } => TodoEdit::Delete { id },
+        };
+        apply_todo_edit(store, &key, edit)?;
+        Ok(phone_todos(&key, store.list(&key)))
+    }
+
+    fn todo_projects(&self) -> Vec<String> {
+        self.app.state::<AppState>().todos.keys()
+    }
+
     fn storage(&self) -> Result<remote::protocol::RemoteStorage, String> {
         Ok(self.app.state::<AppState>().storage.phone_view().into())
     }
@@ -693,6 +723,7 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let apns = Arc::new(remote::live_activity::ApnsHttp::new(r.live.clone())?);
     let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), apns.clone(), Arc::new(move |slot| watching.watched(slot)));
     let opened = notifier.clone();
+    let pusher = notifier.clone();
     gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
     // The lock-screen cards of phones that registered one, kept right with pushes straight to Apple (see remote/live_activity.rs).
     let cards = remote::live_activity::LiveActivities::new(r.store.clone(), r.hub.clone(), apns);
@@ -701,7 +732,7 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let task = tokio::spawn(async move {
         tokio::join!(notifier.run(notifier_bus), cards.run(cards_bus));
     });
-    state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task) });
+    state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task), pusher: Some(pusher) });
     Ok(())
 }
 
@@ -889,6 +920,7 @@ fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
 
 /// The chat's slot, created on first use.
 fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, String> {
+    let slot_id = slot;
     // Every request to the chat's bridge must come from its own claude's helper: a direct child of that claude running
     // Lantern's own executable (see bridge::helper_of).
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -900,12 +932,25 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     let login = state.login_path.clone();
     // And the dashboard_* tools (see dashboard_tools.rs): a run is asked of the user by the helper before it gets here.
     let dashboards = state.dashboards.clone();
+    // And the todo_* tools (see todos.rs), for the chat's project, naming this chat on what it adds or ticks.
+    let todo_store = state.todos.clone();
+    let (chat_id, hub) = (slot_id.to_string(), state.remote.hub.clone());
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
         let dashboards = dashboards.clone();
+        let (todo_store, chat_id, hub) = (todo_store.clone(), chat_id.clone(), hub.clone());
         Box::pin(async move {
+            if todos::TOOLS.contains(&tool.as_str()) {
+                let chat = (chat_id.clone(), hub.chat(&chat_id).and_then(|c| c.title));
+                let result = tauri::async_runtime::spawn_blocking(move || todos::call(&todo_store, folder.as_deref(), chat, &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+                let (allow, text) = match result {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             if dashboard_tools::OPS.contains(&tool.as_str()) {
                 let path_env = tauri::async_runtime::spawn_blocking(move || login.get_or_init(cli_locator::login_shell_path).clone()).await.unwrap_or_default();
                 let (allow, text) = match dashboard_tools::call(&dashboards, folder, &tool, &input, path_env).await {
@@ -952,6 +997,111 @@ async fn artifacts_read(folder: String, name: String) -> Result<String, String> 
 #[tauri::command]
 fn artifacts_theme(state: State<'_, AppState>, vars: std::collections::HashMap<String, String>) {
     state.artifacts.set_theme(vars);
+}
+
+/// Hands out the to-do reminders that are due, every 20 seconds: the window posts each on the Mac, and phones get a push.
+async fn remind_todos(app: AppHandle) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        let state = app.state::<AppState>();
+        let due = state.todos.due_reminders(todos::now_ms());
+        if due.is_empty() {
+            continue;
+        }
+        let _ = app.emit("todos-remind", &due);
+        if let Some(notifier) = state.remote.notifier() {
+            notifier.remind(&due).await;
+        }
+    }
+}
+
+/// A project's to-do list, for the window: its key (the repository's main folder) and its items in order.
+#[tauri::command]
+async fn todos_list(state: State<'_, AppState>, folder: String) -> Result<todos::Listing, String> {
+    let store = state.todos.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = todos::list_key(std::path::Path::new(&folder));
+        todos::Listing { items: store.list(&key), key }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// How many to-dos are open, and overdue, in each of these folders' projects (the sidebar's count).
+#[tauri::command]
+async fn todos_counts(state: State<'_, AppState>, folders: Vec<String>) -> Result<std::collections::HashMap<String, todos::Count>, String> {
+    let store = state.todos.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = todos::now_ms();
+        folders.into_iter().map(|f| {
+            let count = store.count(&todos::list_key(std::path::Path::new(&f)), now);
+            (f, count)
+        }).collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// What the window asks of a to-do list: the user's own edits.
+#[derive(serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum TodoEdit {
+    Add { title: String, note: Option<String>, due: Option<todos::Due> },
+    Update { id: String, patch: todos::Patch },
+    Done { id: String, done: bool },
+    Delete { id: String },
+    ClearDone,
+    Reorder { ids: Vec<String> },
+    Snooze { id: String, until: u64 },
+    Link { id: String, chat: String, title: Option<String> },
+}
+
+/// One edit of a project's list by the user; answers with the list after it.
+#[tauri::command]
+async fn todos_edit(state: State<'_, AppState>, folder: String, edit: TodoEdit) -> Result<todos::Listing, String> {
+    let store = state.todos.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = todos::list_key(std::path::Path::new(&folder));
+        apply_todo_edit(&store, &key, edit)?;
+        Ok(todos::Listing { items: store.list(&key), key })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A project's list as a phone gets it.
+fn phone_todos(key: &str, items: Vec<todos::Todo>) -> remote::protocol::RemoteUserTodos {
+    let now = todos::now_ms();
+    let name = std::path::Path::new(key).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| key.to_string());
+    let items = items
+        .into_iter()
+        .map(|t| remote::protocol::RemoteUserTodo {
+            overdue: t.overdue(now),
+            by_claude: if t.done { t.done_by == Some(todos::Who::Claude) } else { t.created_by == todos::Who::Claude },
+            due_date: t.due.as_ref().map(|d| d.date.clone()),
+            due_time: t.due.as_ref().and_then(|d| d.time.clone()),
+            id: t.id,
+            title: t.title,
+            note: t.note,
+            done: t.done,
+            snoozed_until: t.snoozed_until,
+        })
+        .collect();
+    remote::protocol::RemoteUserTodos { project: key.to_string(), name, items }
+}
+
+fn apply_todo_edit(store: &todos::Store, key: &str, edit: TodoEdit) -> Result<(), String> {
+    use todos::Who::User;
+    match edit {
+        TodoEdit::Add { title, note, due } => store.add(key, &title, note, due, User, None).map(drop),
+        TodoEdit::Update { id, patch } => store.update(key, &id, patch).map(drop),
+        TodoEdit::Done { id, done } => store.set_done(key, &id, done, User, None).map(drop),
+        TodoEdit::Delete { id } => store.delete(key, &id),
+        TodoEdit::ClearDone => store.clear_done(key).map(drop),
+        TodoEdit::Reorder { ids } => store.reorder(key, &ids),
+        TodoEdit::Snooze { id, until } => store.snooze(key, &id, until).map(drop),
+        TodoEdit::Link { id, chat, title } => store.link_chat(key, &id, &chat, title).map(drop),
+    }
 }
 
 /// The folder's dashboards (`.lantern/dashboards/*.json`), each as a checked spec or the issues found in it.
@@ -3163,6 +3313,11 @@ pub fn run() {
             dashboards.set_on_change(move || {
                 let _ = handle.emit("dashboards-changed", ());
             });
+            let todos = Arc::new(todos::Store::load(app.path().app_data_dir().ok().map(|d| d.join("todos.json"))));
+            let handle = app.handle().clone();
+            todos.on_change(Arc::new(move |key| {
+                let _ = handle.emit("todos-changed", key);
+            }));
             let handle = app.handle().clone();
             let for_in_use = app.handle().clone();
             let storage = Arc::new(storage::Storage::new(
@@ -3179,7 +3334,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -3187,6 +3342,8 @@ pub fn run() {
                     let _ = start_remote(&handle).await;
                 });
             }
+            // To-do reminders, on the Mac and pushed to phones (see todos.rs). A reminder missed while Lantern was closed goes off now.
+            tauri::async_runtime::spawn(remind_todos(app.handle().clone()));
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());
@@ -3272,6 +3429,9 @@ pub fn run() {
             artifacts_read,
             artifacts_theme,
             dashboards_list,
+            todos_list,
+            todos_counts,
+            todos_edit,
             dashboards_state,
             dashboard_trust,
             dashboard_commands,

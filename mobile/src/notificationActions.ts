@@ -4,17 +4,26 @@
  * src-tauri/src/remote/notifier.rs, which must agree with these), and puts the chat and, for a prompt, its request id in the
  * data. A button answers that very prompt: the Mac refuses an id nothing is waiting on.
  *
+ * A to-do's reminder has Snooze (an hour), Tomorrow (9:00) and Done, on that item of the project's list (the Mac names both); a
+ * reminder about several items has none. Done needs the phone unlocked; putting a reminder off doesn't.
+ *
  * Allow and Reply need the phone (or the watch) unlocked first, because each lets Claude do something: run a command, change a
  * file, or take your words. Deny doesn't. And when the user has turned on Lantern's own Face ID lock, Allow and Reply aren't done
  * from a notification at all (it would get round the lock): they say to open Lantern. Deny is always safe.
  */
 import { slotOfNotification } from "./notifications";
+import type { RemoteTodoEdit } from "./protocol/generated/RemoteTodoEdit";
+import { todoOfNotification, tomorrowMorning } from "./view/todos";
 
 export const CATEGORY_DECIDE = "lantern_decide";
 export const CATEGORY_REPLY = "lantern_reply";
 export const ACTION_ALLOW = "allow";
 export const ACTION_DENY = "deny";
 export const ACTION_REPLY = "reply";
+export const CATEGORY_TODO = "lantern_todo";
+export const ACTION_TODO_SNOOZE = "todo_snooze";
+export const ACTION_TODO_TOMORROW = "todo_tomorrow";
+export const ACTION_TODO_DONE = "todo_done";
 /** What expo-notifications calls a plain tap on a notification (not one of the buttons). */
 export const TAP = "expo.modules.notifications.actions.DEFAULT";
 
@@ -41,6 +50,14 @@ export const CATEGORIES: { identifier: string; actions: ButtonSpec[] }[] = [
     identifier: CATEGORY_REPLY,
     actions: [{ identifier: ACTION_REPLY, buttonTitle: "Reply", textInput: { submitButtonTitle: "Send", placeholder: "Message" }, options: { isAuthenticationRequired: true, opensAppToForeground: false } }],
   },
+  {
+    identifier: CATEGORY_TODO,
+    actions: [
+      { identifier: ACTION_TODO_SNOOZE, buttonTitle: "In 1 hour", options: { isAuthenticationRequired: false, opensAppToForeground: false } },
+      { identifier: ACTION_TODO_TOMORROW, buttonTitle: "Tomorrow", options: { isAuthenticationRequired: false, opensAppToForeground: false } },
+      { identifier: ACTION_TODO_DONE, buttonTitle: "Done", options: { isAuthenticationRequired: true, opensAppToForeground: false } },
+    ],
+  },
 ];
 
 /** The parts of a notification response this reads (expo-notifications' NotificationResponse). */
@@ -58,11 +75,13 @@ export interface ActionHost {
   connected(ms: number): Promise<boolean>;
   answer(slot: string, requestId: string, allow: boolean): Promise<unknown>;
   send(slot: string, text: string): Promise<unknown>;
+  /** One change to a project's to-do list (a reminder's button). */
+  todoEdit(project: string, edit: RemoteTodoEdit): Promise<unknown>;
   /** A notification of the phone's own, for what didn't work (the success is the notification going away). */
   tell(title: string, body: string): Promise<unknown>;
 }
 
-export type ActionResult = { kind: "ignored" } | { kind: "answered"; allow: boolean } | { kind: "sent" } | { kind: "failed"; why: string };
+export type ActionResult = { kind: "ignored" } | { kind: "answered"; allow: boolean } | { kind: "sent" } | { kind: "todo"; edit: RemoteTodoEdit["op"] } | { kind: "failed"; why: string };
 
 /** How long a button waits for the Mac: the app may have just been woken and must find it first. */
 export const CONNECT_WAIT_MS = 20_000;
@@ -102,7 +121,29 @@ export function requestIdOfNotification(data: unknown): string | null {
 }
 
 /** Whether a response is one of the buttons (and not a tap, which opens the chat). */
-export const isButton = (r: ResponseLike) => r.actionIdentifier === ACTION_ALLOW || r.actionIdentifier === ACTION_DENY || r.actionIdentifier === ACTION_REPLY;
+const TODO_ACTIONS = [ACTION_TODO_SNOOZE, ACTION_TODO_TOMORROW, ACTION_TODO_DONE];
+export const isButton = (r: ResponseLike) => r.actionIdentifier === ACTION_ALLOW || r.actionIdentifier === ACTION_DENY || r.actionIdentifier === ACTION_REPLY || TODO_ACTIONS.includes(r.actionIdentifier);
+
+/** A reminder's button: put the item's reminder off, or tick it off. */
+async function runTodoButton(r: ResponseLike, host: ActionHost, now: number): Promise<ActionResult> {
+  const done = r.actionIdentifier === ACTION_TODO_DONE;
+  const what = done ? "tick that off" : "put that off";
+  const fail = async (why: string): Promise<ActionResult> => {
+    await host.tell(`Couldn't ${what}`, why).catch(() => {});
+    return { kind: "failed", why };
+  };
+  const about = todoOfNotification(r.notification.request.content.data);
+  if (!about?.todo) return fail("That reminder doesn't say which to-do it was for. Open Lantern.");
+  if (done && (await host.lockOn().catch(() => true))) return fail("Lantern is locked. Open Lantern to do it.");
+  if (!(await host.connected(CONNECT_WAIT_MS))) return fail("Lantern couldn't reach your Mac. Open Lantern to do it.");
+  const edit: RemoteTodoEdit = done ? { op: "done", id: about.todo, done: true } : { op: "snooze", id: about.todo, until: r.actionIdentifier === ACTION_TODO_TOMORROW ? tomorrowMorning(now) : now + 3_600_000 };
+  try {
+    await host.todoEdit(about.project, edit);
+    return { kind: "todo", edit: edit.op };
+  } catch (e) {
+    return fail((e as Error).message || "Your Mac said no.");
+  }
+}
 
 /**
  * What a button does. Each press is done once (`handled` keeps what this run has done: the same response can arrive again, as
@@ -113,6 +154,7 @@ export async function runButton(r: ResponseLike, host: ActionHost, handled: Set<
   const once = `${r.notification.request.identifier}:${r.actionIdentifier}`;
   if (handled.has(once)) return { kind: "ignored" };
   handled.add(once);
+  if (TODO_ACTIONS.includes(r.actionIdentifier)) return runTodoButton(r, host, Date.now());
   const data = r.notification.request.content.data;
   const slot = slotOfNotification(data);
   const requestId = requestIdOfNotification(data);

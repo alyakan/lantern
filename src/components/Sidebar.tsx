@@ -10,6 +10,7 @@ import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
 import { useReorder } from "../lib/useReorder";
+import { useTodoCounts, type TodoCount } from "../lib/todos";
 import { useMenuInside } from "../lib/useMenuInside";
 
 /** The sidebar's width in pixels: what Show/Hide Sidebar and the drag edge keep between these. */
@@ -520,7 +521,7 @@ function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: str
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, noted, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, todos, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; todos?: TodoCount; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The pane closing takes the menu away at once: it would otherwise shrink with the pane, clipped as it goes.
   const shut = phase === "closing";
@@ -540,6 +541,12 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
           {noted && (
             <span className="sb-notes" role="img" aria-label="Has project notes" title="This project has notes every new chat starts with">
               <NoteIcon />
+            </span>
+          )}
+          {todos && todos.open > 0 && (
+            <span className={`sb-todos${todos.overdue > 0 ? " overdue" : ""}`} role="img" aria-label={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""}`} title={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""} (the Todos tab)`}>
+              <span className="sb-todos-ring" aria-hidden />
+              {todos.open}
             </span>
           )}
           <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
@@ -672,6 +679,8 @@ export function Sidebar(props: Props) {
   }, [openKey]);
 
   const groups = useMemo(() => compactGroups(open, recent, order), [open, recent, order]);
+  // Each project's open to-dos, and how many are overdue (red).
+  const todoCounts = useTodoCounts(groups.map((g) => g.folder));
   // The projects with something open get their colours first, in the order the collapsed bar lists them, then the others the
   // sidebar knows, so the colours don't depend on which are open.
   const colors = assignColors([...groups.map((g) => g.folder), ...recent.filter((r) => !hidden.includes(r.path)).map((r) => r.path)], assignColors(groups.map((g) => g.folder), savedColors));
@@ -944,6 +953,7 @@ export function Sidebar(props: Props) {
                   group={g}
                   color={PROJECT_COLORS[colors[g.folder]]}
                   noted={noted.includes(g.folder)}
+                  todos={todoCounts[g.folder]}
                   expanded={isExpanded(g)}
                   phase={phase}
                   onToggle={() => toggle(g)}

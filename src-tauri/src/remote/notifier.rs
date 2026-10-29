@@ -36,12 +36,19 @@ pub enum Kind {
     NeedsYou,
     Finished,
     Failed,
+    /// A to-do's reminder: about a project's list, not a chat.
+    Todo,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PushData {
     pub slot: String,
     pub kind: Kind,
+    /// For a to-do's reminder: the project (its folder) whose list a tap opens, and the item when there is one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub todo: Option<String>,
 }
 
 /// One notification, as Expo takes it.
@@ -148,6 +155,7 @@ impl Ask {
 /// The buttons a notification has, by the category the phone registered (see mobile/src/notificationActions.ts).
 const CATEGORY_DECIDE: &str = "lantern_decide";
 const CATEGORY_REPLY: &str = "lantern_reply";
+const CATEGORY_TODO: &str = "lantern_todo";
 
 /// The words of a push, by kind: with no title (the default), and with the chat's.
 fn words(kind: Kind, title: Option<&str>) -> (String, String) {
@@ -158,6 +166,7 @@ fn words(kind: Kind, title: Option<&str>) -> (String, String) {
         (Kind::NeedsYou, Some(t)) => (t.into(), "Needs you.".into()),
         (Kind::Finished, Some(t)) => (t.into(), "Finished.".into()),
         (Kind::Failed, Some(t)) => (t.into(), "Stopped with an error.".into()),
+        (Kind::Todo, _) => ("Lantern".into(), "A to-do is due.".into()),
     }
 }
 
@@ -241,7 +250,7 @@ impl Notifier {
             let (title, body) = words(kind, title.as_deref());
             let messages: Vec<PushMessage> = expo
                 .iter()
-                .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: slot.to_string(), kind }, sound: "default" })
+                .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: slot.to_string(), kind, project: None, todo: None }, sound: "default" })
                 .collect();
             match self.sender.send(messages).await {
                 Ok(tickets) => {
@@ -296,11 +305,91 @@ impl Notifier {
     }
 }
 
+/// What a reminder says: the project's name over the item's title (only with "Show titles" on, as a chat's title is), or how
+/// many are due. Returns the title line and the body.
+fn todo_words(project: &str, titles: &[&str], show_titles: bool) -> (String, String) {
+    let body = match (titles, show_titles) {
+        ([one], true) => format!("Due: {}", one.chars().take(80).collect::<String>()),
+        ([_], false) => "A to-do is due.".to_string(),
+        (many, _) => format!("{} to-dos are due.", many.len()),
+    };
+    (project.to_string(), body)
+}
+
+/// A reminder straight to Apple: one per project, with Snooze, Tomorrow and Done when it is about one item. The app reads
+/// `body`: the kind, the project whose list a tap opens (as a token: no path goes out, see todos::push_token), and the item.
+fn todo_alert(project: &str, title: &str, body: &str, todo: Option<&str>) -> Alert {
+    let mut aps = serde_json::json!({"alert": {"title": title, "body": body}, "sound": "default", "thread-id": format!("todo:{project}")});
+    if todo.is_some() {
+        aps["category"] = CATEGORY_TODO.into();
+    }
+    let mut data = serde_json::json!({"slot": "", "kind": Kind::Todo, "project": project});
+    if let Some(id) = todo {
+        data["todo"] = id.into();
+    }
+    Alert { body: serde_json::json!({"aps": aps, "body": data}) }
+}
+
+impl Notifier {
+    /// Pushes the to-do reminders that just went off to every phone that takes pushes: one notification per project. Not
+    /// kept in `sent`: each reminder goes off once anyway (todos.rs).
+    pub async fn remind(&self, due: &[crate::todos::Reminder]) {
+        let saved = self.store.saved();
+        if !saved.enabled || due.is_empty() {
+            return;
+        }
+        let devices: Vec<&Device> = saved.devices.iter().filter(|d| d.push_token.is_some()).collect();
+        if devices.is_empty() {
+            note("to-do not pushed: no phone has a push token");
+            return;
+        }
+        let mut by_project: std::collections::BTreeMap<&str, Vec<&crate::todos::Todo>> = Default::default();
+        for r in due {
+            by_project.entry(r.key.as_str()).or_default().push(&r.todo);
+        }
+        for (key, todos) in by_project {
+            let project = std::path::Path::new(key).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Lantern".into());
+            let titles: Vec<&str> = todos.iter().map(|t| t.title.as_str()).collect();
+            let (title, body) = todo_words(&project, &titles, saved.show_titles);
+            let one = (todos.len() == 1).then(|| todos[0].id.as_str());
+            let token = crate::todos::push_token(key);
+            let (apple, expo): (Vec<&&Device>, Vec<&&Device>) = devices.iter().partition(|d| d.push_token.as_deref().is_some_and(is_apns_token));
+            if !expo.is_empty() {
+                let messages = expo
+                    .iter()
+                    .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: String::new(), kind: Kind::Todo, project: Some(token.clone()), todo: one.map(str::to_string) }, sound: "default" })
+                    .collect();
+                match self.sender.send(messages).await {
+                    Ok(tickets) => {
+                        note("to-do to Expo: sent");
+                        // A phone that no longer has the app is forgotten for push (it stays paired), as for a chat's push.
+                        for (device, ticket) in expo.iter().zip(tickets) {
+                            if ticket.error.as_deref() == Some("DeviceNotRegistered") {
+                                let _ = self.store.clear_push_token(&device.id);
+                            }
+                        }
+                    }
+                    Err(_) => note("to-do to Expo: not sent"),
+                }
+            }
+            let alert = todo_alert(&token, &title, &body, one);
+            for device in apple {
+                if let Ok(reply) = self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
+                    if reply.gone() {
+                        let _ = self.store.clear_push_token(&device.id);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::NeedsYou => "needs-you",
         Kind::Finished => "finished",
         Kind::Failed => "failed",
+        Kind::Todo => "to-do",
     }
 }
 
@@ -316,6 +405,7 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: O
         (Kind::NeedsYou, _) => ("A chat needs you.", "Needs you."),
         (Kind::Finished, _) => ("A chat finished.", "Finished."),
         (Kind::Failed, _) => ("A chat stopped with an error.", "Stopped with an error."),
+        (Kind::Todo, _) => ("A to-do is due.", "A to-do is due."),
     };
     // Which tool, program or file, in place of the general words.
     let named = match (kind, needs, detail) {
@@ -520,11 +610,58 @@ pub(crate) mod tests {
         let sent = r.pushed();
         assert_eq!(sent.len(), 2, "one for each phone with a token");
         assert_eq!((sent[0].title.as_str(), sent[0].body.as_str()), ("Lantern", "A chat needs you."));
-        assert_eq!(sent[0].data, PushData { slot: "a".into(), kind: Kind::NeedsYou });
+        assert_eq!(sent[0].data, PushData { slot: "a".into(), kind: Kind::NeedsYou, project: None, todo: None });
         let json = serde_json::to_string(&sent).unwrap();
         for secret in ["SECRET-COMMAND", "SECRET-PROMPT", "SECRET-RESULT", "Bash", "echo"] {
             assert!(!json.contains(secret), "{secret} leaked into a push");
         }
+    }
+
+    fn reminder(key: &str, title: &str) -> crate::todos::Reminder {
+        let todo = crate::todos::Todo { id: format!("id-{}", title.len()), title: title.into(), note: Some("SECRET-NOTE".into()), done: false, created_at: 0, created_by: crate::todos::Who::User, done_at: None, done_by: None, due: None, chat: None, chat_title: None, snoozed_until: None, reminded_for: None };
+        crate::todos::Reminder { key: key.into(), todo }
+    }
+
+    #[tokio::test]
+    async fn a_reminder_names_its_project_and_its_title_only_with_show_titles_on() {
+        let r = rig(1);
+        r.notifier.remind(&[reminder("/code/app", "SECRET-TITLE")]).await;
+        let sent = r.pushed();
+        assert_eq!((sent[0].title.as_str(), sent[0].body.as_str()), ("app", "A to-do is due."));
+        assert_eq!(sent[0].data, PushData { slot: String::new(), kind: Kind::Todo, project: Some(crate::todos::push_token("/code/app")), todo: Some("id-12".into()) });
+        // No path goes out: the project is a token the Mac maps back.
+        let json = serde_json::to_string(&sent).unwrap();
+        assert!(!json.contains("SECRET") && !json.contains("/code"), "{json}");
+        r.store.set_show_titles(true).unwrap();
+        r.notifier.remind(&[reminder("/code/app", "Call the bank")]).await;
+        assert_eq!(r.pushed()[1].body, "Due: Call the bank");
+        // Two in a project are one notification, with no item (so no buttons).
+        r.notifier.remind(&[reminder("/code/app", "a"), reminder("/code/app", "b"), reminder("/code/web", "c")]).await;
+        let sent = r.pushed();
+        assert_eq!(sent.len(), 4);
+        assert_eq!((sent[2].body.as_str(), sent[2].data.todo.clone()), ("2 to-dos are due.", None));
+        assert!(!serde_json::to_string(&sent).unwrap().contains("SECRET-NOTE"));
+    }
+
+    #[tokio::test]
+    async fn a_reminder_to_apple_has_the_todo_buttons_for_one_item_and_opens_its_project() {
+        let r = rig_apple(1);
+        r.notifier.remind(&[reminder("/code/app", "x")]).await;
+        let (_, body) = &r.alerts()[0];
+        assert_eq!(body["aps"]["category"], "lantern_todo");
+        let token = crate::todos::push_token("/code/app");
+        assert_eq!((body["body"]["kind"].as_str(), body["body"]["project"].as_str(), body["body"]["todo"].as_str()), (Some("todo"), Some(token.as_str()), Some("id-1")));
+        assert!(!body.to_string().contains("/code"), "{body}");
+        r.notifier.remind(&[reminder("/code/app", "a"), reminder("/code/app", "b")]).await;
+        assert!(r.alerts()[1].1["aps"]["category"].is_null());
+    }
+
+    #[tokio::test]
+    async fn no_reminder_is_pushed_with_remote_control_off() {
+        let r = rig(1);
+        r.store.set_enabled(false).unwrap();
+        r.notifier.remind(&[reminder("/code/app", "x")]).await;
+        assert!(r.pushed().is_empty());
     }
 
     #[tokio::test]
@@ -902,7 +1039,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_push_is_in_the_shape_expo_takes() {
-        let m = PushMessage { to: "ExponentPushToken[x]".into(), title: "Lantern".into(), body: "A chat needs you.".into(), data: PushData { slot: "a".into(), kind: Kind::NeedsYou }, sound: "default" };
+        let m = PushMessage { to: "ExponentPushToken[x]".into(), title: "Lantern".into(), body: "A chat needs you.".into(), data: PushData { slot: "a".into(), kind: Kind::NeedsYou, project: None, todo: None }, sound: "default" };
         assert_eq!(serde_json::to_value(&m).unwrap(), serde_json::json!({"to": "ExponentPushToken[x]", "title": "Lantern", "body": "A chat needs you.", "data": {"slot": "a", "kind": "needs_you"}, "sound": "default"}));
     }
 }

@@ -155,6 +155,8 @@ pub struct Running {
     pub bonjour: Option<transport::Bonjour>,
     /// The task that pushes to phones that aren't looking (see notifier.rs).
     pub notifier: Option<tokio::task::JoinHandle<()>>,
+    /// The notifier itself, for what isn't a chat's event: a to-do's reminder.
+    pub pusher: Option<Arc<notifier::Notifier>>,
 }
 
 impl Remote {
@@ -192,6 +194,11 @@ impl Remote {
         if let Some(r) = self.running.lock().unwrap().as_ref() {
             r.gateway.disconnect_device(device);
         }
+    }
+
+    /// What pushes to phones, while Remote control is on.
+    pub fn notifier(&self) -> Option<Arc<notifier::Notifier>> {
+        self.running.lock().unwrap().as_ref().and_then(|r| r.pusher.clone())
     }
 
     pub fn connected(&self) -> Vec<String> {
@@ -495,7 +502,7 @@ mod tests {
         let listener = tokio::spawn(std::future::pending::<()>());
         let notifier = tokio::spawn(std::future::pending::<()>());
         let (l, n) = (listener.abort_handle(), notifier.abort_handle());
-        (Running { gateway, listener, bonjour: None, notifier: Some(notifier) }, l, n)
+        (Running { gateway, listener, bonjour: None, notifier: Some(notifier), pusher: None }, l, n)
     }
 
     async fn stopped(h: &tokio::task::AbortHandle) -> bool {

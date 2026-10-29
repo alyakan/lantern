@@ -6,6 +6,7 @@ import type { Controller } from "./shell/controller";
 import type { AppLock } from "./lock";
 import { CATEGORIES, connectedWithin, TAP, type ActionHost, type ResponseLike } from "./notificationActions";
 import type { PushPlatform } from "./notifications";
+import { todoOfNotification } from "./view/todos";
 
 export const pushPlatform: PushPlatform = {
   isDevice: Device.isDevice,
@@ -19,10 +20,16 @@ export const pushPlatform: PushPlatform = {
   },
 };
 
-/** While the app is open a chat that needs you already shows on screen: a banner on top of it would only repeat. */
+/**
+ * While the app is open a chat that needs you already shows on screen: a banner on top of it would only repeat. A to-do's
+ * reminder is shown nowhere else, so it still comes as a banner.
+ */
 export function quietInForeground() {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({ shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false }),
+    handleNotification: async (n) => {
+      const show = todoOfNotification(n.request.content.data) !== null;
+      return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+    },
   });
 }
 
@@ -78,6 +85,7 @@ export function actionHost(controller: Controller, lock: AppLock): ActionHost {
       ),
     answer: (slot, requestId, allow) => controller.sync.answer(slot, requestId, allow),
     send: (slot, text) => controller.sync.sendQuiet(slot, text),
+    todoEdit: (project, edit) => controller.sync.todoEdit(project, edit),
     tell: (title, body) => Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: null }),
   };
 }
