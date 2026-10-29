@@ -17,7 +17,7 @@ import { dueText, isProjectToken, shownTodos, tomorrowMorning, validDay } from "
  * optional due date, and put off a reminder for an overdue one. A reminder's push opens it on its project. Rewording and
  * reordering are on the Mac.
  */
-export function TodosSheet({ project: initial, onClose }: { project?: string | null; onClose: () => void }) {
+export function TodosSheet({ project: initial, projectName, onClose }: { project?: string | null; /** Opened from a chat: its project's folder name, picked once the projects are known (else the first). */ projectName?: string | null; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
@@ -47,11 +47,11 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
         if (!live.current) return;
         const sorted = [...all].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
         setProjects(sorted);
-        setProject((now) => now ?? sorted[0]?.id ?? null);
+        setProject((now) => now ?? sorted.find((p) => !!projectName && p.name === projectName)?.id ?? sorted[0]?.id ?? null);
       },
       () => live.current && setProjects([]),
     );
-  }, [sync, up]);
+  }, [sync, up, projectName]);
 
   const load = useCallback(async () => {
     if (!project || !up) return;

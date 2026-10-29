@@ -6,7 +6,7 @@ import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { barRoom } from "../ui/keyboard";
-import { SearchBar, type BarSearch } from "./SearchBar";
+import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
@@ -584,7 +584,7 @@ const HANDOFF_MS = 300;
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, working = false, onStop }: { /** Claude is in the middle of a turn: the bar's button is Stop (a square), and a message typed is queued by a small link above the bar. */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: a circle beside the bar that turns the bar into its field (see SearchBar.tsx). */ search?: BarSearch;  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop }: { /** Claude is in the middle of a turn: the circle beside the bar is Stop and Send queues what is typed (with no circle, the bar's button is Stop and a small link above it queues). */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: a circle beside the bar that turns the bar into its field (see SearchBar.tsx). */ search?: BarSearch; /** The bar's tools besides Search: the circle opens a row of them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
@@ -678,6 +678,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
   const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
+  // The circle beside the bar is Stop while Claude works (see SearchBar.tsx).
+  const stopInCircle = !!search && !!onStop;
   const problem = dictation.problem ?? attach.problem;
   // Sends what is typed (and the pictures attached), and empties the box.
   const submit = () => {
@@ -792,12 +794,12 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-      {working && ready && (
+      {working && ready && !stopInCircle && (
         <FadeSlideIn from={6} ms={160} style={{ alignItems: "flex-end", marginBottom: 6, marginRight: 8 }}>
           <QueueLink onPress={submit} />
         </FadeSlideIn>
       )}
-      <SearchBar search={search} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} back={() => input.current?.focus()}>
+      <SearchBar search={search} tools={tools} working={working} onStop={onStop} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} back={() => input.current?.focus()}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
           ref={input}
@@ -821,8 +823,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           style={{ flex: 1, maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
         />
         {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-        {/* While Claude works the button is Stop, in Send's place; what is typed is queued by the link above the bar. */}
-        {working && onStop ? <StopButton onPress={onStop} /> : <SendButton ready={ready} onPress={submit} />}
+        {/* While Claude works Stop is the circle beside the bar, and Send queues; with no circle, Stop takes Send's place and the link above the bar queues. */}
+        {working && onStop && !stopInCircle ? <StopButton onPress={onStop} /> : <SendButton ready={ready} queues={working} onPress={submit} />}
       </SearchBar>
       {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
@@ -871,7 +873,7 @@ function QueueLink({ onPress }: { onPress: () => void }) {
  * The send button: grey until there is something to send, then it takes its colour with a little spring; pressing it
  * sends the arrow up and out, and a fresh one rises into place.
  */
-function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void }) {
+function SendButton({ ready, queues = false, onPress }: { ready: boolean; /** Claude is working: what is sent waits for the turn to end. */ queues?: boolean; onPress: () => void }) {
   const colors = useColors();
   const accent = useAccent();
   const tint = useRef(new Animated.Value(ready ? 1 : 0)).current;
@@ -901,7 +903,7 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
   };
   return (
     <Animated.View style={{ transform: [{ scale: spring }] }}>
-      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityHint={queues ? "Sends it once Claude has finished" : undefined} accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
         <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
             <Txt variant="heading" tone={colors.isDark ? "on-ink" : "white"}>
