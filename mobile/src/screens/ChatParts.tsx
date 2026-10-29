@@ -14,6 +14,7 @@ import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
+import { useReturnToSend } from "../ui/useReturnToSend";
 import { useDictation } from "../ui/useDictation";
 import { useAttachments } from "../ui/useAttachments";
 import type { ImageSource } from "../platformImages";
@@ -689,6 +690,17 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const list = useListInput(text, setText);
   const query = slashQuery(text);
   const matches = query === null || commands.length === 0 ? [] : matchCommands(commands, query);
+  // On an iPad's keyboard, Return sends (queued while Claude works, as the link above the bar does) and Shift+Return is the new line.
+  // Not while a sheet is over the box (the box may still have the keyboard behind it), and a half-typed "/command" is completed to
+  // the first match rather than sent.
+  useReturnToSend(typing && !choosing && !marking, () => {
+    const first = matches[0];
+    if (first && text.trim() !== `/${first.name}`) {
+      setText(`/${first.name} `);
+      return;
+    }
+    if (ready) submit();
+  });
   return (
     <View style={{ paddingTop: 8, paddingBottom: barRoom(insets.bottom), backgroundColor: glass ? "transparent" : colors.paper }}>
       <SlashPicker
