@@ -44,6 +44,8 @@ export function Marked({ text, mark }: { text: string; mark?: string }) {
   );
 }
 
+const NO_FILES: string[] = [];
+
 /** The files a message's turn edited, and what a tap on one named in its words does (opens its diff). */
 const FileLinks = createContext<{ files: string[]; onFile: (path: string) => void } | null>(null);
 
@@ -54,7 +56,8 @@ export function fileNamed(code: string, files: string[]): string | null {
   return files.find((f) => f === name || f.endsWith(`/${name.replace(/^\.?\//, "")}`)) ?? null;
 }
 
-function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string }) {
+/** `inLink`: these are a link's words, so code in them is not a second link. */
+function Spans({ spans, tone, mark, inLink = false }: { spans: Span[]; tone: Tone; mark?: string; inLink?: boolean }) {
   const accent = useAccent();
   const colors = useColors();
   const hit = useHit();
@@ -64,7 +67,7 @@ function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string
       {spans.map((s, i) => {
         switch (s.kind) {
           case "code": {
-            const file = links ? fileNamed(s.text, links.files) : null;
+            const file = links && !inLink ? fileNamed(s.text, links.files) : null;
             return (
               <Text
                 key={i}
@@ -104,9 +107,20 @@ function Spans({ spans, tone, mark }: { spans: Span[]; tone: Tone; mark?: string
           case "link":
             return (
               <Text key={i} accessibilityRole="link" style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(s.url).catch(() => {})}>
-                <Marked text={s.text} mark={mark} />
+                {s.spans ? <Spans spans={s.spans} tone={tone} mark={mark} inLink /> : <Marked text={s.text} mark={mark} />}
               </Text>
             );
+          case "file": {
+            // A link to a file on the Mac opens its change where the message can show one; elsewhere it is just its words.
+            const words = s.spans ? <Spans spans={s.spans} tone={tone} mark={mark} inLink /> : <Marked text={s.text} mark={mark} />;
+            if (!links) return <Fragment key={i}>{words}</Fragment>;
+            const file = fileNamed(s.path, links.files) ?? s.path;
+            return (
+              <Text key={i} accessibilityRole="link" accessibilityHint="Shows what changed in this file" style={{ color: accent, textDecorationLine: "underline" }} onPress={() => links.onFile(file)}>
+                {words}
+              </Text>
+            );
+          }
           default:
             return mark ? <Marked key={i} text={s.text} mark={mark} /> : s.text;
         }
@@ -250,7 +264,8 @@ const BULLET_WIDTH = 10;
 export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
-  const links = useMemo(() => (files?.length && onFile ? { files, onFile } : null), [files, onFile]);
+  // Where a tap can open a change: a link to a file always can, and code naming one of the turn's files too.
+  const links = useMemo(() => (onFile ? { files: files ?? NO_FILES, onFile } : null), [files, onFile]);
   const body = (
     <View style={{ gap: 8 }}>
       {blocks.map((b, i) => {

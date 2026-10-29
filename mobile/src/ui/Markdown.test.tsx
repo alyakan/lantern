@@ -226,4 +226,20 @@ describe("what a chat search looks for, marked in the words", () => {
       await screen.unmount();
     }
   });
+
+  it("opens the change of a file a link points at", async () => {
+    const onFile = jest.fn();
+    const text = "See [`Flow.swift:35`](/Users/me/App/Flow.swift#L35).";
+    // The turn changed it, so the code naming it would be a link of its own: inside the link, it is just its words.
+    await render(<Markdown text={text} files={["/Users/me/App/Flow.swift"]} onFile={onFile} />);
+    await fireEvent.press(screen.getByRole("link"));
+    expect(onFile).toHaveBeenCalledWith("/Users/me/App/Flow.swift");
+  });
+
+  it("shows just a file link's words where nothing can open it", async () => {
+    await render(<Markdown text="See [`Flow.swift:35`](/Users/me/App/Flow.swift#L35)." />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByText("Flow.swift:35")).toBeTruthy();
+    expect(screen.queryByText(/\]\(/)).toBeNull();
+  });
 });

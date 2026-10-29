@@ -295,6 +295,34 @@ describe("the little markdown", () => {
     expect(parseMarkdown("- a\n\n1. b").map((b) => b.kind)).toEqual(["list", "list"]);
   });
 
+  it("reads a link to a file on the Mac, its words in code, as the file and its line", () => {
+    expect(parseInline("1. [`App/Flow.swift:35`](/Users/me/App/Flow.swift#L35): gone")).toEqual([
+      { kind: "text", text: "1. " },
+      { kind: "file", text: "App/Flow.swift:35", spans: [{ kind: "code", text: "App/Flow.swift:35" }], path: "/Users/me/App/Flow.swift", line: 35 },
+      { kind: "text", text: ": gone" },
+    ]);
+    expect(parseInline("[a b](src/My%20File.ts)")).toEqual([{ kind: "file", text: "a b", path: "src/My File.ts", line: null }]);
+    expect(parseInline("[`docs`](https://a.b/c)")).toEqual([{ kind: "link", text: "docs", spans: [{ kind: "code", text: "docs" }], url: "https://a.b/c" }]);
+    expect(parseInline("[x](mailto:a@b.c)")).toEqual([{ kind: "text", text: "[x](mailto:a@b.c)" }]);
+    expect(parseInline("arr[0](x)")).toEqual([{ kind: "text", text: "arr[0](x)" }]);
+    // As Claude wrote it in a step: a range of lines, in a list, with code after the link.
+    const [item] = parseMarkdown("2. [`Lumiform/Testo/TestoConnectionFlow.swift:94-105`](/Users/me/ios-app/Lumiform/Testo/TestoConnectionFlow.swift#L94): new `mutating func timedOut() -> [Output]`.");
+    expect(item).toEqual({
+      kind: "list",
+      ordered: true,
+      items: [
+        [
+          { kind: "file", text: "Lumiform/Testo/TestoConnectionFlow.swift:94-105", spans: [{ kind: "code", text: "Lumiform/Testo/TestoConnectionFlow.swift:94-105" }], path: "/Users/me/ios-app/Lumiform/Testo/TestoConnectionFlow.swift", line: 94 },
+          { kind: "text", text: ": new " },
+          { kind: "code", text: "mutating func timedOut() -> [Output]" },
+          { kind: "text", text: "." },
+        ],
+      ],
+      meta: [expect.objectContaining({ depth: 0 })],
+    });
+    expect(parseInline("`[x](y)`")).toEqual([{ kind: "code", text: "[x](y)" }]);
+  });
+
   it("reads strikethrough, marks inside marks, and bare links without the full stop after them", () => {
     expect(parseInline("~~old~~ **bold `code`** *it's `x`*")).toEqual([
       { kind: "strike", text: "old" },
