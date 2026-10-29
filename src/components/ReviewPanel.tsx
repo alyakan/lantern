@@ -7,6 +7,8 @@ import { TestsTab } from "./TestsTab";
 import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import { ChecksTab, hasChecks } from "./ChecksTab";
 import { DashboardTab } from "./DashboardTab";
+import { ArtifactsTab } from "./ArtifactsTab";
+import { artifactName } from "../lib/artifacts";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
 import type { NetworkItem } from "../types";
@@ -73,6 +75,8 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null; onUpdate?: () => void };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** The file the chat's latest edit was to, in which chat (`slot`), and its count of edits: an artifact Claude writes opens in Artifacts. */
+  lastEdit?: { slot: string; path: string | null; count: number };
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
   /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
@@ -158,6 +162,7 @@ export function ReviewPanel(props: Props) {
       setTab("files");
     }
   });
+  const artifactOpen = useArtifactEdits(props.lastEdit, props.folder, () => setTab("artifacts"));
   const badges: Partial<Record<Tab, TabBadge>> = {};
   if (count > 0) badges.changes = { text: `${count}`, failed: false, attention: false };
   if (latestRun?.outcome === "failed") badges.tests = { text: `${latestRun.failed || "!"}`, failed: true, attention: true };
@@ -297,6 +302,11 @@ export function ReviewPanel(props: Props) {
           {props.folder ? <DashboardTab folder={props.folder} refreshKey={props.refreshKey} /> : <TabEmpty title="Dashboard">Open a folder to see its dashboards.</TabEmpty>}
         </div>
       )}
+      {tab === "artifacts" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("artifacts")}>
+          {props.folder ? <ArtifactsTab folder={props.folder} refreshKey={props.refreshKey} open={artifactOpen} /> : <TabEmpty title="Artifacts">Open a folder to see its artifacts.</TabEmpty>}
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
@@ -325,7 +335,30 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
   dashboard: "This folder's dashboards: forms whose buttons run commands, with their results and history",
+  artifacts: "Pages Claude made to show you something (maps, flows, charts, reports), from .lantern/artifacts/",
 };
+
+/** The edit count each chat was last seen at: a chat seen for the first time (opened, or switched to) opens nothing. */
+const seenEdits = new Map<string, number>();
+
+/**
+ * When the chat's latest edit is to an artifact, brings up the Artifacts tab on it: once per edit, and only for an edit
+ * made while the chat was on screen, not one found when switching to it.
+ */
+function useArtifactEdits(edit: Props["lastEdit"], folder: string | null, show: () => void) {
+  const [open, setOpen] = useState<{ name: string; key: number } | null>(null);
+  useEffect(() => {
+    if (!edit) return;
+    const seen = seenEdits.get(edit.slot);
+    seenEdits.set(edit.slot, edit.count);
+    if (seen === undefined || edit.count <= seen || !edit.path) return;
+    const name = artifactName(edit.path, folder);
+    if (!name) return;
+    setOpen({ name, key: Date.now() });
+    show();
+  }, [edit?.slot, edit?.count]);
+  return open;
+}
 
 /**
  * Plan: the architecture map in a Design chat (the plan so far under a toggle), the plan and progress in any Step by

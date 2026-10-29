@@ -1903,6 +1903,19 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           if (session) session.title = String(a.title);
           return undefined;
         }
+        // A browser can't serve the artifact scheme, so the mock has a Markdown and a Mermaid artifact to show.
+        case "artifacts_list":
+          return {
+            key: "mock",
+            items: [
+              { name: "auth-flow.mmd", path: `${a.folder}/.lantern/artifacts/auth-flow.mmd`, kind: "mermaid", modified: Date.now() - 60_000, size: 80 },
+              { name: "report.md", path: `${a.folder}/.lantern/artifacts/report.md`, kind: "markdown", modified: Date.now() - 3_600_000, size: 60 },
+            ],
+          };
+        case "artifacts_read":
+          return a.name === "auth-flow.mmd" ? "flowchart LR\n  App --> Gateway --> Auth\n  Auth --> DB[(Users)]" : "# Weekly report\n\n- 12 pull requests merged\n- 2 releases";
+        case "artifacts_theme":
+          return null;
         case "dashboards_list":
           // The same spec the Rust tests check, plus one file that doesn't check out.
           return [

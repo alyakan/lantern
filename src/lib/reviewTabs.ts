@@ -1,5 +1,5 @@
 /** Every tab the side panel has. Only the pinned ones sit in its strip; the rest are in the ⋯ menu. */
-export type Tab = "changes" | "files" | "plan" | "tests" | "checks" | "network" | "dashboard";
+export type Tab = "changes" | "files" | "plan" | "tests" | "checks" | "network" | "dashboard" | "artifacts";
 export const TABS: { id: Tab; label: string }[] = [
   { id: "changes", label: "Changes" },
   { id: "files", label: "Files" },
@@ -8,6 +8,7 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: "checks", label: "Checks" },
   { id: "network", label: "Network" },
   { id: "dashboard", label: "Dashboard" },
+  { id: "artifacts", label: "Artifacts" },
 ];
 export const DEFAULT_PINNED: Tab[] = ["changes", "files", "plan"];
 

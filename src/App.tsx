@@ -2740,6 +2740,7 @@ export default function App() {
                 selected={state.selectedFile}
                 follow={state.follow}
                 refreshKey={state.editCount}
+                lastEdit={{ slot: active, path: state.lastEdited, count: state.claudeEdits }}
                 onSaved={() => syncChanges(active)}
                 // Sent now when Claude is free, queued behind the turn when it's working.
                 onSummarizeRequest={

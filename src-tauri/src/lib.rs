@@ -16,6 +16,7 @@ pub mod menu;
 pub mod menu_bar;
 pub mod merge_tests;
 pub mod navigation;
+pub mod artifacts;
 pub mod dashboard;
 pub mod dashboard_run;
 pub mod dashboard_tools;
@@ -77,6 +78,8 @@ pub struct AppState {
     network: Arc<network::Monitor>,
     /// Which dashboards are trusted, the runs of their forms, and what is running now (see dashboard_run.rs).
     dashboards: Arc<dashboard_run::Runner>,
+    /// The folders whose artifacts the `lantern-artifact:` scheme serves, by key, and the theme they get (see artifacts.rs).
+    artifacts: Arc<artifacts::Artifacts>,
     /// The Storage tab's scan, and what Claude's storage_* tools read and mark (see storage/mod.rs).
     storage: Arc<storage::Storage>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
@@ -928,6 +931,27 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
         })
     }));
     Ok(slot)
+}
+
+/// The folder's artifacts (`.lantern/artifacts/`), newest first, and the key its HTML and SVG ones are served under.
+#[tauri::command]
+async fn artifacts_list(state: State<'_, AppState>, folder: String) -> Result<artifacts::Listing, String> {
+    let root = std::path::PathBuf::from(&folder);
+    let key = state.artifacts.key_for(&root)?;
+    let items = tauri::async_runtime::spawn_blocking(move || artifacts::list(&root)).await.map_err(|e| e.to_string())?;
+    Ok(artifacts::Listing { key, items })
+}
+
+/// A Markdown or Mermaid artifact's text, for the app to draw.
+#[tauri::command]
+async fn artifacts_read(folder: String, name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || artifacts::read(std::path::Path::new(&folder), &name)).await.map_err(|e| e.to_string())?
+}
+
+/// The app's theme as CSS variables, for the `lantern.css` artifacts link (the window sends it when the theme changes).
+#[tauri::command]
+fn artifacts_theme(state: State<'_, AppState>, vars: std::collections::HashMap<String, String>) {
+    state.artifacts.set_theme(vars);
 }
 
 /// The folder's dashboards (`.lantern/dashboards/*.json`), each as a checked spec or the issues found in it.
@@ -3114,6 +3138,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Artifacts' HTML and SVG, for the Artifacts tab's sandboxed frame (see artifacts.rs).
+        .register_uri_scheme_protocol(artifacts::SCHEME, |ctx, request| match ctx.app_handle().try_state::<AppState>() {
+            Some(state) => state.artifacts.serve(request.uri().path()),
+            None => tauri::http::Response::builder().status(tauri::http::StatusCode::SERVICE_UNAVAILABLE).body(Vec::new()).unwrap(),
+        })
         .setup(|app| {
             let titles = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("titles.json")));
             let renames = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("renames.json")));
@@ -3128,6 +3157,7 @@ pub fn run() {
             network.set_on_change(move || {
                 let _ = handle.emit("network-changed", ());
             });
+            let artifacts = Arc::new(artifacts::Artifacts::default());
             let dashboards = Arc::new(dashboard_run::Runner::load(app.path().app_data_dir().ok().map(|d| d.join("dashboards.json"))));
             let handle = app.handle().clone();
             dashboards.set_on_change(move || {
@@ -3149,7 +3179,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -3235,6 +3265,9 @@ pub fn run() {
             aside_stop,
             aside_stop_answering,
             orchestra_approve_merge,
+            artifacts_list,
+            artifacts_read,
+            artifacts_theme,
             dashboards_list,
             dashboards_state,
             dashboard_trust,

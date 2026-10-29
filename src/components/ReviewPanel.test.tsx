@@ -232,9 +232,9 @@ describe("ReviewPanel's tabs", () => {
     expect(screen.queryByRole("tab", { name: /Activity|Storage/ })).toBeNull();
     openMenu();
     const menu = screen.getByRole("menu", { name: "Side panel tabs" });
-    expect(within(menu).getAllByRole("menuitem").filter((i) => i.classList.contains("menu-row")).map((i) => i.textContent)).toEqual(["Changes2", "Files", "Plan", "Tests", "Checks", "Network", "Dashboard", "Reset to default"]);
+    expect(within(menu).getAllByRole("menuitem").filter((i) => i.classList.contains("menu-row")).map((i) => i.textContent)).toEqual(["Changes2", "Files", "Plan", "Tests", "Checks", "Network", "Dashboard", "Artifacts", "Reset to default"]);
     expect(within(menu).getAllByRole("menuitemcheckbox").map((c) => [c.getAttribute("aria-label"), c.getAttribute("aria-checked")])).toEqual([
-      ["Pin Changes", "true"], ["Pin Files", "true"], ["Pin Plan", "true"], ["Pin Tests", "false"], ["Pin Checks", "false"], ["Pin Network", "false"], ["Pin Dashboard", "false"],
+      ["Pin Changes", "true"], ["Pin Files", "true"], ["Pin Plan", "true"], ["Pin Tests", "false"], ["Pin Checks", "false"], ["Pin Network", "false"], ["Pin Dashboard", "false"], ["Pin Artifacts", "false"],
     ]);
     localStorage.clear();
   });
