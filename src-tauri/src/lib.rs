@@ -171,7 +171,26 @@ async fn pr_range(state: &AppState, folder: std::path::PathBuf, number: Option<u
 
 /// A file's diff as a phone reads it: unified text, cut to PHONE_DIFF_MAX.
 fn phone_diff(path: &str, d: &FileDiff) -> String {
-    let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(path, path).to_string();
+    cut_for_phone(similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(path, path).to_string())
+}
+
+/// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
+/// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
+fn named_file_diff(path: &str, original: Option<String>, current: Option<String>) -> Result<String, String> {
+    if original.is_none() && current.is_none() {
+        return Err("There is no file by that name in the open folder.".into());
+    }
+    let (created, deleted) = (original.is_none(), current.is_none());
+    let (before, after) = (original.unwrap_or_default(), current.unwrap_or_default());
+    if !created && !deleted && before == after {
+        let n = after.lines().count();
+        let body: String = after.lines().map(|l| format!(" {l}\n")).collect();
+        return Ok(cut_for_phone(format!("--- {path}\n+++ {path}\n@@ -1,{n} +1,{n} @@\n{body}")));
+    }
+    Ok(phone_diff(path, &FileDiff { path: path.to_string(), created, deleted, original: before, current: after }))
+}
+
+fn cut_for_phone(text: String) -> String {
     if text.len() > PHONE_DIFF_MAX {
         format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)])
     } else {
@@ -534,10 +553,18 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone();
         Box::pin(async move {
             let s = app.state::<AppState>().slots.get(&slot)?;
-            // Only a file the chat changed: the tracker knows no other. A review's page may name it relative to the chat's folder.
+            // A file the chat changed through its tools: the tracker has it. A page may name it relative to the chat's folder.
+            let named = path.clone();
             let path = if std::path::Path::new(&path).is_absolute() { path } else { s.folder()?.join(&path).to_string_lossy().into_owned() };
-            let d = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None)?;
-            Ok(phone_diff(&path, &d))
+            let tracked = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None);
+            if let Ok(d) = tracked {
+                return Ok(phone_diff(&path, &d));
+            }
+            // Any other file a message names (a script's edit, an earlier step, one only read): git's view of it, from the folder the Changes pane reads.
+            let view = s.view_folder()?;
+            let abs = if std::path::Path::new(&named).is_absolute() { std::path::PathBuf::from(&named) } else { view.join(&named) };
+            let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::named_sides(&view, &abs)).await.map_err(|e| e.to_string())??;
+            named_file_diff(&path, original, current)
         })
     }
 
@@ -3522,6 +3549,18 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         assert!(!take_marker(&path, now + RESTORE_MARKER_MAX_AGE + std::time::Duration::from_secs(60)));
         assert!(!path.exists());
+    }
+
+    /// A file a message names that the chat never edited: its changes if it has any, else the whole file as unchanged lines.
+    #[test]
+    fn a_named_file_shows_its_changes_or_else_all_its_lines() {
+        let same = named_file_diff("/p/a.swift", Some("one\ntwo\n".into()), Some("one\ntwo\n".into())).unwrap();
+        assert_eq!(same, "--- /p/a.swift\n+++ /p/a.swift\n@@ -1,2 +1,2 @@\n one\n two\n");
+        let changed = named_file_diff("/p/a.swift", Some("one\n".into()), Some("one\ntwo\n".into())).unwrap();
+        assert!(changed.contains("+two") && !changed.contains("-one"));
+        assert!(named_file_diff("/p/a.swift", None, Some("new\n".into())).unwrap().contains("+new"));
+        assert!(named_file_diff("/p/a.swift", Some("gone\n".into()), None).unwrap().contains("-gone"));
+        assert!(named_file_diff("/p/a.swift", None, None).is_err());
     }
 
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.
