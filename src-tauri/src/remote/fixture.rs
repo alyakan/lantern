@@ -287,6 +287,24 @@ impl Host for FixtureHost {
         self.diff(slot, path)
     }
 
+    fn artifacts(&self, _slot: String) -> BoxFut<Result<Vec<super::protocol::RemoteArtifact>, String>> {
+        let item = |name: &str, kind: &str, modified: u64, size: u64| super::protocol::RemoteArtifact { name: name.into(), kind: kind.into(), modified, size };
+        Box::pin(async move { Ok(vec![item("tonight.html", "html", 1_761_800_000_000, 900), item("release-flow.md", "markdown", 1_761_700_000_000, 300), item("architecture.mmd", "mermaid", 1_761_600_000_000, 120)]) })
+    }
+
+    fn artifact_read(&self, _slot: String, name: String) -> BoxFut<Result<String, String>> {
+        Box::pin(async move {
+            match name.as_str() {
+                "tonight.html" => Ok(crate::artifacts::defuse(
+                    r#"<!doctype html><link rel="preconnect" href="http://127.0.0.1:9"><h1>Tonight</h1><p class="muted">A page with a chart.</p><div style="display:flex;gap:6px;align-items:flex-end;height:80px"><div style="flex:1;height:40%;background:var(--series-1,#4c8bf5)"></div><div style="flex:1;height:70%;background:var(--series-2,#e0903c)"></div><div style="flex:1;height:55%;background:var(--series-3,#3fa37c)"></div></div><p><a href="http://127.0.0.1:9/x">a link out</a></p>"#,
+                )),
+                "release-flow.md" => Ok("# Release flow\n\n1. Feature PR\n2. Version PR\n3. Tag\n4. Draft, then **publish**\n".into()),
+                "architecture.mmd" => Ok("graph TD\n  Phone --> Gateway\n  Gateway --> Mac\n".into()),
+                _ => Err("That artifact is gone.".into()),
+            }
+        })
+    }
+
     fn diff(&self, _slot: String, path: String) -> BoxFut<Result<String, String>> {
         Box::pin(async move {
             if path == "/Users/you/dev/lantern/package.json" {

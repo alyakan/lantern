@@ -122,7 +122,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
 }
 
 /** A window with a card in its middle (float it), or with a pane down its right (put it back beside the chat). */
-function FloatIcon({ floating, color }: { floating: boolean; color: string }) {
+export function FloatIcon({ floating, color }: { floating: boolean; color: string }) {
   return (
     <View accessibilityElementsHidden style={{ width: 22, height: 17, borderRadius: 4, borderWidth: 2, borderColor: color, flexDirection: "row", alignItems: floating ? "stretch" : "center", justifyContent: floating ? "flex-end" : "center", overflow: "hidden" }}>
       {floating ? <View style={{ width: 7, backgroundColor: color }} /> : <View style={{ width: 10, height: 7, borderRadius: 1.5, backgroundColor: color }} />}

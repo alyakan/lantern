@@ -86,6 +86,9 @@ const TEAM_ON_MAC: &str = "A team is started on your Mac.";
 
 const NO_STORAGE: &str = "This Mac can't show its storage.";
 const NO_TODOS: &str = "This Mac has no to-do lists.";
+const NO_ARTIFACTS: &str = "This Mac can't show artifacts.";
+/// The longest an artifact's name may be, as the phone asks for it.
+const ARTIFACT_NAME_MAX: usize = 300;
 
 /// The most ids a phone may name in one clear: a little over what it is ever shown.
 const STORAGE_IDS_MAX: usize = 80;
@@ -133,6 +136,14 @@ pub trait Host: Send + Sync + 'static {
     /// A file of what the chat is reviewing, as a unified diff of the pull request or branch: `path` is relative to the
     /// repository or absolute in it (checked by `reviewed_path`), and a file outside the repository is refused.
     fn review_diff(&self, slot: String, path: String, target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>>;
+    /// The artifacts in the chat's folder, newest first (see artifacts.rs). A host with none says so.
+    fn artifacts(&self, _slot: String) -> BoxFut<Result<Vec<protocol::RemoteArtifact>, String>> {
+        Box::pin(async { Err(NO_ARTIFACTS.to_string()) })
+    }
+    /// One artifact's text, by a name `artifacts` listed (see artifacts::read_for_phone, which refuses any other).
+    fn artifact_read(&self, _slot: String, _name: String) -> BoxFut<Result<String, String>> {
+        Box::pin(async { Err(NO_ARTIFACTS.to_string()) })
+    }
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
     /// shown yet (see history::page).
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
@@ -910,6 +921,17 @@ impl<'a> Session<'a> {
                 host.diff(slot, path).await.map(serde_json::Value::String)
             }
             Request::ReviewDiff { slot, path } => self.gw.review_diff(slot, path).await,
+            Request::Artifacts { slot } => {
+                self.chat_known(&slot)?;
+                host.artifacts(slot).await.map(|items| json(&items))
+            }
+            Request::ArtifactRead { slot, name } => {
+                self.chat_known(&slot)?;
+                if name.is_empty() || name.len() > ARTIFACT_NAME_MAX || name.chars().any(|c| c.is_control() || c == '\\') {
+                    return Err("That isn't an artifact.".into());
+                }
+                host.artifact_read(slot, name).await.map(serde_json::Value::String)
+            }
             Request::StepOutput { slot, tool_use_id } => {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
@@ -1221,6 +1243,12 @@ pub(crate) mod tests {
                 tokio::time::sleep(delay).await;
                 Ok(format!("review {path} pr={:?} base={:?}", target.pr, target.base))
             })
+        }
+        fn artifacts(&self, slot: String) -> BoxFut<Result<Vec<protocol::RemoteArtifact>, String>> {
+            Box::pin(async move { Ok(vec![protocol::RemoteArtifact { name: format!("{slot}/map.html"), kind: "html".into(), modified: 7, size: 12 }]) })
+        }
+        fn artifact_read(&self, _: String, name: String) -> BoxFut<Result<String, String>> {
+            Box::pin(async move { Ok(format!("text of {name}")) })
         }
         fn history(&self, _: String, _: Option<usize>) -> BoxFut<Result<crate::history::Page, String>> {
             let h = self.history.lock().unwrap().clone();
@@ -1685,6 +1713,21 @@ pub(crate) mod tests {
             assert!(p.ask(Request::ReviewDiff { slot: "z".into(), path: bad.into() }).await.1.is_some(), "{bad:?}");
         }
         assert!(p.ask(Request::ReviewDiff { slot: "unknown".into(), path: "src/lib.rs".into() }).await.1.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_phone_lists_and_reads_a_chats_artifacts_only_for_a_chat_that_is_open_and_a_plain_name() {
+        let r = rig();
+        r.hub.asleep("z", "/p", Some("Review".into()), Some("s".into()));
+        let (_, mut p) = paired(&r).await;
+        assert_eq!(p.ask(Request::Artifacts { slot: "z".into() }).await.0, Some(json!([{"name": "z/map.html", "kind": "html", "modified": 7, "size": 12}])));
+        assert_eq!(p.ask(Request::ArtifactRead { slot: "z".into(), name: "maps/a.md".into() }).await.0, Some(json!("text of maps/a.md")));
+        assert!(p.ask(Request::Artifacts { slot: "unknown".into() }).await.1.is_some());
+        assert!(p.ask(Request::ArtifactRead { slot: "unknown".into(), name: "a.md".into() }).await.1.is_some());
+        for bad in ["", "a\nb", "a\\b", "a\u{0}b", &"x".repeat(ARTIFACT_NAME_MAX + 1)] {
+            assert!(p.ask(Request::ArtifactRead { slot: "z".into(), name: bad.into() }).await.1.is_some(), "{bad:?}");
+        }
+        assert!(protocol::FEATURES.contains(&"artifacts"));
     }
 
     #[test]

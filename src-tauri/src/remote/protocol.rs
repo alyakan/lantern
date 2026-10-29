@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -499,6 +499,21 @@ pub struct PairOffer {
     pub modules: Vec<String>,
 }
 
+/// One of a chat's folder's artifacts (`.lantern/artifacts/`), as the phone lists it: no path, only the name it asks for it by.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteArtifact {
+    /// From the artifacts folder, with `/` between folders: `maps/auth.html`.
+    pub name: String,
+    /// "html", "svg", "markdown" or "mermaid".
+    pub kind: String,
+    /// Last changed, in milliseconds since 1970.
+    #[ts(type = "number")]
+    pub modified: u64,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
 /// One item of the Mac's storage a phone may clear, as it is shown: no path, only what the user needs to decide. The phone sends
 /// the ids back to clear them, and the Mac clears only those it still finds safe (see storage/phone.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -731,6 +746,12 @@ pub enum Request {
     /// call), or, when it isn't reviewing anything, the chat's own change to it (as Diff). `path` is as the review's page names
     /// it, relative to the repository or absolute in it. Only sent to a Mac whose Welcome lists "reviewdiff".
     ReviewDiff { slot: String, path: String },
+    /// The artifacts in the chat's folder (`.lantern/artifacts/`), newest first, as a list of RemoteArtifact. Only sent to a Mac
+    /// whose Welcome lists "artifacts" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Artifacts { slot: String },
+    /// One artifact's text, by the `name` Artifacts listed: Markdown and Mermaid as written; HTML and SVG with what makes a page
+    /// reach a server on its own taken out (artifacts.rs `defuse`), for the phone to draw with scripts off. At most 1 MB.
+    ArtifactRead { slot: String, name: String },
     /// What a finished step of the chat printed (a command's output, a skill's, a helper's report, an MCP tool's), as text,
     /// cut to STEP_OUTPUT_MAX. Never what Claude read from a file or the web (hub.rs `output_may_be_read`). Only what the Mac
     /// still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose Welcome lists "output".

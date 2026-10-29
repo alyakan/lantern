@@ -10,8 +10,11 @@ import { useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { changedFiles } from "../view/changes";
 import { CHANGES_SHARE, changesWidth, COLUMN_MAX, hasRoomForChanges, shareOf } from "../view/layout";
+import { useMacCan } from "../shell/useControls";
+import { ArtifactsPane } from "./ArtifactsPane";
 import { ChangesDock, type DockMode } from "./ChangesDock";
 import { ChangesPane } from "./ChangesPane";
+import { PanelMenu, type Panel } from "./PanelMenu";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 
@@ -52,7 +55,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const [changesOpen, setChangesOpen] = useState(true);
   const [floating, setFloating] = useState(false);
   const changed = slot ? changedFiles((views[slot] ?? emptyView).items) : [];
-  const room = hasRoomForChanges(layout, win.width) && changed.length > 0;
+  // What the pane shows: the chat's changes, or (a Mac that lists "artifacts") its folder's artifacts, picked from the pane's title.
+  const canArtifacts = useMacCan("artifacts");
+  const [panel, setPanel] = useState<Panel>("changes");
+  const showing: Panel = canArtifacts ? panel : "changes";
+  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || showing === "artifacts");
   const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
   // The room this has (the window, less the chats when they are beside it), as laid out.
   const [size, setSize] = useState({ width: win.width, height: win.height });
@@ -126,7 +133,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
         {slot && (
           <CrossFade id={slot}>
             <View style={{ flex: 1, backgroundColor: colors.card }}>
-              <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} float={{ floating, onToggle: toggleFloat }} />
+              {showing === "artifacts" ? (
+                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts onPick={setPanel} />} float={{ floating, onToggle: toggleFloat }} />
+              ) : (
+                <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={setPanel} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+              )}
             </View>
           </CrossFade>
         )}

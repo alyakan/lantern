@@ -600,6 +600,23 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn artifacts(&self, slot: String) -> remote::gateway::BoxFut<Result<Vec<remote::protocol::RemoteArtifact>, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let folder = app.state::<AppState>().slots.get(&slot)?.folder()?;
+            let items = tauri::async_runtime::spawn_blocking(move || artifacts::list(&folder)).await.map_err(|e| e.to_string())?;
+            Ok(items.into_iter().map(|a| remote::protocol::RemoteArtifact { name: a.name, kind: a.kind.name().to_string(), modified: a.modified, size: a.size }).collect())
+        })
+    }
+
+    fn artifact_read(&self, slot: String, name: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let folder = app.state::<AppState>().slots.get(&slot)?.folder()?;
+            tauri::async_runtime::spawn_blocking(move || artifacts::read_for_phone(&folder, &name)).await.map_err(|e| e.to_string())?
+        })
+    }
+
     fn history(&self, slot: String, before: Option<usize>) -> remote::gateway::BoxFut<Result<history::Page, String>> {
         let app = self.app.clone();
         Box::pin(async move {
