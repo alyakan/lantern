@@ -55,7 +55,12 @@ export interface ChatProps {
   changesPane?: { shown: boolean; onToggle: () => void };
   /** The Done page's "Start something new": opens the new-chat sheet on this chat's project (its folder's name; null when it has none). */
   onStartNew?: (project: string | null) => void;
+  /** The chat's width is being dragged (the Changes pane's divider): the reader's place is put back once, when it ends. */
+  resizing?: boolean;
 }
+
+/** The header's buttons take a touch a little way around them, but not above: that is the status bar, whose tap scrolls a list to its top. */
+const HEADER_SLOP = { top: 0, left: 8, right: 8, bottom: 8 };
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
@@ -91,7 +96,7 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onStartNew }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onStartNew, resizing = false }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -202,6 +207,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const list = useRef<FlashListRef<Row>>(null);
   // The reader's place survives the chat getting narrower or wider (the chats pinned beside it, put away, or the tablet turned).
   const keep = useKeepPlace(list);
+  const { hold } = keep;
+  useEffect(() => hold(resizing), [hold, resizing]);
 
   // Whatever the chat did while it is open is seen: it isn't unread on Home. Once more when it closes, for what came as it went.
   const activeAt = chat?.active_at;
@@ -421,7 +428,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
         {lead === "back" && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
+          <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={HEADER_SLOP} scaleTo={0.88}>
             <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
               <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
             </Glass>
@@ -431,7 +438,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           // It pops in when the chats are unpinned and go away (not when the chat opens with them away: then it was just there).
           // While they are slid in it stays where it is, under them, so they cover and uncover it as they move.
           <PopIn glass animate={sidebarLeadLate}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} scaleTo={0.88}>
               <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
                 {/* A window with its side panel: the chats. */}
                 <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
@@ -479,7 +486,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             </Glass>
           )}
         </ChatSettings>
-        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.88}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
           <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
             <ChangesIcon color={colors.ink} />
           </Glass>
@@ -566,6 +573,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       <FlashList
         renderScrollComponent={scrollComponent}
         testID="chat-list"
+        // A tap on the status bar would jump to the oldest message loaded, which in a chat is never where the reader wants to be,
+        // and on a tablet the header's buttons are right under it.
+        scrollsToTop={false}
         contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom } : undefined}
         ref={list}
         onScroll={onScroll}

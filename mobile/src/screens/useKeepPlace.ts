@@ -19,6 +19,9 @@ export const FREEZE_MS = 700;
  * once the width has changed puts that back.
  *
  * `remember(atEnd)` goes in the list's onScroll, `widthChanged(width)` in the onLayout of the view around the list.
+ *
+ * While the width is being dragged (`hold(true)`: the Changes pane's divider), it changes at every frame: the place from before
+ * the drag is kept, nothing is put back as it goes, and it is put back once when the drag ends (`hold(false)`).
  */
 export function useKeepPlace(list: RefObject<PlaceList | null>) {
   // A chat opens at its end, so that is the place until the reader has moved.
@@ -27,10 +30,12 @@ export function useKeepPlace(list: RefObject<PlaceList | null>) {
   const frozenUntil = useRef(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  // The width when a drag began, while one is on.
+  const held = useRef<number | null>(null);
 
   const remember = useCallback(
     (atEnd: boolean) => {
-      if (Date.now() < frozenUntil.current) return;
+      if (held.current !== null || Date.now() < frozenUntil.current) return;
       // (A list that can't say, such as the one in the screens' tests, leaves the last place as it was.)
       const first = list.current?.getFirstVisibleIndex?.();
       place.current = { index: typeof first === "number" && first >= 0 ? first : place.current.index, atEnd };
@@ -38,24 +43,41 @@ export function useKeepPlace(list: RefObject<PlaceList | null>) {
     [list],
   );
 
+  const restore = useCallback(() => {
+    const { index, atEnd } = place.current;
+    frozenUntil.current = Date.now() + FREEZE_MS;
+    timers.current.forEach(clearTimeout);
+    timers.current = RESTORE_AT_MS.map((ms) =>
+      setTimeout(() => {
+        if (atEnd) list.current?.scrollToEnd({ animated: false });
+        else void list.current?.scrollToIndex({ index, animated: false });
+      }, ms),
+    );
+  }, [list]);
+
   const widthChanged = useCallback(
     (now: number) => {
       const before = width.current;
       width.current = now;
       // The first layout is not a change, and a few points either way are not a re-wrap.
-      if (before === null || Math.abs(before - now) < 1) return;
-      const { index, atEnd } = place.current;
-      frozenUntil.current = Date.now() + FREEZE_MS;
-      timers.current.forEach(clearTimeout);
-      timers.current = RESTORE_AT_MS.map((ms) =>
-        setTimeout(() => {
-          if (atEnd) list.current?.scrollToEnd({ animated: false });
-          else void list.current?.scrollToIndex({ index, animated: false });
-        }, ms),
-      );
+      if (before === null || Math.abs(before - now) < 1 || held.current !== null) return;
+      restore();
     },
-    [list],
+    [restore],
   );
 
-  return { remember, widthChanged };
+  const hold = useCallback(
+    (on: boolean) => {
+      if (on) {
+        if (held.current === null) held.current = width.current ?? 0;
+        return;
+      }
+      const began = held.current;
+      held.current = null;
+      if (began !== null && width.current !== null && Math.abs(began - width.current) >= 1) restore();
+    },
+    [restore],
+  );
+
+  return { remember, widthChanged, hold };
 }

@@ -89,6 +89,21 @@ export function runPane(value: Animated.Value, to: number, done?: () => void) {
 }
 
 /**
+ * `runPane` for a value that sets a size or a place (the Changes pane's frame as it floats), which the native driver can't move.
+ * The same curve and time, so it keeps in step with what `movePanes` lays out beside it.
+ */
+export function runPaneFrame(value: Animated.Value, to: number, done?: () => void) {
+  if (skips()) {
+    value.setValue(to);
+    done?.();
+    return;
+  }
+  Animated.timing(value, { toValue: to, duration: PANE_MS, easing: paneEasing, useNativeDriver: false }).start(({ finished }) => {
+    if (finished) done?.();
+  });
+}
+
+/**
  * Lets the next render's changes of place and size glide there on the panes' curve, instead of jumping: the chat narrowing as
  * the chats are pinned beside it, its title moving over as its chats button goes. Only for what a person did (a tap), never
  * for a turned tablet, which iOS animates itself. Nothing is faded in or out by it (Liquid Glass does not fade in, see

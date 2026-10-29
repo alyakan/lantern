@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, StyleSheet, useWindowDimensions, View } from "react-native";
-import { run, runPane, skips } from "./motion";
+import { run, skips } from "./motion";
 
 /** How long one screen takes to give way to the next in place (one chat to another). */
 const SWAP_MS = 220;
@@ -25,29 +25,6 @@ function useLeaving(shown: boolean, play: (p: Animated.Value, to: number, done?:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown]);
   return { mounted: mounted || shown, p };
-}
-
-/**
- * A pane at the right of a row (the Changes beside a chat) that slides in from the right edge when `shown`, and back out when
- * not. While it goes it no longer takes room in the row, so what is beside it widens into its place as it leaves (with
- * `movePanes`), rather than after.
- */
-export function SidePane({ shown, width, children, style }: { shown: boolean; width: number; children: ReactNode; style?: object }) {
-  const { mounted, p } = useLeaving(shown, runPane);
-  // What it showed stays on it as it goes (its chat may have gone first).
-  const kept = useRef(children);
-  if (shown) kept.current = children;
-  if (!mounted) return null;
-  return (
-    <Animated.View
-      accessibilityElementsHidden={!shown}
-      importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
-      pointerEvents={shown ? "auto" : "none"}
-      style={[{ width }, style, !shown && { position: "absolute", right: 0, top: 0, bottom: 0 }, { transform: [{ translateX: p.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) }] }]}
-    >
-      {kept.current}
-    </Animated.View>
-  );
 }
 
 const rise = (p: Animated.Value, to: number, done?: () => void) => run(p, to, RISE_MS, done);

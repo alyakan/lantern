@@ -93,6 +93,26 @@ export async function saveSidebarPinned(pinned: boolean): Promise<void> {
   }
 }
 
+const CHANGES_SHARE_KEY = "lantern.changes-share";
+
+/** The share of a tablet's width the Changes pane was last dragged to beside the chat; null when it never was. */
+export async function loadChangesShare(): Promise<number | null> {
+  try {
+    const n = Number(await SecureStore.getItemAsync(CHANGES_SHARE_KEY, OPTIONS));
+    return Number.isFinite(n) && n > 0 && n < 1 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveChangesShare(share: number): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(CHANGES_SHARE_KEY, share.toFixed(3), OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
 const NOTES_KEY = "lantern.notes-seen";
 
 /**

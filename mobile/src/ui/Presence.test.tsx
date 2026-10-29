@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, Text } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { motion } from "./motion";
-import { CrossFade, Rise, SidePane } from "./Presence";
+import { CrossFade, Rise } from "./Presence";
 
 /** A screen that counts how often it was made: the same screen moved keeps its count, a new one starts again. */
 function Counted({ name }: { name: string }) {
@@ -57,53 +57,6 @@ describe("one screen giving way to the next", () => {
     expect(screen.getByRole("button", { name: "a 1" })).toBeTruthy();
     expect(screen.queryByText(/^b /, { includeHiddenElements: true })).toBeNull();
     await view.unmount();
-  });
-});
-
-describe("a pane at the side", () => {
-  it("stays while it slides away, out of reach and out of the row, and is gone once it has", async () => {
-    motion.instant = false;
-    const view = await render(
-      <SidePane shown width={380}>
-        <Text>changes</Text>
-      </SidePane>,
-    );
-    await view.rerender(
-      <SidePane shown={false} width={380}>
-        <Text>changes</Text>
-      </SidePane>,
-    );
-    expect(screen.queryByText("changes")).toBeNull();
-    const going = screen.getByText("changes", { includeHiddenElements: true });
-    expect(going).toBeTruthy();
-    await played();
-    expect(screen.queryByText("changes", { includeHiddenElements: true })).toBeNull();
-    await view.unmount();
-  });
-
-  it("keeps what it showed as it goes, even when that is gone first", async () => {
-    motion.instant = false;
-    const view = await render(
-      <SidePane shown width={380}>
-        <Text>chat a's changes</Text>
-      </SidePane>,
-    );
-    await view.rerender(
-      <SidePane shown={false} width={380}>
-        {null}
-      </SidePane>,
-    );
-    expect(screen.getByText("chat a's changes", { includeHiddenElements: true })).toBeTruthy();
-    await view.unmount();
-  });
-
-  it("is not there when it was never shown", async () => {
-    await render(
-      <SidePane shown={false} width={380}>
-        <Text>changes</Text>
-      </SidePane>,
-    );
-    expect(screen.queryByText("changes", { includeHiddenElements: true })).toBeNull();
   });
 });
 

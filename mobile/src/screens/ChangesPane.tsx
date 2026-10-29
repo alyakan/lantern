@@ -14,7 +14,7 @@ import { DiffView } from "./DiffView";
  * A tablet's right-hand pane: the files the open chat has changed, and a diff of the one chosen, read from the Mac the way the
  * chat's own "What changed" sheet reads it. Read-only: nothing here writes anything.
  */
-export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false, title }: { slot: string; onHide: () => void; /** What the button that puts it away says. */ hideLabel?: string; /** On a phone it is a sheet over the chat, which starts below the clock already. */ inSheet?: boolean; /** In place of the "Changes" heading (the phone's sheet: a menu of what it can show). */ title?: ReactNode }) {
+export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false, title, float }: { slot: string; onHide: () => void; /** What the button that puts it away says. */ hideLabel?: string; /** On a phone it is a sheet over the chat, which starts below the clock already. */ inSheet?: boolean; /** In place of the "Changes" heading (the phone's sheet: a menu of what it can show). */ title?: ReactNode; /** A tablet's pane beside the chat can float over it as a big card, and go back (`floating` says where it is). */ float?: { floating: boolean; onToggle: () => void } }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -42,7 +42,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
   }, [path, load, files.find((f) => f.path === path)?.added, files.find((f) => f.path === path)?.removed]);
   const line = changesLine(files);
   return (
-    <View testID="changes-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet ? 16 : insets.top + 6 }}>
+    <View testID="changes-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet || float?.floating ? 16 : insets.top + 6 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.lg, paddingBottom: 8 }}>
         <View style={{ flex: 1 }}>
           {title ?? (
@@ -56,6 +56,11 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
             </Txt>
           )}
         </View>
+        {float && (
+          <PressScale accessibilityRole="button" accessibilityLabel={float.floating ? "Put the changes beside the chat" : "Float the changes over the chat"} onPress={float.onToggle} haptic="select" hitSlop={8} scaleTo={0.88} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+            <FloatIcon floating={float.floating} color={colors.ink} />
+          </PressScale>
+        )}
         <Button label={hideLabel} kind="ghost" onPress={onHide} />
       </View>
       {files.length === 0 ? (
@@ -112,6 +117,15 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
           </ScrollView>
         </>
       )}
+    </View>
+  );
+}
+
+/** A window with a card in its middle (float it), or with a pane down its right (put it back beside the chat). */
+function FloatIcon({ floating, color }: { floating: boolean; color: string }) {
+  return (
+    <View accessibilityElementsHidden style={{ width: 22, height: 17, borderRadius: 4, borderWidth: 2, borderColor: color, alignItems: floating ? "flex-end" : "center", justifyContent: "center", overflow: "hidden" }}>
+      {floating ? <View style={{ width: 7, alignSelf: "stretch", backgroundColor: color }} /> : <View style={{ width: 10, height: 7, borderRadius: 1.5, backgroundColor: color }} />}
     </View>
   );
 }
