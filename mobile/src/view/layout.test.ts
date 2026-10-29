@@ -30,10 +30,13 @@ describe("layoutFor", () => {
 });
 
 describe("the Changes pane's room", () => {
-  it("needs the chats beside the chat and a window wide enough for a third column", () => {
-    expect(hasRoomForChanges("split", CHANGES_MIN)).toBe(true);
-    expect(hasRoomForChanges("split", CHANGES_MIN - 1)).toBe(false);
-    expect(hasRoomForChanges("overlay", 1400)).toBe(false);
+  it("is beside the chat once the chats are away, in a window wide enough for both", () => {
+    expect(hasRoomForChanges("overlay", CHANGES_MIN)).toBe(true);
+    expect(hasRoomForChanges("overlay", CHANGES_MIN - 1)).toBe(false);
+  });
+
+  it("is a sheet while the chats are beside the chat, however wide the window", () => {
+    expect(hasRoomForChanges("split", 1400)).toBe(false);
     expect(hasRoomForChanges("phone", 1400)).toBe(false);
   });
 });

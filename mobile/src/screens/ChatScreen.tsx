@@ -46,11 +46,13 @@ export interface ChatProps {
   onBack: () => void;
   /** Opens the full-screen decision for one of this chat's prompts. */
   onReview: (requestId: string) => void;
-  /** What leads the header: a back button (the phone), the chats' button (a tablet held upright: they slide in), or the button that hides them (they are beside the chat, and this gives the chat the whole width). */
-  lead?: "back" | "sidebar" | "hide";
+  /** What leads the header: a back button (the phone), the chats' button (a tablet with them away: they slide in), or nothing (the chats are beside the chat, with their own button). */
+  lead?: "back" | "sidebar" | "none";
   onSidebar?: () => void;
-  /** A button in the title bar opens what the chat changed (not where a pane beside the chat already shows it). */
-  changesButton?: boolean;
+  /** The chats' button is there to take its place but out of sight, while the chats are slid in over the chat with a button of their own. */
+  leadHidden?: boolean;
+  /** The Changes button opens what the chat changed in a sheet; with this it shows or hides them in a pane beside the chat instead (`shown` says which). */
+  changesPane?: { shown: boolean; onToggle: () => void };
 }
 
 /** How long "Caught up on 14 events" stays up. */
@@ -87,7 +89,7 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, changesButton = true }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -417,12 +419,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
             </Glass>
           </PressScale>
         )}
-        {(lead === "sidebar" || lead === "hide") && (
-          <PressScale accessibilityRole="button" accessibilityLabel={lead === "hide" ? "Hide chats" : "Show chats"} onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
+        {lead === "sidebar" && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={8} scaleTo={0.88} opacity={leadHidden ? 0 : 1}>
             <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-              {/* A window with its side panel: the chats (filled in while they are beside the chat). */}
+              {/* A window with its side panel: the chats. */}
               <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
-                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink, backgroundColor: lead === "hide" ? colors.ink : "transparent" }} />
+                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
               </View>
             </Glass>
           </PressScale>
@@ -465,13 +467,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, c
             </Glass>
           )}
         </ChatSettings>
-        {changesButton && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={() => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.88}>
-            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-              <ChangesIcon color={colors.ink} />
-            </Glass>
-          </PressScale>
-        )}
+        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={8} scaleTo={0.88}>
+          <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
+            <ChangesIcon color={colors.ink} />
+          </Glass>
+        </PressScale>
       </View>
       {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} />}
 

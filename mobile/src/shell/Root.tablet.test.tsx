@@ -16,6 +16,10 @@ let mockPinned = false;
 jest.mock("./useLayout", () => ({ useLayout: () => mockLayout }));
 jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadSidebarPinned: jest.fn(async () => mockPinned), saveSidebarPinned: jest.fn(async () => {}) }));
 
+// How wide the window is: the Changes pane has room beside the chat only in a wide one.
+let mockWidth = 1100;
+jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => ({ __esModule: true, default: () => ({ width: mockWidth, height: 800, scale: 2, fontScale: 1 }) }));
+
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
 
 async function open(s: Parameters<typeof seed>[1]) {
@@ -32,6 +36,7 @@ let backHandlers: BackHandlerFn[] = [];
 beforeEach(() => {
   backHandlers = [];
   mockPinned = false;
+  mockWidth = 1100;
   (saveSidebarPinned as jest.Mock).mockClear();
   jest.spyOn(BackHandler, "addEventListener").mockImplementation((_event, cb) => {
     backHandlers.push(cb);
@@ -138,40 +143,94 @@ describe("a tablet with the chats pinned", () => {
     expect(handled).toBe(false);
   });
 
-  it("unpins them from the list's own button: they stay slid in until a chat is chosen, and it is remembered", async () => {
-    await open({ chats: two });
+  it("has one button for the chats at a time: the list's, and none in the chat's header", async () => {
+    await openInAChat();
+    expect(screen.getByRole("button", { name: "Unpin the chats" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^(Show|Hide) chats$/ })).toBeNull();
+  });
+
+  it("takes the chats away from the list's own button, so the chat has the whole width, and it is remembered", async () => {
+    await openInAChat();
     await press("Unpin the chats");
     await settle();
     expect(saveSidebarPinned).toHaveBeenCalledWith(false);
-    // Slid in over the chat, with the chat dimmed behind (it can be tapped away).
-    expect(column().props.pointerEvents).toBe("auto");
-    expect(screen.getByRole("button", { name: "Close chats" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Pin the chats beside the chat" })).toBeTruthy();
-    await press(/Release 0.1.53/);
-    await settle();
     expect(column().props.pointerEvents).toBe("none");
-  });
-});
-
-describe("hiding the chats from the chat's own button", () => {
-  beforeEach(() => {
-    mockLayout = "split";
-    mockPinned = true;
-  });
-
-  it("takes the chats away for good, so the chat has the whole width, and Show chats brings them back", async () => {
-    await open({ chats: two });
-    await press(/Release 0.1.53/);
-    await settle();
-    await press("Hide chats");
-    await settle();
-    expect(saveSidebarPinned).toHaveBeenCalledWith(false);
-    expect(column().props.pointerEvents).toBe("none");
-    expect(screen.queryByRole("button", { name: "Hide chats" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close chats" })).toBeNull();
+    // The chat's header has the chats' button now, and the list's is gone with the list.
     expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Pin the chats/ })).toBeNull();
     await press("Show chats");
     await settle();
     expect(column().props.pointerEvents).toBe("auto");
+    expect(screen.getByRole("button", { name: "Pin the chats beside the chat" })).toBeTruthy();
+    // Slid in, the list's button is the only one: the chat's is out of sight.
+    expect(screen.queryByRole("button", { name: "Show chats" })).toBeNull();
+  });
+});
+
+describe("the changed files, beside the chat or over it", () => {
+  const edited = [
+    { kind: "user_text" as const, text: "Fix it.", at: 1_000_000, sent_by: "desktop" },
+    { kind: "tool_started" as const, tool_use_id: "t1", name: "Edit", summary: "a.ts" },
+    { kind: "file_edited" as const, tool_use_id: "t1", path: "/p/src/a.ts", created: false, added: 3, removed: 1 },
+  ];
+  const openEdited = async () => {
+    const rig = await open({ chats: two, events: { a: edited } });
+    await press(/Release 0.1.53/);
+    await settle();
+    return rig;
+  };
+  const paneUp = () => screen.queryByTestId("changes-pane");
+
+  beforeEach(() => {
+    mockLayout = "split";
+    mockWidth = 1100;
+  });
+
+  it("are beside the chat while the chats are away, and the Changes button shows and hides them", async () => {
+    mockPinned = false;
+    await openEdited();
+    expect(paneUp()).toBeTruthy();
+    expect(screen.queryByText(/^Changes ·/)).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeTruthy();
+    // The pane's own Hide puts it away too, and the button brings it back: a button, not a word over the chat's header.
+    await press("Hide");
+    expect(paneUp()).toBeNull();
+    expect(screen.queryByText(/^Changes ·/)).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeTruthy();
+  });
+
+  it("are a sheet over the chat while the chats are beside it, however wide the window", async () => {
+    mockPinned = true;
+    mockWidth = 1400;
+    await openEdited();
+    expect(paneUp()).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeTruthy();
+    await press("Close");
+    expect(paneUp()).toBeNull();
+  });
+
+  it("are a sheet in a window too narrow for both, even with the chats away", async () => {
+    mockPinned = false;
+    mockWidth = 800;
+    await openEdited();
+    expect(paneUp()).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeTruthy();
+  });
+
+  it("move from the sheet to the pane as the chats are put away", async () => {
+    mockPinned = true;
+    await openEdited();
+    expect(paneUp()).toBeNull();
+    await press("Unpin the chats");
+    await settle();
+    expect(paneUp()).toBeTruthy();
   });
 });
 

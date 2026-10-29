@@ -23,11 +23,15 @@ export function layoutFor(width: number, height: number): Layout {
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
 }
 
-/** The narrowest window that has room for the chats, the chat and the changed files side by side (the chats are 340, the chat reads best at 500 and over). */
-export const CHANGES_MIN = 1200;
-
 /** The Changes pane's width. */
 export const CHANGES_WIDTH = 380;
 
-/** Whether a window has room for the Changes pane beside the chat. */
-export const hasRoomForChanges = (layout: Layout, width: number) => layout === "split" && width >= CHANGES_MIN;
+/** The narrowest window that has the chat and the changed files side by side (the chat reads best at 500 and over). */
+export const CHANGES_MIN = 880;
+
+/**
+ * Whether the changed files sit beside the chat, given where the chats are (`layout` is how the chats are placed: "split" is
+ * beside the chat, "overlay" is away until asked for): the pane takes the room the chats would have, so with them beside the
+ * chat the changes are a sheet over it instead.
+ */
+export const hasRoomForChanges = (layout: Layout, width: number) => layout === "overlay" && width >= CHANGES_MIN;

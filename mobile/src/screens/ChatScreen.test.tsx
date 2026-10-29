@@ -1151,9 +1151,14 @@ describe("what a turn changed", () => {
     expect(screen.getByText("Nothing changed in this chat yet.")).toBeTruthy();
   });
 
-  it("has no Changes button where a pane beside the chat shows them", async () => {
-    await withSession(turn, { changesButton: false });
-    expect(screen.queryByRole("button", { name: /^Changes/ })).toBeNull();
+  it("shows and hides a pane beside the chat from the Changes button, instead of opening a sheet, where there is one", async () => {
+    const onToggle = jest.fn();
+    await withSession(turn, { changesPane: { shown: true, onToggle } });
+    const button = screen.getByRole("button", { name: "Changes" });
+    expect(button.props.accessibilityState).toMatchObject({ expanded: true });
+    await fireEvent.press(button);
+    expect(onToggle).toHaveBeenCalled();
+    expect(screen.queryByText("2 files · +5 −1")).toBeNull();
   });
 
   it("says why a diff couldn't be read", async () => {
