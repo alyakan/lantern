@@ -128,17 +128,12 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       live = false;
     };
   }, []);
+  // Pinning puts the chats beside the chat; unpinning takes them away entirely, so the chat has the whole width (and its Changes
+  // are beside it). From there the chat's own button, or a pull from the edge, slides them in again.
   const togglePin = () => {
     const next = !pinned;
     setPinned(next);
     void saveSidebarPinned(next);
-    // Pinned, they are beside the chat. Unpinned from the list itself, they stay slid in until a chat is chosen.
-    setChatsOpen(!next);
-  };
-  // From the chat's own button: the chats go away entirely, and the chat has the whole width.
-  const hideChats = () => {
-    setPinned(false);
-    void saveSidebarPinned(false);
     setChatsOpen(false);
   };
 
@@ -280,7 +275,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} onShowChats={() => setChatsOpen(true)} onHideChats={hideChats} onBack={back} onReview={review} />
+          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
