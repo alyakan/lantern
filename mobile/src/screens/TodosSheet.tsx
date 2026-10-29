@@ -5,7 +5,7 @@ import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteTodoEdit } from "../protocol/generated/RemoteTodoEdit";
 import type { RemoteUserTodo } from "../protocol/generated/RemoteUserTodo";
 import type { RemoteUserTodos } from "../protocol/generated/RemoteUserTodos";
-import { useController } from "../shell/hooks";
+import { useConnectionState, useController } from "../shell/hooks";
 import { Button, Chip, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -21,6 +21,8 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
+  // A reminder's tap can open the sheet before the app has reached the Mac: it asks once the connection is up.
+  const up = useConnectionState().kind === "connected";
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initial ?? null);
   const [list, setList] = useState<RemoteUserTodos | null>(null);
@@ -39,6 +41,7 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
   }, []);
 
   useEffect(() => {
+    if (!up) return;
     sync.projects().then(
       (all) => {
         if (!live.current) return;
@@ -48,10 +51,10 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
       },
       () => live.current && setProjects([]),
     );
-  }, [sync]);
+  }, [sync, up]);
 
   const load = useCallback(async () => {
-    if (!project) return;
+    if (!project || !up) return;
     try {
       const next = await sync.todos(project);
       if (live.current) {
@@ -63,7 +66,7 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
     } catch (e) {
       if (live.current) setProblem((e as Error).message || "Couldn't reach your Mac.");
     }
-  }, [sync, project]);
+  }, [sync, project, up]);
   useEffect(() => {
     setList(null);
     void load();
@@ -144,7 +147,7 @@ export function TodosSheet({ project: initial, onClose }: { project?: string | n
           )}
           {project && !list && !problem && (
             <Txt variant="body" tone="ink2">
-              Asking your Mac…
+              {up ? "Asking your Mac…" : "Connecting to your Mac…"}
             </Txt>
           )}
           {list && (

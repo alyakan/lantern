@@ -610,7 +610,7 @@ export default function App() {
       .onTodosRemind((due: TodoReminder[]) => {
         const byProject = new Map<string, TodoReminder[]>();
         for (const r of due) byProject.set(r.key, [...(byProject.get(r.key) ?? []), r]);
-        for (const [key, list] of byProject) notify(basename(key), list.length === 1 ? `Due: ${list[0].todo.title}` : `${list.length} to-dos are due`, "waiting");
+        for (const [key, list] of byProject) notify(basename(key), list.length === 1 ? `Due: ${list[0].todo.title}` : `${list.length} to-dos are due`, "reminder");
       })
       .catch(() => null);
     return () => {

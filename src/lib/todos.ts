@@ -76,8 +76,12 @@ export function dueMs(due: Due): number {
   return new Date(y, m - 1, d, h, min).getTime();
 }
 
+/** Past its due moment and not done; a day without a time is overdue once that day is over (as todos.rs counts it). */
 export function isOverdue(t: Todo, now: number): boolean {
-  return !t.done && !!t.due && dueMs(t.due) <= now;
+  if (t.done || !t.due) return false;
+  if (t.due.time) return dueMs(t.due) <= now;
+  const [y, m, d] = t.due.date.split("-").map(Number);
+  return new Date(y, m - 1, d + 1).getTime() <= now;
 }
 
 /** Tomorrow at DAY_HOUR, local time: a reminder's "Tomorrow". */
@@ -103,12 +107,6 @@ export function dueLabel(due: Due, now: number): string {
             ? day.toLocaleDateString(undefined, { weekday: "short" })
             : day.toLocaleDateString(undefined, y === today.getFullYear() ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
   return due.time ? `${name} ${due.time}` : name;
-}
-
-/** The order the tab shows: overdue open items first, then the other open ones as the user ordered them, then the done ones. */
-export function shownOrder(items: Todo[], now: number): Todo[] {
-  const open = items.filter((t) => !t.done);
-  return [...open.filter((t) => isOverdue(t, now)), ...open.filter((t) => !isOverdue(t, now)), ...items.filter((t) => t.done)];
 }
 
 /** Said before an item Claude wrote (as todos.rs says it to Claude in todo_list): its words may have come from anywhere. */

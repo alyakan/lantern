@@ -359,7 +359,18 @@ impl Notifier {
                     .iter()
                     .map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: title.clone(), body: body.clone(), data: PushData { slot: String::new(), kind: Kind::Todo, project: Some(token.clone()), todo: one.map(str::to_string) }, sound: "default" })
                     .collect();
-                note(&format!("to-do to Expo: {}", if self.sender.send(messages).await.is_ok() { "sent" } else { "not sent" }));
+                match self.sender.send(messages).await {
+                    Ok(tickets) => {
+                        note("to-do to Expo: sent");
+                        // A phone that no longer has the app is forgotten for push (it stays paired), as for a chat's push.
+                        for (device, ticket) in expo.iter().zip(tickets) {
+                            if ticket.error.as_deref() == Some("DeviceNotRegistered") {
+                                let _ = self.store.clear_push_token(&device.id);
+                            }
+                        }
+                    }
+                    Err(_) => note("to-do to Expo: not sent"),
+                }
             }
             let alert = todo_alert(&token, &title, &body, one);
             for device in apple {

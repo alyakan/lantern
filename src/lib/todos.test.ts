@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueLabel, dueMs, isOverdue, parseTodoCommand, shownOrder, todoPrompt, tomorrowMorning, validDue, type Todo } from "./todos";
+import { dueLabel, dueMs, isOverdue, parseTodoCommand, todoPrompt, tomorrowMorning, validDue, type Todo } from "./todos";
 
 const todo = (id: string, extra: Partial<Todo> = {}): Todo => ({ id, title: id, done: false, created_at: 0, created_by: "user", ...extra });
 const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
@@ -19,11 +19,12 @@ describe("to-dos", () => {
     expect(dueLabel({ date: "2027-01-05" }, now)).toMatch(/2027/);
   });
 
-  it("puts overdue open items first, then the rest as ordered, then the done ones", () => {
-    const now = at(2026, 10, 29);
-    const items = [todo("a"), todo("late", { due: { date: "2026-10-01" } }), todo("old", { done: true, due: { date: "2026-01-01" } }), todo("b", { due: { date: "2026-12-01" } })];
-    expect(shownOrder(items, now).map((t) => t.id)).toEqual(["late", "a", "b", "old"]);
-    expect(isOverdue(items[2], now)).toBe(false);
+  it("counts a day without a time overdue only once the day is over", () => {
+    const now = at(2026, 10, 29, 15);
+    expect(isOverdue(todo("t", { due: { date: "2026-10-29" } }), now)).toBe(false);
+    expect(isOverdue(todo("t", { due: { date: "2026-10-29", time: "14:00" } }), now)).toBe(true);
+    expect(isOverdue(todo("t", { due: { date: "2026-10-28" } }), now)).toBe(true);
+    expect(isOverdue(todo("t", { due: { date: "2026-10-01" }, done: true }), now)).toBe(false);
   });
 
   it("takes /todo with an optional leading due date, and leaves other messages alone", () => {

@@ -83,9 +83,27 @@ impl Todo {
         self.snoozed_until.or_else(|| self.due.as_ref().and_then(due_ms))
     }
 
-    /// Past its due moment and not done.
+    /// Past its due moment and not done. An item due on a day without a time is overdue once that day is over (its reminder
+    /// still goes off at DAY_HOUR).
     pub fn overdue(&self, now: u64) -> bool {
-        !self.done && self.due.as_ref().and_then(due_ms).is_some_and(|t| t <= now)
+        !self.done && self.due.as_ref().and_then(overdue_ms).is_some_and(|t| t <= now)
+    }
+
+    /// A reminder whose moment has already passed when the date is set (a date of today, after 09:00; a day in the past) is
+    /// counted as gone off: setting a date is not a reason to be reminded at once.
+    fn settle_reminder(&mut self, now: u64) {
+        self.reminded_for = self.remind_at().filter(|at| *at <= now);
+    }
+}
+
+/// When an item becomes overdue: its time, or the end of its day for a day alone.
+fn overdue_ms(due: &Due) -> Option<u64> {
+    match due.time {
+        Some(_) => due_ms(due),
+        None => {
+            let (y, m, d) = date_parts(&due.date)?;
+            local_ms(y, m, d + 1, 0, 0)
+        }
     }
 }
 
@@ -240,21 +258,6 @@ fn local_ms(y: i32, m: u32, d: u32, h: u32, min: u32) -> Option<u64> {
     (secs >= 0).then(|| secs as u64 * 1000)
 }
 
-/// Tomorrow at DAY_HOUR, local time, from `now` (ms): the reminder's "Tomorrow".
-pub fn tomorrow_morning(now: u64) -> u64 {
-    let secs = (now / 1000) as libc::time_t;
-    // SAFETY: localtime_r writes into the tm we own.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&secs, &mut tm) };
-    tm.tm_mday += 1;
-    tm.tm_hour = DAY_HOUR;
-    tm.tm_min = 0;
-    tm.tm_sec = 0;
-    tm.tm_isdst = -1;
-    let t = unsafe { libc::mktime(&mut tm) };
-    if t < 0 { now + 24 * 3600 * 1000 } else { t as u64 * 1000 }
-}
-
 /// A project's name in a push: short, and saying nothing about where it is (a push goes through Apple or Expo). The Mac maps it
 /// back to the project when a phone asks over its own encrypted connection.
 pub fn push_token(key: &str) -> String {
@@ -331,11 +334,11 @@ impl Store {
     fn change<T>(&self, key: &str, f: impl FnOnce(&mut Vec<Todo>) -> Result<T, String>) -> Result<T, String> {
         let out = {
             let mut lists = self.lists.lock().unwrap();
-            let items = lists.entry(key.to_string()).or_default();
-            let out = f(items)?;
-            if items.is_empty() {
-                lists.remove(key);
-            }
+            // Worked on a copy: a change that fails leaves nothing behind (not even an empty list for a project that had none).
+            // A list emptied by the user stays, so the project still counts as one with a list.
+            let mut items = lists.get(key).cloned().unwrap_or_default();
+            let out = f(&mut items)?;
+            lists.insert(key.to_string(), items);
             self.save(&lists);
             out
         };
@@ -373,7 +376,8 @@ impl Store {
                 return Err(format!("This project's list is full ({ITEMS_MAX} items): delete some done ones first."));
             }
             let (chat, chat_title) = chat.map_or((None, None), |(c, t)| (Some(c), t));
-            let todo = Todo { id: new_id(), title, note, done: false, created_at: now_ms(), created_by: by, done_at: None, done_by: None, due, chat, chat_title, snoozed_until: None, reminded_for: None };
+            let mut todo = Todo { id: new_id(), title, note, done: false, created_at: now_ms(), created_by: by, done_at: None, done_by: None, due, chat, chat_title, snoozed_until: None, reminded_for: None };
+            todo.settle_reminder(todo.created_at);
             let at = items.iter().position(|t| t.done).unwrap_or(items.len());
             items.insert(at, todo.clone());
             Ok(todo)
@@ -398,7 +402,7 @@ impl Store {
                 // A new date is a new reminder.
                 todo.due = d;
                 todo.snoozed_until = None;
-                todo.reminded_for = None;
+                todo.settle_reminder(now_ms());
             }
             Ok(todo.clone())
         })
@@ -452,7 +456,8 @@ impl Store {
     pub fn reorder(&self, key: &str, ids: &[String]) -> Result<(), String> {
         self.change(key, |items| {
             let mut ordered: Vec<Todo> = ids.iter().filter_map(|id| items.iter().find(|t| &t.id == id).cloned()).collect();
-            ordered.dedup_by(|a, b| a.id == b.id);
+            let mut seen = std::collections::HashSet::new();
+            ordered.retain(|t| seen.insert(t.id.clone()));
             ordered.extend(items.iter().filter(|t| !ids.contains(&t.id)).cloned());
             ordered.sort_by_key(|t| t.done);
             *items = ordered;
@@ -696,15 +701,13 @@ mod tests {
         let ten = due_ms(&due("2026-10-30", Some("10:00"))).unwrap();
         assert_eq!(morning, nine);
         assert_eq!(ten - nine, 3600 * 1000);
-        let next = tomorrow_morning(due_ms(&due("2026-10-30", Some("23:30"))).unwrap());
-        assert_eq!(next, due_ms(&due("2026-10-31", None)).unwrap());
     }
 
     #[test]
     fn each_reminder_goes_off_once_and_again_after_a_snooze_or_a_new_date() {
         let (_d, s) = store();
-        let t = s.add("/p", "call", None, Some(due("2026-10-30", Some("10:00"))), Who::User, None).unwrap();
-        let at = due_ms(&due("2026-10-30", Some("10:00"))).unwrap();
+        let t = s.add("/p", "call", None, Some(due("2199-10-30", Some("10:00"))), Who::User, None).unwrap();
+        let at = due_ms(&due("2199-10-30", Some("10:00"))).unwrap();
         assert!(s.due_reminders(at - 1).is_empty());
         let fired = s.due_reminders(at);
         assert_eq!(fired.len(), 1);
@@ -716,10 +719,51 @@ mod tests {
         assert_eq!(s.due_reminders(at + 3_600_000).len(), 1);
         assert!(s.due_reminders(at + 3_700_000).is_empty());
         // A new date is a new reminder; a done item has none.
-        s.update("/p", &t.id, Patch { due: Some(Some(due("2026-10-31", None))), ..Default::default() }).unwrap();
-        let next = due_ms(&due("2026-10-31", None)).unwrap();
+        s.update("/p", &t.id, Patch { due: Some(Some(due("2199-10-31", None))), ..Default::default() }).unwrap();
+        let next = due_ms(&due("2199-10-31", None)).unwrap();
         s.set_done("/p", &t.id, true, Who::User, None).unwrap();
         assert!(s.due_reminders(next).is_empty());
+    }
+
+    #[test]
+    fn a_date_already_past_reminds_nothing_and_a_day_alone_is_overdue_only_once_it_is_over() {
+        let (_d, s) = store();
+        let now = now_ms();
+        // Due today without a time (its 09:00 may well have passed): not overdue today, and no reminder at once.
+        let today = {
+            let secs = (now / 1000) as libc::time_t;
+            let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+            unsafe { libc::localtime_r(&secs, &mut tm) };
+            format!("{:04}-{:02}-{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
+        };
+        let t = s.add("/p", "today", None, Some(due(&today, None)), Who::User, None).unwrap();
+        assert!(!t.overdue(now));
+        if due_ms(&due(&today, None)).unwrap() <= now {
+            assert!(s.due_reminders(now).is_empty(), "a reminder went off for a date set after its moment");
+        }
+        // A day in the past is overdue, and setting it reminds nothing either.
+        let late = s.add("/p", "late", None, Some(due("2020-01-01", None)), Who::User, None).unwrap();
+        assert!(late.overdue(now));
+        assert!(s.due_reminders(now).iter().all(|r| r.todo.id != late.id));
+    }
+
+    #[test]
+    fn a_failed_change_leaves_no_list_behind_and_an_emptied_one_stays() {
+        let (_d, s) = store();
+        assert!(s.delete("/nothing", "x").is_err());
+        assert!(s.keys().is_empty(), "a failed change made a list");
+        let t = s.add("/p", "a", None, None, Who::User, None).unwrap();
+        s.delete("/p", &t.id).unwrap();
+        assert_eq!(s.keys(), ["/p"], "an emptied list should still count as the project's");
+    }
+
+    #[test]
+    fn a_reorder_naming_an_item_twice_keeps_one_copy() {
+        let (_d, s) = store();
+        let a = s.add("/p", "a", None, None, Who::User, None).unwrap().id;
+        let b = s.add("/p", "b", None, None, Who::User, None).unwrap().id;
+        s.reorder("/p", &[a.clone(), b.clone(), a.clone()]).unwrap();
+        assert_eq!(s.list("/p").iter().map(|t| t.id.clone()).collect::<Vec<_>>(), [a, b]);
     }
 
     #[test]

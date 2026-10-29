@@ -61,6 +61,18 @@ describe("the to-do sheet", () => {
     expect(screen.getByText("old")).toBeTruthy();
   });
 
+  it("waits for the connection before asking, as after a reminder's tap that started the app", async () => {
+    const { controller } = makeController();
+    const { asked } = attachSession(controller, { projects: [{ id: "/p", name: "p" }], todos: list(item("a")) }, ["todos"]);
+    await renderWith(<TodosSheet project="0123456789abcdef" onClose={jest.fn()} />, { connection: { kind: "connecting" } as never }, controller);
+    await settle();
+    expect(asked.filter((r) => r.op === "todos")).toEqual([]);
+    expect(screen.getByText("Connecting to your Mac…")).toBeTruthy();
+    await act(async () => controller.setConnection(connectedWith(["todos"])));
+    await settle();
+    expect(asked.filter((r) => r.op === "todos")[0]).toEqual({ op: "todos", project: "0123456789abcdef" });
+  });
+
   it("says what the Mac refused", async () => {
     const { controller } = makeController();
     attachSession(controller, { projects: [{ id: "/p", name: "p" }], todos: new Error("That isn't one of your projects on this Mac.") }, ["todos"]);
