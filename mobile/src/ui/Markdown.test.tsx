@@ -239,9 +239,9 @@ describe("what a chat search looks for, marked in the words", () => {
   it("opens a path in code even when the turn did not edit that file", async () => {
     const onFile = jest.fn();
     // A script's edit, or a step shown again later, is not in the turn's list: the Mac is asked, and says if it has no such file.
-    await render(<Markdown text="`Lumiform/Testo/TestoMeasuringDevice.swift:82`: `removeDevice` is gone." files={[]} onFile={onFile} />);
+    await render(<Markdown text="`App/Sensors/Pairing.swift:82`: `removeDevice` is gone." files={[]} onFile={onFile} />);
     await fireEvent.press(screen.getByRole("link"));
-    expect(onFile).toHaveBeenCalledWith("Lumiform/Testo/TestoMeasuringDevice.swift");
+    expect(onFile).toHaveBeenCalledWith("App/Sensors/Pairing.swift");
     expect(screen.queryAllByRole("link")).toHaveLength(1);
   });
 
