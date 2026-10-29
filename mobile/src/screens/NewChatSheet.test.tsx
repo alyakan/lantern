@@ -65,6 +65,20 @@ describe("starting a chat from the phone", () => {
     expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", text: "Update the footer" });
   });
 
+  it("starts in the project a chat belongs to when only its folder's name is known (the Done page's Start something new)", async () => {
+    const { lastOf, onStarted } = await open(undefined, { initialProjectName: "website" });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "website" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await write("Add a footer");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", text: "Add a footer" });
+  });
+
+  it("falls back to the first project when that name isn't one the Mac lists", async () => {
+    await open(undefined, { initialProjectName: "gone" });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" }).props.accessibilityState).toMatchObject({ selected: true }));
+  });
+
   it("can't start without something written, or while it is starting", async () => {
     const { asked } = await open();
     await waitFor(() => screen.getByRole("radio", { name: "lantern" }));

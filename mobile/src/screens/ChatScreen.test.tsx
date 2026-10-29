@@ -928,10 +928,49 @@ describe("Step by step's pages", () => {
     expect(screen.getAllByRole("button", { name: "Commit, next" })).toHaveLength(1);
   });
 
-  it("has no buttons on a Done page", async () => {
-    await withSession([{ kind: "assistant_text", block_id: "d", text: "# Done — built it" }]);
-    expect(screen.getByText("Done")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  describe("the Done page", () => {
+    const done: RemoteEvent[] = [{ kind: "assistant_text", block_id: "d", text: "# Done — built it" }];
+
+    it("has no Next, but what to do next that the phone does itself: Start something new opens a new chat on the project, and sends nothing", async () => {
+      const onStartNew = jest.fn();
+      const { lastOf } = await withSession(done, { onStartNew });
+      expect(screen.getByText("Done")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Start something new" }));
+      expect(onStartNew).toHaveBeenCalledWith("lantern");
+      expect(lastOf("send")).toBeUndefined();
+      // Not answered: it can be pressed again.
+      expect(screen.getByRole("button", { name: "Start something new" })).toBeTruthy();
+    });
+
+    it("opens everything the chat changed from Review the changes", async () => {
+      const more: RemoteEvent[] = [...turn, { kind: "assistant_text", block_id: "d", text: "# Done — built it" }];
+      const { lastOf } = await withSession(more);
+      await fireEvent.press(screen.getAllByRole("button", { name: "Review the changes" })[0]);
+      expect(screen.getByText("1 file · +1 −1")).toBeTruthy();
+      expect(lastOf("send")).toBeUndefined();
+    });
+
+    it("shows the Changes pane instead of a sheet where there is one", async () => {
+      const onToggle = jest.fn();
+      await withSession(done, { changesPane: { shown: false, onToggle } });
+      await fireEvent.press(screen.getByRole("button", { name: "Review the changes" }));
+      expect(onToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("is there in a Step by step chat on its own page, and stays when the post-hook has run after it", async () => {
+      const onStartNew = jest.fn();
+      await withSession([...done, { kind: "hook_turn", text: "Update the brain" }, { kind: "assistant_text", block_id: "h", text: "The brain is updated." }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null }], { onStartNew }, {}, { workflow: "steps" });
+      expect(screen.getByTestId("step-pager")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Done, page 1 of 1" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Start something new" }));
+      expect(onStartNew).toHaveBeenCalledWith("lantern");
+    });
+
+    it("waits while Claude is at work", async () => {
+      await withSession(done, {}, {}, { workflow: "steps", status: "working" });
+      expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
+    });
   });
 
   describe("in a Step by step chat, a page at a time", () => {
@@ -1041,6 +1080,13 @@ describe("Step by step's pages", () => {
       expect(screen.getByText("Changed in this step")).toBeTruthy();
       await fireEvent.press(screen.getByRole("link", { name: "TimeoutScheduler.swift" }));
       await waitFor(() => expect(screen.getByLabelText("Added: moved")).toBeTruthy());
+    });
+
+    it("moves a page up with the keyboard as the chat's list does, so the messages after the summary stay above the bar", async () => {
+      await steps();
+      const page = screen.getByTestId("step-page-2");
+      expect(page.props.keyboardLiftBehavior).toBe("always");
+      expect(page.props.offset).toBe(barRoom(0) - KEYBOARD_GAP);
     });
 
     it("is a plain chat in any other workflow", async () => {

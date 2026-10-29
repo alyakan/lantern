@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { FlatList, ScrollView, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
+import { FlatList, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
+import { KeyboardChatScrollView } from "react-native-keyboard-controller";
 import { Txt } from "../ui/components";
 import { Glass } from "../ui/Glass";
 import { PressScale } from "../ui/motion";
@@ -7,8 +8,11 @@ import { control, useColors } from "../ui/theme";
 import type { StepPage } from "../view/stepPages";
 import type { Row } from "../view/timeline";
 
-/** One page, read top to bottom. The newest one goes down to what was just said, as a chat does. */
-function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, footer }: { page: StepPage; n: number; width: number; newest: boolean; renderRow: (r: { item: Row }) => ReactElement; padTop: number; padBottom: number; footer: ReactNode }) {
+/**
+ * One page, read top to bottom. The newest one goes down to what was just said, as a chat does. It rises with the keyboard as the
+ * chat's list does (`lift`: the keyboard's height less the room the bar already has under it), so what was just said stays above the bar.
+ */
+function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, footer, lift }: { page: StepPage; n: number; width: number; newest: boolean; renderRow: (r: { item: Row }) => ReactElement; padTop: number; padBottom: number; footer: ReactNode; lift: number }) {
   const scroll = useRef<ScrollViewInstance>(null);
   const count = useRef(page.rows.length);
   useEffect(() => {
@@ -16,17 +20,17 @@ function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, foot
     count.current = page.rows.length;
   }, [newest, page.rows.length]);
   return (
-    <ScrollView ref={scroll} testID={`step-page-${n}`} style={{ width }} contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
+    <KeyboardChatScrollView ref={scroll} testID={`step-page-${n}`} style={{ width }} contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" offset={lift} keyboardLiftBehavior="always">
       {page.rows.map((r) => (
         <View key={r.key}>{renderRow({ item: r })}</View>
       ))}
       {newest && footer}
-    </ScrollView>
+    </KeyboardChatScrollView>
   );
 }
 
 /** Step by step's pages side by side, one on screen: a swipe goes to the one before or after, as the Mac's Previous and Next do. */
-export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, footer }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** Under the newest page: what Claude is doing. */ footer?: ReactNode }) {
+export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, footer, lift = 0 }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** Under the newest page: what Claude is doing. */ footer?: ReactNode; /** What the keyboard's height is cut by before the pages rise with it (the room the bar has under it already). */ lift?: number }) {
   const screen = useWindowDimensions().width;
   const [width, setWidth] = useState(screen);
   const list = useRef<FlatList<StepPage>>(null);
@@ -63,7 +67,7 @@ export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBot
           shown.current = i;
           if (i !== index) onIndex(i);
         }}
-        renderItem={({ item, index: i }) => <PageScroll page={item} n={i} width={width} newest={i === pages.length - 1} renderRow={renderRow} padTop={padTop} padBottom={padBottom} footer={footer} />}
+        renderItem={({ item, index: i }) => <PageScroll page={item} n={i} width={width} newest={i === pages.length - 1} renderRow={renderRow} padTop={padTop} padBottom={padBottom} footer={footer} lift={lift} />}
       />
     </View>
   );

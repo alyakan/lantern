@@ -8,6 +8,9 @@
 //! (the emitter). The post-hook's turn is not shown as a turn of its own: the user's turn goes on until the hook is done, and
 //! ends once, with both turns' costs, so the busy state, the message queue, a phone's push and its lock-screen card each see
 //! one end for each message.
+//!
+//! In Step by step the hook's reply would be read as a page, so there it follows only the turn that ends on the Done page (the
+//! end of the flow), not each step.
 
 use crate::ui_event::UiEvent;
 use serde::Deserialize;
@@ -97,6 +100,14 @@ pub fn post_message(post: &str) -> String {
     format!("{POST_PREFIX}{post}")
 }
 
+/// What a post-hook in Step by step ends with: its prompt says every message Claude stops on is a page, and this one is not.
+const STEPS_POST_NOTE: &str = "\n\n[Lantern: this is not a page. Answer in plain words, with no heading.]";
+
+/// `post_message`, in Step by step.
+fn post_message_in_steps(post: &str) -> String {
+    format!("{}{STEPS_POST_NOTE}", post_message(post))
+}
+
 /// What Claude Code's own message starts with when a Stop hook of the user's (a `settings.json` hook, not Lantern's) keeps
 /// Claude going after it has answered. With an exit-2 hook the reason comes after `[the hook's command]: `.
 pub const STOP_PREFIX: &str = "Stop hook feedback:\n";
@@ -104,7 +115,7 @@ pub const STOP_PREFIX: &str = "Stop hook feedback:\n";
 /// The post-hook inside a message, if it is one (for the window's card when a chat is replayed). A Stop hook's feedback
 /// counts as one: what Claude does for it comes after the answer, and isn't the answer.
 pub fn post_text(message: &str) -> Option<&str> {
-    message.strip_prefix(POST_PREFIX).or_else(|| message.strip_prefix(STOP_PREFIX).map(|reason| without_command(reason).trim_end()))
+    message.strip_prefix(POST_PREFIX).map(|hook| hook.strip_suffix(STEPS_POST_NOTE).unwrap_or(hook)).or_else(|| message.strip_prefix(STOP_PREFIX).map(|reason| without_command(reason).trim_end()))
 }
 
 /// `reason` without the `[command]: ` an exit-2 Stop hook's feedback starts with.
@@ -139,6 +150,19 @@ struct Inner {
     /// The next message that can carry it is the first of a chat, or of the conversation after a compaction.
     pre_armed: bool,
     post: Post,
+    /// Step by step: the post-hook follows the turn only if it ended on the Done page.
+    done_only: bool,
+    /// The last thing Claude said in the turn being worked on is a Done page.
+    ended_on_done: bool,
+}
+
+/// Whether `text` is Step by step's Done page: its first line is `# Done — <title>` (the shape the phone reads as well).
+fn is_done_page(text: &str) -> bool {
+    let first = text.trim_start().lines().next().unwrap_or("").trim();
+    let Some(rest) = first.strip_prefix('#').filter(|r| r.starts_with(char::is_whitespace)) else { return false };
+    let Some(rest) = rest.trim_start().strip_prefix("Done").filter(|r| r.starts_with(char::is_whitespace)) else { return false };
+    let Some(title) = rest.trim_start().strip_prefix(['—', '–', '-']).filter(|t| t.starts_with(char::is_whitespace)) else { return false };
+    !title.trim().is_empty()
 }
 
 /// What the emitter does with a chat's end of turn.
@@ -181,7 +205,24 @@ impl SlotHooks {
         // One that is already running is not interrupted by a message sent meanwhile (a phone's): it ends the turn it holds.
         if !matches!(inner.post, Post::Running(_)) {
             inner.post = post.map_or(Post::Idle, Post::Armed);
+            inner.done_only = false;
+            inner.ended_on_done = false;
         }
+    }
+
+    /// `follow_with`, for Step by step: a page's reply would be read as a page, so the hook is sent only if this turn ends on the
+    /// Done page (the end of the flow), and not after a step.
+    pub fn follow_after_done(&self, post: Option<String>) {
+        self.follow_with(post);
+        let mut inner = self.0.lock().unwrap();
+        if matches!(inner.post, Post::Armed(_)) {
+            inner.done_only = true;
+        }
+    }
+
+    /// Claude said something on the main thread: the turn's last such message decides whether it ended on the Done page.
+    pub fn said(&self, text: &str) {
+        self.0.lock().unwrap().ended_on_done = is_done_page(text);
     }
 
     /// The post-hook was not sent after all (the message that would carry it didn't go).
@@ -195,10 +236,12 @@ impl SlotHooks {
     /// A turn ended: what to do with it.
     pub fn turn_ended(&self, ended: UiEvent) -> TurnEnd {
         let mut inner = self.0.lock().unwrap();
+        let skipped = inner.done_only && !inner.ended_on_done;
         match (std::mem::take(&mut inner.post), &ended) {
-            (Post::Armed(post), UiEvent::TurnDone { is_error: false, .. }) => {
+            (Post::Armed(post), UiEvent::TurnDone { is_error: false, .. }) if !skipped => {
+                let message = if inner.done_only { post_message_in_steps(&post) } else { post_message(&post) };
                 inner.post = Post::Running(Box::new(ended));
-                TurnEnd::SendPost(post_message(&post))
+                TurnEnd::SendPost(message)
             }
             (Post::Running(held), UiEvent::TurnDone { .. }) => TurnEnd::Publish(Box::new(merged(*held, ended))),
             // A turn that failed or was stopped isn't followed by anything; neither is a turn nobody asked for.
@@ -422,6 +465,61 @@ mod tests {
         assert_eq!(h.post_failed(), None);
         let next = done(false, None, 0.2);
         assert_eq!(h.turn_ended(next.clone()), TurnEnd::Publish(Box::new(next)));
+    }
+
+    #[test]
+    fn the_done_page_is_known_by_its_heading() {
+        assert!(is_done_page("# Done — Release 0.1.82\n\nWhat changed."));
+        assert!(is_done_page("\n  # Done - shipped\nbody"));
+        assert!(is_done_page("# Done – shipped"));
+        assert!(!is_done_page("# Step 3 of 4 — Done with tests"));
+        assert!(!is_done_page("Done — shipped"));
+        assert!(!is_done_page("# Done\n\nno title"));
+        assert!(!is_done_page("# Doneness — not it"));
+        assert!(!is_done_page("The # Done — page is next"));
+    }
+
+    #[test]
+    fn in_step_by_step_the_post_hook_follows_the_done_page_and_no_step() {
+        let h = SlotHooks::default();
+        // A step: no hook, and it isn't kept for the turn after.
+        h.follow_after_done(Some("update the brain".into()));
+        h.said("# Step 2 of 4 — Bump the version\n\nDone in the file.");
+        let ev = done(false, None, 0.1);
+        assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
+        // The Done page: the hook goes, and the two end as one.
+        h.follow_after_done(Some("update the brain".into()));
+        h.said("# Step 4 of 4 — Tag it");
+        h.said("# Done — Release 0.1.82\n\nShipped.");
+        let TurnEnd::SendPost(sent) = h.turn_ended(done(false, Some(0.10), 0.10)) else { panic!("the hook goes") };
+        // It says it is not a page (Claude is told every message it stops on is one), and the card still shows only the user's words.
+        assert_eq!(sent, post_message_in_steps("update the brain"));
+        assert!(sent.ends_with("no heading.]"));
+        assert_eq!(post_text(&sent), Some("update the brain"));
+        assert!(matches!(h.turn_ended(done(false, Some(0.02), 0.12)), TurnEnd::Publish(_)));
+        // A question about the Done page, answered in plain words: no hook for that turn.
+        h.follow_after_done(Some("update the brain".into()));
+        h.said("# Done — Release 0.1.82");
+        h.said("It touched four files.");
+        let ev = done(false, None, 0.2);
+        assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
+    }
+
+    #[test]
+    fn a_done_page_from_an_earlier_turn_does_not_carry_over() {
+        let h = SlotHooks::default();
+        h.follow_after_done(Some("save".into()));
+        h.said("# Done — it");
+        h.turn_ended(done(false, None, 0.1));
+        h.turn_ended(done(false, None, 0.1));
+        // The next message's turn says nothing of the sort.
+        h.follow_after_done(Some("save".into()));
+        let ev = done(false, None, 0.2);
+        assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
+        // And outside Step by step the hook follows whatever was said.
+        h.follow_with(Some("save".into()));
+        h.said("plain");
+        assert_eq!(h.turn_ended(done(false, None, 0.3)), TurnEnd::SendPost(post_message("save")));
     }
 
     #[test]

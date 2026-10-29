@@ -255,6 +255,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
 
+  // A chat's Done page: the new-chat sheet, on that chat's project.
+  const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
   const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} />;
   const items: StackItem[] = tablet
     ? []
@@ -263,7 +265,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           case "home":
             return { key: `${i}:home`, kind: "push", element: homeScreen() };
           case "chat":
-            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
+            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} onStartNew={startNew} /> };
           case "decide":
             return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
         }
@@ -275,7 +277,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
+          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
@@ -318,6 +320,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
         <NewChatSheet
           initialText={newChat.text}
           initialProject={newChat.project}
+          initialProjectName={newChat.projectName}
           continueChat={newChat.continueChat}
           onClose={() => setNewChat(null)}
           onStarted={(slot) => {
