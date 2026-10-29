@@ -79,7 +79,7 @@ pub struct Artifact {
 pub struct Listing {
     /// The key the folder's frames are served under.
     pub key: String,
-    /// Whether HTML may run its scripts: only once WebRTC is off in the window (see `switch_off_webrtc`).
+    /// Whether HTML may run its scripts: only once WebRTC and preconnect are off in the window (see `lock_down_webkit`).
     pub scripts: bool,
     /// Newest first.
     pub items: Vec<Artifact>,
@@ -90,14 +90,14 @@ pub struct Listing {
 pub struct Artifacts {
     keys: Mutex<HashMap<String, PathBuf>>,
     theme: Mutex<Vec<(String, String)>>,
-    webrtc_off: AtomicBool,
+    locked_down: AtomicBool,
 }
 
 impl Artifacts {
-    /// Whether artifacts' scripts may run: the policy blocks every request a page makes, but not WebRTC, which can reach any
-    /// server; so scripts wait until WebRTC is off in the window.
+    /// Whether artifacts' scripts may run: the policy blocks every request a page makes, but not WebRTC or preconnect,
+    /// which can reach any server; so scripts wait until those are off in the window (see `lock_down_webkit`).
     pub fn scripts_allowed(&self) -> bool {
-        self.webrtc_off.load(Ordering::SeqCst)
+        self.locked_down.load(Ordering::SeqCst)
     }
 
     /// The folder's key, made the first time it's asked for. Keys last until Lantern quits.
@@ -168,33 +168,20 @@ enum Served {
     File(PathBuf, &'static str),
 }
 
-/// Switches WebRTC off in the window's WebKit (a private preference, checked before it's set): a frame made after this has
-/// no `RTCPeerConnection`, so an artifact's script can't send what it holds to a STUN or TURN server. Scripts are allowed
-/// only once it is done; elsewhere, or when WebKit doesn't have the preference, artifacts' HTML is shown without them.
-pub fn switch_off_webrtc(window: &tauri::WebviewWindow, artifacts: std::sync::Arc<Artifacts>) {
+/// Switches off what in the window's WebKit reaches the network around a page's Content-Security-Policy: WebRTC (a
+/// script can reach any STUN or TURN server), `<link rel="preconnect">` (opens a connection, and looks up the host's name,
+/// to any server) and DNS prefetching. Private preferences, each sent only if WebKit answers to it; they hold for every
+/// frame made afterwards. Scripts are allowed only once WebRTC and preconnect are confirmed off; elsewhere, or when WebKit
+/// lacks one of them, artifacts' HTML is shown without its scripts.
+pub fn lock_down_webkit(window: &tauri::WebviewWindow, artifacts: std::sync::Arc<Artifacts>) {
     #[cfg(target_os = "macos")]
     {
         let _ = window.with_webview(move |webview| {
-            use objc2::runtime::AnyObject;
-            use objc2::{msg_send, sel};
-            // SAFETY: on macOS `inner` is the window's WKWebView, and this runs on the main thread. Each message is one
-            // WKWebView and WKPreferences answer; the private setter is sent only if the preferences respond to it.
-            let off = unsafe {
-                let view = webview.inner() as *mut AnyObject;
-                let config: *mut AnyObject = msg_send![view, configuration];
-                let prefs: *mut AnyObject = msg_send![config, preferences];
-                let responds: bool = msg_send![prefs, respondsToSelector: sel!(_setPeerConnectionEnabled:)];
-                if responds {
-                    let _: () = msg_send![prefs, _setPeerConnectionEnabled: false];
-                    let enabled: bool = msg_send![prefs, _peerConnectionEnabled];
-                    !enabled
-                } else {
-                    false
-                }
-            };
-            artifacts.webrtc_off.store(off, Ordering::SeqCst);
+            // SAFETY: on macOS `inner` is the window's WKWebView, and this runs on the main thread.
+            let off = unsafe { macos::lock_down(webview.inner()) };
+            artifacts.locked_down.store(off, Ordering::SeqCst);
             if !off {
-                eprintln!("[artifacts] couldn't switch WebRTC off: artifacts' HTML is shown without its scripts");
+                eprintln!("[artifacts] couldn't switch WebRTC and preconnect off: artifacts' HTML is shown without its scripts");
             }
         });
     }
@@ -202,9 +189,89 @@ pub fn switch_off_webrtc(window: &tauri::WebviewWindow, artifacts: std::sync::Ar
     let _ = (window, artifacts);
 }
 
+#[cfg(target_os = "macos")]
+mod macos {
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
+    use objc2::{msg_send, sel};
+    use std::ffi::CStr;
+
+    /// WebKit features that would let a page reach a server its CSP doesn't cover. The first must be found.
+    const PRECONNECT: &str = "LinkPreconnect";
+    const ALSO_OFF: [&str; 2] = ["LinkPreconnectEarlyHintsEnabled", "LinkDNSPrefetchEnabled"];
+
+    unsafe fn responds(object: *mut AnyObject, selector: Sel) -> bool {
+        msg_send![object, respondsToSelector: selector]
+    }
+
+    /// Switches the features off on the WKWebView `view`; true when WebRTC and preconnect are confirmed off.
+    ///
+    /// # Safety
+    /// `view` must be a live WKWebView, and this must run on the main thread. Every private selector is checked with
+    /// `respondsToSelector:` before it is sent.
+    pub unsafe fn lock_down(view: *mut std::ffi::c_void) -> bool {
+        let view = view as *mut AnyObject;
+        let config: *mut AnyObject = msg_send![view, configuration];
+        let prefs: *mut AnyObject = msg_send![config, preferences];
+        if prefs.is_null() {
+            return false;
+        }
+        if responds(prefs, sel!(_setDNSPrefetchingEnabled:)) {
+            let _: () = msg_send![prefs, _setDNSPrefetchingEnabled: false];
+        }
+        let webrtc_off = responds(prefs, sel!(_setPeerConnectionEnabled:)) && {
+            let _: () = msg_send![prefs, _setPeerConnectionEnabled: false];
+            let enabled: bool = msg_send![prefs, _peerConnectionEnabled];
+            !enabled
+        };
+        let Some(class) = AnyClass::get(c"WKPreferences") else { return false };
+        let class_responds: bool = msg_send![class, respondsToSelector: sel!(_features)];
+        if !class_responds || !responds(prefs, sel!(_setEnabled:forFeature:)) || !responds(prefs, sel!(_isEnabledForFeature:)) {
+            return false;
+        }
+        let features: *mut AnyObject = msg_send![class, _features];
+        if features.is_null() {
+            return false;
+        }
+        let count: usize = msg_send![features, count];
+        let mut preconnect_off = false;
+        for i in 0..count {
+            let feature: *mut AnyObject = msg_send![features, objectAtIndex: i];
+            let key: *mut AnyObject = msg_send![feature, key];
+            if key.is_null() {
+                continue;
+            }
+            let text: *const std::ffi::c_char = msg_send![key, UTF8String];
+            if text.is_null() {
+                continue;
+            }
+            let key = CStr::from_ptr(text).to_string_lossy();
+            if key == PRECONNECT || ALSO_OFF.contains(&key.as_ref()) {
+                let _: () = msg_send![prefs, _setEnabled: false, forFeature: feature];
+                let enabled: bool = msg_send![prefs, _isEnabledForFeature: feature];
+                if key == PRECONNECT {
+                    preconnect_off = !enabled;
+                }
+            }
+        }
+        webrtc_off && preconnect_off
+    }
+}
+
+/// The folder's artifacts folder, resolved, if it really is inside the folder: a cloned repository could ship
+/// `.lantern/artifacts` (or `.lantern`) as a symlink to somewhere else.
+fn artifacts_root(folder: &Path) -> Result<PathBuf, ()> {
+    let folder = folder.canonicalize().map_err(|_| ())?;
+    let root = folder.join(DIR).canonicalize().map_err(|_| ())?;
+    if root.starts_with(&folder) {
+        Ok(root)
+    } else {
+        Err(())
+    }
+}
+
 /// `path`, resolved, if it really is inside the folder's artifacts folder (not through a symlink out of it).
 fn inside_artifacts(folder: &Path, path: &Path) -> Result<PathBuf, ()> {
-    let root = folder.join(DIR).canonicalize().map_err(|_| ())?;
+    let root = artifacts_root(folder)?;
     let full = path.canonicalize().map_err(|_| ())?;
     if full.starts_with(&root) {
         Ok(full)
@@ -261,7 +328,7 @@ fn valid_value(value: &str) -> bool {
 /// The folder's artifacts, newest first: every HTML, SVG, Markdown and Mermaid file under `.lantern/artifacts/`.
 pub fn list(folder: &Path) -> Vec<Artifact> {
     let root = folder.join(DIR);
-    let Ok(canonical_root) = root.canonicalize() else { return Vec::new() };
+    let Ok(canonical_root) = artifacts_root(folder) else { return Vec::new() };
     let mut items = Vec::new();
     let walker = ignore::WalkBuilder::new(&root).hidden(true).git_ignore(false).git_global(false).git_exclude(false).ignore(false).max_depth(Some(MAX_DEPTH)).build();
     for entry in walker.filter_map(Result::ok) {
@@ -387,6 +454,30 @@ mod tests {
         assert_eq!(a.serve(&format!("/{key}/up/secret.html")).status(), StatusCode::NOT_FOUND);
         assert!(list(dir.path()).is_empty());
         assert!(read(dir.path(), "up/secret.md").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_artifacts_folder_that_is_a_symlink_out_of_the_folder_is_ignored() {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.html"), "secret").unwrap();
+        fs::write(outside.path().join("notes.md"), "secret").unwrap();
+        // .lantern/artifacts itself points away.
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".lantern")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join(DIR)).unwrap();
+        // .lantern points away, with an artifacts folder there.
+        let other = tempfile::tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("artifacts")).unwrap();
+        fs::write(outside.path().join("artifacts/secret.html"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.path(), other.path().join(".lantern")).unwrap();
+        let a = Artifacts::default();
+        for folder in [dir.path(), other.path()] {
+            let key = a.key_for(folder).unwrap();
+            assert!(list(folder).is_empty());
+            assert_eq!(a.serve(&format!("/{key}/secret.html")).status(), StatusCode::NOT_FOUND);
+            assert!(read(folder, "notes.md").is_err());
+        }
     }
 
     #[test]

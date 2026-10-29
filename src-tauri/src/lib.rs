@@ -3200,7 +3200,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
             if let Some(window) = app.get_webview_window("main") {
-                artifacts::switch_off_webrtc(&window, app.state::<AppState>().artifacts.clone());
+                artifacts::lock_down_webkit(&window, app.state::<AppState>().artifacts.clone());
             }
             Ok(())
         })

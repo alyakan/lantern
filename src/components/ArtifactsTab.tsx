@@ -116,7 +116,7 @@ function Viewer({ folder, artifactKey, scripts, artifact, theme }: { folder: str
   if (artifact.kind === "html" || artifact.kind === "svg") {
     return (
       <div className="artifact-body">
-        {!scripts && artifact.kind === "html" && <div className="tests-note">This page's scripts are off: Lantern couldn't switch WebRTC off, which they could reach the internet through.</div>}
+        {!scripts && artifact.kind === "html" && <div className="tests-note">This page's scripts are off: Lantern couldn't switch off the parts of WebKit (WebRTC, preconnect) they could reach the internet through.</div>}
         {/* Scripts run, with an opaque origin: no app, no files, no network (the scheme's own policy), no popups, forms or navigating the app. */}
         <iframe className="artifact-frame" title={artifact.name} sandbox={scripts ? "allow-scripts" : ""} referrerPolicy="no-referrer" src={artifactUrl(artifactKey, artifact.name, artifact.modified * 1000 + theme)} />
       </div>

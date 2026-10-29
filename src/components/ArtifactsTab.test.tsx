@@ -40,7 +40,7 @@ describe("ArtifactsTab", () => {
     expect(api.artifactsTheme).toHaveBeenCalledWith(expect.objectContaining({ "--color-scheme": "light" }));
   });
 
-  it("shows HTML without its scripts, and says so, when WebRTC couldn't be switched off", async () => {
+  it("shows HTML without its scripts, and says so, when WebRTC and preconnect couldn't be switched off", async () => {
     vi.mocked(api.artifactsList).mockResolvedValue({ ...listing(item("page.html", "html")), scripts: false });
     render(<ArtifactsTab folder="/p" refreshKey={0} />);
     const frame = await screen.findByTitle("page.html");

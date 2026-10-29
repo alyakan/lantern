@@ -1,8 +1,9 @@
 //! Keeps the window on Lantern's own pages: nothing (whatever button, whatever element) can replace the app with a
 //! web page. The app opens links in the browser itself (ExternalLink, with the opener plugin), so a navigation to a
-//! web page is refused, not handed to the browser: it may come from an artifact's frame (WebKit asks about every
-//! frame's navigations, and doesn't say which frame), and a page that could open URLs could send what it holds out in
-//! one.
+//! web page is refused, not handed to the browser. Defense in depth for artifacts: WebKit asks this about every
+//! frame's navigations without saying which frame, and today the window's `frame-src` already stops an artifact's
+//! frame from loading a web page before this is asked; were that ever loosened, a frame that could get URLs opened
+//! could send what it holds out in one.
 
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime, Url};
@@ -67,7 +68,7 @@ mod tests {
 
     #[test]
     fn web_pages_are_refused_not_opened() {
-        // An artifact's frame could otherwise send its data out in a URL the browser opens.
+        // Not opened in the browser either: an artifact's frame mustn't be able to get a URL opened (see the module note).
         assert_eq!(decide(&url("https://github.com/alyakan/lantern"), None), Navigation::Block);
         assert_eq!(decide(&url("mailto:someone@example.com"), None), Navigation::Block);
         // Another local server is not the app, even while developing.
