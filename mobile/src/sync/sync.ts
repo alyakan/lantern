@@ -12,6 +12,8 @@ import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
+import type { RemoteUserTodos } from "../protocol/generated/RemoteUserTodos";
+import type { RemoteTodoEdit } from "../protocol/generated/RemoteTodoEdit";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -235,6 +237,18 @@ export class Sync {
     // is left out altogether, not sent empty, when none was chosen.
     const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}) });
     return started.slot;
+  }
+
+  /** The user's own to-do list for a project (one of projects()' ids, or the project a reminder named). Only for a Mac that lists "todos". */
+  todos(project: string) {
+    if (!this.has("todos")) return Promise.reject(new Error("This Mac can't show to-dos yet. Update Lantern on it."));
+    return this.ask<RemoteUserTodos>({ op: "todos", project });
+  }
+
+  /** One change to a project's to-do list; the list after it. */
+  todoEdit(project: string, edit: RemoteTodoEdit) {
+    if (!this.has("todos")) return Promise.reject(new Error("This Mac can't show to-dos yet. Update Lantern on it."));
+    return this.ask<RemoteUserTodos>({ op: "todo_edit", project, edit });
   }
 
   /** Whether this Mac says it can do `feature` (Welcome's features); an older Mac ends the connection at a request it doesn't know. */

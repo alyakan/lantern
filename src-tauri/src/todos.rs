@@ -300,6 +300,11 @@ impl Store {
         *self.on_change.lock().unwrap() = Some(f);
     }
 
+    /// The projects that have a list.
+    pub fn keys(&self) -> Vec<String> {
+        self.lists.lock().unwrap().keys().cloned().collect()
+    }
+
     pub fn list(&self, key: &str) -> Vec<Todo> {
         self.lists.lock().unwrap().get(key).cloned().unwrap_or_default()
     }

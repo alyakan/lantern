@@ -10,6 +10,7 @@ import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen
 import { RememberChats } from "./RememberChats";
 import { PairDeviceSheet } from "../screens/PairDevice";
 import { StorageSheet } from "../screens/StorageSheet";
+import { TodosSheet } from "../screens/TodosSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -41,6 +42,9 @@ export interface RootProps {
   /** A tapped notification named this chat: open it, then say so. */
   openSlot?: string | null;
   onOpened?: () => void;
+  /** A tapped reminder named this project: open its to-dos, then say so. */
+  openTodos?: string | null;
+  onTodosOpened?: () => void;
 }
 
 /** Android's "Message a chat": pick which. */
@@ -78,7 +82,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   );
 }
 
-function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProps, "controller">) {
+function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTodosOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
   const { chats, chatsLoaded } = useSyncState();
@@ -98,6 +102,13 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [pairingDevice, setPairingDevice] = useState(false);
   // The Mac's storage, from the Mac sheet.
   const [storageOpen, setStorageOpen] = useState(false);
+  // The to-do lists, from the Mac sheet (any project) or a reminder (its project).
+  const [todos, setTodos] = useState<{ project: string | null } | null>(null);
+  useEffect(() => {
+    if (!openTodos) return;
+    setTodos({ project: openTodos });
+    onTodosOpened?.();
+  }, [openTodos, onTodosOpened]);
   // What changed in this build: once after an update, and from the Mac sheet.
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesDue, setNotesDue] = useState(false);
@@ -164,7 +175,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [homeUp]);
   // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
   // in: it waits until they are gone. On a tablet the chats are always a tap away, so a chat open doesn't hold it back there.
-  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
+  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !todos && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
@@ -178,6 +189,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       if (notesOpen) return setNotesOpen(false), true;
       if (pairingDevice) return setPairingDevice(false), true;
       if (storageOpen) return setStorageOpen(false), true;
+      if (todos) return setTodos(null), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
@@ -188,7 +200,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, notesOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, todos, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
@@ -303,6 +315,10 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
             setMacSheet(false);
             setStorageOpen(true);
           }}
+          onTodos={() => {
+            setMacSheet(false);
+            setTodos({ project: null });
+          }}
           onWhatsNew={
             hasNotes(releaseNotes)
               ? () => {
@@ -318,6 +334,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       <ChatToast toast={toast} onOpen={openChat} onDone={clearToast} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
+      {todos && <TodosSheet project={todos.project} onClose={() => setTodos(null)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (

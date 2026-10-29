@@ -85,6 +85,7 @@ fn check_shell(id: &str, command: Option<&str>) -> Result<(), String> {
 const TEAM_ON_MAC: &str = "A team is started on your Mac.";
 
 const NO_STORAGE: &str = "This Mac can't show its storage.";
+const NO_TODOS: &str = "This Mac has no to-do lists.";
 
 /// The most ids a phone may name in one clear: a little over what it is ever shown.
 const STORAGE_IDS_MAX: usize = 80;
@@ -146,6 +147,17 @@ pub trait Host: Send + Sync + 'static {
     /// Starts clearing these items in the background, those of them the Mac finds safe now: how many, and about how many bytes.
     fn storage_clear(&self, _ids: Vec<String>) -> BoxFut<Result<(usize, u64), String>> {
         Box::pin(async { Err(NO_STORAGE.to_string()) })
+    }
+    /// The user's to-do list for a project (see todos.rs), and one change to it by the user. A host without lists says so.
+    fn todos(&self, _project: &str) -> Result<protocol::RemoteUserTodos, String> {
+        Err(NO_TODOS.into())
+    }
+    fn todo_edit(&self, _project: &str, _edit: protocol::RemoteTodoEdit) -> Result<protocol::RemoteUserTodos, String> {
+        Err(NO_TODOS.into())
+    }
+    /// The projects that have a to-do list (their keys): a reminder names one of them, which a phone may then open.
+    fn todo_projects(&self) -> Vec<String> {
+        Vec::new()
     }
     fn mac_name(&self) -> String;
     fn app_version(&self) -> String;
@@ -757,6 +769,16 @@ impl<'a> Session<'a> {
         self.gw.hub.chat(slot).map(|_| ()).ok_or_else(|| "That chat isn't open on your Mac.".to_string())
     }
 
+    /// A project whose to-dos a phone may read and change: one it may start a chat in, or one that has a list.
+    async fn todo_project(&self, project: &str) -> Result<(), String> {
+        let host = &self.gw.host;
+        if host.todo_projects().iter().any(|p| p == project) || host.projects().await.iter().any(|(f, _)| f == project) {
+            Ok(())
+        } else {
+            Err("That isn't one of your projects on this Mac.".into())
+        }
+    }
+
     async fn handle(&mut self, link: &Link, channel: &mut Channel, request: Request) -> Result<serde_json::Value, String> {
         let host = self.gw.host.clone();
         let json = |v: &dyn erased::Ser| v.to_json();
@@ -895,6 +917,15 @@ impl<'a> Session<'a> {
                 let offer = self.gw.store.start_offer(super::now_ms())?;
                 let link = super::pairing::pairing_link(&self.gw.mac.public, &offer, &host.hosts(), super::port(), &host.mac_name());
                 Ok(json(&protocol::PairOffer { modules: super::pairing::qr_modules(&link)?, link, expires_at: offer.expires_at }))
+            }
+            // A project the phone may start a chat in, or one with a list (a reminder named it): no other folder is read.
+            Request::Todos { project } => {
+                self.todo_project(&project).await?;
+                host.todos(&project).map(|v| json(&v))
+            }
+            Request::TodoEdit { project, edit } => {
+                self.todo_project(&project).await?;
+                host.todo_edit(&project, edit).map(|v| json(&v))
             }
             Request::Storage => host.storage().map(|v| json(&v)),
             Request::StorageScan => host.storage_scan().await.map(|started| json(&started)),
@@ -1914,6 +1945,24 @@ pub(crate) mod tests {
             assert!(err.is_some());
         }
         assert_eq!(r.host.storage_asked.lock().unwrap().len(), 2, "none of those got through");
+    }
+
+    #[tokio::test]
+    async fn a_phone_reads_and_changes_the_todos_of_its_projects_only() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        let (_, mut p) = paired(&r).await;
+        // A folder that isn't one of the projects is refused before the Mac's lists are asked.
+        for project in ["/Users/me", "/etc", "/Users/me/app/../.."] {
+            let (_, err, _) = p.ask(Request::Todos { project: project.into() }).await;
+            assert_eq!(err.as_deref(), Some("That isn't one of your projects on this Mac."), "{project}");
+            let (_, err, _) = p.ask(Request::TodoEdit { project: project.into(), edit: protocol::RemoteTodoEdit::Delete { id: "x".into() } }).await;
+            assert_eq!(err.as_deref(), Some("That isn't one of your projects on this Mac."), "{project}");
+        }
+        // A project goes through to the host (which here has no lists).
+        let (_, err, _) = p.ask(Request::Todos { project: "/Users/me/app".into() }).await;
+        assert_eq!(err.as_deref(), Some(NO_TODOS));
+        assert!(protocol::FEATURES.contains(&"todos"));
     }
 
     #[tokio::test]

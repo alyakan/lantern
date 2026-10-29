@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -760,6 +760,11 @@ pub enum Request {
     /// ignores any id that isn't (a Review or Blocked item, a project, the Trash). Refused for a scan older than an hour. The
     /// phone asks Face ID and a swipe first, with the list shown.
     StorageClear { ids: Vec<String> },
+    /// The user's own to-do list for a project (a folder Projects lists, or the project a reminder named), as RemoteUserTodos.
+    /// Not Claude's plan (RemoteEvent::Todos). Only sent to a Mac whose Welcome lists "todos" in `features`.
+    Todos { project: String },
+    /// One change to that list, by the user on the phone; the answer is the list after it.
+    TodoEdit { project: String, edit: RemoteTodoEdit },
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
     /// The key the phone made for the words of its notifications (32 bytes, standard base64): the Mac encrypts what a prompt
@@ -777,6 +782,55 @@ pub enum Request {
         #[ts(optional)]
         card: Option<RemoteLiveCard>,
     },
+}
+
+/// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
+/// sends back; `name` is the project's folder name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteUserTodos {
+    pub project: String,
+    pub name: String,
+    pub items: Vec<RemoteUserTodo>,
+}
+
+/// One of the user's to-dos. `due_date` is "YYYY-MM-DD" and `due_time` "HH:MM", the Mac's local time; `overdue` is the Mac's
+/// word for it now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteUserTodo {
+    pub id: String,
+    pub title: String,
+    pub note: Option<String>,
+    pub done: bool,
+    pub due_date: Option<String>,
+    pub due_time: Option<String>,
+    pub overdue: bool,
+    /// Claude added it (open) or ticked it (done).
+    pub by_claude: bool,
+    #[ts(type = "number | null")]
+    pub snoozed_until: Option<u64>,
+}
+
+/// What a phone may change on a to-do list. `until` is ms since 1970.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "op", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteTodoEdit {
+    Add {
+        title: String,
+        #[serde(default)]
+        due_date: Option<String>,
+        #[serde(default)]
+        due_time: Option<String>,
+    },
+    Done { id: String, done: bool },
+    Snooze {
+        id: String,
+        #[ts(type = "number")]
+        until: u64,
+    },
+    Delete { id: String },
 }
 
 /// A phone's card on its lock screen, which the Mac keeps right with pushes to Apple.

@@ -620,6 +620,33 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn todos(&self, project: &str) -> Result<remote::protocol::RemoteUserTodos, String> {
+        let store = &self.app.state::<AppState>().todos;
+        let key = todos::list_key(std::path::Path::new(project));
+        Ok(phone_todos(&key, store.list(&key)))
+    }
+
+    fn todo_edit(&self, project: &str, edit: remote::protocol::RemoteTodoEdit) -> Result<remote::protocol::RemoteUserTodos, String> {
+        use remote::protocol::RemoteTodoEdit as E;
+        let store = &self.app.state::<AppState>().todos;
+        let key = todos::list_key(std::path::Path::new(project));
+        let edit = match edit {
+            E::Add { title, due_date, due_time } => {
+                let due = due_date.filter(|d| !d.is_empty()).map(|d| todos::parse_due(&match due_time.filter(|t| !t.is_empty()) { Some(t) => format!("{d} {t}"), None => d })).transpose()?;
+                TodoEdit::Add { title, note: None, due }
+            }
+            E::Done { id, done } => TodoEdit::Done { id, done },
+            E::Snooze { id, until } => TodoEdit::Snooze { id, until },
+            E::Delete { id } => TodoEdit::Delete { id },
+        };
+        apply_todo_edit(store, &key, edit)?;
+        Ok(phone_todos(&key, store.list(&key)))
+    }
+
+    fn todo_projects(&self) -> Vec<String> {
+        self.app.state::<AppState>().todos.keys()
+    }
+
     fn storage(&self) -> Result<remote::protocol::RemoteStorage, String> {
         Ok(self.app.state::<AppState>().storage.phone_view().into())
     }
@@ -1040,6 +1067,27 @@ async fn todos_edit(state: State<'_, AppState>, folder: String, edit: TodoEdit) 
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// A project's list as a phone gets it.
+fn phone_todos(key: &str, items: Vec<todos::Todo>) -> remote::protocol::RemoteUserTodos {
+    let now = todos::now_ms();
+    let name = std::path::Path::new(key).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| key.to_string());
+    let items = items
+        .into_iter()
+        .map(|t| remote::protocol::RemoteUserTodo {
+            overdue: t.overdue(now),
+            by_claude: if t.done { t.done_by == Some(todos::Who::Claude) } else { t.created_by == todos::Who::Claude },
+            due_date: t.due.as_ref().map(|d| d.date.clone()),
+            due_time: t.due.as_ref().and_then(|d| d.time.clone()),
+            id: t.id,
+            title: t.title,
+            note: t.note,
+            done: t.done,
+            snoozed_until: t.snoozed_until,
+        })
+        .collect();
+    remote::protocol::RemoteUserTodos { project: key.to_string(), name, items }
 }
 
 fn apply_todo_edit(store: &todos::Store, key: &str, edit: TodoEdit) -> Result<(), String> {

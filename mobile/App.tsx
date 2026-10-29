@@ -13,6 +13,7 @@ import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
 import { runButton, TAP } from "./src/notificationActions";
+import { todoOfNotification } from "./src/view/todos";
 import { slotOfLink } from "./src/liveActivity";
 import { AccentFromPledge, TipsContext } from "./src/shell/tipsContext";
 import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
@@ -63,6 +64,7 @@ export default function App() {
   }, [lock]);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
+  const [openTodos, setOpenTodos] = useState<string | null>(null);
   const registered = useRef(false);
 
   useEffect(() => {
@@ -92,8 +94,11 @@ export default function App() {
     void registerButtons();
     const host = actionHost(controller, lock);
     return onNotificationResponse((r) => {
-      if (r.actionIdentifier === TAP) setOpenSlot(slotOfNotification(r.notification.request.content.data));
-      else void runButton(r, host, handled.current);
+      if (r.actionIdentifier !== TAP) return void runButton(r, host, handled.current);
+      // A reminder opens its project's to-dos; anything else, its chat.
+      const todo = todoOfNotification(r.notification.request.content.data);
+      if (todo) setOpenTodos(todo.project);
+      else setOpenSlot(slotOfNotification(r.notification.request.content.data));
     });
   }, [controller, lock]);
   useEffect(() => {
@@ -125,6 +130,7 @@ export default function App() {
 
   const clearLink = useCallback(() => setPendingLink(null), []);
   const clearSlot = useCallback(() => setOpenSlot(null), []);
+  const clearTodos = useCallback(() => setOpenTodos(null), []);
   useEffect(() => {
     if (fontsReady) void SplashScreen.hideAsync().catch(() => {});
   }, [fontsReady]);
@@ -137,7 +143,7 @@ export default function App() {
         <AccentFromPledge>
           <LockContext.Provider value={lock}>
             <LockGate>
-              <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+              <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} openTodos={openTodos} onTodosOpened={clearTodos} />
             </LockGate>
           </LockContext.Provider>
         </AccentFromPledge>
