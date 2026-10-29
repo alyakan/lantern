@@ -23,8 +23,14 @@ export function layoutFor(width: number, height: number): Layout {
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
 }
 
-/** The Changes pane's width. */
-export const CHANGES_WIDTH = 380;
+/** The narrowest the Changes pane gets beside the chat. */
+export const CHANGES_WIDTH = 320;
+
+/** The narrowest the chat gets beside the Changes pane: it reads best at 500 and over. */
+export const CHAT_MIN = 500;
+
+/** The share of the width the Changes pane takes beside the chat until it is dragged to another: half. */
+export const CHANGES_SHARE = 0.5;
 
 /** The narrowest window that has the chat and the changed files side by side (the chat reads best at 500 and over). */
 export const CHANGES_MIN = 880;
@@ -35,3 +41,26 @@ export const CHANGES_MIN = 880;
  * chat the changes are a sheet over it instead.
  */
 export const hasRoomForChanges = (layout: Layout, width: number) => layout === "overlay" && width >= CHANGES_MIN;
+
+/**
+ * How wide the Changes pane is beside the chat: its share of the width (dragged to, or half), but never narrower than it reads
+ * (`CHANGES_WIDTH`) nor so wide that the chat is narrower than `CHAT_MIN`. A share rather than points, so a turned tablet keeps
+ * the same split.
+ */
+export function changesWidth(share: number, width: number): number {
+  const most = Math.max(CHANGES_WIDTH, width - CHAT_MIN);
+  return Math.round(Math.min(most, Math.max(CHANGES_WIDTH, share * width)));
+}
+
+/** The share a pane `pane` points wide takes of `width`, kept between what `changesWidth` allows. */
+export function shareOf(pane: number, width: number): number {
+  return width > 0 ? changesWidth(pane / width, width) / width : CHANGES_SHARE;
+}
+
+/** Where the Changes go when floated over the chat: a big card in the middle, the chat dimmed around it. */
+export function floatFrame(width: number, height: number, top = 0, bottom = 0) {
+  const w = Math.round(Math.min(width * 0.8, 1100));
+  const room = height - top - bottom;
+  const h = Math.round(room * 0.86);
+  return { x: Math.round((width - w) / 2), y: Math.round(top + (room - h) / 2), w, h };
+}

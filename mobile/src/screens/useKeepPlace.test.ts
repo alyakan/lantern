@@ -48,6 +48,37 @@ describe("keeping the reader's place when the chat's width changes", () => {
     expect(list.scrollToIndex).toHaveBeenCalledTimes(RESTORE_AT_MS.length);
   });
 
+  it("holds still while the width is dragged, and puts the place from before the drag back once at the end", async () => {
+    const { list, hook, settle } = await rig(9);
+    await act(() => hook.result.current.widthChanged(820));
+    await act(() => hook.result.current.remember(false));
+    await act(() => hook.result.current.hold(true));
+    for (const w of [800, 760, 700, 640]) {
+      await act(() => hook.result.current.widthChanged(w));
+      // The list moving under the drag is not the reader moving.
+      (list.getFirstVisibleIndex as jest.Mock).mockReturnValue(0);
+      await act(() => hook.result.current.remember(false));
+    }
+    await settle();
+    expect(list.scrollToIndex).not.toHaveBeenCalled();
+    await act(() => hook.result.current.hold(false));
+    await settle();
+    expect(list.scrollToIndex).toHaveBeenCalledTimes(RESTORE_AT_MS.length);
+    expect(list.scrollToIndex).toHaveBeenLastCalledWith({ index: 9, animated: false });
+  });
+
+  it("puts nothing back after a drag that ended where it began", async () => {
+    const { list, hook, settle } = await rig(9);
+    await act(() => hook.result.current.widthChanged(820));
+    await act(() => hook.result.current.hold(true));
+    await act(() => hook.result.current.widthChanged(700));
+    await act(() => hook.result.current.widthChanged(820));
+    await act(() => hook.result.current.hold(false));
+    await settle();
+    expect(list.scrollToEnd).not.toHaveBeenCalled();
+    expect(list.scrollToIndex).not.toHaveBeenCalled();
+  });
+
   it("does nothing for the first layout, or for a width that is the same to within a point", async () => {
     const { list, hook, settle } = await rig();
     await act(() => hook.result.current.widthChanged(820));

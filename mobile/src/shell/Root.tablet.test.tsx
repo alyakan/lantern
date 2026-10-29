@@ -1,7 +1,8 @@
 import "@shopify/flash-list/jestSetup";
 import { BackHandler } from "react-native";
+import { StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import { saveSidebarPinned } from "../prefs";
+import { saveChangesShare, saveSidebarPinned } from "../prefs";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, seed, waiting } from "../test/render";
 import { Root } from "./Root";
@@ -13,8 +14,10 @@ jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "") }))
 // The layout is what the window's size says; a test says it directly. Whether the chats are pinned is what this tablet remembers.
 let mockLayout: Layout = "split";
 let mockPinned = false;
+// The share of the width the Changes were last dragged to: none until they were.
+let mockShare: number | null = null;
 jest.mock("./useLayout", () => ({ useLayout: () => mockLayout }));
-jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadSidebarPinned: jest.fn(async () => mockPinned), saveSidebarPinned: jest.fn(async () => {}) }));
+jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadSidebarPinned: jest.fn(async () => mockPinned), saveSidebarPinned: jest.fn(async () => {}), loadChangesShare: jest.fn(async () => mockShare), saveChangesShare: jest.fn(async () => {}) }));
 
 // How wide the window is: the Changes pane has room beside the chat only in a wide one.
 let mockWidth = 1100;
@@ -36,8 +39,10 @@ let backHandlers: BackHandlerFn[] = [];
 beforeEach(() => {
   backHandlers = [];
   mockPinned = false;
+  mockShare = null;
   mockWidth = 1100;
   (saveSidebarPinned as jest.Mock).mockClear();
+  (saveChangesShare as jest.Mock).mockClear();
   jest.spyOn(BackHandler, "addEventListener").mockImplementation((_event, cb) => {
     backHandlers.push(cb);
     return { remove: () => void (backHandlers = backHandlers.filter((h) => h !== cb)) };
@@ -222,6 +227,43 @@ describe("the changed files, beside the chat or over it", () => {
     expect(paneUp()).toBeNull();
     await press("Changes");
     expect(paneUp()).toBeTruthy();
+  });
+
+  const paneWidth = () => StyleSheet.flatten(screen.getByTestId("changes-dock").props.style).width;
+
+  it("take half the width beside the chat at first, and the share they were last dragged to once it is read", async () => {
+    await openEdited();
+    expect(paneWidth()).toBe(550);
+    mockShare = 0.4;
+    await openEdited();
+    expect(paneWidth()).toBe(440);
+  });
+
+  it("are made narrower from their divider, and that is remembered", async () => {
+    await openEdited();
+    await act(async () => void fireEvent(screen.getByLabelText("Width of the changes"), "accessibilityAction", { nativeEvent: { actionName: "decrement" } }));
+    expect(paneWidth()).toBe(495);
+    expect(saveChangesShare).toHaveBeenCalledWith(0.45);
+  });
+
+  it("float over the chat as a card from their own button, and go back beside it", async () => {
+    await openEdited();
+    await press("Float the changes over the chat");
+    expect(paneUp()).toBeTruthy();
+    expect(screen.queryByTestId("changes-divider")).toBeNull();
+    await press("Put the changes beside the chat");
+    expect(paneUp()).toBeTruthy();
+    expect(screen.getByTestId("changes-divider")).toBeTruthy();
+  });
+
+  it("go away with a tap around the floating card, and the Changes button brings them back floating", async () => {
+    await openEdited();
+    await press("Float the changes over the chat");
+    await fireEvent.press(screen.getByTestId("changes-scrim", { includeHiddenElements: true }));
+    expect(paneUp()).toBeNull();
+    await press("Changes");
+    expect(paneUp()).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Put the changes beside the chat" })).toBeTruthy();
   });
 
   it("move from the sheet to the pane as the chats are put away", async () => {

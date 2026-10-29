@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { movePanes } from "../ui/motion";
-import { CrossFade, Rise, SidePane } from "../ui/Presence";
+import { CrossFade, Rise } from "../ui/Presence";
 import { space, useColors } from "../ui/theme";
+import { loadChangesShare, saveChangesShare } from "../prefs";
 import { useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { changedFiles } from "../view/changes";
-import { CHANGES_WIDTH, COLUMN_MAX, hasRoomForChanges } from "../view/layout";
+import { CHANGES_SHARE, changesWidth, COLUMN_MAX, hasRoomForChanges, shareOf } from "../view/layout";
+import { ChangesDock, type DockMode } from "./ChangesDock";
 import { ChangesPane } from "./ChangesPane";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
@@ -36,25 +38,53 @@ export interface TabletDetailProps {
  * What a tablet shows beside the chats: the chat they picked, in a column that reads well, or a word to pick one. Nothing here
  * cuts from one thing to the next: another chat is under the last as it fades away, the Changes pane slides in and out at the
  * right with the chat making room for it, and a decision rises over its chat and goes back down.
+ *
+ * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
+ * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
 export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onReview, onStartNew }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const win = useWindowDimensions();
   const { views } = useSyncState();
   // With the chats away and the window wide enough, the files the chat has changed are beside it, and the chat's Changes button
   // shows or hides them. Otherwise that button opens them in a sheet over the chat.
   const [changesOpen, setChangesOpen] = useState(true);
+  const [floating, setFloating] = useState(false);
   const changed = slot ? changedFiles((views[slot] ?? emptyView).items) : [];
-  const room = hasRoomForChanges(layout, width) && changed.length > 0;
+  const room = hasRoomForChanges(layout, win.width) && changed.length > 0;
+  const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
+  // The room this has (the window, less the chats when they are beside it), as laid out.
+  const [size, setSize] = useState({ width: win.width, height: win.height });
+  // The pane's share of that width beside the chat: half until dragged, then what it was dragged to (remembered). The saved
+  // one arrives a moment after the screen; a drag before then wins.
+  const [share, setShare] = useState(CHANGES_SHARE);
+  const touched = useRef(false);
+  useEffect(() => {
+    let live = true;
+    void loadChangesShare().then((saved) => live && saved !== null && !touched.current && setShare(saved));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const [resizing, setResizing] = useState(false);
+  const paneWidth = changesWidth(share, size.width);
+  const resizeTo = (w: number) => {
+    touched.current = true;
+    setShare(shareOf(w, size.width));
+  };
   const toggleChanges = (open: boolean) => {
     movePanes();
     setChangesOpen(open);
   };
+  const toggleFloat = () => {
+    movePanes();
+    setFloating((f) => !f);
+  };
   const main = slot ? (
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-      <ChatScreen key={slot} slot={slot} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
@@ -66,22 +96,41 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     </View>
   );
   return (
-    <View style={{ flex: 1, backgroundColor: colors.paper, flexDirection: "row" }}>
-      <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: colors.paper }} onLayout={(e) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
+      <View style={{ flex: 1, marginRight: mode === "dock" ? paneWidth : 0 }}>
         {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
         <CrossFade id={slot ?? ""}>
           <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
         </CrossFade>
       </View>
-      <SidePane shown={!!slot && room && changesOpen} width={CHANGES_WIDTH} style={{ borderLeftWidth: 1, borderLeftColor: colors.rule, backgroundColor: colors.paper }}>
+      <ChangesDock
+        mode={mode}
+        width={paneWidth}
+        room={{ ...size, top: insets.top, bottom: insets.bottom }}
+        onScrim={() => toggleChanges(false)}
+        onResizeStart={() => setResizing(true)}
+        onResize={resizeTo}
+        onResizeEnd={() => {
+          setResizing(false);
+          void saveChangesShare(shareOf(paneWidth, size.width));
+        }}
+        onStep={(dir) => {
+          const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
+          touched.current = true;
+          movePanes();
+          setShare(next);
+          void saveChangesShare(next);
+        }}
+        share={`${Math.round((paneWidth / size.width) * 100)}%`}
+      >
         {slot && (
           <CrossFade id={slot}>
-            <View style={{ flex: 1, backgroundColor: colors.paper }}>
-              <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} />
+            <View style={{ flex: 1, backgroundColor: colors.card }}>
+              <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} float={{ floating, onToggle: toggleFloat }} />
             </View>
           </CrossFade>
         )}
-      </SidePane>
+      </ChangesDock>
       <Rise testID="decision-pane" shown={!!decide} style={{ backgroundColor: colors.night }}>
         {decide && (
           <View style={{ flex: 1, width: "100%", maxWidth: DECISION_MAX, alignSelf: "center" }}>
