@@ -7,6 +7,7 @@ import type { Role } from "./lib/roles";
 import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset, WindowProvider } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
+import type { ArtifactListing } from "./lib/artifacts";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
@@ -303,6 +304,12 @@ export const api = {
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */
   onOpenRecent: (cb: (path: string) => void): Promise<UnlistenFn> => listen<string>("open-recent", (e) => cb(e.payload)),
+  /** The folder's artifacts (`.lantern/artifacts/`), newest first, and the key the sandboxed frame loads them under. */
+  artifactsList: (folder: string) => invoke<ArtifactListing>("artifacts_list", { folder }),
+  /** A Markdown or Mermaid artifact's text. */
+  artifactsRead: (folder: string, name: string) => invoke<string>("artifacts_read", { folder, name }),
+  /** The theme `lantern.css` gives artifacts, as CSS variables. */
+  artifactsTheme: (vars: Record<string, string>) => invoke<void>("artifacts_theme", { vars }),
   /** The folder's dashboards (`.lantern/dashboards/*.json`), each checked: a spec to render, or the issues in the file. */
   dashboardsList: (folder: string) => invoke<Dashboard[]>("dashboards_list", { folder }),
   /** Which of the folder's dashboards are trusted, what is running, and the history of runs. */

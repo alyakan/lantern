@@ -244,6 +244,8 @@ export interface State {
   editCount: number;
   selectedFile: string | null;
   lastEdited: string | null;
+  /** Counts Claude's own edits (not the re-reads `editCount` also counts): a new one to `lastEdited` is a fresh edit. */
+  claudeEdits: number;
   follow: boolean;
   thinking: boolean;
   /** When Claude last said or did anything (any event from its run): how long a working agent has been quiet. */
@@ -356,6 +358,7 @@ export const initialState: State = {
   editCount: 0,
   selectedFile: null,
   lastEdited: null,
+  claudeEdits: 0,
   follow: true,
   thinking: false,
   activityAt: null,
@@ -534,7 +537,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -630,6 +633,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         editCount: state.editCount + 1,
         changedFiles: addChange(state.changedFiles, ev.path, ev.created, ev.hunks),
         lastEdited: ev.path,
+        claudeEdits: state.claudeEdits + 1,
         selectedFile: state.follow ? ev.path : state.selectedFile,
         items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, edit: { path: ev.path, created: ev.created, hunks: ev.hunks } })),
       };
