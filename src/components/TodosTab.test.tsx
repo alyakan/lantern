@@ -22,7 +22,8 @@ describe("TodosTab", () => {
   it("explains itself when the project has no to-dos", async () => {
     vi.mocked(api.todosList).mockResolvedValue(listing());
     render(<TodosTab folder="/p" chats={{}} onOpenChat={() => {}} />);
-    expect(await screen.findByText(/Your own list for this project/)).toBeInTheDocument();
+    expect(await screen.findByText(/send \/todo and the text from the message box/)).toBeInTheDocument();
+    expect(screen.getByText("All done")).toBeInTheDocument();
   });
 
   it("adds an item, with a due date when one is given", async () => {
@@ -38,16 +39,20 @@ describe("TodosTab", () => {
     expect(screen.getByLabelText("New to-do")).toHaveValue("");
   });
 
-  it("shows overdue items first and in red, with snooze buttons", async () => {
+  it("puts overdue items in their own section first, in red, with snooze in their menu", async () => {
     vi.mocked(api.todosList).mockResolvedValue(listing(todo("a"), todo("b", { due: { date: "2020-01-01" } })));
     vi.mocked(api.todosEdit).mockResolvedValue(listing(todo("a"), todo("b", { due: { date: "2020-01-01" } })));
     render(<TodosTab folder="/p" chats={{}} onOpenChat={() => {}} />);
-    const rows = within(await screen.findByRole("list", { name: "To-dos" })).getAllByRole("listitem");
-    expect(rows[0]).toHaveClass("overdue");
-    expect(rows[0]).toHaveTextContent(/Overdue/);
-    fireEvent.click(within(rows[0]).getByRole("button", { name: "1h" }));
+    const sections = (await screen.findAllByRole("region")).map((s) => s.getAttribute("aria-label"));
+    expect(sections).toEqual(["Overdue", "No date"]);
+    const late = within(screen.getByRole("list", { name: "Overdue" })).getByRole("listitem");
+    expect(late).toHaveClass("overdue");
+    fireEvent.click(within(late).getByRole("button", { name: "More for “Item b”" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remind me in an hour" }));
     await waitFor(() => expect(api.todosEdit).toHaveBeenCalledWith("/p", expect.objectContaining({ op: "snooze", id: "b" })));
-    expect(within(rows[1]).queryByRole("button", { name: "1h" })).toBeNull();
+    // An item that isn't overdue has no snooze.
+    fireEvent.click(screen.getByRole("button", { name: "More for “Item a”" }));
+    expect(screen.queryByRole("menuitem", { name: "Remind me in an hour" })).toBeNull();
   });
 
   it("ticks an item off, and says who added or ticked one", async () => {
@@ -62,7 +67,7 @@ describe("TodosTab", () => {
   it("folds the done items away, and shows who ticked them when opened", async () => {
     vi.mocked(api.todosList).mockResolvedValue(listing(todo("a"), todo("d", { done: true, done_by: "claude" })));
     render(<TodosTab folder="/p" chats={{}} onOpenChat={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: /Done \(1\)/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show done (1)" }));
     expect(screen.getByText("Done by Claude")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear done" })).toBeInTheDocument();
   });

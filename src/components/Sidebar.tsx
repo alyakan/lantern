@@ -545,7 +545,8 @@ function Project({ group, color, noted, todos, expanded, phase, onToggle, curren
           )}
           {todos && todos.open > 0 && (
             <span className={`sb-todos${todos.overdue > 0 ? " overdue" : ""}`} role="img" aria-label={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""}`} title={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""} (the Todos tab)`}>
-              ☐ {todos.open}
+              <span className="sb-todos-ring" aria-hidden />
+              {todos.open}
             </span>
           )}
           <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
