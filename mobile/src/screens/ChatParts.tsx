@@ -29,6 +29,7 @@ import { barButton, control, fonts, radius, shadow, space, useColors } from "../
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
+import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
@@ -1025,7 +1026,6 @@ function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source
 
 /** A file's diff, as a sheet: pick one of the files an edit chip stands for, and read its lines. */
 export function DiffSheet({ files, load, onClose }: { files: string[]; load: (path: string) => Promise<string>; onClose: () => void }) {
-  const colors = useColors();
   const [path, setPath] = useState(files[0]);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1057,19 +1057,22 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
                 ))}
               </ScrollView>
             )}
-            <Txt variant="small" tone="ink2" numberOfLines={1}>
+            <Txt variant="small" tone="ink2" numberOfLines={1} ellipsizeMode="head">
               {path}
             </Txt>
           </View>
-          <ScrollView style={{ flexShrink: 1, paddingHorizontal: space.lg }}>
-            {text === null && !error && <DiffSkeleton />}
-            {error && <Txt tone="stop">{error}</Txt>}
-            {text !== null &&
-              text.split("\n").map((line, i) => (
-                <Txt key={i} variant="mono" style={{ fontFamily: fonts.mono, color: line.startsWith("+") && !line.startsWith("+++") ? colors.go : line.startsWith("-") && !line.startsWith("---") ? colors.stop : colors.ink2 }}>
-                  {line || " "}
-                </Txt>
-              ))}
+          <ScrollView style={{ flexShrink: 1 }}>
+            {text === null && !error && (
+              <View style={{ paddingHorizontal: space.lg }}>
+                <DiffSkeleton />
+              </View>
+            )}
+            {error && (
+              <Txt tone="stop" style={{ paddingHorizontal: space.lg }}>
+                {error}
+              </Txt>
+            )}
+            {text !== null && <DiffView path={path} text={text} />}
           </ScrollView>
           <View style={{ padding: space.lg }}>
             <Button label="Close" kind="ghost" onPress={close} />

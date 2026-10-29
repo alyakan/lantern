@@ -693,7 +693,7 @@ describe("while more of a chat is coming", () => {
     await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
     await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy(), { timeout: 3000 });
     await act(async () => releases.diff("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"));
-    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByLabelText("Added, line 1: new")).toBeTruthy(), { timeout: 3000 });
     expect(screen.queryByLabelText("Loading the changes")).toBeNull();
   });
 });
@@ -1040,7 +1040,7 @@ describe("Step by step's pages", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Close" }));
       expect(screen.getByText("Changed in this step")).toBeTruthy();
       await fireEvent.press(screen.getByRole("link", { name: "TimeoutScheduler.swift" }));
-      await waitFor(() => expect(screen.getByText("+moved")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Added: moved")).toBeTruthy());
     });
 
     it("is a plain chat in any other workflow", async () => {
@@ -1095,10 +1095,10 @@ describe("a Review, a file page at a time", () => {
     const { lastOf } = await review(one, ["reviewdiff"], { review_diff: "--- a\n+++ b\n-old\n+new" });
     await fireEvent.press(screen.getByRole("link", { name: "src/lib/auth.ts" }));
     await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/auth.ts" }));
-    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Added: new")).toBeTruthy());
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     await fireEvent.press(screen.getByRole("link", { name: "line 42" }));
-    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Added: new")).toBeTruthy());
   });
 
   it("asks an older Mac for the chat's own change instead, which it knows", async () => {
@@ -1120,7 +1120,7 @@ describe("what a turn changed", () => {
   it("opens the diff of an edited file from its chip, with added and removed lines told apart", async () => {
     const { lastOf } = await withSession(turn, {}, { diff: "--- /p/Cargo.toml\n+++ /p/Cargo.toml\n@@ -3 +3 @@\n-version = \"0.1.52\"\n+version = \"0.1.53\"\n" });
     await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
-    await waitFor(() => expect(screen.getByText("+version = \"0.1.53\"")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Added, line 3: version = \"0.1.53\"")).toBeTruthy());
     expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" });
     expect(screen.getByText("What changed")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
@@ -1140,7 +1140,7 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/docs/notes.md" }));
     await fireEvent.press(screen.getByRole("button", { name: "Cargo.toml, 1 added, 1 removed" }));
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" }));
-    await waitFor(() => expect(screen.getByText("+version = \"0.1.53\"")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Added, line 3: version = \"0.1.53\"")).toBeTruthy());
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByText("2 files · +5 −1")).toBeNull());
   });
