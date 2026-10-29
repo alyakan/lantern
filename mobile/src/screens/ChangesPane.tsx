@@ -6,11 +6,9 @@ import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
-import { fonts, radius, space, useColors } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { changedFiles, changesLine } from "../view/changes";
-
-/** What a diff's line is, by its first character: added, removed, or the rest. */
-const lineTone = (line: string): "add" | "del" | "plain" => (line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "plain");
+import { DiffView } from "./DiffView";
 
 /**
  * A tablet's right-hand pane: the files the open chat has changed, and a diff of the one chosen, read from the Mac the way the
@@ -94,32 +92,23 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
             ))}
           </ScrollView>
           <View style={{ height: 1, backgroundColor: colors.rule }} />
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.lg, paddingBottom: insets.bottom + 16 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: space.lg, paddingBottom: insets.bottom + 16 }}>
             {path && (
-              <Txt variant="tiny" tone="ink3" numberOfLines={1} ellipsizeMode="head" style={{ marginBottom: 6 }}>
+              <Txt variant="tiny" tone="ink3" numberOfLines={1} ellipsizeMode="head" style={{ marginBottom: 6, paddingHorizontal: space.lg }}>
                 {path}
               </Txt>
             )}
-            {text === null && !error && <DiffSkeleton />}
+            {text === null && !error && (
+              <View style={{ paddingHorizontal: space.lg }}>
+                <DiffSkeleton />
+              </View>
+            )}
             {!!error && (
-              <Txt tone="stop" accessibilityRole="alert">
+              <Txt tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg }}>
                 {error}
               </Txt>
             )}
-            {text !== null && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View>
-                  {text.split("\n").map((l, i) => {
-                    const tone = lineTone(l);
-                    return (
-                      <Txt key={i} variant="mono" selectable style={{ fontFamily: fonts.mono, color: tone === "add" ? colors.go : tone === "del" ? colors.stop : colors.ink2 }}>
-                        {l || " "}
-                      </Txt>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            )}
+            {text !== null && path && <DiffView path={path} text={text} />}
           </ScrollView>
         </>
       )}

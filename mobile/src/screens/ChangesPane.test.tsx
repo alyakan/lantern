@@ -26,7 +26,7 @@ describe("the Changes pane", () => {
     expect(screen.getByText("2 files · +12 −1")).toBeTruthy();
     expect(screen.getByRole("button", { name: "b.ts, new, 9 added, 0 removed" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "a.ts, 3 added, 1 removed" })).toBeTruthy();
-    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Added, line 1: new")).toBeTruthy());
     expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/b.ts" });
   });
 

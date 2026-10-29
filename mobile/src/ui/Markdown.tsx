@@ -74,7 +74,7 @@ function Spans({ spans, tone, mark, inLink = false }: { spans: Span[]; tone: Ton
                 accessibilityRole={file ? "link" : undefined}
                 accessibilityHint={file ? "Shows what changed in this file" : undefined}
                 onPress={file ? () => links?.onFile(file) : undefined}
-                style={[{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }, file ? { color: accent, textDecorationLine: "underline", textDecorationStyle: "dotted" } : null]}
+                style={[{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }, file ? { color: accent } : null]}
               >
                 {mark
                   ? splitMarked(s.text, mark).map((p, j) => (
@@ -140,7 +140,7 @@ function TaskBox({ checked }: { checked: boolean }) {
 }
 
 /** What each kind of token is coloured, for code on the page (your own message and the night screens keep it plain). */
-function tokenColour(kind: TokenKind, colors: Palette): string | undefined {
+export function tokenColour(kind: TokenKind, colors: Palette): string | undefined {
   switch (kind) {
     case "keyword":
       return colors.cobalt;
