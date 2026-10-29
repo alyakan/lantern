@@ -57,6 +57,7 @@ export function themeCss(p: Palette): string {
     "--field": p.card,
     "--bg-subtle": p.wash,
     "--bg-hover": p.wash,
+    "--code-bg": p.wash,
     "--line": p.rule,
     "--line-strong": p.shapeStrong,
     "--text": p.ink,

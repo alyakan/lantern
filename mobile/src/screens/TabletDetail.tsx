@@ -59,7 +59,13 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const canArtifacts = useMacCan("artifacts");
   const [panel, setPanel] = useState<Panel>("changes");
   const showing: Panel = canArtifacts ? panel : "changes";
-  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || showing === "artifacts");
+  // The pane stays once artifacts were picked, even back on Changes with none: the menu is in it.
+  const [artifactsPicked, setArtifactsPicked] = useState(false);
+  const pick = (p: Panel) => {
+    if (p === "artifacts") setArtifactsPicked(true);
+    setPanel(p);
+  };
+  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || artifactsPicked);
   const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
   // The room this has (the window, less the chats when they are beside it), as laid out.
   const [size, setSize] = useState({ width: win.width, height: win.height });
@@ -134,9 +140,9 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
           <CrossFade id={slot}>
             <View style={{ flex: 1, backgroundColor: colors.card }}>
               {showing === "artifacts" ? (
-                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts onPick={setPanel} />} float={{ floating, onToggle: toggleFloat }} />
+                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
               ) : (
-                <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={setPanel} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+                <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
               )}
             </View>
           </CrossFade>

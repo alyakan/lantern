@@ -1,4 +1,4 @@
-import { Component, type ComponentType, type ReactNode } from "react";
+import { Component, useMemo, type ComponentType, type ReactNode } from "react";
 import { View } from "react-native";
 import { artifactDocument, isOwnPage } from "../view/artifacts";
 import { Txt } from "./components";
@@ -36,6 +36,8 @@ class Boundary extends Component<{ fallback: ReactNode; children: ReactNode }, {
  */
 export function ArtifactPage({ html, testID }: { html: string; testID?: string }) {
   const colors = useColors();
+  // Built once per page and palette, not per render: the pane draws again with every event of the chat.
+  const source = useMemo(() => ({ html: artifactDocument(html, colors) }), [html, colors]);
   const gone = (
     <Txt variant="body" tone="ink2" style={{ padding: space.lg }}>
       This page can't be shown in this version of the app. It is on your Mac.
@@ -47,7 +49,7 @@ export function ArtifactPage({ html, testID }: { html: string; testID?: string }
     <View testID={testID} style={{ flex: 1, backgroundColor: colors.card }}>
       <Boundary fallback={gone}>
         <Web
-          source={{ html: artifactDocument(html, colors) }}
+          source={source}
           // Everything is let through to the check below, which allows only the page: an origin the list left out would be handed to
           // Safari by the web view itself (a page's meta refresh opened one on its own, seen in the simulator), which is a way out.
           originWhitelist={["*"]}

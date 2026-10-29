@@ -388,7 +388,7 @@ fn read_text(folder: &Path, name: &str, max: u64) -> Result<String, String> {
 pub const PHONE_MAX: u64 = 1024 * 1024;
 
 /// An artifact's text for a phone. Any kind: the phone has no frame to serve from, so it draws HTML and SVG itself, in a web
-/// view with scripts off and a policy that blocks every request (see mobile/src/screens/ArtifactsSheet.tsx). The policy
+/// view with scripts off and a policy that blocks every request (see mobile/src/ui/ArtifactPage.tsx and PAGE_POLICY in mobile/src/view/artifacts.ts, which this goes with). The policy
 /// doesn't stop a page's `<link rel=preconnect>` or a link's host being looked up ahead of a tap, which reach a server
 /// without a request the policy sees; so those are taken out here, where they are text, before the phone has the page.
 pub fn read_for_phone(folder: &Path, name: &str) -> Result<String, String> {
@@ -416,9 +416,10 @@ pub fn defuse(html: &str) -> String {
         .replace_all(&html, |c: &regex::Captures| {
             let (lead, name, eq, quote) = (&c[1], &c[2], &c[3], &c[4]);
             match c.get(5) {
-                // Its own fragment, or data it carries: kept as it was.
-                Some(keep) => format!("{lead}{name}{eq}{quote}{}", keep.as_str()),
-                None => format!("{lead}x-{}{eq}{quote}", name.replace(':', "-")),
+                // Its own fragment, or data it carries: kept as it was. Not a list of candidates (`srcset`), whose later
+                // entries may name a server after a first that is data.
+                Some(keep) if !name.to_ascii_lowercase().ends_with("srcset") => format!("{lead}{name}{eq}{quote}{}", keep.as_str()),
+                _ => format!("{lead}x-{}{eq}{quote}", name.replace(':', "-")),
             }
         })
         .into_owned()
@@ -455,12 +456,12 @@ mod tests {
     #[test]
     fn a_phone_gets_every_kind_with_the_ways_a_page_reaches_a_server_on_its_own_taken_out() {
         let dir = folder();
-        let page = r##"<!doctype html><meta http-equiv="refresh" content="0;url=http://evil.test/"><LINK rel=preconnect href="http://evil.test"><base href="http://evil.test/"><a href="https://evil.test/x">x</a><a href='#top'>top</a><img src="data:image/png;base64,AA=="><img src=http://evil.test/p.png><svg><use xlink:href="#a"/><image xlink:href="http://evil.test/i.png"/></svg><form action=http://evil.test><button formaction="http://evil.test">go</button></form><a data-src="x" href = "http://evil.test">y</a><iframe srcdoc="&lt;link rel=preconnect href=http://evil.test&gt;"></iframe><IFRAME SRCDOC='&#60;link rel=preconnect&#62;'></IFRAME>"##;
+        let page = r##"<!doctype html><meta http-equiv="refresh" content="0;url=http://evil.test/"><LINK rel=preconnect href="http://evil.test"><base href="http://evil.test/"><a href="https://evil.test/x">x</a><a href='#top'>top</a><img src="data:image/png;base64,AA=="><img src=http://evil.test/p.png><svg><use xlink:href="#a"/><image xlink:href="http://evil.test/i.png"/></svg><form action=http://evil.test><button formaction="http://evil.test">go</button></form><a data-src="x" href = "http://evil.test">y</a><img srcset="data:image/png;base64,AA== 1x, http://evil.test/p.png 2x"><iframe srcdoc="&lt;link rel=preconnect href=http://evil.test&gt;"></iframe><IFRAME SRCDOC='&#60;link rel=preconnect&#62;'></IFRAME>"##;
         fs::write(dir.path().join(DIR).join("page.html"), page).unwrap();
         fs::write(dir.path().join(DIR).join("notes.md"), "# notes\n[a link](https://example.com)").unwrap();
         fs::write(dir.path().join(DIR).join("flow.mmd"), "graph TD; A-->B").unwrap();
         let html = read_for_phone(dir.path(), "page.html").unwrap();
-        for gone in ["<link", "<LINK", "<base", "<meta", " href=\"http", " href = \"http", " src=http", "xlink:href=\"http", " action=http", " formaction=\"http", " srcdoc=", " SRCDOC="] {
+        for gone in ["<link", "<LINK", "<base", "<meta", " href=\"http", " href = \"http", " src=http", "xlink:href=\"http", " action=http", " formaction=\"http", " srcdoc=", " SRCDOC=", " srcset="] {
             assert!(!html.contains(gone), "{gone:?} is still in {html}");
         }
         // Its own fragments and its inline data stay, and a word that only looks like an attribute is left alone.

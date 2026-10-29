@@ -27,12 +27,18 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Claude writing a page is a change to a file of the chat: the list is read again when what the chat changed does.
-  const edits = changedFiles((views[slot] ?? emptyView).items)
-    .map((f) => `${f.path}:${f.added}:${f.removed}`)
-    .join("|");
+  // What was read, and for which artifact (its name and stamp): another artifact's text is never drawn as this one's.
+  const [read, setRead] = useState<{ name: string; text: string | null; error: string | null } | null>(null);
+  // Claude writing a page is a change to a file of the chat in the artifacts folder: the list is read again when those change.
+  const chatItems = (views[slot] ?? emptyView).items;
+  const edits = useMemo(
+    () =>
+      changedFiles(chatItems)
+        .filter((f) => f.path.includes("/.lantern/artifacts/"))
+        .map((f) => `${f.path}:${f.added}:${f.removed}`)
+        .join("|"),
+    [chatItems],
+  );
   useEffect(() => {
     let live = true;
     controller.sync.artifacts(slot).then(
@@ -52,17 +58,19 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
   useEffect(() => {
     if (!current) return;
     let live = true;
-    setText(null);
-    setError(null);
     controller.sync.artifactRead(slot, current.name).then(
-      (t) => live && setText(t),
-      (e: Error) => live && setError(e.message),
+      (t) => live && setRead({ name: current.name, text: t, error: null }),
+      (e: Error) => live && setRead({ name: current.name, text: null, error: e.message }),
     );
     return () => {
       live = false;
     };
-    // A page is read again when its own size or time change (Claude wrote it again).
+    // A page is read again when its own size or time change (Claude wrote it again): the old text stays up until the new arrives.
   }, [controller, slot, stamp]);
+  // The text read for another artifact is not this one's: a page being read shows its skeleton.
+  const own = read && current && read.name === current.name ? read : null;
+  const text = own?.text ?? null;
+  const error = own?.error ?? null;
   return (
     <View testID="artifacts-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet || float?.floating ? 16 : insets.top + 6 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.lg, paddingBottom: 8 }}>
@@ -85,14 +93,18 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
         )}
         <Button label={hideLabel} kind="ghost" onPress={onHide} />
       </View>
-      {listError ? (
-        <Txt tone="stop" accessibilityRole="alert" style={{ padding: space.lg }}>
+      {listError && (
+        <Txt tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg, paddingBottom: 8 }}>
           {listError}
         </Txt>
-      ) : items === null ? (
-        <View style={{ paddingHorizontal: space.lg }}>
-          <DiffSkeleton />
-        </View>
+      )}
+      {items === null ? (
+        // The skeleton waits for the list; a list that failed to come has said why above.
+        listError ? null : (
+          <View style={{ paddingHorizontal: space.lg }}>
+            <DiffSkeleton />
+          </View>
+        )
       ) : items.length === 0 ? (
         <Txt variant="body" tone="ink2" style={{ padding: space.lg }}>
           Nothing here yet. Ask Claude to put a page, a diagram or notes in this folder's .lantern/artifacts/, and it shows up here.
