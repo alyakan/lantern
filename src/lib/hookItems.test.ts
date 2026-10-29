@@ -20,6 +20,12 @@ describe("outsideHooks", () => {
     expect(outsideHooks([user("u1", "go"), say("m1", "Done."), hook, say("m2", "saving…")]).map((i) => i.id)).toEqual(["u1", "m1"]);
   });
 
+  it("keeps what follows a hook that came while the turn was still at work: it is the user's turn going on", () => {
+    const allowed: ChatItem = { type: "permission", id: "p1", toolName: "Bash", input: {}, decision: "allowed" };
+    const items = [user("u1", "go"), allowed, hook, say("m1", "The answer."), turn];
+    expect(outsideHooks(items).map((i) => i.id)).toEqual(["u1", "p1", "m1", "t1"]);
+  });
+
   it("changes nothing for a chat without hooks", () => {
     const items = [user("u1", "go"), say("m1", "Done."), turn];
     expect(outsideHooks(items)).toEqual(items);

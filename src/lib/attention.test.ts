@@ -15,8 +15,8 @@ describe("attentionFor", () => {
   it("quotes the answer, not what Claude said doing a post-hook", () => {
     const items: ChatItem[] = [user, { type: "assistant", id: "m1", text: "Fixed the retry." }, { type: "hook", id: "h1", text: "Update the brain" }, { type: "assistant", id: "m2", text: "Nothing to save." }, turn()];
     expect(attentionFor(items, null, describeInput)?.body).toBe("Fixed the retry.");
-    // A turn that ran tools and said nothing before the hook is still "Done", not the hook's words.
-    expect(attentionFor([user, { type: "hook", id: "h1", text: "x" }, { type: "assistant", id: "m2", text: "Nothing to save." }, turn()], null, describeInput)?.body).toBe("Done");
+    // A hook that comes before any reply is taken as sent into a turn still at work (see followsReply), so what follows it is that turn's.
+    expect(attentionFor([user, { type: "hook", id: "h1", text: "x" }, { type: "assistant", id: "m2", text: "The answer." }, turn()], null, describeInput)?.body).toBe("The answer.");
   });
 
   it("doesn't repeat an earlier turn's reply when this turn only ran tools", () => {
