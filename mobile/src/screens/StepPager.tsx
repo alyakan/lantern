@@ -89,9 +89,10 @@ export function StepNav({ pages, index, onIndex, fresh }: { pages: StepPage[]; i
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
       <Glass style={{ flex: 1, height: control - 4, borderRadius: (control - 4) / 2, flexDirection: "row", alignItems: "center", paddingHorizontal: 4 }}>
         <Arrow label="Previous page" on={index > 0} onPress={() => onIndex(index - 1)} />
-        <View style={{ flex: 1, alignItems: "center" }} accessibilityRole="header">
+        {/* Claude's own label for the step ("Step 13 of 15"): the pages the phone holds are fewer when earlier steps aren't loaded, so their count would only disagree with it. It goes in what is read aloud. */}
+        <View accessible style={{ flex: 1, alignItems: "center" }} accessibilityRole="header" accessibilityLabel={page ? `${page.kicker}, page ${index + 1} of ${pages.length}` : undefined}>
           <Txt variant="small" tone="cobalt" numberOfLines={1} style={{ fontWeight: "700" }}>
-            {page ? `${page.kicker} · ${index + 1} of ${pages.length}` : ""}
+            {page ? page.kicker : ""}
           </Txt>
         </View>
         {fresh ? (

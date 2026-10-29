@@ -947,7 +947,7 @@ describe("Step by step's pages", () => {
       await steps();
       expect(screen.getByTestId("step-pager")).toBeTruthy();
       expect(screen.queryByTestId("chat-list")).toBeNull();
-      expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 2 of 2, page 3 of 3" })).toBeTruthy();
       // The newest page's buttons are there, on it.
       expect(screen.getByRole("button", { name: "Commit, next" })).toBeTruthy();
     });
@@ -956,27 +956,27 @@ describe("Step by step's pages", () => {
       await steps();
       expect(screen.getByRole("button", { name: "Next page" }).props.accessibilityState).toMatchObject({ disabled: true });
       await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
-      expect(screen.getByText("Step 1 of 2 · 2 of 3")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 1 of 2, page 2 of 3" })).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
-      expect(screen.getByText("Start · 1 of 3")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Start, page 1 of 3" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Previous page" }).props.accessibilityState).toMatchObject({ disabled: true });
       await fireEvent.press(screen.getByRole("button", { name: "Next page" }));
-      expect(screen.getByText("Step 1 of 2 · 2 of 3")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 1 of 2, page 2 of 3" })).toBeTruthy();
     });
 
     it("follows a new page when on the newest, and says one came when reading an older one", async () => {
       const { controller } = await steps(run.slice(0, 2));
-      expect(screen.getByText("Step 1 of 2 · 2 of 2")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 1 of 2, page 2 of 2" })).toBeTruthy();
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 100, event: run[2] } }));
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 101, event: run[3] } }));
-      await waitFor(() => expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole("header", { name: "Step 2 of 2, page 3 of 3" })).toBeTruthy());
       await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 102, event: { kind: "assistant_text", block_id: "p3", text: "# Done — shipped" } } }));
       // Still on the page being read; the way to the new one says so.
       await waitFor(() => expect(screen.getByRole("button", { name: "New page" })).toBeTruthy());
-      expect(screen.getByText("Step 1 of 2 · 2 of 4")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 1 of 2, page 2 of 4" })).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "New page" }));
-      expect(screen.getByText("Done · 4 of 4")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Done, page 4 of 4" })).toBeTruthy();
     });
 
     it("can be read as one list, and back as pages, from the chat's settings (no button for it beside the pages)", async () => {
@@ -1012,7 +1012,7 @@ describe("Step by step's pages", () => {
         { kind: "assistant_text", block_id: "r", text: "So the release notes have it." },
         { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
       ]);
-      expect(screen.getByText("Step 2 of 2 · 3 of 3")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Step 2 of 2, page 3 of 3" })).toBeTruthy();
       // Once on the page: at its end, not in its heading card as well.
       expect(screen.getAllByRole("button", { name: "Commit, next" })).toHaveLength(1);
       await fireEvent.press(screen.getByRole("button", { name: "Commit, next" }));
