@@ -1,6 +1,7 @@
 import type { ChatItem, EditInfo, ToolItem } from "../store";
 import { relativeTo } from "./diff";
 import { serverLabel } from "./complete";
+import { followsReply } from "./hookItems";
 
 export type Step = ToolItem;
 type AssistantItem = Extract<ChatItem, { type: "assistant" }>;
@@ -33,10 +34,14 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
     } else rows.push(...foldTurn(turn, live && last));
     turn = [];
   };
-  for (const it of items) {
+  for (const [i, it] of items.entries()) {
     if (it.type === "user") {
       flush(false);
       rows.push(it);
+    } else if (it.type === "hook" && !followsReply(items[i - 1])) {
+      // Sent into a turn that was still at work (see followsReply): a note where it came, and the turn goes on after it.
+      flush(false);
+      rows.push({ type: "hook", id: it.id, text: it.text, rows: [], waiting: false });
     } else if (it.type === "hook") {
       // What came before it is the user's turn, as far as it went, or an earlier hook's work (a Stop hook that blocked
       // twice, or one before Lantern's post-hook); this hook's work follows.

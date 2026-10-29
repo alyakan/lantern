@@ -96,11 +96,30 @@ describe("groupItems", () => {
   });
 
   it("a hook row is the same row when what it holds is the same, and not when it holds something more", () => {
-    const base: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash")];
-    const a = groupItems(base, true)[1];
+    const base: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, say("m1", "Done."), { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash")];
+    const a = groupItems(base, true)[2];
     expect(a).toMatchObject({ type: "hook" });
-    expect(sameRow(a, groupItems(base, true)[1])).toBe(true);
-    expect(sameRow(a, groupItems([...base, tool("t3", "Read")], true)[1])).toBe(false);
+    expect(sameRow(a, groupItems(base, true)[2])).toBe(true);
+    expect(sameRow(a, groupItems([...base, tool("t3", "Read")], true)[2])).toBe(false);
+  });
+
+  it("a hook that arrives while the turn is still at work is a note, and the turn's work and answer stay out in the open", () => {
+    // A message typed while a compaction ended: the hook for the compaction's turn is sent into it, before any reply.
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "why are the links broken?" },
+      tool("t1", "Read"),
+      { type: "hook", id: "h1", text: "Update the brain if needed" },
+      tool("t2", "Bash"),
+      tool("t3", "Edit", { edit }),
+      say("m1", "The renderer only read http links."),
+      done,
+    ];
+    const rows = groupItems(items);
+    expect(rows.map((r) => r.type)).toEqual(["user", "activity", "hook", "activity", "assistant", "turn"]);
+    expect(rows[2]).toMatchObject({ id: "h1", rows: [], waiting: false });
+    expect(rows[4]).toMatchObject({ id: "m1" });
+    // Even right after the message, before any work.
+    expect(groupItems([{ type: "user", id: "u1", text: "go" }, { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash")], true).map((r) => r.type)).toEqual(["user", "hook", "activity"]);
   });
 
   it("keeps the last text visible, where it was said, when the turn ended on a tool", () => {

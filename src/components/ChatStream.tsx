@@ -43,6 +43,17 @@ function NoteLine({ text }: { text: string }) {
 function HookCard({ row, render }: { row: HookRow; render: (row: Row) => ReactNode }) {
   const [open, setOpen] = useState(false);
   const shown = open || row.waiting;
+  // A hook that came while the turn was at work has no work of its own: just the note, where it was sent.
+  if (!row.rows.length) {
+    return (
+      <div className="hook-card">
+        <div className="hook-card-head" style={{ cursor: "default" }}>
+          <span className="auto-turn-dot" aria-hidden />
+          <span className="hook-card-text">Post-hook: {row.text}</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="hook-card">
       <button type="button" className="hook-card-head" aria-expanded={shown} onClick={() => setOpen(!open)} title={shown ? "Hide what Claude did" : "Show what Claude did"}>
