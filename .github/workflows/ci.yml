@@ -8,16 +8,24 @@ on:
 permissions:
   contents: read
 
+# Runs started by someone in CI_RUNNER_USERS (e.g. ["alyakan"]) go to CI_RUNNER (e.g. ["self-hosted","lantern-mac"]),
+# that person's own Mac, which keeps its build caches between runs; everything else stays GitHub-hosted. A pull request
+# from a fork never does, whoever opened it: the repo is public, and that Mac is someone's own computer. Both variables
+# must be valid JSON: a typo fails every run of this workflow before any job starts.
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"macos-latest"') || 'macos-latest' }}
+    env:
+      # A self-hosted runner's background service sets no locale.
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
 
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
@@ -25,6 +33,7 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: runner.environment == 'github-hosted'
         with:
           workspaces: src-tauri
 
@@ -61,7 +70,7 @@ jobs:
   # The phone app (mobile/): its tests (Noise against the Mac's transcripts and the published vectors, the sync, the
   # connection) and its types.
   mobile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: mobile
@@ -71,7 +80,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
           cache-dependency-path: mobile/package-lock.json
 
       - run: npm ci
