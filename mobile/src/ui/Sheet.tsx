@@ -1,7 +1,8 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
-import { useWindowDimensions } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { TrueSheet } from "@lodev09/react-native-true-sheet";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { LockCover } from "../shell/LockCover";
 import { useLockState } from "../shell/lockContext";
 import { SHEET_MAX } from "../view/layout";
 
@@ -24,7 +25,9 @@ export type SheetScroll = RefObject<any>;
  * goes), and `scroll`, the ref for the list in it that scrolls.
  *
  * A sheet sized to its content can't hide the screen around it, so when the app lock covers the app (it locked, or the app is
- * leaving the screen) the sheet is put away: the lock's own cover is what shows.
+ * leaving the screen) the sheet is put away at once, with the lock's cover drawn over what is in it meanwhile (iOS takes the
+ * app switcher's picture as the app leaves: no animation is left running for it to catch). One asked for while the app is
+ * covered (a handoff as it locks, a sheet at launch) is never shown: it says it closed.
  */
 export function Sheet({ onClose, children }: { onClose: () => void; children: (close: () => void, scroll: SheetScroll) => ReactNode }) {
   const sheet = useRef<TrueSheet>(null);
@@ -40,13 +43,22 @@ export function Sheet({ onClose, children }: { onClose: () => void; children: (c
   const close = () => void sheet.current?.dismiss();
   const lock = useLockState();
   const covered = lock.ready && (lock.locked || lock.covered);
+  // Covered when it was asked for: never presented.
+  const blocked = useRef(covered).current;
   useEffect(() => {
-    if (covered) close();
+    if (blocked) return done();
+    if (covered) void sheet.current?.dismiss(false);
   }, [covered]);
+  if (blocked) return null;
   return (
     <TrueSheet ref={sheet} detents={["auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
       <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
+      {covered && (
+        <View style={StyleSheet.absoluteFill}>
+          <LockCover />
+        </View>
+      )}
     </TrueSheet>
   );
 }

@@ -110,7 +110,23 @@ describe("the lock and a sheet", () => {
     );
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => lock.start());
+    // At once, with the lock's cover over what was in it meanwhile: iOS's app switcher picture is taken as the app leaves.
+    expect(screen.getByText("Lantern is locked")).toBeTruthy();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("never shows one asked for while the app is locked (a button's next sheet as it locks, one at launch): it says it closed", async () => {
+    const { lock } = setup({ enabled: true, results: ["cancelled"] });
+    await act(async () => lock.start());
+    const onClose = jest.fn();
+    await render(
+      <LockContext.Provider value={lock}>
+        <Sheet onClose={onClose}>{() => <Text>the sheet</Text>}</Sheet>
+      </LockContext.Provider>,
+    );
+    expect(screen.queryByText("the sheet")).toBeNull();
+    expect(screen.queryByTestId("true-sheet")).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("leaves it open when the lock is off", async () => {
