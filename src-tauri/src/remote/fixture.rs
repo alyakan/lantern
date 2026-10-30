@@ -211,6 +211,11 @@ impl Host for FixtureHost {
         Ok(())
     }
 
+    fn rename(&self, slot: &str, title: String) -> Result<(), String> {
+        self.hub.titled(slot, &title);
+        Ok(())
+    }
+
     /// A scripted terminal: it says it ran the command. One with "password" in it asks for one (a secret prompt) and ends when
     /// answered; one with "sleep" in it keeps running until stopped.
     fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>> {

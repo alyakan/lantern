@@ -313,6 +313,31 @@ describe("a chat a paired phone closes", () => {
   });
 });
 
+describe("a chat a paired phone names", () => {
+  const renamed = (calls: Call[]) => calls.filter(([c]) => c === "rename_session").map(([, a]) => a);
+  const toWindow = (event: string, payload: unknown) => (globalThis as unknown as { mockEmit: (e: string, p?: unknown) => Promise<void> }).mockEmit(event, payload);
+
+  it("is named as the History menu's Rename names one, by its session, once it has had a conversation", async () => {
+    const calls = await launch();
+    await fromPhone(ask());
+    await waitFor(() => expect(answers(calls)).toHaveLength(1));
+    await waitFor(() => expect(sent(calls).some((t) => t.includes("add a dark mode toggle"))).toBe(true));
+    const slot = String(answers(calls)[0]?.slot);
+    // (The conversation's id comes with the chat's first events, after the message is sent.)
+    await quiet();
+    await toWindow("remote-rename-chat", { slot, title: "Dark mode" });
+    await waitFor(() => expect(renamed(calls)).toEqual([{ sessionId: `mock-${slot}`, title: "Dark mode" }]));
+  });
+
+  it("does nothing for a chat it doesn't have", async () => {
+    const calls = await launch();
+    await quiet();
+    await toWindow("remote-rename-chat", { slot: "nope", title: "Dark mode" });
+    await quiet();
+    expect(renamed(calls)).toEqual([]);
+  });
+});
+
 describe("a chat a paired phone starts or switches to Step by step", () => {
   const firstSlot = (calls: Call[]) => String(sessions(calls)[0]?.[1]?.slot);
 

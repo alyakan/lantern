@@ -162,6 +162,12 @@ export interface RemoteClose {
   slot: string;
 }
 
+/** What the backend asks of the window when a phone names a chat (see remote::RenameRequest). */
+export interface RemoteRename {
+  slot: string;
+  title: string;
+}
+
 /** What the window knows of the chat a phone wants to close. */
 export interface CloseTarget {
   known: boolean;

@@ -670,6 +670,32 @@ describe("a chat", () => {
       expect(lastOf("send")).toBeUndefined();
     });
 
+    it("offers Rename only from a Mac that can, asks for the name with the chat's own in the box, and sends it trimmed", async () => {
+      const { Alert } = jest.requireActual<typeof import("react-native")>("react-native");
+      const prompt = jest.spyOn(Alert, "prompt").mockImplementation(() => {});
+      const old = await withSession(turn);
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+      await old.unmount();
+      const { controller } = makeController();
+      const { lastOf } = attachSession(controller, { rename: null }, ["rename"]);
+      await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ title: "Old name" })], events: { a: turn }, connection: connectedWith(["rename"]) }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Rename" }));
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(prompt.mock.calls[0][0]).toBe("Rename this chat");
+      expect(prompt.mock.calls[0][3]).toBe("plain-text");
+      expect(prompt.mock.calls[0][4]).toBe("Old name");
+      const buttons = prompt.mock.calls[0][2] as { text: string; onPress?: (name?: string) => void }[];
+      // Nothing typed, or only spaces: nothing is sent.
+      await act(async () => buttons.find((b) => b.text === "Rename")?.onPress?.("   "));
+      expect(lastOf("rename")).toBeUndefined();
+      await act(async () => buttons.find((b) => b.text === "Rename")?.onPress?.("  Release 0.1.84 "));
+      await waitFor(() => expect(lastOf("rename")).toEqual({ op: "rename", slot: "a", title: "Release 0.1.84" }));
+      prompt.mockRestore();
+    });
+
     it("offers To-dos only from a Mac that keeps them, and opens this chat's list in its sheet, beside Changes", async () => {
       const quiet = await withSession(turn);
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));

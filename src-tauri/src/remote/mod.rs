@@ -106,6 +106,14 @@ pub struct CloseRequest {
     pub slot: String,
 }
 
+/// What the window is asked when a phone names a chat. The gateway has checked the chat has a conversation and the name is one;
+/// the window checks again.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RenameRequest {
+    pub slot: String,
+    pub title: String,
+}
+
 /// What the window is asked when a phone puts a chat on one of the presets.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SetPresetRequest {

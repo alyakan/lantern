@@ -54,6 +54,8 @@ export interface SidebarHandlers {
   onChat: (slot: string) => void;
   onTeam: (slot: string) => void;
   onAgent: (slot: string, team: string) => void;
+  /** Names a chat, as the History menu's Rename does (the app finds its conversation; a chat with none yet is left alone). Absent: the menu has no Rename. */
+  onRename?: (slot: string, title: string) => void;
   /** Closes chats (any, the one on screen too: the app shows another, or the start screen). Asking first is the sidebar's job. */
   onCloseChats: (slots: string[]) => void;
   /** What closing an agent would throw away, and closing it (the same checked flow as the canvas's "Clean up and close"). */
@@ -247,6 +249,43 @@ interface Closer {
 
 const targetOf = (item: Pick<SidebarChat, "slot" | "title" | "state">, kind: CloseTarget["kind"], agents: string[] = []): CloseTarget => ({ slot: item.slot, kind, title: item.title, state: item.state, agents });
 const itemTarget = (item: SidebarItem): CloseTarget => (item.kind === "team" ? targetOf(item, "team", item.agents.map((a) => a.slot)) : targetOf(item, "chat"));
+
+/** Naming a chat, where the user pressed: its words are there to change, Enter keeps them, Escape or a press elsewhere doesn't. */
+function RenameBox({ target, at, onSave, onCancel }: { target: CloseTarget; at: At; onSave: (title: string) => void; onCancel: () => void }) {
+  const root = useRef<HTMLFormElement>(null);
+  const [title, setTitle] = useState(target.title);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && onCancel();
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  return (
+    <form
+      className="sb-rename"
+      role="group"
+      aria-label={`Rename ${target.title}`}
+      ref={root}
+      style={{ left: at.x, top: at.y }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (title.trim()) onSave(title);
+      }}
+    >
+      <input
+        autoFocus
+        aria-label="Chat name"
+        value={title}
+        maxLength={200}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onCancel()}
+      />
+      <button type="submit" className="sb-rename-save" disabled={!title.trim()}>
+        Rename
+      </button>
+    </form>
+  );
+}
 
 /** Closing's question, inline under the row (open pane) or on its own where the user pressed (the bar). */
 function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer: Closer; floating: boolean }) {
@@ -716,6 +755,7 @@ export function Sidebar(props: Props) {
   // inline under its row (the bar has no room, so there it opens where the user pressed). A menu is "Close chat".
   const [closing, setClosing] = useState<Closing | null>(null);
   const [menu, setMenu] = useState<{ target: CloseTarget; at: At } | null>(null);
+  const [renaming, setRenaming] = useState<{ target: CloseTarget; at: At } | null>(null);
   const [notice, setNotice] = useState<{ folder: string; text: string } | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const say = (folder: string, text: string) => {
@@ -771,7 +811,9 @@ export function Sidebar(props: Props) {
   const menuRoot = useRef<HTMLDivElement>(null);
   useDismiss(menu !== null, menuRoot, () => setMenu(null));
   // While a question or a menu is open the bar stays open under it, and shuts when it is done if the pointer went elsewhere.
-  const hold = closing !== null || menu !== null;
+  const hold = closing !== null || menu !== null || renaming !== null;
+  // A chat can be named once it has had a conversation (a draft has nothing to name yet); a team or an agent keeps its own name.
+  const canRename = !!handlers.onRename && menu?.target.kind === "chat" && menu.target.state !== "draft";
   const inside = useRef(false);
 
   useEffect(
@@ -994,11 +1036,35 @@ export function Sidebar(props: Props) {
       </div>
       {menu && (
         <div className="menu sb-context" role="menu" aria-label="Chat" ref={menuRoot} style={{ left: menu.at.x, top: menu.at.y }} onKeyDown={menuKeys}>
-            <button role="menuitem" className="menu-row" autoFocus onClick={() => ask(menu.target, menu.at)}>
+            {canRename && (
+              <button
+                role="menuitem"
+                className="menu-row"
+                autoFocus
+                onClick={() => {
+                  setRenaming(menu);
+                  setMenu(null);
+                }}
+              >
+                <span className="menu-row-title">Rename chat</span>
+              </button>
+            )}
+            <button role="menuitem" className="menu-row" autoFocus={!canRename} onClick={() => ask(menu.target, menu.at)}>
               <span className="menu-row-title">{menu.target.kind === "team" ? "Close team" : menu.target.kind === "agent" ? "Close agent" : "Close chat"}</span>
             </button>
           </div>
         )}
+      {renaming && (
+        <RenameBox
+          target={renaming.target}
+          at={renaming.at}
+          onSave={(title) => {
+            handlers.onRename?.(renaming.target.slot, title);
+            setRenaming(null);
+          }}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
       {!full && closing && <CloseConfirm closing={closing} closer={closer} floating />}
       {mode === "pinned" && <div className="sb-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={shownWidth} tabIndex={0} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onResizeKey} />}
     </aside>

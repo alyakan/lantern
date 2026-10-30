@@ -112,6 +112,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const canShell = useMacCan("shell");
   const canImages = useMacCan("images");
   const canTodos = useMacCan("todos");
+  const canRename = useMacCan("rename");
   const lock = useAppLock();
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
@@ -403,6 +404,27 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               setPanel("todos");
               setChangesOpen(true);
             },
+          },
+        ]
+      : []),
+    ...(canRename
+      ? [
+          {
+            label: "Rename",
+            icon: "rename" as const,
+            hint: "Names this chat, here and on the Mac",
+            disabled: !online,
+            onPress: () =>
+              Alert.prompt("Rename this chat", undefined, [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Rename",
+                  onPress: (name?: string) => {
+                    const title = name?.trim();
+                    if (title) sync.rename(slot, title).catch(fail);
+                  },
+                },
+              ], "plain-text", chat?.title?.trim() ?? ""),
           },
         ]
       : []),

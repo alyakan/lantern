@@ -35,6 +35,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onTeam: vi.fn(),
     onAgent: vi.fn(),
     onCloseChats: vi.fn(),
+    onRename: vi.fn(),
     closeCheck: vi.fn(async () => noLoss),
     closeWorker: vi.fn(async () => {}),
     onHistory: vi.fn(),
@@ -467,6 +468,53 @@ describe("closing from the sidebar", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Close finished chats" }));
     expect(h.onCloseChats).toHaveBeenCalledWith(["a", "b"]);
     expect(within(project("lantern")).getByRole("status")).toHaveTextContent("Closed 2 finished chats");
+  });
+
+  describe("naming a chat", () => {
+    const menuOf = (row: RegExp) => fireEvent.contextMenu(rowOf(row), { clientX: 30, clientY: 200 });
+
+    it("is in the menu of a right click: its name opens where the user pressed, and Enter keeps what was typed", () => {
+      const { h } = setup();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      expect(screen.queryByRole("menu", { name: "Chat" })).toBeNull();
+      const box = screen.getByRole("group", { name: "Rename Done chat" });
+      expect(box).toHaveStyle({ left: "30px", top: "200px" });
+      const input = within(box).getByRole("textbox", { name: "Chat name" });
+      expect(input).toHaveValue("Done chat");
+      fireEvent.change(input, { target: { value: "  Release 0.1.84 " } });
+      fireEvent.submit(box);
+      expect(h.onRename).toHaveBeenCalledWith("s3", "  Release 0.1.84 ");
+      expect(screen.queryByRole("group", { name: "Rename Done chat" })).toBeNull();
+    });
+
+    it("keeps nothing on Escape, a press elsewhere, or a name with nothing in it", () => {
+      const { h } = setup();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      const input = screen.getByRole("textbox", { name: "Chat name" });
+      fireEvent.change(input, { target: { value: "   " } });
+      expect(within(screen.getByRole("group", { name: "Rename Done chat" })).getByRole("button", { name: "Rename" })).toBeDisabled();
+      fireEvent.submit(screen.getByRole("group", { name: "Rename Done chat" }));
+      expect(h.onRename).not.toHaveBeenCalled();
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+      expect(h.onRename).not.toHaveBeenCalled();
+    });
+
+    it("is not offered for a draft, which has no conversation to name, or for a team", () => {
+      setup();
+      menuOf(/^Typing a draft/);
+      expect(screen.getByRole("menuitem", { name: "Close chat" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Rename chat" })).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      menuOf(/^Team: audit sweep/);
+      expect(screen.queryByRole("menuitem", { name: "Rename chat" })).toBeNull();
+    });
   });
 
   describe("in the collapsed bar", () => {

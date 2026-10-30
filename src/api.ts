@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
-import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset, WindowProvider } from "./lib/remoteChats";
+import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset, WindowProvider } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
@@ -412,6 +412,8 @@ export const api = {
   onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
   /** A paired phone asked to close a chat: the window checks it and closes it as the sidebar does. */
   onRemoteClose: (cb: (r: RemoteClose) => void): Promise<UnlistenFn> => listen<RemoteClose>("remote-close-chat", (e) => cb(e.payload)),
+  /** A paired phone named a chat (the backend checked it has a conversation and the name is one). */
+  onRemoteRename: (cb: (r: RemoteRename) => void): Promise<UnlistenFn> => listen<RemoteRename>("remote-rename-chat", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on Chat or Step by step. */
   onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */
