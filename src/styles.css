@@ -3769,6 +3769,10 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-note { align-self: stretch; display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-chip); background: var(--field); font-size: calc(13px * var(--font-scale)); color: var(--text); }
 .desk-note .desk-actions { flex-wrap: wrap; margin-top: 0; }
 .desk-hits { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+/* The Desk's own answer: Claude's markdown, then the chats it read, numbered as it cites them. */
+.desk-answer > :first-child { margin-top: 0; }
+.desk-answer p, .desk-answer ul, .desk-answer ol:not(.desk-sources) { margin: 4px 0; }
+.desk-sources { list-style: decimal; padding-left: 20px; margin-top: 8px; color: var(--muted); }
 .desk-hit { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 8px; border: none; border-radius: var(--radius-inner); background: none; color: var(--text); text-align: left; }
 .desk-hit:hover { background: var(--bg-hover); }
 .desk-hit-title { font-weight: 600; }

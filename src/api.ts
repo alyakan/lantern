@@ -220,6 +220,8 @@ export const api = {
   searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
   /** Where a message typed on the Desk goes (see desk.rs): the window then sends the user's own words there. */
   deskRoute: (claudePath: string, text: string, chats: RouteCandidate[], projects: string[]) => invoke<DeskRoute>("desk_route", { claudePath, text, chats, projects }),
+  /** The Desk's own answer to `question` (Markdown, citing the chats as [1], [2] in order), from the past chats the search found. */
+  deskAnswer: (claudePath: string, question: string, chats: { id: string; folder: string; title: string; project: string }[]) => invoke<string>("desk_answer", { claudePath, question, chats }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
   renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
   /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */

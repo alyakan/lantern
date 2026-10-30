@@ -6,4 +6,4 @@ import type { RemoteWorkflow } from "./RemoteWorkflow";
  * Where a message typed on a phone's Desk goes (the answer to Request::DeskRoute). The phone sends it there itself, as it would
  * from the chat or the New chat sheet: the Mac only decides.
  */
-export type RemoteDeskRoute = { "kind": "chat", slot: string, } | { "kind": "start", project: string, workflow: RemoteWorkflow, } | { "kind": "ask", slots: Array<string>, unsure: boolean, } | { "kind": "search", terms: string, hits: Array<RemoteDeskHit>, failed: boolean, };
+export type RemoteDeskRoute = { "kind": "chat", slot: string, } | { "kind": "start", project: string, workflow: RemoteWorkflow, } | { "kind": "ask", slots: Array<string>, unsure: boolean, } | { "kind": "search", terms: string, hits: Array<RemoteDeskHit>, failed: boolean, } | { "kind": "answer", terms: string, text: string, sources: Array<RemoteDeskHit>, error: string | null, };

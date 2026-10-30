@@ -17,6 +17,8 @@ export type DeskOutcome =
   /** Which chat? The likeliest of the Desk's (`unsure`: a new chat is offered too). */
   | { kind: "ask"; slots: string[]; unsure: boolean }
   | { kind: "search"; terms: string; hits: RemoteDeskHit[]; failed: boolean }
+  /** The Desk's own answer (Markdown citing `sources` as [1], [2]); "" with no sources: no chat talks about it. */
+  | { kind: "answer"; terms: string; text: string; sources: RemoteDeskHit[]; error: string | null }
   | { kind: "failed"; why: string };
 
 export interface DeskEntry {

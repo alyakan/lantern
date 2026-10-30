@@ -115,6 +115,16 @@ describe("the Desk on the phone", () => {
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
   });
 
+  it("shows the Desk's own answer to how something stands, with the chats it read, sending nothing", async () => {
+    const { h, session } = await open({ kind: "answer", terms: "testo", text: "- The demo is ready [1]", error: null, sources: [{ title: "Testo demo prep", project: "ios-app", updated_ms: 5, snippet: "", slot: "a" }, { title: "Plan Testo", project: "ios-app", updated_ms: 4, snippet: "", slot: null }] });
+    await say("how are we on testo?");
+    expect(screen.getByText("The demo is ready [1]")).toBeTruthy();
+    expect(screen.getByText("[2] Plan Testo · ios-app · on your Mac")).toBeTruthy();
+    await fireEvent.press(screen.getByText("[1] Testo demo prep · ios-app"));
+    expect(h.onOpenChat).toHaveBeenCalledWith("a");
+    expect(session.lastOf("send")).toBeUndefined();
+  });
+
   it("says why when the Mac didn't answer, and doesn't send it anywhere", async () => {
     const { session } = await open(new Error("Your Mac didn't answer in time."));
     await say("hello");

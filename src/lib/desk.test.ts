@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Chats } from "../sessions";
-import { clip, deskFeed, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
+import { clip, deskFeed, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
 import { addDesk, moveProject, NO_DESKS } from "./desks";
 import { openProjects } from "./sidebar";
 
@@ -131,5 +131,21 @@ describe("a card's text", () => {
 
   it("is left whole when it fits", () => {
     expect(clip("  short\n text ", 20)).toBe("short text");
+  });
+});
+
+describe("the Desk's messages read back", () => {
+  it("says an answer that wasn't finished when Lantern closed has none, and keeps a finished one", () => {
+    const at = 1;
+    const read = readLog([
+      { id: "a", desk: "home", at, text: "How is it?", also: [], outcome: { kind: "answer", terms: "it", hits: [], text: null } },
+      { id: "b", desk: "home", at, text: "And now?", also: [], outcome: { kind: "answer", terms: "it", hits: null, text: null } },
+      { id: "c", desk: "home", at, text: "Done?", also: [], outcome: { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" } },
+    ]);
+    expect(read.map((e) => e.outcome)).toEqual([
+      { kind: "answer", terms: "it", hits: [], text: null, error: "Lantern closed before it answered." },
+      { kind: "answer", terms: "it", hits: "failed", text: null, error: "Lantern closed before it answered." },
+      { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" },
+    ]);
   });
 });

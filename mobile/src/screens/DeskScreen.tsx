@@ -10,6 +10,7 @@ import { Chip, Txt } from "../ui/components";
 import { AboveKeyboard, barRoom } from "../ui/keyboard";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
+import { Markdown } from "../ui/Markdown";
 import { radius, space, useColors } from "../ui/theme";
 import { ago } from "../view/home";
 import { cantSend, chatName, clip, deskFeed, deskLive, deskShown, LOG_MAX, waitingBy, type DeskEntry, type DeskOutcome } from "../view/desk";
@@ -63,10 +64,10 @@ function Entry({ entry, desk, onOpen, onSendTo, onStartIn }: { entry: DeskEntry;
         </Txt>
       </View>
       {o.kind === "routing" && (
-        <View accessibilityLabel="Finding the chat" accessible style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View accessibilityLabel="Working on it" accessible style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Dots />
           <Txt variant="small" tone="ink2">
-            Finding the chat
+            Working on it
           </Txt>
         </View>
       )}
@@ -88,6 +89,7 @@ function Entry({ entry, desk, onOpen, onSendTo, onStartIn }: { entry: DeskEntry;
       )}
       {o.kind === "ask" && <Ask outcome={o} desk={desk} chats={chats} onSendTo={onSendTo} onStartIn={onStartIn} />}
       {o.kind === "search" && <Found outcome={o} onOpen={onOpen} />}
+      {o.kind === "answer" && <Answered outcome={o} onOpen={onOpen} />}
     </View>
   );
 }
@@ -112,6 +114,31 @@ function Ask({ outcome, desk, chats, onSendTo, onStartIn }: { outcome: Extract<D
             </Chip>
           ))}
       </View>
+    </View>
+  );
+}
+
+/** The Desk's own answer to how something stands, and the chats it read, numbered as it cites them. */
+function Answered({ outcome, onOpen }: { outcome: Extract<DeskOutcome, { kind: "answer" }>; onOpen: (slot: string) => void }) {
+  const colors = useColors();
+  if (outcome.sources.length === 0 && !outcome.error) {
+    return (
+      <Txt variant="small" tone="ink2" style={{ textAlign: "right" }}>
+        No chat on this Desk talks about "{outcome.terms}".
+      </Txt>
+    );
+  }
+  return (
+    <View style={{ alignSelf: "stretch", backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, gap: 8, marginRight: 36 }}>
+      {outcome.text ? <Markdown text={outcome.text} /> : <Txt variant="small" tone="stop">{outcome.error ?? "No answer came."}</Txt>}
+      {outcome.sources.map((h, i) => (
+        <PressScale key={i} disabled={!h.slot} accessibilityRole={h.slot ? "button" : undefined} accessibilityHint={h.slot ? "Opens the chat" : undefined} onPress={() => h.slot && onOpen(h.slot)} scaleTo={0.98}>
+          <Txt variant="tiny" tone="ink3" numberOfLines={1}>
+            [{i + 1}] {h.title || "A chat"} · {h.project}
+            {h.slot ? "" : " · on your Mac"}
+          </Txt>
+        </PressScale>
+      ))}
     </View>
   );
 }
@@ -206,7 +233,10 @@ export function DeskScreen({ top, onOpenChat, renderNeeds }: DeskProps) {
     if (r.kind === "chat") sendTo(entry, r.slot);
     else if (r.kind === "start") startIn(entry, r.project, r.workflow === "steps" ? "steps" : "chat");
     else if (r.kind === "ask") edit(entry.id, { kind: "ask", slots: r.slots, unsure: r.unsure });
-    else edit(entry.id, { kind: "search", terms: r.terms, hits: r.hits, failed: r.failed });
+    else if (r.kind === "answer") edit(entry.id, { kind: "answer", terms: r.terms, text: r.text, sources: r.sources, error: r.error });
+    else if (r.kind === "search") edit(entry.id, { kind: "search", terms: r.terms, hits: r.hits, failed: r.failed });
+    // A newer Mac's kind of answer this app can't show.
+    else edit(entry.id, { kind: "failed", why: "Update Lantern on this phone to see this." });
   };
   const send = () => {
     const said = text.trim();
