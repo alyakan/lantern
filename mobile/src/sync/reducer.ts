@@ -54,6 +54,8 @@ export interface ChatView {
   todos: RemoteTodo[];
   /** The tokens the chat holds, and its model's context size when the Mac has said it. */
   context: { tokens: number; window: number | null } | null;
+  /** What the chat still runs in the background (a dev server, a subagent): each one's description (empty for a Mac that can't say). */
+  background: string[];
   /** The number of the last event applied (in `epoch`). */
   seq: number;
   /** Earlier turns not loaded yet (Request::Earlier brings them). */
@@ -99,7 +101,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
 
 export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null, desk: null };
 
-export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
+export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -206,10 +208,10 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, items: upsert(items, { kind: "desktop", id: `desktop-${event.what}`, what: event.what }) };
     case "session_started":
     case "session_ended":
-      // A new claude, or none: nothing it was asking can be answered any more.
-      return { ...view, thinking: false, items: items.map((it) => (it.kind === "prompt" && it.state === "open" ? { ...it, state: "withdrawn" } : it)) };
+      // A new claude, or none: nothing it was asking can be answered any more, and nothing it ran goes on.
+      return { ...view, thinking: false, background: [], items: items.map((it) => (it.kind === "prompt" && it.state === "open" ? { ...it, state: "withdrawn" } : it)) };
     case "asleep":
-      return view;
+      return event.asleep ? { ...view, background: [] } : view;
     case "conversation_reset":
       return { ...view, items: [], todos: [], context: null, hidden: 0, thinking: false };
     case "commands":
@@ -218,6 +220,8 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, todos: event.items };
     case "context":
       return { ...view, context: { tokens: event.tokens, window: event.window ?? view.context?.window ?? null } };
+    case "background":
+      return { ...view, background: event.tasks };
     case "shell_started":
       return { ...view, items: upsert(items, { kind: "shell", id: event.id, command: event.command, output: "", status: "running", code: null, secret: false }, (old) => old) };
     case "shell_output":

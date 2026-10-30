@@ -190,6 +190,8 @@ pub enum RemoteEvent {
         #[ts(type = "number | null")]
         window: Option<u64>,
     },
+    /// What the chat still runs in the background (a dev server, a subagent), whole each time it changes: each one's description (extras).
+    Background { tasks: Vec<String> },
     /// A command started from a phone (Request::Shell) is running. Only such commands are sent, never the Mac's own (extras).
     ShellStarted { id: String, command: String },
     /// What that command printed, stdout and stderr together, as it comes (extras).
@@ -205,7 +207,7 @@ impl RemoteEvent {
     pub fn is_extra(&self) -> bool {
         matches!(
             self,
-            RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::Context { .. } | RemoteEvent::ShellStarted { .. } | RemoteEvent::ShellOutput { .. } | RemoteEvent::ShellSecret { .. } | RemoteEvent::ShellDone { .. }
+            RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::Context { .. } | RemoteEvent::Background { .. } | RemoteEvent::ShellStarted { .. } | RemoteEvent::ShellOutput { .. } | RemoteEvent::ShellSecret { .. } | RemoteEvent::ShellDone { .. }
         )
     }
 }
@@ -214,6 +216,9 @@ impl RemoteEvent {
 pub fn to_remote_for(event: &UiEvent, extras: bool) -> Option<RemoteEvent> {
     to_remote(event).filter(|e| extras || !e.is_extra())
 }
+
+/// The most background tasks a phone is told of (each one's description cut short too).
+pub const BACKGROUND_MAX: usize = 20;
 
 /// The most slash commands a phone is sent, each with its text cut short: a long list of skills is still a short message.
 pub const COMMANDS_MAX: usize = 300;
@@ -253,6 +258,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         }
         U::Todos { parent: None, items } => R::Todos { items: items.iter().map(|t| RemoteTodo { content: t.content.clone(), status: t.status.clone(), active_form: t.active_form.clone() }).collect() },
         U::ContextUsed { tokens } => R::Context { tokens: *tokens, window: None },
+        U::BackgroundTasks { tasks } => R::Background { tasks: tasks.iter().take(BACKGROUND_MAX).map(|t| t.description.chars().take(200).collect()).collect() },
         // Only the commands a phone started: what a command typed on the Mac prints stays there.
         U::ShellStarted { id, command } if phone_shell_id(id) => R::ShellStarted { id: id.clone(), command: command.clone() },
         U::ShellOutput { id, text } if phone_shell_id(id) => R::ShellOutput { id: id.clone(), text: text.clone() },
@@ -263,7 +269,6 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         // Lantern's own bookkeeping, and what only the desktop's panes show.
         U::AgentSetup { .. }
         | U::Retrying { .. }
-        | U::BackgroundTasks { .. }
         | U::TaskStarted { .. }
         | U::TaskEnded { .. }
         | U::AgentModel { .. }

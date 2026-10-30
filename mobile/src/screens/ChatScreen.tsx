@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { Button, ProjectTag, Txt } from "../ui/components";
+import { BackgroundBadge, Button, ProjectTag, Txt } from "../ui/components";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
@@ -576,12 +576,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
                 {chat?.title?.trim() || "Chat"}
               </Txt>
-              {/* The project in its colour (the desktop sidebar's), then how the chat stands and what it runs on. */}
+              {/* The project in its colour (the desktop sidebar's), breathing while the chat works (said in words when there is
+                  no project); what it runs in the background; then whether it sleeps and what it runs on. */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} />}
-                {!!([asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).length) && (
+                {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} />}
+                {view.background.length > 0 && !asleep && <BackgroundBadge tasks={view.background} />}
+                {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
                   <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
-                    {[asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).join(" · ")}
+                    {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
                   </Txt>
                 )}
               </View>
