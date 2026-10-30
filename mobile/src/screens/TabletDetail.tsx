@@ -12,6 +12,7 @@ import { changedFileOf, changedFiles } from "../view/changes";
 import { CHANGES_SHARE, changesWidth, COLUMN_MAX, hasRoomForChanges, shareOf } from "../view/layout";
 import { useMacCan } from "../shell/useControls";
 import { ArtifactsPane } from "./ArtifactsPane";
+import { TodosPane } from "./TodosPane";
 import { ChangesDock, type DockMode } from "./ChangesDock";
 import { ChangesPane } from "./ChangesPane";
 import { PanelMenu, type Panel } from "./PanelMenu";
@@ -49,23 +50,26 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
-  const { views } = useSyncState();
+  const { views, chats } = useSyncState();
   // With the chats away and the window wide enough, the files the chat has changed are beside it, and the chat's Changes button
   // shows or hides them. Otherwise that button opens them in a sheet over the chat.
   const [changesOpen, setChangesOpen] = useState(true);
   const [floating, setFloating] = useState(false);
   const changed = slot ? changedFiles((views[slot] ?? emptyView).items) : [];
-  // What the pane shows: the chat's changes, or (a Mac that lists "artifacts") its folder's artifacts, picked from the pane's title.
+  // What the pane shows: the chat's changes, (a Mac that lists "artifacts") its folder's artifacts, or (one that lists "todos")
+  // its project's to-do list, picked from the pane's title or the chat bar's To-dos.
   const canArtifacts = useMacCan("artifacts");
+  const canTodos = useMacCan("todos");
   const [panel, setPanel] = useState<Panel>("changes");
-  const showing: Panel = canArtifacts ? panel : "changes";
-  // The pane stays once artifacts were picked, even back on Changes with none: the menu is in it.
-  const [artifactsPicked, setArtifactsPicked] = useState(false);
+  const showing: Panel = panel === "artifacts" && canArtifacts ? "artifacts" : panel === "todos" && canTodos ? "todos" : "changes";
+  // The pane stays once artifacts or to-dos were picked, even back on Changes with none: the menu is in it.
+  const [otherPicked, setOtherPicked] = useState(false);
   const pick = (p: Panel) => {
-    if (p === "artifacts") setArtifactsPicked(true);
+    if (p !== "changes") setOtherPicked(true);
     setPanel(p);
   };
-  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || artifactsPicked);
+  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || otherPicked);
+  const project = (slot && chats.find((c) => c.slot === slot)?.project) || null;
   const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
   // The room this has (the window, less the chats when they are beside it), as laid out.
   const [size, setSize] = useState({ width: win.width, height: win.height });
@@ -106,10 +110,18 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     movePanes();
     setFloating((f) => !f);
   };
+  // The chat bar's To-dos: the pane on the to-dos wherever the window has room for it, even a chat that changed nothing yet.
+  const showTodos = hasRoomForChanges(layout, win.width)
+    ? () => {
+        movePanes();
+        pick("todos");
+        setChangesOpen(true);
+      }
+    : undefined;
   const main = slot ? (
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen), onFile: showFile } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen), onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
@@ -152,9 +164,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
           <CrossFade id={slot}>
             <View style={{ flex: 1, backgroundColor: colors.card }}>
               {showing === "artifacts" ? (
-                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+              ) : showing === "todos" ? (
+                <TodosPane key={slot} projectName={project} onHide={() => toggleChanges(false)} title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
               ) : (
-                <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+                <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts || canTodos ? <PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
               )}
             </View>
           </CrossFade>

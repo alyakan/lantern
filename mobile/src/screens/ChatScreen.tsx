@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState, Modal, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { Alert, AppState, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
+import { PageSheet } from "../ui/PageSheet";
 import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
@@ -30,7 +31,7 @@ import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
-import { TodosSheet } from "./TodosSheet";
+import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
@@ -55,6 +56,8 @@ export interface ChatProps {
   leadHidden?: boolean;
   /** The Changes button opens what the chat changed in a sheet; with this it shows or hides them in a pane beside the chat instead (`shown` says which). */
   changesPane?: { shown: boolean; onToggle: () => void; /** A file link tapped: the pane shows it if it can (one of the files changed), and says whether it did; else it opens in a sheet. */ onFile?: (path: string) => boolean };
+  /** The chat bar's To-dos, on a tablet with room beside the chat: the pane shows the to-dos, in place of this chat's own sheet. */
+  onTodos?: () => void;
   /** The Done page's "Start something new": opens the new-chat sheet on this chat's project (its folder's name; null when it has none). */
   onStartNew?: (project: string | null) => void;
   /** The chat's width is being dragged (the Changes pane's divider): the reader's place is put back once, when it ends. */
@@ -98,7 +101,7 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onStartNew, resizing = false }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onTodos, onStartNew, resizing = false }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -139,7 +142,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
   const changed = useMemo(() => changedFiles(view.items), [view.items]);
   const [changesOpen, setChangesOpen] = useState(false);
-  // What the sheet shows: the chat's changes, or (a Mac that lists "artifacts") the artifacts of its folder.
+  // What the sheet shows: the chat's changes, (a Mac that lists "artifacts") the artifacts of its folder, or (one that lists
+  // "todos") its project's to-do list.
   const canArtifacts = useMacCan("artifacts");
   const [panel, setPanel] = useState<Panel>("changes");
   // The Changes button opens the sheet on the changes, whatever it showed last.
@@ -369,8 +373,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   };
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
   // Step by step, whose pages they would cut across, and not during a turn, which the Mac waits for too); Clear asks first, as the
-  // Mac does. To-dos opens this project's list.
-  const [todosOpen, setTodosOpen] = useState(false);
+  // Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
   const barTools: BarTool[] = [
     ...(stepsChat
       ? []
@@ -387,7 +390,19 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               ]),
           },
         ]),
-    ...(canTodos ? [{ label: "To-dos", hint: "This project's to-do list", onPress: () => setTodosOpen(true) }] : []),
+    ...(canTodos
+      ? [
+          {
+            label: "To-dos",
+            hint: "This project's to-do list",
+            onPress: () => {
+              if (onTodos) return onTodos();
+              setPanel("todos");
+              setChangesOpen(true);
+            },
+          },
+        ]
+      : []),
   ];
   // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
@@ -746,14 +761,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           onClose={() => setActions(null)}
         />
       )}
-      <Modal visible={changesOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setChangesOpen(false)}>
+      <PageSheet visible={changesOpen} onClose={() => setChangesOpen(false)}>
         {panel === "artifacts" && canArtifacts ? (
-          <ArtifactsPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="artifacts" artifacts onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
+          <ArtifactsPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
+        ) : panel === "todos" && canTodos ? (
+          <TodosPane projectName={chat?.project ?? null} inSheet hideLabel="Close" title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
         ) : (
-          <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" artifacts={canArtifacts} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
+          <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
         )}
-      </Modal>
-      {todosOpen && <TodosSheet projectName={chat?.project ?? null} onClose={() => setTodosOpen(false)} />}
+      </PageSheet>
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {reviewed && <DiffSheet files={[reviewed]} load={loadReviewed} onClose={() => setReviewed(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}

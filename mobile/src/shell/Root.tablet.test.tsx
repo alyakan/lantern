@@ -4,7 +4,7 @@ import { StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { saveChangesShare, saveSidebarPinned } from "../prefs";
 import { attachSession } from "../test/fakeSession";
-import { chat, makeController, seed, waiting } from "../test/render";
+import { chat, connectedWith, makeController, seed, waiting } from "../test/render";
 import { Root } from "./Root";
 import type { Layout } from "../view/layout";
 
@@ -284,6 +284,25 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.getByRole("button", { name: /^a\.ts,/ }).props.accessibilityState).toMatchObject({ selected: true });
     // No sheet of what changed over the chat: its Close is the only way to tell it is there.
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
+  it("show the chat's to-dos in the pane from the chat bar's To-dos, even in a chat that changed nothing", async () => {
+    mockPinned = false;
+    const { controller } = makeController();
+    seed(controller, { chats: two, connection: connectedWith(["todos"]) });
+    const { lastOf } = attachSession(controller, { list_waiting: [], projects: [{ id: "/Users/me/lantern", name: "lantern" }], todos: { project: "/Users/me/lantern", name: "lantern", items: [] } }, ["todos"]);
+    await render(<Root controller={controller} />);
+    await settle();
+    await press(/Release 0.1.53/);
+    await settle();
+    expect(screen.queryByTestId("todos-pane")).toBeNull();
+    await press("Tools");
+    await press("To-dos");
+    await settle();
+    expect(screen.getByTestId("todos-pane")).toBeTruthy();
+    expect(lastOf("todos")).toMatchObject({ op: "todos" });
+    // Beside the chat, not in a sheet over it: the pane has its divider.
+    expect(screen.getByTestId("changes-divider")).toBeTruthy();
   });
 
   it("move from the sheet to the pane as the chats are put away", async () => {
