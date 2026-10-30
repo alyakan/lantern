@@ -178,6 +178,7 @@ function SendToo({ entry, targets, onSendTo }: { entry: DeskEntry; targets: Desk
 function Reply({ reply, slot, open, onOpen }: { reply: DeskReply; slot: string; open: boolean; onOpen: (slot: string) => void }) {
   const [full, setFull] = useState(false);
   if (reply.status === "waiting") return open ? <div className="desk-reply waiting muted">Working on it…</div> : null;
+  if (reply.status === "lost") return <div className="desk-reply waiting muted">Lantern restarted before it came back: open the chat to see it.</div>;
   const failed = reply.outcome === "failed";
   const stopped = reply.outcome === "stopped";
   return (
@@ -239,7 +240,8 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
       </div>
       {o.kind === "ask" && (
         <div className="desk-note">
-          <div>{o.unsure ? "I couldn't work out where this goes. Where should it go?" : "Which chat is this for?"}</div>
+          {/* What the Desk said already asks, when it said something. */}
+          {!entry.say && <div>{o.unsure ? "I couldn't work out where this goes. Where should it go?" : "Which chat is this for?"}</div>}
           <div className="desk-actions">
             {o.chats.map((c) => (
               <button key={c.slot} onClick={() => p.onSendTo(entry, c.slot)}>
@@ -494,7 +496,7 @@ export function DeskView(props: DeskViewProps) {
   }, [shape]);
   const said = [...entries].sort((a, b) => a.at - b.at);
   // An answer to a Desk message shows under the message, not again in Just finished.
-  const linked = new Set(entries.flatMap((e) => (e.reply && e.reply.status !== "waiting" ? [e.reply.key] : [])));
+  const linked = new Set(entries.flatMap((e) => (e.reply && "key" in e.reply ? [e.reply.key] : [])));
   const finished = cards.filter((c) => !linked.has(c.key));
   const empty = !cards.length && !entries.length && !waiting.length;
 

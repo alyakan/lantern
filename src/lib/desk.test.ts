@@ -232,3 +232,20 @@ describe("what came back to a Desk message", () => {
     expect(old.reply).toBeUndefined();
   });
 });
+
+describe("a Desk message's reply is never another turn's", () => {
+  it("doesn't take a turn that only holds its words inside something else, or one Claude went on with by itself", () => {
+    const typed = idle({ items: [said("yes, and also fix the footer", 2000), answer("Both."), turn("t1")] });
+    expect(replyOf("s1", typed, "yes", 1000)).toBeNull();
+    const auto = idle({ items: [said("yes", 2000, true), answer("Went on."), turn("t1")] });
+    expect(replyOf("s1", auto, "yes", 1000)).toBeNull();
+    // The whole message, or a whole part of a queue, after Lantern's notes.
+    expect(replyOf("s1", idle({ items: [said("[Lantern: a]\n\n[Lantern: b]\n\nyes", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+    expect(replyOf("s1", idle({ items: [said("yes\n\nand the footer", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+  });
+
+  it("stops waiting for a reply across a restart, as the chat's place may be another chat's by then", () => {
+    const [entry] = readLog([{ id: "a", desk: "home", at: 1, text: "x", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "waiting" } }]);
+    expect(entry.reply).toEqual({ status: "lost" });
+  });
+});

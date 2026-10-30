@@ -117,9 +117,19 @@ const REPLY_SLACK_MS = 5_000;
  * Null while it hasn't finished, or when no turn in that chat is it.
  */
 export function replyOf(slot: string, s: State, text: string, at: number): { key: string; said: string; outcome: DeskCard["outcome"] } | null {
-  const words = text.trim();
-  const turn = turns(slot, "", "", s).find((t) => (t.card.at ?? 0) >= at - REPLY_SLACK_MS && t.asked.includes(words));
+  const turn = turns(slot, "", "", s).find((t) => !t.card.auto && (t.card.at ?? 0) >= at - REPLY_SLACK_MS && carries(t.asked, text));
   return turn ? { key: turn.card.key, said: turn.said, outcome: turn.card.outcome } : null;
+}
+
+/**
+ * Whether a turn's opening message is the Desk's message: the whole of it, after any notes Lantern put first, or one whole
+ * part of messages queued together (joined by a blank line). Never a few of its words inside something else ("yes" in "yes,
+ * and also…" typed in the chat).
+ */
+function carries(asked: string, text: string): boolean {
+  const words = text.trim();
+  const own = asked.replace(/^(?:\[Lantern:[\s\S]*?\]\n\n)+/, "").trim();
+  return own === words || own.startsWith(`${words}\n\n`) || own.endsWith(`\n\n${words}`) || own.includes(`\n\n${words}\n\n`);
 }
 
 // Each chat's cards, kept while its state is the same object: the Desk draws again with every streamed event of every
@@ -231,10 +241,12 @@ export type DeskReply =
   | { status: "summarizing"; key: string; full: string; outcome: DeskCard["outcome"] }
   | { status: "done"; key: string; full: string; outcome: DeskCard["outcome"]; summary: string }
   | { status: "failed"; key: string; full: string; outcome: DeskCard["outcome"]; why: string }
-  | { status: "off"; key: string; outcome: DeskCard["outcome"] };
+  | { status: "off"; key: string; outcome: DeskCard["outcome"] }
+  /** Lantern restarted before the reply came: a chat may have its old place since, so it is never looked for again. */
+  | { status: "lost" };
 
 /** The most of a chat's reply kept with a Desk message, for "Show full answer". */
-export const FULL_MAX = 20_000;
+export const FULL_MAX = 8_000;
 
 /** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
 export interface DeskEntry {
@@ -263,12 +275,16 @@ export function readLog(raw: unknown): DeskEntry[] {
     .slice(-LOG_MAX);
 }
 
-/** A reply read back: one being summarized when the app closed is kept as failed (it isn't asked for again by itself). */
+/**
+ * A reply read back: one being summarized when the app closed is kept as failed (it isn't asked for again by itself), and one
+ * still waiting is lost: after a restart a chat's place (its slot) may be another chat's, whose reply isn't this one.
+ */
 function readReply(r: unknown): DeskReply | undefined {
   if (!r || typeof r !== "object") return undefined;
   const reply = r as DeskReply;
   if (reply.status === "summarizing") return { status: "failed", key: reply.key, full: reply.full, outcome: reply.outcome, why: "Lantern closed before it summarized the reply." };
-  return ["waiting", "done", "failed", "off"].includes(reply.status) ? reply : undefined;
+  if (reply.status === "waiting") return { status: "lost" };
+  return ["done", "failed", "off", "lost"].includes(reply.status) ? reply : undefined;
 }
 
 /** An earlier exchange as the Desk is shown it (see desk.rs `Exchange`). */

@@ -2519,14 +2519,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const done = deliver(slot, entry.text);
     const title = deskTargets.find((t) => t.slot === slot)?.title ?? chatTitle(chats.slots[slot] ?? initialState, titles);
     if (typeof done === "string") {
-      if (entry.outcome.kind !== "sent") deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: done } }));
+      // What the Desk said it would do didn't happen: it goes, so it never claims what didn't happen.
+      if (entry.outcome.kind !== "sent") deskEdit(entry.id, (e) => ({ ...e, say: undefined, outcome: { kind: "failed", why: done } }));
       else setHud({ key: Date.now(), kind: "warning", body: done });
       return;
     }
     deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued }, reply: { status: "waiting" } }));
   };
   const deskStartIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
-    if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
+    if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, say: undefined, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
     const slot = takeSlot();
     startIn(slot, folder, false, false, entry.text, undefined, undefined, workflow === "steps" ? { permissions: permissionsFor(folder), preset: null, workflow } : false);
     deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false }, reply: { status: "waiting" } }));
@@ -2546,8 +2547,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const deskId = desks.on;
     const ask = (chats: string[], unsure: boolean) => {
       const asked = chats.map((slot) => sentTargets.find((t) => t.slot === slot)).filter((t): t is (typeof sentTargets)[number] => !!t);
-      // Unsure, or nothing to pick from: a new chat is offered too.
-      deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
+      // Unsure, or nothing to pick from: a new chat is offered too. Unsure, what the Desk said it would do didn't happen.
+      deskEdit(entry.id, (e) => ({ ...e, ...(unsure ? { say: undefined } : {}), outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
     };
     // The Desk talks (Sonnet): what it says back is shown to you only; what it does is checked as the router's choice is.
     const history = deskHistory(deskLog, deskId, offClaude);
@@ -2597,6 +2598,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     for (const e of deskLog) {
       if (e.outcome.kind !== "sent" || e.reply?.status !== "waiting" || summarizing.current.has(e.id)) continue;
       const slot = e.outcome.slot;
+      // Only a chat still on the Desk the message was typed on: no other Desk's chat is read for it.
+      const folder = projectFolderOf(slot);
+      if (folder === null || deskOf(desks, folder) !== e.desk) continue;
       const s = chats.slots[slot];
       const found = s ? replyOf(slot, s, e.text, e.at) : null;
       if (!found) continue;
@@ -2617,7 +2621,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         (err) => deskEdit(e.id, (x) => ({ ...x, reply: { status: "failed", ...base, why: errText(err) } })),
       );
     }
-  }, [chats, deskLog]);
+  }, [chats, deskLog, desks]);
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
