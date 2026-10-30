@@ -16,6 +16,9 @@ struct LanternCardProps: Decodable {
   var needs: String?
   /// How much of the plan's five-hour window is used, 0 to 100.
   var plan: Double?
+  /// A summary card's chats (the Mac fills them in): their presence makes the card a summary of every chat.
+  var chats: [LanternCardRow]?
+  var counts: LanternCardCounts?
 
   /// What the Mac sent, or the plainest card when it sent nothing readable (a card must never come out blank).
   static func read(_ json: String?) -> LanternCardProps {
@@ -25,7 +28,7 @@ struct LanternCardProps: Decodable {
     return props
   }
 
-  enum CodingKeys: String, CodingKey { case project, status, since, title, steps_done, steps_total, needs, plan }
+  enum CodingKeys: String, CodingKey { case project, status, since, title, steps_done, steps_total, needs, plan, chats, counts }
 
   init() {}
 
@@ -39,8 +42,51 @@ struct LanternCardProps: Decodable {
     steps_total = try? c.decode(Double.self, forKey: .steps_total)
     needs = try? c.decode(String.self, forKey: .needs)
     plan = try? c.decode(Double.self, forKey: .plan)
+    // A row that can't be read is left out, not the whole list.
+    chats = (try? c.decode([LanternCardRow?].self, forKey: .chats)).map { $0.compactMap { $0 } }
+    counts = try? c.decode(LanternCardCounts.self, forKey: .counts)
   }
 }
+
+/// One chat on a summary card.
+struct LanternCardRow: Decodable {
+  var project: String
+  var status: String
+  var title: String?
+  /// When its turn began, ms since the epoch (a working one's timer counts from it).
+  var since: Double?
+
+  enum CodingKeys: String, CodingKey { case project, status, title, since }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    project = (try? c.decode(String.self, forKey: .project)) ?? "Lantern"
+    status = (try? c.decode(String.self, forKey: .status)) ?? "working"
+    title = try? c.decode(String.self, forKey: .title)
+    since = try? c.decode(Double.self, forKey: .since)
+  }
+}
+
+/// How many of a summary card's chats are in each state (its rows show at most three of them).
+struct LanternCardCounts: Decodable {
+  var needs_you: Double = 0
+  var working: Double = 0
+  var done: Double = 0
+  var failed: Double = 0
+
+  enum CodingKeys: String, CodingKey { case needs_you, working, done, failed }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    needs_you = (try? c.decode(Double.self, forKey: .needs_you)) ?? 0
+    working = (try? c.decode(Double.self, forKey: .working)) ?? 0
+    done = (try? c.decode(Double.self, forKey: .done)) ?? 0
+    failed = (try? c.decode(Double.self, forKey: .failed)) ?? 0
+  }
+}
+
+/// How many chats a summary card lists (the Mac sends no more; the rest are only counted).
+let lanternSummaryRows = 3
 
 /// What the card says, worked out once from the props and the two things the system says about the screen.
 struct LanternCardLook {
@@ -56,7 +102,19 @@ struct LanternCardLook {
 
   var words: String {
     if isStale { return "Not updating" }
-    switch props.status {
+    return word(of: props.status)
+  }
+
+  var hue: Color { hue(of: props.status) }
+
+  var symbol: String {
+    if isStale { return "zzz" }
+    return symbol(of: props.status)
+  }
+
+  /// A state in a word: the card's own, or a summary row's.
+  func word(of status: String) -> String {
+    switch status {
     case "working": return "Working"
     case "needs_you": return "Needs you"
     case "done": return "Done"
@@ -64,10 +122,10 @@ struct LanternCardLook {
     }
   }
 
-  var hue: Color {
+  func hue(of status: String) -> Color {
     if dimmed { return .white }
     if isStale { return Color(red: 0.56, green: 0.56, blue: 0.58) }
-    switch props.status {
+    switch status {
     case "working": return Color(red: 0.36, green: 0.56, blue: 1.0)
     case "needs_you": return Color(red: 1.0, green: 0.70, blue: 0.28)
     case "done": return Color(red: 0.30, green: 0.80, blue: 0.50)
@@ -75,9 +133,8 @@ struct LanternCardLook {
     }
   }
 
-  var symbol: String {
-    if isStale { return "zzz" }
-    switch props.status {
+  func symbol(of status: String) -> String {
+    switch status {
     case "working": return "ellipsis"
     case "needs_you": return "exclamationmark"
     case "done": return "checkmark"
@@ -196,7 +253,7 @@ struct LanternStatusPill: View {
   var body: some View {
     HStack(spacing: 6) {
       Circle().fill(look.hue).frame(width: 7, height: 7)
-      Text(look.words).font(.system(size: 13, weight: .semibold)).foregroundColor(look.hue)
+      Text(look.pillWords).font(.system(size: 13, weight: .semibold)).foregroundColor(look.hue).lineLimit(1)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 5)
@@ -210,7 +267,8 @@ struct LanternTimer: View {
   let look: LanternCardLook
 
   var body: some View {
-    if look.working, let since = look.since {
+    // A summary's timers are its rows'.
+    if look.working, !look.isSummary, let since = look.since {
       Text(since, style: .timer)
         .font(.system(size: 14, weight: .medium))
         .monospacedDigit()
@@ -251,6 +309,14 @@ struct LanternCardBanner: View {
   let look: LanternCardLook
 
   var body: some View {
+    if look.isSummary {
+      LanternSummaryBanner(look: look)
+    } else {
+      chat
+    }
+  }
+
+  private var chat: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(alignment: .center, spacing: 12) {
         LanternMark(height: 42, stale: look.isStale, dimmed: look.dimmed)
@@ -299,7 +365,9 @@ struct LanternCompactLeading: View {
 struct LanternCompactTrailing: View {
   let look: LanternCardLook
   var body: some View {
-    if look.working, look.stepsTotal > 0 {
+    if look.isSummary {
+      Text(look.short).font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundColor(look.hue)
+    } else if look.working, look.stepsTotal > 0 {
       Text("\(look.stepsDone)/\(look.stepsTotal)").font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundColor(look.hue)
     } else {
       Image(systemName: look.symbol).font(.system(size: 12, weight: .bold)).foregroundColor(look.hue)
@@ -330,6 +398,14 @@ struct LanternExpandedTrailing: View {
 struct LanternExpandedBottom: View {
   let look: LanternCardLook
   var body: some View {
+    if look.isSummary {
+      LanternSummaryRows(look: look)
+    } else {
+      chat
+    }
+  }
+
+  private var chat: some View {
     VStack(alignment: .leading, spacing: 8) {
       VStack(alignment: .leading, spacing: 2) {
         Text(look.props.project).font(.system(size: 16, weight: .bold)).foregroundColor(.white).lineLimit(1)
@@ -350,14 +426,14 @@ struct LanternCardSmall: View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 6) {
         LanternMark(height: 22, stale: look.isStale, dimmed: look.dimmed)
-        Text(look.words)
+        Text(look.pillWords)
           .font(.system(size: 15, weight: .bold))
           .foregroundColor(look.hue)
           .lineLimit(1)
           .minimumScaleFactor(0.6)
           .layoutPriority(2)
         Spacer(minLength: 2)
-        if look.working, let since = look.since {
+        if look.working, !look.isSummary, let since = look.since {
           Text(since, style: .timer)
             .font(.system(size: 13, weight: .medium))
             .monospacedDigit()
@@ -377,9 +453,144 @@ struct LanternCardSmall: View {
   }
 }
 
+// MARK: - The summary card (every chat, from a Mac that lists "livesummary")
+
+extension LanternCardLook {
+  var isSummary: Bool { props.chats != nil }
+
+  private func count(_ v: Double?) -> Int { (v ?? 0) > 0 ? Int((v ?? 0).rounded()) : 0 }
+  var needsCount: Int { count(props.counts?.needs_you) }
+  var workingCount: Int { count(props.counts?.working) }
+  var doneCount: Int { count(props.counts?.done) }
+  var failedCount: Int { count(props.counts?.failed) }
+
+  /// The rows shown, and how many chats are only counted.
+  var rows: [LanternCardRow] { Array((props.chats ?? []).prefix(lanternSummaryRows)) }
+  var more: Int { max(needsCount + workingCount + doneCount + failedCount - rows.count, 0) }
+
+  /// The summary in a few words: what needs you and what works, else what finished.
+  var headline: String {
+    if isStale { return "Not updating" }
+    var parts: [String] = []
+    if needsCount > 0 { parts.append(needsCount == 1 ? "1 needs you" : "\(needsCount) need you") }
+    if workingCount > 0 { parts.append("\(workingCount) working") }
+    if needsCount + workingCount == 0 {
+      if doneCount > 0 { parts.append("\(doneCount) done") }
+      if failedCount > 0 { parts.append("\(failedCount) stopped") }
+    }
+    return parts.isEmpty ? "Nothing running" : parts.joined(separator: " · ")
+  }
+
+  /// The island's few characters: how many need you, else how many work, else a tick.
+  var short: String {
+    if isStale { return "…" }
+    if needsCount > 0 { return "\(needsCount)!" }
+    if workingCount > 0 { return "\(workingCount)" }
+    return "✓"
+  }
+
+  /// What the pill says: the summary's headline, or the card's one state.
+  var pillWords: String { isSummary ? headline : words }
+}
+
+/// One chat on the summary card: its state's sign, the project, its title if the user lets titles show, and its timer while it
+/// works (its state otherwise).
+struct LanternSummaryRow: View {
+  let look: LanternCardLook
+  let row: LanternCardRow
+
+  var body: some View {
+    let hue = look.hue(of: row.status)
+    let title = (row.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    HStack(spacing: 8) {
+      Image(systemName: look.symbol(of: row.status))
+        .font(.system(size: 10, weight: .heavy))
+        .foregroundColor(look.dimmed ? .black : Color(red: 0.10, green: 0.13, blue: 0.17))
+        .frame(width: 18, height: 18)
+        .background(Circle().fill(hue))
+      project.layoutPriority(1)
+      if !title.isEmpty {
+        // Room kept for a few words of the title: a long project's name gives way rather than leave it a letter.
+        Text(title)
+          .font(.system(size: 13))
+          .foregroundColor(Color.white.opacity(0.6))
+          .lineLimit(1)
+          .frame(minWidth: 80, alignment: .leading)
+          .layoutPriority(1)
+      }
+      Spacer(minLength: 6)
+      if row.status == "working", !look.isStale, let since = row.since {
+        Text(Date(timeIntervalSince1970: since / 1000), style: .timer)
+          .font(.system(size: 13, weight: .medium))
+          .monospacedDigit()
+          .foregroundColor(look.dimmed ? .white : Color.white.opacity(0.75))
+          .multilineTextAlignment(.trailing)
+          .frame(width: 56, alignment: .trailing)
+      } else {
+        Text(look.word(of: row.status))
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundColor(hue)
+          .fixedSize()
+      }
+    }
+  }
+
+  private var project: some View {
+    Text(row.project)
+      .font(.system(size: 14, weight: .semibold))
+      .foregroundColor(.white)
+      .lineLimit(1)
+  }
+}
+
+/// The summary card's rows, and how many more chats there are.
+struct LanternSummaryRows: View {
+  let look: LanternCardLook
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      ForEach(Array(look.rows.enumerated()), id: \.offset) { _, row in
+        LanternSummaryRow(look: look, row: row)
+      }
+      if look.more > 0 {
+        Text("and \(look.more) more")
+          .font(.system(size: 12))
+          .foregroundColor(Color.white.opacity(0.55))
+      }
+    }
+  }
+}
+
+/// The summary card's banner: Lantern, what is going on in a few words, then the chats.
+struct LanternSummaryBanner: View {
+  let look: LanternCardLook
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .center, spacing: 10) {
+        LanternMark(height: 30, stale: look.isStale, dimmed: look.dimmed)
+        Text("Lantern")
+          .font(.system(size: 17, weight: .bold))
+          .foregroundColor(.white)
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        LanternStatusPill(look: look)
+      }
+      LanternSummaryRows(look: look)
+    }
+    .padding(16)
+  }
+}
+
 extension LanternCardLook {
   /// The watch card's second line: what it asks for, else the chat's title (or the project) with how many steps are done.
+  /// For a summary, the first chat listed and how many others there are.
   var smallLine: String {
+    if isSummary {
+      guard let first = rows.first else { return "Lantern" }
+      let others = rows.count - 1 + more
+      return others > 0 ? "\(first.project) +\(others)" : first.project
+    }
     if !asks.isEmpty { return asks }
     let base = title.isEmpty ? props.project : title
     return stepsTotal > 0 ? "\(base) · \(stepsDone)/\(stepsTotal)" : base

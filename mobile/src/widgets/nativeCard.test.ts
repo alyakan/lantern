@@ -45,4 +45,17 @@ describe("the native lock-screen card", () => {
     expect(card).toContain("try? JSONDecoder().decode(LanternCardProps.self");
     expect(card).toContain("return LanternCardProps()");
   });
+
+  it("draws a summary card from the chats and counts the Mac sends (lanternChat.tsx's layout is not what iOS draws)", () => {
+    const card = read("native", "LanternCard.swift");
+    expect(card).toContain("case project, status, since, title, steps_done, steps_total, needs, plan, chats, counts }");
+    expect(card).toContain("case project, status, title, since }");
+    expect(card).toContain("case needs_you, working, done, failed }");
+    expect(card).toContain("var isSummary: Bool { props.chats != nil }");
+    // No more rows than the Mac sends (SUMMARY_ROWS in live_activity.rs).
+    const mac = fs.readFileSync(path.join(root, "..", "src-tauri", "src", "remote", "live_activity.rs"), "utf8");
+    const rows = /pub const SUMMARY_ROWS: usize = (\d+);/.exec(mac)?.[1];
+    expect(rows).toBeDefined();
+    expect(card).toContain(`let lanternSummaryRows = ${rows}`);
+  });
 });

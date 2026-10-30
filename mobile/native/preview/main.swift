@@ -39,6 +39,31 @@ let since = Int((Date().timeIntervalSince1970 - 3 * 60 - 7) * 1000)
 
 struct Sheet: View {
   var body: some View {
+    HStack(alignment: .top, spacing: 20) {
+      chats
+      summaries
+    }
+    .padding(20)
+    .background(Color(red: 0.30, green: 0.45, blue: 0.50))
+    .environment(\.colorScheme, .dark)
+  }
+
+  /// The summary card (a Mac that lists "livesummary"): every chat, at most three rows.
+  var summaries: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      card(#"{"project":"Lantern","status":"needs_you","since":\#(since),"chats":[{"project":"lantern","status":"needs_you","title":"Release 0.1.66"},{"project":"network-monitor","status":"working","since":\#(since)},{"project":"brain","status":"working","since":\#(since)}],"counts":{"needs_you":1,"working":3,"done":1,"failed":0}}"#)
+      card(#"{"project":"Lantern","status":"working","since":\#(since),"chats":[{"project":"lantern","status":"working","since":\#(since)},{"project":"a-project-with-a-very-long-name-indeed","status":"done","title":"A long title that goes on and on"}],"counts":{"needs_you":0,"working":1,"done":1,"failed":0}}"#)
+      card(#"{"project":"Lantern","status":"done","since":\#(since),"chats":[{"project":"lantern","status":"done"},{"project":"brain","status":"failed"}],"counts":{"needs_you":0,"working":0,"done":1,"failed":1}}"#)
+      card(#"{"project":"Lantern","status":"working","since":\#(since),"chats":[{"project":"lantern","status":"working","since":\#(since)}],"counts":{"needs_you":0,"working":1,"done":0,"failed":0}}"#, stale: true)
+      card(#"{"project":"Lantern","status":"needs_you","since":\#(since),"chats":[{"project":"lantern","status":"needs_you"},{"project":"brain","status":"working","since":\#(since)}],"counts":{"needs_you":1,"working":1,"done":0,"failed":0}}"#, dimmed: true)
+      card(#"{"project":"Lantern","status":"working","since":\#(since),"chats":[],"counts":{"needs_you":0,"working":0,"done":0,"failed":0}}"#)
+      island(#"{"project":"Lantern","status":"needs_you","since":\#(since),"chats":[{"project":"lantern","status":"needs_you"}],"counts":{"needs_you":2,"working":1,"done":0,"failed":0}}"#)
+      small(#"{"project":"Lantern","status":"working","since":\#(since),"chats":[{"project":"lantern","status":"working","since":\#(since)},{"project":"brain","status":"working","since":\#(since)}],"counts":{"needs_you":0,"working":2,"done":0,"failed":0}}"#)
+      small(#"{"project":"Lantern","status":"needs_you","since":\#(since),"chats":[{"project":"lantern","status":"needs_you"},{"project":"brain","status":"working","since":\#(since)}],"counts":{"needs_you":2,"working":3,"done":0,"failed":0}}"#, width: 150)
+    }
+  }
+
+  var chats: some View {
     VStack(alignment: .leading, spacing: 14) {
       card(#"{"project":"lantern","status":"working","since":\#(since)}"#)
       card(#"{"project":"lantern","status":"working","since":\#(since),"title":"Release 0.1.66","steps_done":3,"steps_total":5,"plan":42}"#)
@@ -54,9 +79,6 @@ struct Sheet: View {
       small(#"{"project":"lantern","status":"done","since":\#(since)}"#)
       small(#"{"project":"lantern","status":"working","since":\#(since)}"#, width: 150)
     }
-    .padding(20)
-    .background(Color(red: 0.30, green: 0.45, blue: 0.50))
-    .environment(\.colorScheme, .dark)
   }
 }
 
