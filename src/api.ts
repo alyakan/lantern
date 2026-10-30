@@ -9,7 +9,7 @@ import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
-import type { RouteCandidate } from "./lib/desk";
+import type { RouteCandidate, WindowDesk } from "./lib/desk";
 import type { AsideEvent, ChatSearchResults, DeskRoute, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
@@ -403,6 +403,8 @@ export const api = {
   remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
   /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** Tells the backend what the Desks hold, for a phone's Desk (see lib/desk.ts windowDesk). */
+  remoteWindowDesk: (desk: WindowDesk) => invoke<void>("remote_window_desk", { desk }),
   /** A phone connected or went: ask remoteSettings who is connected now. */
   onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
   /** A paired phone asked for an asleep chat: wake it where it is. */

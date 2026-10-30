@@ -9,6 +9,7 @@
  */
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -84,6 +85,8 @@ export interface State {
   plan: PlanUsage | null;
   /** The Mac's run the numbers in `views` belong to (its Welcome's). */
   epoch: number | null;
+  /** The Desk as the Mac's window has it, once a Mac that has one has said (null: not yet, or a Mac without). */
+  desk: RemoteDesk | null;
 }
 
 /** Keeps when each working chat was first seen working, and forgets the ones that are not working (their next time is a new start). */
@@ -94,7 +97,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null };
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null, desk: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -102,6 +105,8 @@ export type Action =
   | { type: "welcome"; epoch: number }
   | { type: "pushed"; msg: Pushed }
   | { type: "waiting"; list: Waiting[] }
+  /** The Desk, as the Mac answered when asked (it pushes it too, as it changes). */
+  | { type: "desk"; desk: RemoteDesk }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
   /** The chat's history was asked for (again), or the asking failed. */
@@ -244,6 +249,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, epoch: action.epoch, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
     case "waiting":
       return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+    case "desk":
+      return { ...state, desk: action.desk };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
@@ -278,6 +285,8 @@ export function reducer(state: State, action: Action): State {
       switch (msg.type) {
         case "chats":
           return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
+        case "desk":
+          return { ...state, desk: msg.desk };
         case "plan":
           return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.

@@ -9,6 +9,7 @@ import { chatState, type Chats } from "../sessions";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 import { workflowOf } from "./workflow";
 import type { ChatHit } from "../types";
+import { deskOf, HOME_ID, openOn, type Desks } from "./desks";
 
 /** One answer that finished, in some chat. */
 export interface DeskCard {
@@ -157,18 +158,23 @@ export interface RouteCandidate {
   last: string;
 }
 
-/** The chats a Desk's message may go to, the ones last active first (the router's "ask" falls back to the first few). */
-export function routeCandidates(chats: Chats, open: Record<string, ProjectOpen>): RouteCandidate[] {
+/**
+ * The chats a Desk's message may go to, the ones last active first (the router's "ask" falls back to the first few). A chat that
+ * runs on another provider than Claude (`offClaude`) is shown by its project only: nothing said in it is put to Claude.
+ */
+export function routeCandidates(chats: Chats, open: Record<string, ProjectOpen>, offClaude: (slot: string) => boolean = () => false): RouteCandidate[] {
   return deskChats(open)
-    .map((c) => {
+    .map((c): { at: number; c: RouteCandidate } | null => {
       const s = chats.slots[c.slot];
       if (!s || !s.folder) return null;
       const state = chatState(s);
+      const status: RouteCandidate["status"] = state === "waiting" ? "waiting" : state === "running" ? "working" : "idle";
+      if (offClaude(c.slot)) return { at: s.activityAt ?? 0, c: { id: c.slot, title: "", project: c.where.split(" · ")[0], workflow: workflowOf(s), status, last: "" } };
       // What it was last asked and answered (its newest card), never the post-hook's reply.
       const cards = cardsOf(c.slot, c.title, c.where, s);
       const card = cards[cards.length - 1];
       const last = card ? clip(`Asked: ${card.asked}${card.said ? ` Answered: ${card.said}` : ""}`, 200) : "";
-      return { at: s.activityAt ?? 0, c: { id: c.slot, title: c.title, project: c.where.split(" · ")[0], workflow: workflowOf(s), status: state === "waiting" ? "waiting" : state === "running" ? "working" : "idle", last } as RouteCandidate };
+      return { at: s.activityAt ?? 0, c: { id: c.slot, title: c.title, project: c.where.split(" · ")[0], workflow: workflowOf(s), status, last } };
     })
     .filter((x): x is { at: number; c: RouteCandidate } => x !== null)
     .sort((a, b) => b.at - a.at)
@@ -207,4 +213,27 @@ export function readLog(raw: unknown): DeskEntry[] {
     .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
     .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome }))
     .slice(-LOG_MAX);
+}
+
+/** What the window tells the backend of its Desks, for a phone's Desk (see remote/desk.rs). */
+export interface WindowDesk {
+  desks: { id: string; name: string; projects: { folder: string; label: string }[]; chats: RouteCandidate[] }[];
+  cards: (DeskCard & { desk: string })[];
+}
+
+/**
+ * Every Desk: its projects (the ones open on it and the ones given to it), its chats as the router is shown them, and the feed's
+ * cards, each with the Desk it is on.
+ */
+export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desks: Desks, offClaude: (slot: string) => boolean = () => false): WindowDesk {
+  const folderOf = new Map(Object.entries(open).flatMap(([folder, p]) => p.items.map((item) => [item.slot, folder] as const)));
+  return {
+    desks: desks.list.map((d) => {
+      const on = openOn(desks, d.id, open);
+      const folders = [...new Set([...Object.keys(on), ...(d.id === HOME_ID ? [] : d.projects)])];
+      const labels = projectLabels(folders);
+      return { id: d.id, name: d.name, projects: folders.map((folder, i) => ({ folder, label: labels[i] })), chats: routeCandidates(chats, on, offClaude) };
+    }),
+    cards: deskFeed(chats, open).map((c) => ({ ...c, desk: deskOf(desks, folderOf.get(c.slot) ?? "") })),
+  };
 }

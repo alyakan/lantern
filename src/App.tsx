@@ -89,7 +89,7 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
-import { clip, deskFeed, deskLive, LOG_MAX, readLog, routeCandidates, type DeskEntry } from "./lib/desk";
+import { clip, deskFeed, deskLive, LOG_MAX, readLog, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { anythingWorking } from "./lib/awake";
@@ -2424,6 +2424,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});
   }, [hubKey]);
+  // A phone's Desk: what the Desks hold, told when it changes. Nothing said in a chat on another provider is put to Claude.
+  const offClaude = (slot: string) => providerLabel(slot) !== null;
+  const phoneDesk = windowDesk(chats, openByProject, desks, offClaude);
+  const phoneDeskKey = JSON.stringify(phoneDesk);
+  useEffect(() => {
+    void api.remoteWindowDesk(phoneDesk).catch(() => {});
+  }, [phoneDeskKey]);
   // What the panel asked of this window, which the backend already checked and brought forward: open a chat, start one in a
   // project the user knows, or open Storage or Settings. The ref is read when it happens, so it sees the chats as they are then.
   const menuBarAct = useRef<(a: MenuBarAction) => void>(() => {});
@@ -2486,7 +2493,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const folder = projectFolderOf(slot);
     return folder !== null && deskOf(desks, folder) === desks.on;
   };
-  const deskCandidates = routeCandidates(chats, deskOpen);
+  const deskCandidates = routeCandidates(chats, deskOpen, offClaude);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];

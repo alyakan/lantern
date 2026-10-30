@@ -20,6 +20,9 @@ beforeEach(() => {
   resetSeen();
 });
 jest.mock("../prefs", () => ({
+  // Home as the Desk or the chats: the Desk, as on a phone that never chose (only a Mac that has one shows it).
+  loadHomeMode: jest.fn(async () => "desk"),
+  saveHomeMode: jest.fn(async () => {}),
   loadGrouping: jest.fn(async () => mockRemembered),
   saveGrouping: jest.fn(async (g: "recent" | "project") => {
     mockRemembered = g;

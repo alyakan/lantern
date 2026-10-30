@@ -2049,6 +2049,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           throw "Remote control needs the app.";
         case "remote_pair_cancel":
         case "remote_window_chats":
+        case "remote_window_desk":
         case "remote_window_controls":
         case "remote_new_chat_done":
         case "remote_claude_path":
