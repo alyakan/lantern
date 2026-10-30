@@ -1021,13 +1021,18 @@ impl<'a> Session<'a> {
                 let now = (self.gw.now)();
                 let card = match card {
                     Some(c) => {
-                        self.chat_known(&c.slot)?;
+                        // A summary card is about every chat, so it names none; any other card is for a chat this Mac has.
+                        let summary = c.summary == Some(true);
+                        if !summary {
+                            self.chat_known(&c.slot)?;
+                        }
                         if !valid_token(&c.token) {
                             return Err("That isn't a push token.".into());
                         }
                         // The turn it shows began a moment ago, not in the future or long ago: the card's timer counts from it.
                         let since = c.since.clamp(now.saturating_sub(60 * 60 * 1000), now);
-                        Some(LiveCard { slot: c.slot, token: c.token, project: clean_project(&c.project), since, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Default::default() })
+                        let (slot, project) = if summary { (String::new(), "Lantern".to_string()) } else { (c.slot, clean_project(&c.project)) };
+                        Some(LiveCard { slot, token: c.token, project, since, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Default::default(), summary: summary.then(Default::default) })
                     }
                     None => None,
                 };
@@ -1633,7 +1638,7 @@ pub(crate) mod tests {
         let (_, mut p) = paired(&r).await;
         let device = r.store.saved().devices[0].id.clone();
         let token = "ab".repeat(32);
-        let card = |slot: &str, token: &str| Some(protocol::RemoteLiveCard { slot: slot.into(), token: token.into(), project: "lantern\u{7}".into(), since: 1 });
+        let card = |slot: &str, token: &str| Some(protocol::RemoteLiveCard { slot: slot.into(), token: token.into(), project: "lantern\u{7}".into(), since: 1, summary: None });
         let ask = |start_token: Option<String>, card| Request::LiveActivity { start_token, card };
         assert!(p.ask(ask(Some(token.clone()), card("a", &token))).await.1.is_none());
         let kept = r.store.live.cards();
@@ -1654,6 +1659,25 @@ pub(crate) mod tests {
         assert!(p.ask(ask(None, card("a", &token))).await.1.is_none());
         r.store.remove_device(&device).unwrap();
         assert!(r.store.live.cards().is_empty() && r.store.live.state(&device).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_names_no_chat_but_still_needs_a_real_token_and_a_plain_card_still_needs_a_chat() {
+        let r = rig();
+        r.hub.opened("a", "/p/lantern");
+        let (_, mut p) = paired(&r).await;
+        let token = "cd".repeat(32);
+        let card = |slot: &str, token: &str, summary: Option<bool>| Some(protocol::RemoteLiveCard { slot: slot.into(), token: token.into(), project: "SECRET-PROJECT".into(), since: 1, summary });
+        let ask = |card| Request::LiveActivity { start_token: None, card };
+        for bad in [ask(card("", "../../3/device/x", Some(true))), ask(card("", &token, None)), ask(card("", &token, Some(false))), ask(card("nope", &token, Some(false)))] {
+            assert!(p.ask(bad).await.1.is_some());
+        }
+        assert!(r.store.live.cards().is_empty());
+        // Whatever slot or project the phone sends with it, a summary card is kept as about no chat.
+        assert!(p.ask(ask(card("nope", &token, Some(true)))).await.1.is_none());
+        let kept = r.store.live.cards();
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].1.slot.as_str(), kept[0].1.project.as_str(), kept[0].1.summary.is_some()), ("", "Lantern", true));
     }
 
     #[tokio::test]

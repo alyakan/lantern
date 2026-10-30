@@ -53,6 +53,8 @@ export class Controller {
     this.sync.onSent = (id) => void this.liveCards.confirm(id);
     this.sync.onFailed = (id) => void this.liveCards.abandon(id);
     this.sync.onConnected = () => void this.liveCards.connected();
+    // The summary card (a Mac that keeps one) follows the chats: looked at again whenever what decides it changes.
+    this.sync.subscribe(() => this.lookAtCard());
     this.connection = new Connection({
       transport: d.transport,
       store: d.store,
@@ -65,9 +67,34 @@ export class Controller {
     });
   }
 
+  /** The app is in front: only then may it start a lock-screen card. */
+  private foreground = true;
+  /** What the summary card was last looked at for: a change in anything else is no reason to look again. */
+  private lastWorld = "";
+
+  private lookAtCard() {
+    const world = {
+      summary: this.state.kind === "connected" && this.sync.has("livesummary"),
+      connected: this.state.kind === "connected",
+      foreground: this.foreground,
+      busy: this.sync.getState().chats.some((c) => c.status === "working" || c.status === "needs_you"),
+    };
+    const key = JSON.stringify(world);
+    if (key === this.lastWorld) return;
+    this.lastWorld = key;
+    void this.liveCards.look(world);
+  }
+
+  /** The app came to the front, or went to the back. */
+  setForeground(active: boolean) {
+    this.foreground = active;
+    this.lookAtCard();
+  }
+
   /** Where the connection stands (the connection says so; the screens' tests do too). */
   setConnection(s: ConnectionState) {
     this.state = s;
+    this.lookAtCard();
     if (s.kind === "connected") void this.loadDeviceId();
     for (const l of this.listeners) l();
   }

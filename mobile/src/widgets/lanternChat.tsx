@@ -1,5 +1,5 @@
 import { HStack, Image, ProgressView, Spacer, Text, VStack } from "@expo/ui/swift-ui";
-import { fixedSize, font, foregroundStyle, minimumScaleFactor, monospacedDigit, multilineTextAlignment, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
+import { fixedSize, font, foregroundStyle, lineLimit, minimumScaleFactor, monospacedDigit, multilineTextAlignment, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
 import { createLiveActivity, type LiveActivityEnvironment } from "expo-widgets";
 
 /**
@@ -20,6 +20,13 @@ export type ChatCardProps = {
   needs?: "command" | "edit" | "question" | "approval" | "tool";
   /** How much of the plan's five-hour window is used, 0 to 100. */
   plan?: number;
+  /**
+   * A summary card (a Mac that lists "livesummary"): a few chats, those that need you first, then those working, then those
+   * that finished while it was up; each its project, state, its own title when it has one, and when a working one began.
+   */
+  chats?: { project: string; status: "working" | "needs_you" | "done" | "failed"; title?: string; since?: number }[];
+  /** A summary card: how many chats are in each state (more than `chats` lists). */
+  counts?: { needs_you: number; working: number; done: number; failed: number };
 };
 
 /**
@@ -33,6 +40,87 @@ export type ChatCardProps = {
  */
 const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment) => {
   "widget";
+  if (Array.isArray(props.chats)) {
+    const dim = environment.isLuminanceReduced === true;
+    const late = environment.isStale === true && (props.status === "working" || props.status === "needs_you");
+    const n = (v: unknown) => (typeof v === "number" && v > 0 ? Math.round(v) : 0);
+    const c = props.counts ?? { needs_you: 0, working: 0, done: 0, failed: 0 };
+    const needsN = n(c.needs_you);
+    const workingN = n(c.working);
+    const doneN = n(c.done);
+    const failedN = n(c.failed);
+    const hueOf = (st: string) => (dim ? "#FFFFFF" : late ? "#8E8E93" : st === "working" ? "#3B82F6" : st === "needs_you" ? "#F59E0B" : st === "done" ? "#22C55E" : "#EF4444");
+    const symbolOf = (st: string) => (st === "working" ? "ellipsis.bubble.fill" : st === "needs_you" ? "exclamationmark.bubble.fill" : st === "done" ? "checkmark.circle.fill" : "xmark.octagon.fill");
+    const wordOf = (st: string) => (st === "working" ? "Working" : st === "needs_you" ? "Needs you" : st === "done" ? "Done" : "Stopped");
+    const parts = [needsN > 0 ? `${needsN} need${needsN === 1 ? "s" : ""} you` : "", workingN > 0 ? `${workingN} working` : "", workingN + needsN === 0 && doneN > 0 ? `${doneN} done` : "", workingN + needsN === 0 && failedN > 0 ? `${failedN} stopped` : ""].filter((t) => t !== "");
+    const headline = late ? "Not updating" : parts.length > 0 ? parts.join(" · ") : "Nothing running";
+    const top = late ? "zzz" : symbolOf(props.status);
+    const topHue = hueOf(props.status);
+    const list = props.chats;
+    const shown = list.length;
+    const more = needsN + workingN + doneN + failedN - shown;
+    const row = (i: number) => {
+      if (i >= shown) return null;
+      const r = list[i];
+      const hue = hueOf(r.status);
+      const title = typeof r.title === "string" && r.title !== "" ? r.title : "";
+      const end =
+        r.status === "working" && !late && typeof r.since === "number" ? (
+          <Text date={new Date(r.since)} dateStyle="timer" modifiers={[font({ size: 13 }), monospacedDigit(), foregroundStyle(hue), fixedSize({ horizontal: true }), multilineTextAlignment("trailing")]} />
+        ) : (
+          <Text modifiers={[font({ size: 13, weight: "semibold" }), foregroundStyle(hue)]}>{wordOf(r.status)}</Text>
+        );
+      return (
+        <HStack spacing={8}>
+          <Image systemName={symbolOf(r.status)} color={hue} size={14} />
+          <Text modifiers={[font({ size: 14, weight: "semibold" }), lineLimit(1)]}>{r.project}</Text>
+          {title !== "" ? <Text modifiers={[font({ size: 13 }), opacity(0.7), lineLimit(1)]}>{title}</Text> : null}
+          <Spacer />
+          {end}
+        </HStack>
+      );
+    };
+    const rows = (
+      <VStack spacing={6} alignment="leading">
+        {row(0)}
+        {row(1)}
+        {row(2)}
+        {row(3)}
+        {more > 0 ? <Text modifiers={[font({ size: 12 }), opacity(0.6)]}>{`and ${more} more`}</Text> : null}
+      </VStack>
+    );
+    const head = (
+      <HStack spacing={10}>
+        <Image systemName={top} color={topHue} size={22} />
+        <Text modifiers={[font({ size: 17, weight: "bold" })]}>Lantern</Text>
+        <Spacer />
+        <Text modifiers={[font({ size: 14, weight: "semibold" }), foregroundStyle(topHue)]}>{headline}</Text>
+      </HStack>
+    );
+    const short = late ? "…" : needsN > 0 ? `${needsN}!` : workingN > 0 ? `${workingN}` : "✓";
+    return {
+      banner: (
+        <VStack spacing={10} alignment="leading" modifiers={[padding({ all: 14 })]}>
+          {head}
+          {rows}
+        </VStack>
+      ),
+      compactLeading: <Image systemName={top} color={topHue} />,
+      compactTrailing: <Text modifiers={[font({ size: 13, weight: "semibold" }), monospacedDigit(), foregroundStyle(topHue)]}>{short}</Text>,
+      minimal: <Image systemName={top} color={topHue} />,
+      expandedLeading: (
+        <VStack modifiers={[padding({ all: 12 })]}>
+          <Image systemName={top} color={topHue} size={28} />
+        </VStack>
+      ),
+      expandedTrailing: (
+        <VStack modifiers={[padding({ all: 12 })]}>
+          <Text modifiers={[font({ size: 15, weight: "semibold" }), foregroundStyle(topHue)]}>{headline}</Text>
+        </VStack>
+      ),
+      expandedBottom: <VStack modifiers={[padding({ all: 12 })]}>{rows}</VStack>,
+    };
+  }
   const stale = environment.isStale === true && (props.status === "working" || props.status === "needs_you");
   const working = props.status === "working" && !stale;
   const words = stale ? "Not updating" : props.status === "working" ? "Working" : props.status === "needs_you" ? "Needs you" : props.status === "done" ? "Done" : "Stopped";

@@ -2,7 +2,14 @@ import { Platform } from "react-native";
 import type { RemoteLiveCard } from "./protocol/generated/RemoteLiveCard";
 
 /** What the card says (the layout reads it, and the Mac sends the same: see widgets/lanternChat.tsx). */
-export type CardProps = { project: string; status: "working" | "needs_you" | "done" | "failed"; since: number };
+export type CardProps = {
+  project: string;
+  status: "working" | "needs_you" | "done" | "failed";
+  since: number;
+  /** A summary card's chats (the Mac fills them in); its presence makes the card a summary. */
+  chats?: { project: string; status: CardProps["status"]; title?: string; since?: number }[];
+  counts?: { needs_you: number; working: number; done: number; failed: number };
+};
 
 /** One card on the lock screen, as expo-widgets gives it. */
 export interface CardInstance {
@@ -15,6 +22,32 @@ export interface CardInstance {
 /** Starts cards of the one kind Lantern has (expo-widgets' LiveActivityFactory). */
 export interface CardFactory {
   start(props: CardProps, url?: string, staleDate?: Date): CardInstance;
+  /** The cards already on the lock screen (left by the app's last run). */
+  getInstances?(): CardInstance[];
+}
+
+/** A summary card older than this is started afresh when it can be: iOS ends every card after about 8 hours. */
+export const SUMMARY_RENEW_MS = 7.5 * 60 * 60 * 1000;
+
+/** What decides whether a summary card should be up, as the phone sees it now. */
+export interface World {
+  /** The Mac keeps summary cards (it lists "livesummary"). */
+  summary: boolean;
+  connected: boolean;
+  /** The app is in front: iOS lets it start a card only then. */
+  foreground: boolean;
+  /** A chat is working or needs you. */
+  busy: boolean;
+}
+
+interface SummaryCard {
+  instance: CardInstance;
+  token: string | null;
+  since: number;
+  /** Nothing was working or waiting the last time the phone looked: the Mac has ended it, or will. */
+  over: boolean;
+  reported: boolean;
+  listener: { remove(): void } | null;
 }
 
 /** How long a card may go without an update before the phone calls it stale (the Mac pushes again well before this). */
@@ -79,6 +112,12 @@ interface Current {
  */
 export class LiveCards {
   private current: Current | null = null;
+  /** With a Mac that keeps them: the one card about every chat, in place of `current`. */
+  private summaryCard: SummaryCard | null = null;
+  /** The phone last saw a Mac that keeps summary cards: a message sent starts no card of its own. */
+  private summaryMode = false;
+  /** The cards left by the app's last run have been looked at. */
+  private adopted = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly factory: () => CardFactory | null;
   private readonly now: () => number;
@@ -102,6 +141,8 @@ export class LiveCards {
   /** A message `id` is being sent to chat `slot` (in the project `project`): its card replaces any other. */
   begin(id: string, slot: string, project: string | null): Promise<void> {
     return this.chain(async () => {
+      // The summary card shows the chat working once the Mac says so.
+      if (this.summaryMode) return;
       const factory = this.factory();
       if (!factory) return;
       await this.endCurrent();
@@ -162,7 +203,103 @@ export class LiveCards {
   connected(): Promise<void> {
     return this.chain(async () => {
       await this.report();
+      await this.reportSummary();
     });
+  }
+
+  /**
+   * With a Mac that keeps summary cards: the one card about every chat. It is started while the app is in front, connected,
+   * and some chat is working or needs you, and there is none (or the last one is over, or nearly as old as iOS lets one get);
+   * from then on the Mac keeps it right, and ends it when nothing works or waits. The phone never ends it itself except to
+   * start the next one. A card the app's last run left is taken over, not doubled.
+   */
+  look(world: World): Promise<void> {
+    return this.chain(async () => {
+      this.summaryMode = world.summary;
+      if (!world.summary) return;
+      const factory = this.factory();
+      if (!factory) return;
+      if (!this.adopted) {
+        this.adopted = true;
+        this.adopt(factory);
+      }
+      const card = this.summaryCard;
+      if (card && !world.busy) {
+        card.over = true;
+        return;
+      }
+      if (!world.busy || !world.foreground || !world.connected) return;
+      if (card && !card.over && this.now() - card.since < SUMMARY_RENEW_MS) return;
+      await this.endSummary();
+      // The old kind of card, from before this Mac kept summaries, goes too.
+      await this.endCurrent();
+      this.startSummary(factory);
+      await this.waitForToken();
+    });
+  }
+
+  private adopt(factory: CardFactory) {
+    let left: CardInstance[] = [];
+    try {
+      left = factory.getInstances?.() ?? [];
+    } catch {
+      return;
+    }
+    const [keep, ...rest] = left;
+    for (const extra of rest) void extra.end("immediate").catch(() => {});
+    // Its age isn't known: it is taken as new, and the Mac (told its token again) goes on with it or ends it.
+    if (keep) this.follow(keep, this.now());
+  }
+
+  private startSummary(factory: CardFactory) {
+    const since = this.now();
+    let instance: CardInstance;
+    try {
+      instance = factory.start({ project: "Lantern", status: "working", since, chats: [], counts: { needs_you: 0, working: 0, done: 0, failed: 0 } }, undefined, new Date(since + STALE_MS));
+    } catch {
+      return;
+    }
+    this.follow(instance, since);
+  }
+
+  private follow(instance: CardInstance, since: number) {
+    const card: SummaryCard = { instance, token: null, since, over: false, reported: false, listener: null };
+    this.summaryCard = card;
+    const take = (token: string | null) => {
+      if (this.summaryCard !== card || !token || token === card.token) return;
+      card.token = token;
+      void this.reportSummary();
+    };
+    try {
+      card.listener = instance.addPushTokenListener((e) => take(e.pushToken));
+    } catch {
+      // Without a token the Mac can't update it: it shows what it started with.
+    }
+    this.pendingToken = instance
+      .getPushToken()
+      .then(take)
+      .catch(() => {});
+  }
+
+  private pendingToken: Promise<void> = Promise.resolve();
+
+  private waitForToken() {
+    return this.pendingToken;
+  }
+
+  private async reportSummary(): Promise<void> {
+    const c = this.summaryCard;
+    if (!c?.token) return;
+    c.reported = true;
+    await this.d.tell({ card: { slot: "", token: c.token, project: "Lantern", since: c.since, summary: true } }).catch(() => {});
+  }
+
+  private async endSummary(): Promise<void> {
+    const c = this.summaryCard;
+    this.summaryCard = null;
+    if (!c) return;
+    c.listener?.remove();
+    await c.instance.end("immediate").catch(() => {});
   }
 
   private async report(): Promise<void> {
