@@ -5,7 +5,7 @@ import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type CompactChip, type CompactGroup, type ProjectOpen, type SidebarChat, type SidebarItem } from "../lib/sidebar";
 import { lostText } from "../lib/orchestraView";
-import { ChevronIcon, ClockIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { ChevronIcon, ClockIcon, DeskIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
@@ -130,6 +130,8 @@ interface Props extends SidebarHandlers {
   onColors: (colors: Record<string, number>) => void;
   /** The projects that have notes: each is marked on its header. */
   noted?: string[];
+  /** The Desk (every chat at once): its button at the top, pressed while it is on screen, with how many things need you. */
+  desk?: { on: boolean; needs: number; onOpen: () => void };
 }
 
 /** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
@@ -985,6 +987,21 @@ export function Sidebar(props: Props) {
             </button>
           )}
           {history}
+          {props.desk && (
+            <button className={`icon sb-button desk-button${full ? " labelled" : ""}${props.desk.on ? " on" : ""}`} aria-label={props.desk.needs > 0 ? `Desk, ${props.desk.needs} waiting` : "Desk"} aria-pressed={props.desk.on} title="Desk: every chat at once" onClick={props.desk.onOpen}>
+              <DeskIcon />
+              {full && (
+                <Away across>
+                  <span aria-hidden>Desk</span>
+                </Away>
+              )}
+              {props.desk.needs > 0 && (
+                <span className="inbox-badge" aria-hidden>
+                  {props.desk.needs}
+                </span>
+              )}
+            </button>
+          )}
         </div>
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
           {full ? (

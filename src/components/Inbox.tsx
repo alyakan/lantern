@@ -33,7 +33,7 @@ const label = (n: number) => (n > 0 ? `What needs you, ${n} waiting` : "What nee
  * under the pointer when the one above it was answered, is a new button, and it can't be pressed until it has been on
  * screen a moment. (aria-disabled rather than disabled, so a button that is only waiting doesn't flash grey.)
  */
-function AllowButton({ title, onAllow }: { title: string; onAllow: () => void }) {
+export function AllowButton({ title, onAllow }: { title: string; onAllow: () => void }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setArmed(true), ARM_MS);

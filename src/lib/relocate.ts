@@ -47,6 +47,9 @@ export const OPEN_CHATS = "session.openChats";
 
 /** Every key the app saves that isn't about one folder (a session, a model, a setting). Listed so a new key is a decision. */
 export const NOT_FOLDER_KEYED = [
+  // The Desks, each a list of its projects' folders. Not moved with a folder: a moved project goes back to the first
+  // Desk, and is put on its Desk again in Edit Desks.
+  "desk.desks",
   "settings.modeBySession",
   "settings.harnessBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.

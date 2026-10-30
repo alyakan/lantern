@@ -26,7 +26,7 @@ import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
-import type { Capabilities, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
+import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
@@ -47,7 +47,7 @@ import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
 import { NotesApplied } from "./components/NotesApplied";
 import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
-import { stepFile, usePersistentState } from "./lib/layout";
+import { readStored, stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
@@ -88,7 +88,10 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
-import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
+import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
+import { clip, deskFeed, deskLive, LOG_MAX, readLog, routeCandidates, type DeskEntry } from "./lib/desk";
+import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
+import { DeskView } from "./components/DeskView";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -161,7 +164,8 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 // A stable empty list, so a chat with no skills loaded yet doesn't hand the composer a new one each render.
 const NO_SKILLS: SkillEntry[] = [];
 
-export default function App() {
+/** `startOnDesk`: the window opens on the Desk (every chat at once) once a chat is open, rather than on the last chat. */
+export default function App({ startOnDesk = false }: { startOnDesk?: boolean } = {}) {
   // What older Lanterns saved per project (one mode, Step by step's own auto-approve, how a team ran) becomes the two
   // settings below, before anything reads them.
   useState(() => migrateModeSettings(localStorage));
@@ -250,6 +254,19 @@ export default function App() {
   // chat and back finds the agents where they were; its chats are handed to it through a store, so each agent redraws only
   // for its own chat.
   const [view, setView] = useState<"chat" | "canvas">("chat");
+  // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
+  const [desk, setDesk] = useState(startOnDesk);
+  // The Desks (see lib/desks.ts) and the messages typed on them (see lib/desk.ts), kept across launches.
+  const [desksStored, setDesks] = usePersistentState<unknown>("desk.desks", NO_DESKS);
+  const desks = useMemo(() => readDesks(desksStored), [desksStored]);
+  const [deskLog, setDeskLog] = useState<DeskEntry[]>(() => readLog(readStored("desk.log", [])));
+  useEffect(() => {
+    try {
+      localStorage.setItem("desk.log", JSON.stringify(deskLog.slice(-LOG_MAX)));
+    } catch {
+      // storage unavailable; the Desk's messages just won't survive a restart
+    }
+  }, [deskLog]);
   const canvasLayout = useRef(newLayout());
   const [chatStore] = useState(createChatStore);
   chatStore.assign(chats.slots);
@@ -543,6 +560,7 @@ export default function App() {
     return left !== "canvas" && chats.slots[left] && teamMain(chats, left) === team ? left : "canvas";
   };
   const switchTo = (slot: string) => {
+    if (chats.slots[slot]) setDesk(false);
     if (slot === active || !chats.slots[slot]) return;
     const left = chats.slots[slot].orchestrator ? viewOf(slot) : null;
     const shown = left && left !== "canvas" ? left : slot;
@@ -2460,6 +2478,88 @@ export default function App() {
     }),
   );
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
+  // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
+  const deskShown = desk && Object.keys(openByProject).length > 0;
+  // What the Desk on screen has: its projects' chats only.
+  const deskOpen = openOn(desks, desks.on, openByProject);
+  const onThisDesk = (slot: string) => {
+    const folder = projectFolderOf(slot);
+    return folder !== null && deskOf(desks, folder) === desks.on;
+  };
+  const deskCandidates = routeCandidates(chats, deskOpen);
+  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
+  // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
+  const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
+  const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
+  const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
+  // A message goes to a chat as if typed there: now when the chat is free, queued behind its turn when it's working.
+  const deliver = (slot: string, text: string): { queued: boolean } | string => {
+    const s = chats.slots[slot];
+    if (!s) return "That chat is closed.";
+    if (s.status === "idle") {
+      sendIn(slot, text);
+      return { queued: false };
+    }
+    if (s.status === "running") {
+      to(slot)({ type: "queue_set", items: [...s.queued, text] });
+      return { queued: true };
+    }
+    return s.status === "asleep" ? "That chat is asleep. Open it to wake it, then send it again." : s.status === "starting" ? "That chat is still starting. Send it again in a moment." : "That chat isn't running.";
+  };
+  const deskSendTo = (entry: DeskEntry, slot: string) => {
+    const done = deliver(slot, entry.text);
+    const title = deskTargets.find((t) => t.slot === slot)?.title ?? chatTitle(chats.slots[slot] ?? initialState, titles);
+    if (typeof done === "string") {
+      if (entry.outcome.kind !== "sent") deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: done } }));
+      else setHud({ key: Date.now(), kind: "warning", body: done });
+      return;
+    }
+    deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued } }));
+  };
+  const deskStartIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
+    if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
+    const slot = takeSlot();
+    startIn(slot, folder, false, false, entry.text, undefined, undefined, workflow === "steps" ? { permissions: permissionsFor(folder), preset: null, workflow } : false);
+    deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false } }));
+  };
+  // The router answers after the chats may have changed: what it says is carried out with the newest of these.
+  const deskNow = useRef({ deskSendTo, deskStartIn });
+  deskNow.current = { deskSendTo, deskStartIn };
+  const desksNow = useRef(desks);
+  desksNow.current = desks;
+  const deskSend = (text: string, picked: string | null) => {
+    const entry: DeskEntry = { id: `desk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, desk: desks.on, at: Date.now(), text, outcome: { kind: "routing" }, also: [] };
+    setDeskLog((all) => [...all, entry].slice(-LOG_MAX));
+    if (picked) return deskSendTo(entry, picked);
+    // What the router is shown is kept: its answer is matched against this, whatever the Desk shows by the time it comes.
+    const sentTargets = deskTargets;
+    const sentProjects = deskProjects;
+    const deskId = desks.on;
+    const ask = (chats: string[], unsure: boolean) => {
+      const asked = chats.map((slot) => sentTargets.find((t) => t.slot === slot)).filter((t): t is (typeof sentTargets)[number] => !!t);
+      // Unsure, or nothing to pick from: a new chat is offered too.
+      deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
+    };
+    api.deskRoute(state.claudePath ?? "", text, deskCandidates, sentProjects.map((p) => p.label)).then(
+      (r) => {
+        const now = deskNow.current;
+        if (r.kind === "route") now.deskSendTo(entry, r.chat);
+        else if (r.kind === "start") {
+          const folder = sentProjects.find((p) => p.label === r.project)?.folder;
+          if (folder) now.deskStartIn(entry, folder, r.workflow);
+          else ask([], true);
+        } else if (r.kind === "search") {
+          deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "search", terms: r.terms, hits: null } }));
+          // Found once and kept with the message. A newer search cancels this one: it looks again, once.
+          const found = (hits: ChatHit[] | "failed") => deskEdit(entry.id, (e) => (e.outcome.kind === "search" ? { ...e, outcome: { ...e.outcome, hits } } : e));
+          const look = (again: boolean): Promise<void> =>
+            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));
+          look(true).catch(() => found("failed"));
+        } else ask(r.chats, r.unsure);
+      },
+      (e) => deskEdit(entry.id, (x) => ({ ...x, outcome: { kind: "failed", why: errText(e) } })),
+    );
+  };
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -2486,11 +2586,12 @@ export default function App() {
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
-  const sidebarHandlers = {
+  const sidebarBase = {
     onRename: renameChat,
     onChat: switchTo,
     // Its canvas, unless the team was left with a chat full size, which it comes back to (a click while in it is the way back to the canvas).
     onTeam: (slot: string) => {
+      setDesk(false);
       const here = inTeam(slot);
       if (here) focusAgent(slot);
       else switchTo(slot);
@@ -2498,6 +2599,7 @@ export default function App() {
     },
     // An agent is focused on its team's canvas, leaving the team's Lead where it is.
     onAgent: (slot: string, team: string) => {
+      setDesk(false);
       if (!inTeam(team)) switchTo(team);
       focusAgent(slot);
       setView("canvas");
@@ -2528,6 +2630,21 @@ export default function App() {
   };
   // The inbox's Go: the same place the sidebar's row for it goes to.
   const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
+  // Starting something from the sidebar leaves the Desk for it.
+  const leaveDesk = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
+    setDesk(false);
+    run(...args);
+  };
+  const sidebarHandlers = {
+    ...sidebarBase,
+    onNewChatIn: leaveDesk(sidebarBase.onNewChatIn),
+    onNewTeamIn: leaveDesk(sidebarBase.onNewTeamIn),
+    onNewChat: leaveDesk(sidebarBase.onNewChat),
+    onNewTeam: leaveDesk(sidebarBase.onNewTeam),
+    onNewTeamTemplate: leaveDesk(sidebarBase.onNewTeamTemplate),
+    onReviewPr: leaveDesk(sidebarBase.onReviewPr),
+    onSetup: leaveDesk(sidebarBase.onSetup),
+  };
   // Picking something in the peeked sidebar takes you there and puts it away.
   const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
     sidebarPeek.close();
@@ -2568,6 +2685,7 @@ export default function App() {
     colors: projectColors,
     onColors: setProjectColors,
     noted: notedFolders(notesBy),
+    desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
   };
 
   const restartToUpdate = () => {
@@ -2738,11 +2856,46 @@ export default function App() {
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
-          collapsed={reviewCollapsed || !state.folder}
+          collapsed={reviewCollapsed || !state.folder || deskShown}
           scope={showCanvas ? "canvas" : (state.folder ?? "")}
           onRatio={setSplitRatio}
           left={
-            showCanvas ? (
+            deskShown ? (
+              <ErrorBoundary name="desk">
+                <DeskView
+                  cards={deskFeed(chats, deskOpen)}
+                  live={deskLive(chats, deskOpen)}
+                  needs={inbox.filter((it) => onThisDesk(it.slot))}
+                  entries={deskLog.filter((e) => e.desk === desks.on)}
+                  targets={deskTargets}
+                  desks={{
+                    value: desks,
+                    waiting: waitingBy(desks, openByProject),
+                    projects: (() => {
+                      const all = [...new Set([...Object.keys(openByProject), ...desks.list.flatMap((d) => d.projects)])];
+                      const labels = projectLabels(all);
+                      return all.map((folder, i) => ({ folder, label: labels[i] }));
+                    })(),
+                    onChange: setDesks,
+                    onAdd: (name) => {
+                      const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
+                      if (next) setDesks(next);
+                    },
+                  }}
+                  canSend={!!state.claudePath}
+                  onSend={deskSend}
+                  onSendTo={deskSendTo}
+                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                  onOpenPast={(hit) => {
+                    setDesk(false);
+                    openSession(hit.id, hit.folder);
+                  }}
+                  onOpen={switchTo}
+                  onGo={goToInbox}
+                  onDecide={answerFromInbox}
+                />
+              </ErrorBoundary>
+            ) : showCanvas ? (
               <ChatStoreContext.Provider value={chatStore}>
                 <NodeActionsContext.Provider value={nodeActions}>
                   <ErrorBoundary name="canvas">

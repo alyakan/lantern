@@ -42,6 +42,7 @@ pub mod storage;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
+pub mod desk;
 pub mod trash;
 pub mod revert;
 pub mod checkpoint;
@@ -3049,6 +3050,14 @@ async fn title_session(state: State<'_, AppState>, claude_path: String, folder: 
     Ok(title)
 }
 
+/// Where a message typed on the Desk goes (see desk.rs): one of `chats`, a new chat in one of `projects`, a question back to
+/// the user, or a search. The window sends the user's own words wherever that is.
+#[tauri::command]
+async fn desk_route(state: State<'_, AppState>, claude_path: String, text: String, chats: Vec<desk::Candidate>, projects: Vec<String>) -> Result<desk::Route, String> {
+    let path_env = login_path(&state).await;
+    Ok(desk::route(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &chats, &projects).await)
+}
+
 /// Folders the user has used Claude Code in lately, for the folder menu.
 #[tauri::command]
 async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
@@ -3539,6 +3548,7 @@ pub fn run() {
             rename_session,
             session_events,
             title_session,
+            desk_route,
             open_session,
             relocations_list,
             folders_gone,
