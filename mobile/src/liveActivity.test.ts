@@ -1,8 +1,11 @@
 import { chatLink, LiveCards, slotOfLink, STALE_MS, SUMMARY_RENEW_MS, type CardFactory, type CardInstance, type CardProps, type World } from "./liveActivity";
 
 /** A card the fake native side started: what it was started with, what became of it, and a way to give it a token. */
+let nextId = 0;
+
 class FakeCard implements CardInstance {
   ended: string | null = null;
+  readonly id = `activity-${++nextId}`;
   listeners: ((e: { activityId: string; pushToken: string }) => void)[] = [];
   removed = 0;
   constructor(
@@ -11,7 +14,7 @@ class FakeCard implements CardInstance {
     public token: string | null = null,
     readonly stale?: Date,
   ) {}
-  getId = () => "activity-1";
+  getId = () => this.id;
   getPushToken = async () => this.token;
   addPushTokenListener(listener: (e: { activityId: string; pushToken: string }) => void) {
     this.listeners.push(listener);
@@ -279,13 +282,30 @@ describe("the summary card (a Mac that keeps one)", () => {
     expect(started).toHaveLength(2);
   });
 
-  it("ends the cards the app's last run left, and starts its own", async () => {
+  it("ends the cards the app's last run left once it has started its own, and not before", async () => {
     const left = [new FakeCard({ project: "Lantern", status: "working", since: 1 }, undefined, "cd".repeat(32)), new FakeCard({ project: "x", status: "done", since: 1 }, undefined)];
     const { cards, started, told } = summaryRig(left);
+    // Woken in the background (to answer a notification): a card the Mac started may be the one on screen, so all stay.
+    await cards.look(world({ foreground: false }));
+    expect(left.map((c) => c.ended)).toEqual([null, null]);
     await cards.look(world());
     expect(left.map((c) => c.ended)).toEqual(["immediate", "immediate"]);
     expect(started).toHaveLength(1);
+    expect(started[0].ended).toBeNull();
     expect(told).toEqual([{ card: expect.objectContaining({ token: "ab".repeat(32), summary: true }) }]);
+  });
+
+  it("ends nothing when iOS won't start its own card", async () => {
+    const left = [new FakeCard({ project: "Lantern", status: "working", since: 1 }, undefined)];
+    const factory: CardFactory = {
+      start: () => {
+        throw new Error("not in front, as iOS sees it");
+      },
+      getInstances: () => left,
+    };
+    const cards = new LiveCards({ factory: () => factory, tell: async () => ({ ended: false }), startTokens: () => null, now: () => 5_000 });
+    await cards.look(world());
+    expect(left[0].ended).toBeNull();
   });
 
   it("starts the next one when the Mac says it ended the last while the phone was away", async () => {

@@ -192,6 +192,10 @@ const SUMMARY_CHECK: Duration = Duration::from_secs(20);
 pub const START_AFTER_MS: u64 = 8 * 1000;
 /// How often the Mac looks for a phone that should have a card and has none.
 const START_CHECK: Duration = Duration::from_secs(3);
+/// The least time between two cards the Mac starts on one phone: each start comes with an alert.
+pub const START_EVERY_MS: u64 = 15 * 60 * 1000;
+/// How long after a start that couldn't reach Apple it is tried again.
+const START_RETRY_MS: u64 = 60 * 1000;
 
 /// What a summary card keeps between pushes.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -275,6 +279,23 @@ pub struct LiveState {
     /// The phone's token for starting a card by push (kept for when a card may be started from the Mac).
     pub start_token: Option<String>,
     pub card: Option<LiveCard>,
+    /// The tokens of the phone's own cards the Mac has let go of (one it started took their place, or Apple said they were
+    /// gone), newest last: a phone woken in the background says its old card again, and that is no card at all.
+    pub spent: Vec<String>,
+}
+
+/// How many let-go tokens are remembered for each phone.
+const SPENT_KEPT: usize = 8;
+
+impl LiveState {
+    fn spend(&mut self, card: Option<&LiveCard>) {
+        if let Some(c) = card.filter(|c| c.channel.is_none() && !c.token.is_empty()) {
+            self.spent.retain(|t| *t != c.token);
+            self.spent.push(c.token.clone());
+            let extra = self.spent.len().saturating_sub(SPENT_KEPT);
+            self.spent.drain(..extra);
+        }
+    }
 }
 
 /// Every phone's Live Activity state, in memory only: a phone says it again each time it connects, and a card's token is
@@ -291,9 +312,14 @@ pub struct LiveBook {
 }
 
 impl LiveBook {
-    /// A phone's whole Live Activity state: replaces what it said before.
-    pub fn register(&self, device: &str, start_token: Option<String>, card: Option<LiveCard>) {
+    /// A phone's whole Live Activity state: replaces what it said before. True when the card it names is one the Mac has
+    /// already let go of (it is over, whatever the phone thinks): what the Mac follows is left as it was.
+    pub fn register(&self, device: &str, start_token: Option<String>, card: Option<LiveCard>) -> bool {
         let mut states = self.states.lock().unwrap();
+        let spent = states.get(device).map(|s| s.spent.clone()).unwrap_or_default();
+        if card.as_ref().is_some_and(|c| c.channel.is_none() && spent.contains(&c.token)) {
+            return true;
+        }
         // The same card said again (a phone does, each time it connects) is the card the Mac already follows: what it knows
         // of where it stands is kept, rather than started over (and an end it already sent sent again).
         let old = states.get(device).and_then(|s| s.card.clone());
@@ -309,9 +335,10 @@ impl LiveBook {
                 self.retired.lock().unwrap().push(old);
             }
         }
-        states.insert(device.to_string(), LiveState { start_token, card });
+        states.insert(device.to_string(), LiveState { start_token, card, spent });
         drop(states);
         self.changed.notify_one();
+        false
     }
 
     pub fn forget(&self, device: &str) {
@@ -320,7 +347,10 @@ impl LiveBook {
 
     /// A card this Mac started on a phone: kept as the phone's card, with what the phone said before.
     fn put(&self, device: &str, card: LiveCard) {
-        self.states.lock().unwrap().entry(device.to_string()).or_default().card = Some(card);
+        let mut states = self.states.lock().unwrap();
+        let state = states.entry(device.to_string()).or_default();
+        let old = state.card.replace(card);
+        state.spend(old.as_ref());
     }
 
     fn take_retired(&self) -> Vec<LiveCard> {
@@ -343,7 +373,8 @@ impl LiveBook {
 
     fn drop_card(&self, device: &str) {
         if let Some(s) = self.states.lock().unwrap().get_mut(device) {
-            s.card = None;
+            let old = s.card.take();
+            s.spend(old.as_ref());
         }
     }
 
@@ -810,6 +841,9 @@ pub struct LiveActivities {
     /// The spell of work each phone was last started a card for: one start a spell, so a card that ended (or that Apple
     /// refused) isn't started over and over, each with its alert.
     started_for: Mutex<HashMap<String, u64>>,
+    /// When each phone was last tried (ms): a start Apple couldn't be reached for is tried again a while later, and one
+    /// that went through is the last for a while (each comes with an alert that lights the screen).
+    tried: Mutex<HashMap<String, (u64, bool)>>,
 }
 
 /// What an event does to a chat's card: the push to send, and the state it leaves the card in.
@@ -832,7 +866,7 @@ impl LiveActivities {
     }
 
     fn with_clock(store: Arc<RemoteStore>, hub: Arc<SessionHub>, apns: Arc<dyn Apns>, now_ms: fn() -> u64) -> Arc<Self> {
-        Arc::new(Self { store, hub, apns, now_ms, busy_since: Mutex::new(None), started_for: Mutex::new(HashMap::new()) })
+        Arc::new(Self { store, hub, apns, now_ms, busy_since: Mutex::new(None), started_for: Mutex::new(HashMap::new()), tried: Mutex::new(HashMap::new()) })
     }
 
     /// Follows the bus until it closes (the task `start_remote` runs and `stop` aborts), and looks again at the cards
@@ -952,14 +986,22 @@ impl LiveActivities {
         for device in saved.devices {
             let Some(start_token) = device.start_token.clone() else { continue };
             let up = self.store.live.state(&device.id).and_then(|s| s.card).is_some_and(|c| !c.ended && now.saturating_sub(c.registered_at) <= CARD_LIFETIME_MS);
-            if up || self.started_for.lock().unwrap().insert(device.id.clone(), since) == Some(since) {
+            let done_this_spell = self.started_for.lock().unwrap().get(&device.id) == Some(&since);
+            let too_soon = self.tried.lock().unwrap().get(&device.id).is_some_and(|&(at, started)| now.saturating_sub(at) < if started { START_EVERY_MS } else { START_RETRY_MS });
+            if up || done_this_spell || too_soon {
                 continue;
             }
-            self.start_card(&device, &start_token, now).await;
+            let answer = self.start_card(&device, &start_token, now).await;
+            self.tried.lock().unwrap().insert(device.id.clone(), (now, answer == Some(true)));
+            // Apple answered (yes or no): that is this spell's start. Not reached: tried again after START_RETRY_MS.
+            if answer.is_some() {
+                self.started_for.lock().unwrap().insert(device.id.clone(), since);
+            }
         }
     }
 
-    async fn start_card(&self, device: &super::pairing::Device, start_token: &str, now: u64) {
+    /// Starts a card on a phone: Some(true) when Apple took it, Some(false) when it refused, None when it couldn't be asked.
+    async fn start_card(&self, device: &super::pairing::Device, start_token: &str, now: u64) -> Option<bool> {
         let channel = match device.live_channel.clone() {
             Some(c) => c,
             None => match self.apns.create_channel().await {
@@ -969,7 +1011,10 @@ impl LiveActivities {
                     }
                     c
                 }
-                Err(e) => return self.store.live.said(e),
+                Err(e) => {
+                    self.store.live.said(e);
+                    return None;
+                }
             },
         };
         let mut card = LiveCard { slot: String::new(), token: String::new(), project: "Lantern".into(), since: now, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Detail::default(), summary: Some(SummaryState::default()), channel: Some(channel.clone()) };
@@ -986,6 +1031,7 @@ impl LiveActivities {
                     s.last_needs = summary.needs_you;
                 }
                 self.store.live.put(&device.id, card);
+                Some(true)
             }
             Ok(reply) => {
                 self.store.live.said(reply.words());
@@ -993,8 +1039,12 @@ impl LiveActivities {
                 if reply.gone() {
                     let _ = self.store.set_start_token(&device.id, None);
                 }
+                Some(false)
             }
-            Err(e) => self.store.live.said(e),
+            Err(e) => {
+                self.store.live.said(e);
+                None
+            }
         }
     }
 
@@ -2118,13 +2168,55 @@ pub(crate) mod tests {
         r.store.live.edit(&device, |c| c.ended = true);
         r.service.start_cards().await;
         assert_eq!(r.sent().len(), 1);
-        // Quiet, then working again: a new spell, a new card, through the same channel.
+        // Quiet, then working again: a new spell, but within START_EVERY_MS of the last start (each comes with an alert).
         r.event("a", done(false)).await;
         r.service.start_cards().await;
         work_long_enough(&r).await;
         r.service.start_cards().await;
+        assert_eq!(r.sent().len(), 1);
+        // Later on (the tests' clock stands still: what the Mac remembers of its last start is forgotten instead), a new card,
+        // through the same channel.
+        r.service.tried.lock().unwrap().clear();
+        r.service.start_cards().await;
         assert_eq!(r.sent().len(), 2);
         assert_eq!(*r.outbox.channels.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_start_that_couldnt_reach_apple_is_tried_again_a_minute_later() {
+        let r = rig();
+        closed_phone(&r);
+        *r.outbox.answer.lock().unwrap() = Some(Err("Couldn't reach Apple.".into()));
+        work_long_enough(&r).await;
+        r.service.start_cards().await;
+        r.service.start_cards().await;
+        assert_eq!(r.sent().len(), 1, "not again straight away");
+        *r.outbox.answer.lock().unwrap() = None;
+        r.service.tried.lock().unwrap().insert(r.store.saved().devices[0].id.clone(), (clock() - 60_000, false));
+        r.service.start_cards().await;
+        assert_eq!(r.sent().len(), 2, "the same spell of work, tried again");
+    }
+
+    #[tokio::test]
+    async fn a_phone_woken_in_the_background_saying_its_old_card_again_leaves_the_macs_card_be() {
+        let r = rig();
+        let device = closed_phone(&r);
+        // The phone's own card, ended by the Mac when the chats went quiet; the app is then closed.
+        r.summary_card(&device);
+        r.store.live.edit(&device, |c| c.ended = true);
+        work_long_enough(&r).await;
+        r.service.start_cards().await;
+        assert_eq!(r.store.live.state(&device).unwrap().card.unwrap().channel.as_deref(), Some(CHANNEL));
+        // Woken to answer a notification, it says the card it still holds: that is no card, and the phone hears it is over.
+        let old = LiveCard { slot: String::new(), token: TOKEN.into(), project: "Lantern".into(), since: clock(), status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default(), summary: Some(SummaryState::default()), channel: None };
+        assert!(r.store.live.register(&device, None, Some(old.clone())));
+        assert_eq!(r.store.live.state(&device).unwrap().card.unwrap().channel.as_deref(), Some(CHANNEL));
+        r.service.reconcile().await;
+        assert!(broadcasts(&r).iter().all(|(_, p)| p.event != "end"));
+        // A card the phone has just started (a new token) does replace it.
+        assert!(!r.store.live.register(&device, None, Some(LiveCard { token: "fe".repeat(32), ..old })));
+        r.service.reconcile().await;
+        assert!(broadcasts(&r).iter().any(|(_, p)| p.event == "end"));
     }
 
     #[tokio::test]
@@ -2157,7 +2249,8 @@ pub(crate) mod tests {
         assert_eq!(r.store.live.state(&device).unwrap().card.unwrap().channel.as_deref(), Some(CHANNEL));
         r.service.reconcile().await;
         assert!(broadcasts(&r).iter().all(|(_, p)| p.event != "end"));
-        // The app opened and put up its own: the Mac's is ended through its channel, and gone from the screen at once.
+        // The app opened and put up its own (a token the Mac hasn't seen): the Mac's is ended through its channel, and gone from
+        // the screen at once.
         r.summary_card(&device);
         r.service.reconcile().await;
         let end = broadcasts(&r).into_iter().find(|(_, p)| p.event == "end").expect("the Mac's card is ended");
@@ -2182,6 +2275,7 @@ pub(crate) mod tests {
         r.event("a", done(false)).await;
         r.service.start_cards().await;
         work_long_enough(&r).await;
+        r.service.tried.lock().unwrap().clear();
         r.service.start_cards().await;
         *r.outbox.broadcast_answer.lock().unwrap() = Some(Ok(Reply { status: 400, reason: Some("BadChannelId".into()) }));
         r.event("b", go()).await;

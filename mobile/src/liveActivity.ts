@@ -134,8 +134,6 @@ export class LiveCards {
   private summaryCard: SummaryCard | null = null;
   /** The phone last saw a Mac that keeps summary cards: a message sent starts no card of its own. */
   private summaryMode = false;
-  /** The cards left by the app's last run have been cleared. */
-  private cleared = false;
   /** What the summary card was last looked at for: the Mac saying it ended it looks again with this. */
   private world: World | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -256,8 +254,9 @@ export class LiveCards {
    * With a Mac that keeps summary cards: the one card about every chat. It is started while the app is in front, connected,
    * and some chat is working or needs you, and there is none (or the last one is over, or nearly as old as iOS lets one get);
    * from then on the Mac keeps it right, and ends it when nothing works or waits (and says so when it is next told of it). The
-   * phone never ends it itself except to start the next one. Cards the app's last run left are ended at launch: one can't be
-   * told from a card the Mac has ended that is still on screen for a while.
+   * phone never ends it itself except to start the next one. Once its own has started, every other card on the lock screen is
+   * ended: the app's last run's, or one the Mac started while the app was closed. Not before: an app woken in the background
+   * (to answer a notification) can't start one, and the Mac's card is the one the user is looking at then.
    */
   look(world: World): Promise<void> {
     return this.chain(async () => {
@@ -266,10 +265,6 @@ export class LiveCards {
       if (!world.summary) return;
       const factory = this.factory();
       if (!factory) return;
-      if (!this.cleared) {
-        this.cleared = true;
-        await this.clearLeftovers(factory);
-      }
       const card = this.summaryCard;
       if (card && !world.busy) {
         card.over = true;
@@ -277,35 +272,43 @@ export class LiveCards {
       }
       if (!world.busy || !world.foreground || !world.connected) return;
       if (card && !card.over && this.now() - card.since < SUMMARY_RENEW_MS) return;
-      await this.endSummary();
-      // The old kind of card, from before this Mac kept summaries, goes too, and a card the Mac started while the app was
-      // closed (the Mac ends it too, when it hears of this one).
+      const before = this.summaryCard;
+      const fresh = this.startSummary(factory);
+      if (!fresh) return;
+      if (before) {
+        before.listener?.remove();
+        await before.instance.end("immediate").catch(() => {});
+      }
+      // The old kind of card, from before this Mac kept summaries, goes too, and any other: the last run's, or one the Mac
+      // started while the app was closed (the Mac ends that too, when it hears of this one).
       await this.endCurrent();
-      await this.clearLeftovers(factory);
-      this.startSummary(factory);
+      await this.endOthers(factory, fresh);
       await this.waitForToken();
     });
   }
 
-  private async clearLeftovers(factory: CardFactory) {
-    let left: CardInstance[] = [];
+  private async endOthers(factory: CardFactory, keep: CardInstance) {
+    let all: CardInstance[] = [];
     try {
-      left = factory.getInstances?.() ?? [];
+      all = factory.getInstances?.() ?? [];
     } catch {
       return;
     }
-    for (const card of left) await card.end("immediate").catch(() => {});
+    const id = keep.getId();
+    for (const card of all) if (card !== keep && card.getId() !== id) await card.end("immediate").catch(() => {});
   }
 
-  private startSummary(factory: CardFactory) {
+  /** Starts the summary card and follows it; null when iOS wouldn't start one (and nothing else changes). */
+  private startSummary(factory: CardFactory): CardInstance | null {
     const since = this.now();
     let instance: CardInstance;
     try {
       instance = factory.start({ project: "Lantern", status: "working", since, chats: [], counts: { needs_you: 0, working: 0, done: 0, failed: 0 } }, undefined, new Date(since + STALE_MS));
     } catch {
-      return;
+      return null;
     }
     this.follow(instance, since);
+    return instance;
   }
 
   private follow(instance: CardInstance, since: number) {
@@ -345,14 +348,6 @@ export class LiveCards {
       c.over = true;
       if (this.world) void this.look(this.world);
     }
-  }
-
-  private async endSummary(): Promise<void> {
-    const c = this.summaryCard;
-    this.summaryCard = null;
-    if (!c) return;
-    c.listener?.remove();
-    await c.instance.end("immediate").catch(() => {});
   }
 
   private async report(): Promise<void> {
