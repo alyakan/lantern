@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActionSheetIOS, Alert, Animated, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActionSheetIOS, Alert, Animated, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
@@ -145,7 +145,8 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
   );
 
   return (
-    <KeyboardAvoidingView behavior="padding" testID="todos-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet || float?.floating ? 16 : insets.top + 6 }}>
+    // Its place on the screen is found, not assumed: a page sheet starts below the top, by more than the keyboard would leave.
+    <KeyboardAvoidingView behavior="padding" automaticOffset testID="todos-pane" style={{ flex: 1, backgroundColor: colors.card, paddingTop: inSheet || float?.floating ? 16 : insets.top + 6 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", paddingHorizontal: space.lg, paddingBottom: 4, gap: 8 }}>
         <View style={{ flex: 1, gap: 2 }}>
           {title}
@@ -347,7 +348,15 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
         {quick.map((q) => (
           <Pill key={q.label} label={q.label} on={date === q.date} onPress={() => pickDay(date === q.date ? null : q.date)} />
         ))}
-        <Pill label={picked ?? "Pick a day"} on={!!picked || !!month} onPress={() => setMonth(month ? null : shown)} />
+        {/* The month takes the keyboard's place, as iOS's own pickers do. */}
+        <Pill
+          label={picked ?? "Pick a day"}
+          on={!!picked || !!month}
+          onPress={() => {
+            if (!month) Keyboard.dismiss();
+            setMonth(month ? null : shown);
+          }}
+        />
       </View>
       {month && (
         <View style={{ gap: 2 }}>
@@ -369,7 +378,8 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
           {monthWeeks(shown.y, shown.m).map((week, w) => (
             <View key={w} style={{ flexDirection: "row" }}>
               {week.map((d, i) => {
-                const on = d === date;
+                // (A blank before the 1st is not the day picked when none is.)
+                const on = !!d && d === date;
                 const past = !!d && d < todayKey;
                 return (
                   <Pressable key={i} accessibilityRole="button" accessibilityLabel={d ? dueText(d, null, now) : undefined} accessibilityState={{ selected: on, disabled: !d || past }} disabled={!d || past} onPress={() => d && (pickDay(d), setMonth(null))} style={{ flex: 1, alignItems: "center", paddingVertical: 1 }}>

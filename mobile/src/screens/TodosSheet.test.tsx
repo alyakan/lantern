@@ -88,6 +88,8 @@ describe("the to-do sheet", () => {
     await fireEvent.changeText(screen.getByLabelText("New to-do"), "Book the venue");
     await fireEvent.press(screen.getByRole("button", { name: "Pick a day" }));
     await fireEvent.press(screen.getByRole("button", { name: "Next month" }));
+    // With no day picked, nothing in the month is marked picked (the blanks around it least of all).
+    expect(screen.getAllByRole("button").filter((b) => b.props.accessibilityState?.selected && !["Pick a day"].includes(b.props.accessibilityLabel))).toEqual([]);
     // The 15th of next month: far enough off to be named by its date, not a weekday or Tomorrow.
     const d = new Date();
     const mid = dayOf(new Date(d.getFullYear(), d.getMonth() + 1, 15));
