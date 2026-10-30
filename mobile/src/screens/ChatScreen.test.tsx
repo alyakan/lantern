@@ -681,7 +681,7 @@ describe("a chat", () => {
       expect(lastOf("send")).toBeUndefined();
     });
 
-    it("offers To-dos only from a Mac that keeps them, and opens this chat's list", async () => {
+    it("offers To-dos only from a Mac that keeps them, and opens this chat's list in its sheet, beside Changes", async () => {
       const quiet = await withSession(turn);
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       expect(screen.queryByRole("button", { name: "To-dos" })).toBeNull();
@@ -698,7 +698,12 @@ describe("a chat", () => {
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       await fireEvent.press(screen.getByRole("button", { name: "To-dos" }));
       await waitFor(() => expect(lastOf("todos")).toEqual({ op: "todos", project: "/Users/me/lantern" }));
-      expect(await screen.findByText("To-dos: lantern")).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "To-dos of lantern" })).toBeTruthy();
+      // The sheet's heading is its menu, which goes back to the changes.
+      await fireEvent.press(screen.getByRole("button", { name: "Showing To-dos" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Changes" }));
+      expect(screen.getByTestId("changes-pane")).toBeTruthy();
+      expect(screen.queryByTestId("todos-pane")).toBeNull();
     });
   });
 

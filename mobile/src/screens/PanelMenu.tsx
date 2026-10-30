@@ -5,12 +5,16 @@ import { Chevron } from "../ui/Chevron";
 import { PressScale } from "../ui/motion";
 import { radius, shadow, useColors } from "../ui/theme";
 
-/** What the chat's sheet beside it can show: what it changed, and the artifacts of its folder (a Mac that lists "artifacts"). */
-export type Panel = "changes" | "artifacts";
+/**
+ * What the chat's sheet beside it can show: what it changed, the artifacts of its folder (a Mac that lists "artifacts"), and its
+ * project's to-do list (a Mac that lists "todos").
+ */
+export type Panel = "changes" | "artifacts" | "todos";
 
 const PANELS: { value: Panel; label: string }[] = [
   { value: "changes", label: "Changes" },
   { value: "artifacts", label: "Artifacts" },
+  { value: "todos", label: "To-dos" },
 ];
 
 /** The title bar's icon for the sheet: a page with a line added and a line taken out. */
@@ -29,11 +33,11 @@ export function ChangesIcon({ color }: { color: string }) {
 }
 
 /** The sheet's heading as a menu: what it shows, and (opened) what else it can. */
-export function PanelMenu({ value, onPick, artifacts = false }: { value: Panel; onPick?: (p: Panel) => void; /** Whether the Mac can show artifacts: a menu offers only what it can. */ artifacts?: boolean }) {
+export function PanelMenu({ value, onPick, artifacts = false, todos = false }: { value: Panel; onPick?: (p: Panel) => void; /** Whether the Mac can show artifacts, and to-dos: a menu offers only what it can. */ artifacts?: boolean; todos?: boolean }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const label = PANELS.find((p) => p.value === value)?.label ?? value;
-  const panels = PANELS.filter((p) => artifacts || p.value !== "artifacts");
+  const panels = PANELS.filter((p) => (artifacts || p.value !== "artifacts") && (todos || p.value !== "todos"));
   return (
     <View style={{ alignSelf: "flex-start", zIndex: 2 }}>
       <PressScale accessibilityRole="button" accessibilityLabel={`Showing ${label}`} accessibilityHint="Choose what this sheet shows" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} haptic="select" scaleTo={0.97} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
