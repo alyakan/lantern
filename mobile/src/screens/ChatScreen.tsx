@@ -54,7 +54,7 @@ export interface ChatProps {
   /** The chats' button is there to take its place but out of sight, while the chats are slid in over the chat with a button of their own. */
   leadHidden?: boolean;
   /** The Changes button opens what the chat changed in a sheet; with this it shows or hides them in a pane beside the chat instead (`shown` says which). */
-  changesPane?: { shown: boolean; onToggle: () => void };
+  changesPane?: { shown: boolean; onToggle: () => void; /** A file link tapped: the pane shows it if it can (one of the files changed), and says whether it did; else it opens in a sheet. */ onFile?: (path: string) => boolean };
   /** The Done page's "Start something new": opens the new-chat sheet on this chat's project (its folder's name; null when it has none). */
   onStartNew?: (project: string | null) => void;
   /** The chat's width is being dragged (the Changes pane's divider): the reader's place is put back once, when it ends. */
@@ -356,7 +356,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // again would do it all over.
   const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
   const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
-  const openFile = useCallback((path: string) => setFiles([path]), []);
+  // A file link goes to the Changes pane when there is one that can show it, else to a sheet over the chat.
+  const pane = useRef(changesPane);
+  pane.current = changesPane;
+  const openFile = useCallback((path: string) => void (pane.current?.onFile?.(path) || setFiles([path])), []);
+  const openFiles = useCallback((paths: string[]) => (paths.length === 1 ? openFile(paths[0]) : setFiles(paths)), [openFile]);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
   const send = (text: string) => {
@@ -403,7 +407,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "assistant":
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={setFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page": {
           // On a page of its own, a Review file page is laid out as the Mac's: its file a link to its change, and its findings.
           const file = paged ? reviewOf(row) : null;
@@ -414,7 +418,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
         case "steps":
-          return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             <PromptRow
@@ -437,7 +441,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "day":
           return <DayRow label={row.label} />;
         case "hook":
-          return <HookRow row={row} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <HookRow row={row} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>

@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { changedFiles, changesLine } from "./changes";
+import { changedFileOf, changedFiles, changesLine } from "./changes";
 
 const step = (id: string, edits: Extract<Item, { kind: "step" }>["edits"]): Item => ({ kind: "step", id, name: "Edit", summary: "", done: true, isError: false, edits, tests: null });
 
@@ -33,5 +33,18 @@ describe("changesLine", () => {
     const rows = changedFiles([step("a", [{ path: "/p/a", created: false, added: 3, removed: 1 }, { path: "/p/b", created: false, added: 2, removed: 4 }])]);
     expect(changesLine(rows)).toBe("2 files · +5 −5");
     expect(changesLine(rows.slice(0, 1))).toBe("1 file · +2 −4");
+  });
+});
+
+describe("changedFileOf", () => {
+  const files = changedFiles([step("a", [{ path: "/p/src/a.ts", created: false, added: 1, removed: 0 }])]);
+  it("finds the changed file a link names, whole or from the project folder", () => {
+    expect(changedFileOf(files, "/p/src/a.ts")).toBe("/p/src/a.ts");
+    expect(changedFileOf(files, "src/a.ts")).toBe("/p/src/a.ts");
+    expect(changedFileOf(files, "./src/a.ts")).toBe("/p/src/a.ts");
+  });
+  it("finds none for a file it did not change, or one that only ends the same way", () => {
+    expect(changedFileOf(files, "src/b.ts")).toBeNull();
+    expect(changedFileOf(files, "xa.ts")).toBeNull();
   });
 });
