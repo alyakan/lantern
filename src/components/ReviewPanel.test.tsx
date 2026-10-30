@@ -392,6 +392,25 @@ describe("ReviewPanel's tabs", () => {
     localStorage.clear();
   });
 
+  it("finds a put-back chat's tab when its session comes after it shows, and keeps a new chat's under the session it gets", () => {
+    forgetChatTabs();
+    localStorage.setItem("review.chatTabs", JSON.stringify({ "sess-1": "files" }));
+    const { rerender, unmount } = render(<ReviewPanel {...base} chat={{ slot: "s9", session: null }} selected={null} follow />);
+    expect(selected()).toBe("Changes2");
+    rerender(<ReviewPanel {...base} chat={{ slot: "s9", session: "sess-1" }} selected={null} follow />);
+    expect(selected()).toBe("Files");
+    // A new chat: Plan picked before its first message, then it gets a session.
+    rerender(<ReviewPanel {...base} chat={{ slot: "s10", session: null }} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    rerender(<ReviewPanel {...base} chat={{ slot: "s10", session: "sess-2" }} selected={null} follow />);
+    expect(selected()).toBe("Plan");
+    unmount();
+    forgetChatTabs();
+    render(<ReviewPanel {...base} chat={{ slot: "s3", session: "sess-2" }} selected={null} follow />);
+    expect(selected()).toBe("Plan");
+    localStorage.clear();
+  });
+
   it("migrateTab sends every tab that left the pane to Changes", () => {
     expect(["activity", "agents", "storage", "nonsense"].map(migrateTab)).toEqual(["changes", "changes", "changes", "changes"]);
     expect(["summary", "map"].map(migrateTab)).toEqual(["plan", "plan"]);

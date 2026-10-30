@@ -68,6 +68,13 @@ export function keepChatTab(chat: ChatKey | undefined, tab: Tab) {
   }
 }
 
+/** A chat that just got its session: a tab picked in it before then is kept under the session, unless one already is. */
+export function adoptSession(chat: ChatKey | undefined) {
+  if (!chat?.session) return;
+  const picked = bySlot.get(chat.slot);
+  if (picked !== undefined && readBySession()[chat.session] === undefined) keepChatTab(chat, picked);
+}
+
 /** For tests: forget the tabs kept by slot. */
 export function forgetChatTabs() {
   bySlot.clear();

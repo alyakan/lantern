@@ -29,7 +29,7 @@ import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
-import { DEFAULT_PINNED, TABS, chatTabOf, keepChatTab, migrateTab, validPinned, type ChatKey, type Tab } from "../lib/reviewTabs";
+import { DEFAULT_PINNED, TABS, adoptSession, chatTabOf, keepChatTab, migrateTab, validPinned, type ChatKey, type Tab } from "../lib/reviewTabs";
 import { PaneTabsMenu, type TabBadge } from "./PaneTabsMenu";
 import { commentsMessage, type CommentControls } from "../lib/diffComments";
 import { CommentBar } from "./DiffComments";
@@ -122,13 +122,17 @@ function useRequest(name: string, key: unknown, act: () => void) {
 }
 
 export function ReviewPanel(props: Props) {
-  // Each chat's own tab: the one picked in it the last time it was on screen.
-  const [shown, setShown] = useState<{ slot: string | undefined; tab: Tab }>(() => ({ slot: props.chat?.slot, tab: chatTabOf(props.chat) }));
-  const tab = shown.slot === props.chat?.slot ? shown.tab : chatTabOf(props.chat);
+  // Each chat's own tab: the one picked in it the last time it was on screen. A chat put back after a restart gets its session
+  // a moment after it shows, and only then is its tab known: the session is part of which chat this is.
+  const chatId = `${props.chat?.slot ?? ""}\n${props.chat?.session ?? ""}`;
+  const [shown, setShown] = useState<{ chat: string; tab: Tab }>(() => ({ chat: chatId, tab: chatTabOf(props.chat) }));
+  const tab = shown.chat === chatId ? shown.tab : chatTabOf(props.chat);
   const setTab = (next: Tab) => {
     keepChatTab(props.chat, next);
-    setShown({ slot: props.chat?.slot, tab: next });
+    setShown({ chat: chatId, tab: next });
   };
+  // A tab picked in a new chat before its first message is kept under its session once it has one, to outlast a restart.
+  useEffect(() => adoptSession(props.chat), [props.chat?.session]);
   const count = props.files.length;
   const runs = props.testRuns ?? [];
   // The folder's watched requests: the Network tab lists them once there's a watch or a summary, and explains itself until then.

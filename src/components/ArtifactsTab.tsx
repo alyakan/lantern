@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { artifactUrl, themeVars, type Artifact, type ArtifactListing } from "../lib/artifacts";
+import { artifactUrl, canAskAbout, themeVars, type Artifact, type ArtifactListing } from "../lib/artifacts";
 import { usePrefersDark } from "../lib/theme";
 import { relativeTime } from "../lib/time";
 import { Md } from "./Md";
@@ -116,7 +116,7 @@ export function ArtifactsTab({ folder, refreshKey, open, busy = false, onRefresh
             Refreshing…
           </span>
         ) : (
-          onRefresh && (
+          onRefresh && canAskAbout(current.name) && (
             <button
               className="ghost artifact-refresh"
               onClick={() => {
