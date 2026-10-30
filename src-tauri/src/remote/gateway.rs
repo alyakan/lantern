@@ -139,6 +139,15 @@ pub trait Host: Send + Sync + 'static {
     /// A file of what the chat is reviewing, as a unified diff of the pull request or branch: `path` is relative to the
     /// repository or absolute in it (checked by `reviewed_path`), and a file outside the repository is refused.
     fn review_diff(&self, slot: String, path: String, target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>>;
+    /// Where a message typed on a Desk goes (see desk.rs): one quick call to a small model, on the user's own claude, shown `chats`
+    /// and the `projects` (labels) as data. A host that can't ask says it can't tell.
+    fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Route> {
+        Box::pin(async move { crate::desk::Route::Ask { chats: chats.into_iter().take(3).map(|c| c.id).collect(), unsure: true } })
+    }
+    /// Past chats whose words have `terms`, newest first, as History's search finds them. A host with no history says so.
+    fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
+        Box::pin(async { Err("This Mac can't search its chats.".to_string()) })
+    }
     /// The artifacts in the chat's folder, newest first (see artifacts.rs). A host with none says so.
     fn artifacts(&self, _slot: String) -> BoxFut<Result<Vec<protocol::RemoteArtifact>, String>> {
         Box::pin(async { Err(NO_ARTIFACTS.to_string()) })
@@ -310,6 +319,63 @@ impl Gateway {
         serde_json::to_value(&suggestions).map_err(|e| e.to_string())
     }
 
+    /// Where a message typed on a phone's Desk goes (Request::DeskRoute). The router is shown the Desk's open chats only, and a chat
+    /// that runs on another provider than Claude by its id and project only (what is said there is never put to Claude); what it
+    /// answers is checked against them, and a new chat's project against the user's projects. Nothing is sent from here.
+    pub async fn desk_route(&self, desk: String, text: String) -> Result<serde_json::Value, String> {
+        use crate::desk::Route;
+        use protocol::RemoteDeskRoute as R;
+        if text.trim().is_empty() || text.len() > TEXT_MAX {
+            return Err("That message is empty, or too long.".into());
+        }
+        let routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
+        let chats: Vec<crate::desk::Candidate> = routing
+            .chats
+            .into_iter()
+            .filter(|c| self.hub.chat(&c.id).is_some())
+            .map(|c| if self.hub.is_off_claude(&c.id) { crate::desk::Candidate { title: String::new(), last: String::new(), ..c } } else { c })
+            .collect();
+        let first = |chats: &[crate::desk::Candidate]| chats.iter().take(3).map(|c| c.id.clone()).collect::<Vec<_>>();
+        let labels: Vec<String> = routing.projects.iter().map(|(_, label)| label.clone()).collect();
+        let host = self.host.clone();
+        let answer = match host.desk_route(text, chats.clone(), labels).await {
+            Route::Route { chat } if chats.iter().any(|c| c.id == chat) => R::Chat { slot: chat },
+            Route::Start { project, workflow } => {
+                let folder = routing.projects.iter().find(|(_, label)| *label == project).map(|(folder, _)| folder.clone());
+                let known = host.projects().await;
+                match (folder.filter(|f| known.iter().any(|(k, _)| k == f)), protocol::RemoteWorkflow::parse(&workflow)) {
+                    (Some(project), Some(workflow)) if workflow != protocol::RemoteWorkflow::Team => R::Start { project, workflow },
+                    _ => R::Ask { slots: first(&chats), unsure: true },
+                }
+            }
+            Route::Ask { chats: picked, unsure } => R::Ask { slots: picked.into_iter().filter(|id| chats.iter().any(|c| c.id == *id)).collect(), unsure },
+            Route::Search { terms } => {
+                let folders: HashSet<&str> = routing.projects.iter().map(|(folder, _)| folder.as_str()).collect();
+                match host.desk_search(terms.clone()).await {
+                    Ok(found) => {
+                        let open = self.hub.chats();
+                        let hits = found
+                            .into_iter()
+                            .filter(|h| folders.contains(h.folder.as_str()))
+                            .take(5)
+                            .map(|h| protocol::RemoteDeskHit {
+                                title: h.title.iter().map(|p| p.text.as_str()).collect(),
+                                project: h.project,
+                                updated_ms: h.updated_ms,
+                                snippet: h.snippets.first().map(|s| s.pieces.iter().map(|p| p.text.as_str()).collect()).unwrap_or_default(),
+                                slot: open.iter().find(|c| c.session_id.as_deref() == Some(h.id.as_str())).map(|c| c.slot.clone()),
+                            })
+                            .collect();
+                        R::Search { terms, hits, failed: false }
+                    }
+                    Err(_) => R::Search { terms, hits: vec![], failed: true },
+                }
+            }
+            Route::Route { .. } => R::Ask { slots: first(&chats), unsure: true },
+        };
+        serde_json::to_value(&answer).map_err(|e| e.to_string())
+    }
+
     /// Starts a chat for `device` in `project` with `text`: the answer to Request::NewChat. The folder must be exactly one
     /// of the projects, and the phone may only start so many.
     #[allow(clippy::too_many_arguments)]
@@ -467,7 +533,9 @@ impl Gateway {
 
     async fn serve(self: Arc<Self>, mut link: Link) -> Result<(), Refused> {
         let permit = self.handshakes.clone().try_acquire_owned().map_err(|_| Refused::Busy)?;
-        let (device, mut channel, extras) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
+        let (device, mut channel, features) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
+        let said = |name: &str| features.iter().any(|f| f == name);
+        let (extras, desk) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK));
         drop(permit);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
@@ -479,7 +547,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, desk, last_desk: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -487,8 +555,8 @@ impl Gateway {
         Ok(())
     }
 
-    /// The handshake, then the phone's hello: who it is, once it has proved it.
-    async fn come_in(&self, link: &mut Link) -> Result<(String, Channel, bool), Refused> {
+    /// The handshake, then the phone's hello: who it is, once it has proved it, and what it said it can read.
+    async fn come_in(&self, link: &mut Link) -> Result<(String, Channel, Vec<String>), Refused> {
         let mode = recv(link).await.ok_or(Refused::Protocol("closed".into()))?;
         let pairing = match mode.as_slice() {
             [secure::PAIR] => true,
@@ -532,7 +600,7 @@ impl Gateway {
             Some(d) if !pairing => d,
             _ => self.store.add_device(&key, &device_name, (self.now)()).map_err(Refused::Protocol)?,
         };
-        Ok((device.id, channel, features.iter().any(|f| f == protocol::PHONE_EXTRAS)))
+        Ok((device.id, channel, features))
     }
 }
 
@@ -582,6 +650,9 @@ struct Session<'a> {
     device: String,
     /// Whether the phone said it can read the extras events (see protocol::PHONE_EXTRAS).
     extras: bool,
+    /// Whether it shows the Desk (protocol::PHONE_DESK), and the Desk's version it was last sent.
+    desk: bool,
+    last_desk: Option<u64>,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
@@ -652,6 +723,7 @@ impl<'a> Session<'a> {
         let mut slow: FuturesUnordered<Slow<'a>> = FuturesUnordered::new();
         self.send_chats(link, channel, true)?;
         self.send_plan(link, channel)?;
+        self.send_desk(link, channel)?;
         loop {
             tokio::select! {
                 _ = killed.changed() => return Ok(()),
@@ -661,10 +733,11 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
+                        Request::DeskRoute { desk, text } => slow.push(Box::pin(async move { (id, gw.desk_route(desk, text).await) })),
                         Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
                         Request::Diff { slot, path } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path).await) })),
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
@@ -691,6 +764,7 @@ impl<'a> Session<'a> {
                 _ = tick.tick() => {
                     self.send_chats(link, channel, false)?;
                     self.send_plan(link, channel)?;
+                    self.send_desk(link, channel)?;
                     for slot in self.named_since_reset() {
                         self.reset(link, channel, &slot).await?;
                     }
@@ -722,6 +796,18 @@ impl<'a> Session<'a> {
             send_message(link, channel, &ServerMessage::Plan { used, resets_at, status, week_used: week.map(|w| w.0), week_resets_at: week.and_then(|w| w.1) })?;
         }
         self.last_plan = sent;
+        Ok(())
+    }
+
+    /// The Desk, to a phone that shows it: when the window has said it and it moved on since this phone was sent it.
+    fn send_desk(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
+        let version = self.gw.hub.desk.version();
+        if !self.desk || version == 0 || self.last_desk == Some(version) {
+            return Ok(());
+        }
+        let (desk, version) = self.gw.hub.desk.phone();
+        send_message(link, channel, &ServerMessage::Desk { desk })?;
+        self.last_desk = Some(version);
         Ok(())
     }
 
@@ -1011,6 +1097,8 @@ impl<'a> Session<'a> {
                 host.shell_stop(&slot, &id).map(|()| serde_json::Value::Null)
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
+            Request::Desk => Ok(json(&self.gw.hub.desk.phone().0)),
+            Request::DeskRoute { desk, text } => self.gw.desk_route(desk, text).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
             Request::PushKey { key } => self.gw.store.set_push_key(&self.device, &key).map(|()| serde_json::Value::Null),
             Request::LiveActivity { start_token, card } => {
@@ -1176,6 +1264,10 @@ pub(crate) mod tests {
         pub new_chat_delay: Mutex<Duration>,
         /// How long a reviewed file's diff takes (a pull request fetched the first time).
         pub review_delay: Mutex<Duration>,
+        /// What the Desk's router answers, and what it was shown each time (the chats and the projects); what History's search finds.
+        pub desk_answer: Mutex<Option<crate::desk::Route>>,
+        pub desk_shown: Mutex<Vec<(Vec<crate::desk::Candidate>, Vec<String>)>>,
+        pub desk_hits: Mutex<Vec<crate::history_search::ChatHit>>,
     }
 
     impl Host for FakeHost {
@@ -1267,6 +1359,15 @@ pub(crate) mod tests {
                 tokio::time::sleep(delay).await;
                 Ok("s9".to_string())
             })
+        }
+        fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Route> {
+            self.desk_shown.lock().unwrap().push((chats, projects));
+            let answer = self.desk_answer.lock().unwrap().clone().unwrap_or(crate::desk::Route::Ask { chats: vec![], unsure: true });
+            Box::pin(async move { answer })
+        }
+        fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
+            let hits = self.desk_hits.lock().unwrap().clone();
+            Box::pin(async move { Ok(hits) })
         }
         fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
             self.prompts.lock().unwrap().push(prompt);
@@ -2804,5 +2905,102 @@ pub(crate) mod tests {
         assert!(p.iter().take(p.len() - 1).all(|(_, done)| !done) && p.last().unwrap().1);
         assert_eq!(p.iter().map(|(e, _)| e.len()).sum::<usize>(), 5);
         assert_eq!(pages(vec![]), vec![(vec![], true)]);
+    }
+
+    fn desk_said(chats: &[&str]) -> crate::remote::desk::WindowDesk {
+        use crate::remote::desk::{WindowCard, WindowDesk, WindowDeskInfo, WindowProject};
+        let chat = |id: &str| crate::desk::Candidate { id: id.into(), title: format!("{id} title"), project: "app".into(), workflow: "chat".into(), status: "idle".into(), last: format!("{id} said") };
+        WindowDesk {
+            desks: vec![
+                WindowDeskInfo { id: "home".into(), name: "Desk".into(), projects: vec![WindowProject { folder: "/Users/me/app".into(), label: "app".into() }], chats: chats.iter().map(|c| chat(c)).collect() },
+                WindowDeskInfo { id: "work".into(), name: "Work".into(), projects: vec![WindowProject { folder: "/Users/me/job".into(), label: "job".into() }], chats: vec![chat("w")] },
+            ],
+            cards: vec![WindowCard { key: "a:t1".into(), desk: "home".into(), slot: "a".into(), title: "A".into(), project: "app".into(), at: Some(5), asked: "Fix it".into(), auto: false, said: "Fixed.".into(), outcome: "done".into() }],
+        }
+    }
+
+    #[tokio::test]
+    async fn the_desk_goes_to_a_phone_that_shows_it_when_it_changes_and_not_to_one_that_doesnt() {
+        let r = rig();
+        r.hub.desk.set(desk_said(&["a"]));
+        let key = generate_keypair().unwrap();
+        let mut p = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_DESK]).await.unwrap();
+        let mut got = None;
+        while let Some(m) = p.next().await {
+            if let ServerMessage::Desk { desk } = m {
+                got = Some(desk);
+                break;
+            }
+        }
+        let desk = got.expect("sent the Desk as it comes in");
+        assert_eq!(desk.desks.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["home", "work"]);
+        assert_eq!(desk.cards[0].said, "Fixed.");
+        // What a chat last said, for the router, isn't sent.
+        assert!(!serde_json::to_string(&desk).unwrap().contains("a said"));
+        r.hub.desk.set(desk_said(&["a", "b"]));
+        let again = loop {
+            if let Some(ServerMessage::Desk { desk }) = p.next().await {
+                break desk;
+            }
+        };
+        assert_eq!(again.desks[0].slots, vec!["a", "b"]);
+        // A phone that didn't say "desk" is never pushed it (it couldn't read it), but may ask.
+        let (_, mut old) = paired(&r).await;
+        let (ok, _, before) = old.ask(Request::Desk).await;
+        assert!(!before.iter().any(|m| matches!(m, ServerMessage::Desk { .. })));
+        assert_eq!(ok.unwrap()["desks"][1]["name"], "Work");
+    }
+
+    #[tokio::test]
+    async fn a_desks_message_goes_only_to_a_chat_open_on_that_desk_and_a_chat_not_on_claude_is_shown_by_its_id() {
+        let r = rig();
+        for slot in ["a", "b", "w"] {
+            r.hub.opened(slot, "/Users/me/app");
+        }
+        r.hub.set_off_claude("b", true);
+        // "gone" is on the Desk but closed since.
+        r.hub.desk.set(desk_said(&["a", "b", "gone"]));
+        let (_, mut p) = paired(&r).await;
+        let route = |desk: &str| Request::DeskRoute { desk: desk.into(), text: "the login bug".into() };
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Route { chat: "a".into() });
+        assert_eq!(p.ask(route("home")).await.0.unwrap(), json!({"kind": "chat", "slot": "a"}));
+        let (shown, projects) = r.host.desk_shown.lock().unwrap()[0].clone();
+        assert_eq!(shown.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!((shown[1].title.as_str(), shown[1].last.as_str()), ("", ""), "nothing said in it is put to Claude");
+        assert_eq!(shown[0].last, "a said");
+        assert_eq!(projects, vec!["app"]);
+        assert!(r.host.sent.lock().unwrap().is_empty(), "nothing is sent from here: the phone sends it");
+        // A chat of another Desk (or none) is never the answer, whatever the router says.
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Route { chat: "w".into() });
+        assert_eq!(p.ask(route("home")).await.0.unwrap(), json!({"kind": "ask", "slots": ["a", "b"], "unsure": true}));
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Ask { chats: vec!["w".into(), "a".into()], unsure: false });
+        assert_eq!(p.ask(route("home")).await.0.unwrap(), json!({"kind": "ask", "slots": ["a"], "unsure": false}));
+        let (_, err, _) = p.ask(route("nowhere")).await;
+        assert!(err.is_some_and(|e| e.contains("isn't on your Mac")));
+        let (_, err, _) = p.ask(Request::DeskRoute { desk: "home".into(), text: "  ".into() }).await;
+        assert!(err.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_desks_new_chat_is_in_one_of_its_projects_by_folder_and_a_search_finds_only_its_projects_chats() {
+        use crate::history_search::{ChatHit, Piece, Snippet};
+        let r = rig();
+        r.hub.opened("a", "/Users/me/app");
+        r.hub.session("a", "0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10");
+        r.hub.desk.set(desk_said(&["a"]));
+        r.host.projects.lock().unwrap().push(("/Users/me/app".into(), "app".into()));
+        let (_, mut p) = paired(&r).await;
+        let route = || Request::DeskRoute { desk: "home".into(), text: "add a dark mode".into() };
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Start { project: "app".into(), workflow: "steps".into() });
+        assert_eq!(p.ask(route()).await.0.unwrap(), json!({"kind": "start", "project": "/Users/me/app", "workflow": "steps"}));
+        assert!(r.host.started.lock().unwrap().is_empty(), "the phone starts it");
+        // A label the Desk doesn't have, or a folder that isn't one of the user's projects any more: the user picks.
+        r.host.projects.lock().unwrap().clear();
+        assert_eq!(p.ask(route()).await.0.unwrap()["kind"], "ask");
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Search { terms: "pricing".into() });
+        let hit = |id: &str, folder: &str| ChatHit { id: id.into(), title: vec![Piece { text: "Pricing ".into(), hit: true }, Piece { text: "page".into(), hit: false }], folder: folder.into(), project: "app".into(), updated_ms: 9, snippets: vec![Snippet { role: "user", pieces: vec![Piece { text: "the pricing page".into(), hit: true }] }] };
+        *r.host.desk_hits.lock().unwrap() = vec![hit("0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10", "/Users/me/app"), hit("other", "/Users/me/job")];
+        let found = p.ask(route()).await.0.unwrap();
+        assert_eq!(found, json!({"kind": "search", "terms": "pricing", "failed": false, "hits": [{"title": "Pricing page", "project": "app", "updated_ms": 9, "snippet": "the pricing page", "slot": "a"}]}));
     }
 }

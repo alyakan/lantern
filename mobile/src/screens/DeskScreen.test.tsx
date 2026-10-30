@@ -1,0 +1,131 @@
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
+import { attachSession } from "../test/fakeSession";
+import { chat, connectedWith, makeController, renderWith, waiting } from "../test/render";
+import type { DeskEntry } from "../view/desk";
+import { HomeScreen } from "./HomeScreen";
+
+let mockMode: "desk" | "chats" = "desk";
+jest.mock("../prefs", () => ({
+  ...jest.requireActual("../prefs"),
+  loadHomeMode: jest.fn(async () => mockMode),
+  saveHomeMode: jest.fn(async (m: "desk" | "chats") => {
+    mockMode = m;
+  }),
+  loadGrouping: jest.fn(async () => "recent"),
+  saveGrouping: jest.fn(async () => {}),
+  loadFolded: jest.fn(async () => []),
+  saveFolded: jest.fn(async () => {}),
+  loadSeen: jest.fn(async () => ({})),
+  saveSeen: jest.fn(async () => {}),
+  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: true, dismissed: [] as string[] })),
+  saveSuggestionPrefs: jest.fn(async () => {}),
+}));
+// The Desk's messages are kept in memory here, not in the Keychain.
+let mockLog: DeskEntry[] = [];
+jest.mock("../deskLog", () => ({
+  loadDeskLog: jest.fn(async () => [...mockLog]),
+  saveDeskLog: jest.fn(async (e: DeskEntry[]) => {
+    mockLog = [...e];
+  }),
+  forgetDeskLog: jest.fn(async () => {}),
+}));
+
+beforeEach(() => {
+  mockMode = "desk";
+  mockLog = [];
+});
+
+const desk: RemoteDesk = {
+  desks: [
+    { id: "home", name: "Desk", slots: ["a", "b"], projects: [{ id: "/w/lantern", name: "lantern" }] },
+    { id: "work", name: "Work", slots: ["w"], projects: [{ id: "/w/job", name: "job" }] },
+  ],
+  cards: [
+    { key: "a:t1", desk: "home", slot: "a", title: "Phone notifications", project: "lantern", at: 10, asked: "Fewer pushes", auto: false, said: "Only approvals buzz now.", outcome: "done" },
+    { key: "w:t1", desk: "work", slot: "w", title: "Release", project: "job", at: 20, asked: "Ship it", auto: false, said: "Shipped 4.2.", outcome: "done" },
+  ],
+};
+const chats = [chat({ slot: "a", title: "Phone notifications" }), chat({ slot: "b", title: "Native sheets", status: "working", preview: "Bash npm test" }), chat({ slot: "w", title: "Release", status: "needs_you" })];
+const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
+
+async function open(route: RemoteDeskRoute | Error, more: Record<string, unknown> = {}) {
+  const { controller } = makeController();
+  const session = attachSession(controller, { desk, desk_route: route, send: null, ...more }, ["desk"]);
+  const h = handlers();
+  await renderWith(<HomeScreen {...h} />, { connection: connectedWith(["desk"]), chats, waiting: [waiting({ slot: "w", request_id: "p1" })] }, controller);
+  await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+  return { h, session, controller };
+}
+
+const say = async (text: string) => {
+  await fireEvent.changeText(screen.getByLabelText("Message the Desk Desk"), text);
+  await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+  await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+};
+
+describe("the Desk on the phone", () => {
+  it("is Home for a Mac that has one: this Desk's answers, what its chats are doing, and a tab for each Desk saying what waits there", async () => {
+    const { h } = await open({ kind: "chat", slot: "a" });
+    expect(screen.getByText("Only approvals buzz now.")).toBeTruthy();
+    expect(screen.queryByText("Shipped 4.2.")).toBeNull();
+    expect(screen.getByText("Bash npm test")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 1 waiting" })).toBeTruthy();
+    await fireEvent.press(screen.getByText("Only approvals buzz now."));
+    expect(h.onOpenChat).toHaveBeenCalledWith("a");
+    // The other Desk: its own answers, and what waits on you there.
+    await fireEvent.press(screen.getByRole("tab", { name: "Work, 1 waiting" }));
+    expect(screen.getByText("Shipped 4.2.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review" })).toBeTruthy();
+  });
+
+  it("sends what is typed to the chat the Mac picked, from this phone, as if typed there", async () => {
+    const { session } = await open({ kind: "chat", slot: "a" });
+    await say("the pushes still buzz for finished turns");
+    expect(session.lastOf("desk_route")).toEqual({ op: "desk_route", desk: "home", text: "the pushes still buzz for finished turns" });
+    expect(session.lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "the pushes still buzz for finished turns" });
+    expect(mockLog.map((e) => e.outcome)).toEqual([{ kind: "sent", slot: "a", title: "Phone notifications", started: false, queued: false }]);
+  });
+
+  it("asks which chat when the Mac can't tell, and sends it to the one picked, or starts one in a project", async () => {
+    const { session } = await open({ kind: "ask", slots: ["a", "b"], unsure: true }, { new_chat: { slot: "n1" } });
+    await say("make it faster");
+    expect(screen.getByText("Which chat is it for?")).toBeTruthy();
+    expect(session.lastOf("send")).toBeUndefined();
+    await fireEvent.press(screen.getByText("+ New in lantern"));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    expect(session.lastOf("new_chat")).toMatchObject({ op: "new_chat", project: "/w/lantern", text: "make it faster", permissions: null });
+    expect(screen.getByText("Started ", { exact: false })).toBeTruthy();
+    expect(mockLog.map((e) => e.outcome)).toEqual([{ kind: "sent", slot: "n1", title: "make it faster", started: true, queued: false }]);
+  });
+
+  it("starts a Step by step chat where the Mac said, on Ask", async () => {
+    const { session } = await open({ kind: "start", project: "/w/lantern", workflow: "steps" }, { new_chat: { slot: "n1" } });
+    await say("go step by step through the release");
+    expect(session.lastOf("new_chat")).toMatchObject({ project: "/w/lantern", workflow: "steps", permissions: null });
+    expect(session.lastOf("send")).toBeUndefined();
+  });
+
+  it("lists the chats a search found, opening the ones that are open", async () => {
+    const { h } = await open({ kind: "search", terms: "pricing", failed: false, hits: [{ title: "Pricing page", project: "lantern", updated_ms: 5, snippet: "the pricing page", slot: "a" }] });
+    await say("which chat had the pricing page?");
+    expect(screen.getByText('Chats that say "pricing"')).toBeTruthy();
+    await fireEvent.press(screen.getByText("Pricing page"));
+    expect(h.onOpenChat).toHaveBeenCalledWith("a");
+  });
+
+  it("says why when the Mac didn't answer, and doesn't send it anywhere", async () => {
+    const { session } = await open(new Error("Your Mac didn't answer in time."));
+    await say("hello");
+    expect(screen.getByText("Your Mac didn't answer in time.")).toBeTruthy();
+    expect(session.lastOf("send")).toBeUndefined();
+  });
+
+  it("goes back to the list of chats when asked, and stays there", async () => {
+    await open({ kind: "chat", slot: "a" });
+    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
+    await waitFor(() => expect(screen.getByText("All chats")).toBeTruthy());
+    expect(mockMode).toBe("chats");
+  });
+});

@@ -11,6 +11,7 @@ import { LiveCards, type CardFactory } from "../liveActivity";
 import { forgetLastKnown } from "../lastKnown";
 import { forgetUsageHistory } from "../usageHistory";
 import { forgetDrafts } from "../drafts";
+import { forgetDeskLog } from "../deskLog";
 import { forgetPins } from "../pins";
 import { forgetPlaces } from "../view/stepPlace";
 import { forgetPanels } from "../view/panelChoice";
@@ -158,10 +159,11 @@ export class Controller {
   async unpair() {
     await this.connection.forget();
     this.sync.reset();
-    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, pins, where Step by step chats were read) goes with it.
+    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, the Desk's messages, pins, where Step by step chats were read) goes with it.
     void forgetLastKnown();
     void forgetUsageHistory();
     void forgetDrafts();
+    void forgetDeskLog();
     void forgetPins();
     forgetPlaces();
     forgetPanels();

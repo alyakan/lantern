@@ -6,6 +6,9 @@ import { HomeScreen } from "./HomeScreen";
 
 // What Home remembers: nothing, here (it is not in the Keychain on Node).
 jest.mock("../prefs", () => ({
+  // Home as the Desk or the chats: the Desk, as on a phone that never chose (only a Mac that has one shows it).
+  loadHomeMode: jest.fn(async () => "desk"),
+  saveHomeMode: jest.fn(async () => {}),
   loadGrouping: jest.fn(async () => "recent"),
   saveGrouping: jest.fn(async () => {}),
   loadFolded: jest.fn(async () => []),

@@ -9,6 +9,8 @@ import type { EarlierPage } from "../protocol/generated/EarlierPage";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
+import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
@@ -33,6 +35,9 @@ export interface SyncDeps {
 const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => fn()) : setTimeout(fn, 16));
 let ids = 0;
 const defaultId = () => `m-${Date.now().toString(36)}-${(++ids).toString(36)}`;
+
+/** How long the Mac has to say where a Desk's message goes: its router may take half a minute. */
+export const DESK_WAIT = 40_000;
 
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
@@ -110,6 +115,7 @@ export class Sync {
     this.flush();
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
+    void this.refreshDesk();
     this.onConnected?.();
   };
 
@@ -140,6 +146,26 @@ export class Sync {
       // shows that rather than waiting for ever on an answer that isn't coming.
       if (this.session) this.apply({ type: "waiting", list: this.state.waiting });
     }
+  }
+
+  /** Asks for the Desk, from a Mac that has one (it pushes it as it changes; this is for the first time). */
+  async refreshDesk() {
+    if (!this.has("desk")) return;
+    try {
+      const desk = await this.ask<RemoteDesk>({ op: "desk" });
+      if (desk && Array.isArray(desk.desks) && Array.isArray(desk.cards)) this.apply({ type: "desk", desk });
+    } catch {
+      // What was known stays: the Mac pushes the Desk again when it changes.
+    }
+  }
+
+  /**
+   * Where a message typed on the Desk `desk` goes, decided on the Mac by a quick call to a small model (up to half a minute). Nothing
+   * is sent: the caller sends it there.
+   */
+  deskRoute(desk: string, text: string) {
+    if (!this.has("desk")) return Promise.reject(new Error("This Mac has no Desk yet. Update Lantern on it."));
+    return this.ask<RemoteDeskRoute>({ op: "desk_route", desk, text }, DESK_WAIT);
   }
 
   /** Opens a chat: its events come from now on. */

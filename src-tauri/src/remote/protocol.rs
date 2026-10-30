@@ -98,6 +98,8 @@ pub const STEP_OUTPUT_MAX: usize = 20_000;
 /// What a phone says it can read beyond protocol 1 (Hello's `features`): the Mac sends it only what its name allows, since a
 /// phone that doesn't know an event can't show the chat. "extras": the commands, plan and context events, and the plan usage.
 pub const PHONE_EXTRAS: &str = "extras";
+/// A phone that shows the Desk: it is pushed ServerMessage::Desk.
+pub const PHONE_DESK: &str = "desk";
 
 /// A slash command or skill the chat's claude offers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -659,6 +661,83 @@ pub struct Waiting {
     pub at: u64,
 }
 
+/// The Desk as the Mac's window has it (see remote/desk.rs): its Desks, and a card for each answer that finished in their chats.
+/// What each chat is doing now is the chat list's (`RemoteChat`), and what waits on the user is ListWaiting's.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDesk {
+    /// The first is home: it has every project no other Desk has.
+    pub desks: Vec<RemoteDeskInfo>,
+    /// Oldest first, the newest only.
+    pub cards: Vec<RemoteDeskCard>,
+}
+
+/// One Desk: a named set of projects, with their open chats.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskInfo {
+    pub id: String,
+    pub name: String,
+    /// The open chats on it.
+    pub slots: Vec<String>,
+    /// The projects a message on it may start a chat in (`id` is the folder, as Projects gives it).
+    pub projects: Vec<RemoteProject>,
+}
+
+/// An answer that finished, in one of a Desk's chats.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskCard {
+    pub key: String,
+    pub desk: String,
+    pub slot: String,
+    pub title: String,
+    /// The project (and the team, for a team's Lead).
+    pub project: String,
+    /// When what started it was sent (ms), when known.
+    #[ts(type = "number | null")]
+    pub at: Option<u64>,
+    /// What was said to start it, on one line; `auto`: by Claude going on by itself, not by the user.
+    pub asked: String,
+    pub auto: bool,
+    /// The start of Claude's last words in it.
+    pub said: String,
+    /// "done", "failed" or "stopped".
+    pub outcome: String,
+}
+
+/// Where a message typed on a phone's Desk goes (the answer to Request::DeskRoute). The phone sends it there itself, as it would
+/// from the chat or the New chat sheet: the Mac only decides.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteDeskRoute {
+    /// One of the Desk's open chats.
+    Chat { slot: String },
+    /// A new chat in one of the Desk's projects (a Projects id), in Chat or Step by step.
+    Start { project: String, workflow: RemoteWorkflow },
+    /// The user picks: the likeliest of the Desk's chats (`unsure`: the router couldn't tell or couldn't be asked, so a new chat is
+    /// offered too).
+    Ask { slots: Vec<String>, unsure: bool },
+    /// The message asked which chat has something: past chats of the Desk's projects that say it, newest first (`failed`: the
+    /// search couldn't be done).
+    Search { terms: String, hits: Vec<RemoteDeskHit>, failed: bool },
+}
+
+/// A past chat a Desk's search found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskHit {
+    pub title: String,
+    pub project: String,
+    #[ts(type = "number")]
+    pub updated_ms: u64,
+    /// Where it says it, a line.
+    pub snippet: String,
+    /// The open chat it is, when it is open (a phone opens only those).
+    pub slot: Option<String>,
+}
+
 /// What a phone may ask. Nothing else is accepted: no commands, no files (not what Claude read from them either), no settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -807,6 +886,12 @@ pub enum Request {
         #[ts(optional)]
         card: Option<RemoteLiveCard>,
     },
+    /// The Desk as the Mac's window has it, as RemoteDesk (also pushed as ServerMessage::Desk when it changes, to a phone that said
+    /// "desk"). Only sent to a Mac whose Welcome lists "desk" in `features`.
+    Desk,
+    /// Where `text`, typed on the phone's Desk `desk`, goes (RemoteDeskRoute): one quick call to a small model on the Mac, shown the
+    /// Desk's chats as data. Nothing is sent: the phone sends the user's words there itself.
+    DeskRoute { desk: String, text: String },
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
@@ -966,6 +1051,8 @@ pub enum ServerMessage {
         #[ts(optional, type = "number | null")]
         week_resets_at: Option<u64>,
     },
+    /// The Desk changed (see Request::Desk). Only sent to a phone that said "desk".
+    Desk { desk: RemoteDesk },
 }
 
 #[cfg(test)]

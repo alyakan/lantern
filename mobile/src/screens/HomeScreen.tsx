@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
+import { loadFolded, loadGrouping, loadHomeMode, saveFolded, saveGrouping, saveHomeMode } from "../prefs";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
 import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
@@ -24,6 +24,7 @@ import { HomeSearch } from "./HomeSearch";
 import { UsageStrip } from "./ChatExtras";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
+import { DeskScreen } from "./DeskScreen";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
 
@@ -52,6 +53,22 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 24, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: pinned ? colors.ink : colors.ink3, flexDirection: "row", overflow: "hidden" }}>
       <View style={{ width: 8, backgroundColor: pinned ? colors.ink : "transparent", borderRightWidth: 1.5, borderRightColor: pinned ? colors.ink : colors.ink3 }} />
+    </View>
+  );
+}
+
+/** Home as the Desk (every chat at once, and a box that finds the chat) or as the list of chats. */
+function ModeSwitch({ value, onChange }: { value: "desk" | "chats"; onChange: (m: "desk" | "chats") => void }) {
+  const colors = useColors();
+  return (
+    <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: colors.card, borderRadius: radius.pill, padding: 3, borderWidth: 1, borderColor: colors.rule }}>
+      {(["desk", "chats"] as const).map((m) => (
+        <PressScale key={m} accessibilityRole="tab" accessibilityState={{ selected: value === m }} onPress={() => onChange(m)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: value === m ? colors.ink : "transparent" }}>
+          <Txt variant="small" tone={value === m ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
+            {m === "desk" ? "Desk" : "Chats"}
+          </Txt>
+        </PressScale>
+      ))}
     </View>
   );
 }
@@ -371,8 +388,16 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const [query, setQuery] = useState("");
   // How far the page is scrolled: the headline fades and trails as it goes.
   const scrollY = useRef(new Animated.Value(0)).current;
+  // The Desk, for a Mac that has one (remembered on this phone; the Desk unless the list was chosen).
+  const canDesk = useMacCan("desk");
+  const [mode, setMode] = useState<"desk" | "chats">("desk");
+  const pickMode = (m: "desk" | "chats") => {
+    setMode(m);
+    void saveHomeMode(m);
+  };
   useEffect(() => {
     let live = true;
+    void loadHomeMode().then((m) => live && setMode(m));
     void loadGrouping().then((g) => live && setGrouping(g));
     // A card folded before this was read stays folded with the rest.
     void loadFolded().then((kept) => live && setFolded((now) => [...kept.filter((p) => !now.includes(p)), ...now]));
@@ -436,6 +461,49 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setRefreshing(false);
   };
 
+  const top = (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, gap: 10 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, flexShrink: 1 }}>
+        {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
+        <Txt variant="small" tone="ink2" numberOfLines={1}>
+          {macName ?? "Your Mac"}
+        </Txt>
+      </PressScale>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        {refreshing && (
+          <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+            <Dots />
+          </View>
+        )}
+        {canDesk && <ModeSwitch value={mode} onChange={pickMode} />}
+        {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
+        {onTogglePin && (
+          <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+            <PinGlyph pinned={pinned} />
+          </PressScale>
+        )}
+      </View>
+    </View>
+  );
+
+  if (canDesk && mode === "desk") {
+    // What waits on you in the Desk's chats: Home's own stack, after the feed.
+    const needs = (slots: string[]) => {
+      const mine = stack.filter((c) => slots.includes(c.waiting.slot));
+      return mine.length > 0 ? (
+        <View style={{ marginHorizontal: -space.lg, paddingTop: 4 }}>
+          <Deck list={mine} onOpenChat={onOpenChat} onReview={onReview} />
+          {mine.length > 1 && (
+            <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl }}>
+              {mine.length - 1} more after this one
+            </Txt>
+          )}
+        </View>
+      ) : null;
+    };
+    return <DeskScreen top={top} onOpenChat={onOpenChat} renderNeeds={needs} />;
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
@@ -448,27 +516,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl }}>
-          <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 }}>
-            {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
-            <Txt variant="small" tone="ink2">
-              {macName ?? "Your Mac"}
-            </Txt>
-          </PressScale>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-            {refreshing && (
-              <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
-                <Dots />
-              </View>
-            )}
-            {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
-            {onTogglePin && (
-              <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-                <PinGlyph pinned={pinned} />
-              </PressScale>
-            )}
-          </View>
-        </View>
+        {top}
         {plan && <UsageStrip plan={plan} onPress={() => setUsageOpen(true)} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (

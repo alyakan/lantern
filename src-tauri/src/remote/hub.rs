@@ -331,6 +331,8 @@ pub struct SessionHub {
     providers: Mutex<Vec<RemoteProvider>>,
     /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
     plan: Mutex<PlanSeen>,
+    /// The Desk as the window last said it (see desk.rs).
+    pub desk: super::desk::Board,
     cap: usize,
     now: fn() -> u64,
 }
@@ -347,7 +349,7 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
@@ -582,7 +584,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -639,7 +641,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -652,14 +654,14 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
 
     #[test]
     fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
         assert_eq!(hub.steps("a"), None, "no plan yet");
@@ -676,7 +678,7 @@ mod tests {
 
     #[test]
     fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
         feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
@@ -926,7 +928,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

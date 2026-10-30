@@ -44,6 +44,25 @@ export async function saveSuggestionPrefs(p: SuggestionPrefs): Promise<void> {
   }
 }
 
+const MODE_KEY = "lantern.home-mode";
+
+/** Whether Home is the Desk or the list of chats; the Desk when nothing was chosen or it can't be read. */
+export async function loadHomeMode(): Promise<"desk" | "chats"> {
+  try {
+    return (await SecureStore.getItemAsync(MODE_KEY, OPTIONS)) === "chats" ? "chats" : "desk";
+  } catch {
+    return "desk";
+  }
+}
+
+export async function saveHomeMode(mode: "desk" | "chats"): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(MODE_KEY, mode, OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
 export async function saveGrouping(g: Grouping): Promise<void> {
   try {
     await SecureStore.setItemAsync(KEY, g, OPTIONS);

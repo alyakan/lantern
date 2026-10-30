@@ -561,6 +561,37 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn desk_route(&self, text: String, chats: Vec<desk::Candidate>, projects: Vec<String>) -> remote::gateway::BoxFut<desk::Route> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            // Not knowing where Claude is yet is the router not answering: the user picks.
+            let claude = state.remote.claude_path().unwrap_or_default();
+            let path_env = login_path(&state).await;
+            desk::route(std::path::Path::new(&claude), path_env.as_deref(), &text, &chats, &projects).await
+        })
+    }
+
+    fn desk_search(&self, terms: String) -> remote::gateway::BoxFut<Result<Vec<history_search::ChatHit>, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let root = projects_root()?;
+            let titles = state.titles.all();
+            let renamed = state.renames.all();
+            let moved: std::collections::HashMap<String, String> = state.relocations.list().into_iter().flat_map(|e| e.aliases.into_iter().map(move |old| (old, e.folder.clone()))).collect();
+            let search = state.chat_search.clone();
+            // History's search, beside the window's own (it isn't cancelled by one, nor cancels one).
+            let found = tauri::async_runtime::spawn_blocking(move || {
+                let scope = history_search::Scope { titles: &titles, renamed: &renamed, moved: &moved };
+                history_search::search(&root, &terms, &scope, &history_search::Options::default(), &search.index, &|| false)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(found.chats)
+        })
+    }
+
     fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -2538,6 +2569,12 @@ fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat
     state.remote.window_chats(&chats);
 }
 
+/// What the window's Desks hold, for a phone's Desk (see remote/desk.rs).
+#[tauri::command]
+fn remote_window_desk(state: State<'_, AppState>, desk: remote::desk::WindowDesk) {
+    state.remote.window_desk(desk);
+}
+
 /// Settings › Remote control: whether it is on, and the paired devices.
 #[tauri::command]
 fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
@@ -3423,6 +3460,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             locate_claude,
             remote_window_chats,
+            remote_window_desk,
             remote_window_controls,
             remote_settings,
             remote_set_enabled,

@@ -4,6 +4,7 @@
 
 pub mod answers;
 pub mod bus;
+pub mod desk;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
@@ -448,6 +449,11 @@ impl Remote {
     /// Stops waiting for the window's answer (it took too long).
     pub fn forget_new_chat(&self, id: &str) {
         self.new_chats.lock().unwrap().remove(id);
+    }
+
+    /// Takes in what the window says its Desks hold (see desk.rs).
+    pub fn window_desk(&self, desk: desk::WindowDesk) {
+        self.hub.desk.set(desk);
     }
 
     /// Takes in what the window knows of its open chats: the titles it shows, and which are asleep.
