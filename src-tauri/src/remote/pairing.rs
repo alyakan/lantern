@@ -71,6 +71,14 @@ pub struct Device {
     /// (an older build never does).
     #[serde(default)]
     pub push_key: Option<String>,
+    /// Apple's token for starting a lock-screen card on the phone by push (iOS 18 or later), so the Mac can put one up while
+    /// the app is closed. Kept across restarts: a Mac that restarted while the phone was away is when it is wanted.
+    #[serde(default)]
+    pub start_token: Option<String>,
+    /// The broadcast channel (Apple's id for it) the cards this Mac starts on the phone are updated through. Made the first
+    /// time one is started, and used for each one after.
+    #[serde(default)]
+    pub live_channel: Option<String>,
 }
 
 /// Remote control's settings and its paired devices, as saved.
@@ -183,7 +191,7 @@ impl RemoteStore {
                 return d.clone();
             }
             let id = format!("phone-{}", &key[..12.min(key.len())]);
-            let device = Device { id, name, key, paired_at: now, last_seen: Some(now), push_token: None, push_key: None };
+            let device = Device { id, name, key, paired_at: now, last_seen: Some(now), push_token: None, push_key: None, start_token: None, live_channel: None };
             s.devices.push(device.clone());
             device
         })
@@ -228,6 +236,26 @@ impl RemoteStore {
             return Err("That isn't a push key.".into());
         }
         self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_key = Some(key.to_string())))
+    }
+
+    /// The phone's token for starting a card by push (None: forget it, as Apple says it is gone).
+    pub fn set_start_token(&self, id: &str, token: Option<&str>) -> Result<(), String> {
+        if token.is_some_and(|t| !super::live_activity::valid_token(t)) {
+            return Err("That isn't a push token.".into());
+        }
+        let changed = self.saved.lock().unwrap().devices.iter().any(|d| d.id == id && d.start_token.as_deref() != token);
+        if !changed {
+            return Ok(());
+        }
+        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.start_token = token.map(str::to_string)))
+    }
+
+    /// The broadcast channel a phone's Mac-started cards are updated through (None: forget it, as Apple says it is gone).
+    pub fn set_live_channel(&self, id: &str, channel: Option<&str>) -> Result<(), String> {
+        if channel.is_some_and(|c| !super::live_activity::valid_channel(c)) {
+            return Err("That isn't a channel.".into());
+        }
+        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.live_channel = channel.map(str::to_string)))
     }
 
     /// Forgets a device's push token (Expo says the phone no longer has the app); the device stays paired.

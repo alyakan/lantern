@@ -68,6 +68,9 @@ export default function App() {
   const registered = useRef(false);
 
   useEffect(() => {
+    // An app launched in the background (a notification's button) is not in front: it mustn't take the lock-screen card for
+    // its own to replace, as only an app in front can start one.
+    controller.setForeground(AppState.currentState === "active");
     void controller.start();
     const sub = AppState.addEventListener("change", (s) => {
       controller.setForeground(s === "active");

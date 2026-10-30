@@ -80,10 +80,28 @@ export function nativeFactory(): CardFactory | null {
   }
 }
 
+/** Follows the phone's token for starting a card by push (Apple's, hex); null where the Mac can't start one. */
+export type StartTokens = (listener: (token: string) => void) => { remove(): void } | null;
+
+/**
+ * The token iOS gives for starting Lantern's card by push, from iOS 18 only: a card the Mac starts is updated through a
+ * broadcast channel, which iOS 17 doesn't have (the Mac couldn't update or end it).
+ */
+export function nativeStartTokens(listener: (token: string) => void): { remove(): void } | null {
+  if (Platform.OS !== "ios" || Number.parseInt(String(Platform.Version), 10) < 18) return null;
+  try {
+    const widgets = require("expo-widgets") as { addPushToStartTokenListener?: (l: (e: { activityPushToStartToken: string }) => void) => { remove(): void } };
+    return widgets.addPushToStartTokenListener?.((e) => listener(e.activityPushToStartToken)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export interface LiveCardsDeps {
   factory?: () => CardFactory | null;
-  /** Tells the Mac what the phone shows (only called when there is something to say). */
-  tell: (state: { card: RemoteLiveCard | null }) => Promise<unknown>;
+  /** Tells the Mac what the phone shows (only called when there is something to say), with its token for starting a card. */
+  tell: (state: { card: RemoteLiveCard | null; start_token?: string }) => Promise<unknown>;
+  startTokens?: StartTokens;
   now?: () => number;
 }
 
@@ -116,17 +134,37 @@ export class LiveCards {
   private summaryCard: SummaryCard | null = null;
   /** The phone last saw a Mac that keeps summary cards: a message sent starts no card of its own. */
   private summaryMode = false;
-  /** The cards left by the app's last run have been cleared. */
-  private cleared = false;
   /** What the summary card was last looked at for: the Mac saying it ended it looks again with this. */
   private world: World | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly factory: () => CardFactory | null;
   private readonly now: () => number;
+  /** The phone's token for starting a card by push: the Mac starts one with it while the app is closed. */
+  private startToken: string | null = null;
+  /** The card the Mac was last told of, to tell it again with a new start token. */
+  private told: RemoteLiveCard | null = null;
+  /** The Mac has been told something on this connection (so it has the start token). */
+  private toldSinceConnect = false;
 
   constructor(private readonly d: LiveCardsDeps) {
     this.factory = d.factory ?? nativeFactory;
     this.now = d.now ?? Date.now;
+    (d.startTokens ?? nativeStartTokens)((token) => void this.takeStartToken(token));
+  }
+
+  private takeStartToken(token: string): Promise<void> {
+    return this.chain(async () => {
+      if (!/^[0-9a-f]{32,200}$/i.test(token) || token === this.startToken) return;
+      this.startToken = token;
+      await this.tell(this.told).catch(() => {});
+    });
+  }
+
+  /** Everything the Mac is told goes through here, with the start token. */
+  private tell(card: RemoteLiveCard | null): Promise<unknown> {
+    this.told = card;
+    this.toldSinceConnect = true;
+    return this.d.tell(this.startToken ? { card, start_token: this.startToken } : { card });
   }
 
   /** The chat the card is for now, if there is one. */
@@ -188,7 +226,7 @@ export class LiveCards {
       const c = this.current;
       if (c?.id !== id) return;
       await this.endCurrent();
-      if (c.reported) await this.d.tell({ card: null }).catch(() => {});
+      if (c.reported) await this.tell(null).catch(() => {});
     });
   }
 
@@ -197,15 +235,18 @@ export class LiveCards {
     return this.chain(async () => {
       if (this.current?.slot !== slot) return;
       await this.endCurrent();
-      await this.d.tell({ card: null }).catch(() => {});
+      await this.tell(null).catch(() => {});
     });
   }
 
   /** A connection to the Mac came up: it is told of the card again (it only knows what it was told while connected). */
   connected(): Promise<void> {
     return this.chain(async () => {
+      this.toldSinceConnect = false;
       await this.report();
       await this.reportSummary();
+      // No card to tell of: the start token still goes, so the Mac can put one up while the app is closed.
+      if (!this.toldSinceConnect && this.startToken) await this.tell(null).catch(() => {});
     });
   }
 
@@ -213,8 +254,9 @@ export class LiveCards {
    * With a Mac that keeps summary cards: the one card about every chat. It is started while the app is in front, connected,
    * and some chat is working or needs you, and there is none (or the last one is over, or nearly as old as iOS lets one get);
    * from then on the Mac keeps it right, and ends it when nothing works or waits (and says so when it is next told of it). The
-   * phone never ends it itself except to start the next one. Cards the app's last run left are ended at launch: one can't be
-   * told from a card the Mac has ended that is still on screen for a while.
+   * phone never ends it itself except to start the next one. Once its own has started, every other card on the lock screen is
+   * ended: the app's last run's, or one the Mac started while the app was closed. Not before: an app woken in the background
+   * (to answer a notification) can't start one, and the Mac's card is the one the user is looking at then.
    */
   look(world: World): Promise<void> {
     return this.chain(async () => {
@@ -223,10 +265,6 @@ export class LiveCards {
       if (!world.summary) return;
       const factory = this.factory();
       if (!factory) return;
-      if (!this.cleared) {
-        this.cleared = true;
-        await this.clearLeftovers(factory);
-      }
       const card = this.summaryCard;
       if (card && !world.busy) {
         card.over = true;
@@ -234,33 +272,43 @@ export class LiveCards {
       }
       if (!world.busy || !world.foreground || !world.connected) return;
       if (card && !card.over && this.now() - card.since < SUMMARY_RENEW_MS) return;
-      await this.endSummary();
-      // The old kind of card, from before this Mac kept summaries, goes too.
+      const before = this.summaryCard;
+      const fresh = this.startSummary(factory);
+      if (!fresh) return;
+      if (before) {
+        before.listener?.remove();
+        await before.instance.end("immediate").catch(() => {});
+      }
+      // The old kind of card, from before this Mac kept summaries, goes too, and any other: the last run's, or one the Mac
+      // started while the app was closed (the Mac ends that too, when it hears of this one).
       await this.endCurrent();
-      this.startSummary(factory);
+      await this.endOthers(factory, fresh);
       await this.waitForToken();
     });
   }
 
-  private async clearLeftovers(factory: CardFactory) {
-    let left: CardInstance[] = [];
+  private async endOthers(factory: CardFactory, keep: CardInstance) {
+    let all: CardInstance[] = [];
     try {
-      left = factory.getInstances?.() ?? [];
+      all = factory.getInstances?.() ?? [];
     } catch {
       return;
     }
-    for (const card of left) await card.end("immediate").catch(() => {});
+    const id = keep.getId();
+    for (const card of all) if (card !== keep && card.getId() !== id) await card.end("immediate").catch(() => {});
   }
 
-  private startSummary(factory: CardFactory) {
+  /** Starts the summary card and follows it; null when iOS wouldn't start one (and nothing else changes). */
+  private startSummary(factory: CardFactory): CardInstance | null {
     const since = this.now();
     let instance: CardInstance;
     try {
       instance = factory.start({ project: "Lantern", status: "working", since, chats: [], counts: { needs_you: 0, working: 0, done: 0, failed: 0 } }, undefined, new Date(since + STALE_MS));
     } catch {
-      return;
+      return null;
     }
     this.follow(instance, since);
+    return instance;
   }
 
   private follow(instance: CardInstance, since: number) {
@@ -293,7 +341,7 @@ export class LiveCards {
     if (!c?.token) return;
     const again = c.reported;
     c.reported = true;
-    const reply = await this.d.tell({ card: { slot: "", token: c.token, project: "Lantern", since: c.since, summary: true } }).catch(() => null);
+    const reply = await this.tell({ slot: "", token: c.token, project: "Lantern", since: c.since, summary: true }).catch(() => null);
     // The Mac ended it while the phone was away (its chats went quiet): the next one is started now if it should be. Only a
     // card the Mac had heard of before can have been ended, so a new one is never started over again.
     if (again && reply && typeof reply === "object" && (reply as { ended?: unknown }).ended === true && this.summaryCard === c && !c.over) {
@@ -302,19 +350,11 @@ export class LiveCards {
     }
   }
 
-  private async endSummary(): Promise<void> {
-    const c = this.summaryCard;
-    this.summaryCard = null;
-    if (!c) return;
-    c.listener?.remove();
-    await c.instance.end("immediate").catch(() => {});
-  }
-
   private async report(): Promise<void> {
     const c = this.current;
     if (!c?.token || !c.confirmed) return;
     c.reported = true;
-    await this.d.tell({ card: { slot: c.slot, token: c.token, project: c.project, since: c.since } }).catch(() => {});
+    await this.tell({ slot: c.slot, token: c.token, project: c.project, since: c.since }).catch(() => {});
   }
 
   private async endCurrent(): Promise<void> {
