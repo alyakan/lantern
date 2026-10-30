@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Modal, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { Alert, AppState, Modal, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,7 +28,8 @@ import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, typ
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
-import { SearchBar, type BarSearch } from "./SearchBar";
+import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
+import { TodosSheet } from "./TodosSheet";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
@@ -106,6 +107,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const canReviewDiff = useMacCan("reviewdiff");
   const canShell = useMacCan("shell");
   const canImages = useMacCan("images");
+  const canTodos = useMacCan("todos");
   const lock = useAppLock();
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
@@ -352,6 +354,28 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
   };
+  // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
+  // Step by step, whose pages they would cut across, and not during a turn, which the Mac waits for too); Clear asks first, as the
+  // Mac does. To-dos opens this project's list.
+  const [todosOpen, setTodosOpen] = useState(false);
+  const barTools: BarTool[] = [
+    ...(stepsChat
+      ? []
+      : [
+          { label: "Compact", hint: working ? "Once Claude has finished its turn" : "Summarises the chat so far to free up context", disabled: !online || working, onPress: () => void sync.send(slot, "/compact") },
+          {
+            label: "Clear",
+            hint: working ? "Once Claude has finished its turn" : "Starts the conversation afresh",
+            disabled: !online || working,
+            onPress: () =>
+              Alert.alert("Clear this conversation?", "Claude forgets this conversation. The files it changed stay as they are.", [
+                { text: "Keep it", style: "cancel" },
+                { text: "Clear", style: "destructive", onPress: () => void sync.send(slot, "/clear") },
+              ]),
+          },
+        ]),
+    ...(canTodos ? [{ label: "To-dos", hint: "This project's to-do list", onPress: () => setTodosOpen(true) }] : []),
+  ];
   // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
     const far = distanceFromEnd(e) > 260;
@@ -556,7 +580,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </SearchBar>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} working={working} onStop={() => sync.interrupt(slot).catch(fail)} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} />
       )}
     </>
   );
@@ -712,6 +736,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       <Modal visible={changesOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setChangesOpen(false)}>
         <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" />} onHide={() => setChangesOpen(false)} />
       </Modal>
+      {todosOpen && <TodosSheet projectName={chat?.project ?? null} onClose={() => setTodosOpen(false)} />}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {reviewed && <DiffSheet files={[reviewed]} load={loadReviewed} onClose={() => setReviewed(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
