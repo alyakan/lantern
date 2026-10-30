@@ -1,15 +1,16 @@
-//! Telling a paired phone that a chat needs it, or has finished, when it isn't looking: a push straight to Apple for a phone
+//! Telling a paired phone that a chat needs it, or stopped with an error, when it isn't looking: a push straight to Apple for a phone
 //! that gave its own device token (the way the lock-screen cards go), or through Expo's service for one that gave an Expo token.
 //! What goes out is a chat id and a kind, with words that name no code and no prompt (at most one word of what is asked, as
 //! the lock-screen card says it); the chat's title only if the user turned that on in Settings. At most one push per chat and
-//! kind, until the user has looked: opened the chat on the phone, answered what was asked, or sent the next message.
+//! kind, until the user has looked: opened the chat on the phone, answered what was asked, or sent the next message. A chat
+//! that simply finished is not pushed: that is news for the lock-screen card, not a reason to buzz.
 //!
 //! With "Show what Claude asks in notifications" on, and a phone that made a push key, the push also carries the real words
 //! (the whole command, the file and what changes) encrypted for the phone's notification extension (see rich.rs); the generic
 //! ones above stay as the fallback, and a phone without a key, or with the setting off, gets only those.
 //!
 //! A push straight to Apple carries buttons (a notification category), which the phone and its watch show without opening the
-//! app: Allow and Deny on a prompt for a command, an edit or a tool, and Reply on a chat that finished. A prompt of that kind is
+//! app: Allow and Deny on a prompt for a command, an edit or a tool. A prompt of that kind is
 //! its own push, with its request id, so a button answers that very prompt (the Mac refuses an id nothing is waiting on).
 
 use super::bus::{BusEvent, EventBus};
@@ -34,7 +35,6 @@ const BATCH: usize = 100;
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     NeedsYou,
-    Finished,
     Failed,
     /// A to-do's reminder: about a project's list, not a chat.
     Todo,
@@ -154,17 +154,14 @@ impl Ask {
 
 /// The buttons a notification has, by the category the phone registered (see mobile/src/notificationActions.ts).
 const CATEGORY_DECIDE: &str = "lantern_decide";
-const CATEGORY_REPLY: &str = "lantern_reply";
 const CATEGORY_TODO: &str = "lantern_todo";
 
 /// The words of a push, by kind: with no title (the default), and with the chat's.
 fn words(kind: Kind, title: Option<&str>) -> (String, String) {
     match (kind, title) {
         (Kind::NeedsYou, None) => ("Lantern".into(), "A chat needs you.".into()),
-        (Kind::Finished, None) => ("Lantern".into(), "A chat finished.".into()),
         (Kind::Failed, None) => ("Lantern".into(), "A chat stopped with an error.".into()),
         (Kind::NeedsYou, Some(t)) => (t.into(), "Needs you.".into()),
-        (Kind::Finished, Some(t)) => (t.into(), "Finished.".into()),
         (Kind::Failed, Some(t)) => (t.into(), "Stopped with an error.".into()),
         (Kind::Todo, _) => ("Lantern".into(), "A to-do is due.".into()),
     }
@@ -214,11 +211,11 @@ impl Notifier {
                     self.forget(slot, &[Kind::NeedsYou]);
                 }
             }
-            UiEvent::TurnDone { is_error: false, .. } => self.push(slot, Kind::Finished, None).await,
+            // A chat that finished is not news worth a notification: the lock-screen card shows it.
             UiEvent::TurnDone { is_error: true, .. } => self.push(slot, Kind::Failed, None).await,
             UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => self.push(slot, Kind::Failed, None).await,
             // A new message starts a new turn, and a new claude starts over.
-            UiEvent::UserText { .. } => self.forget(slot, &[Kind::Finished, Kind::Failed]),
+            UiEvent::UserText { .. } => self.forget(slot, &[Kind::Failed]),
             UiEvent::SessionStarted { .. } => self.forget(slot, &[Kind::Failed]),
             _ => {}
         }
@@ -387,7 +384,6 @@ impl Notifier {
 fn kind_name(kind: Kind) -> &'static str {
     match kind {
         Kind::NeedsYou => "needs-you",
-        Kind::Finished => "finished",
         Kind::Failed => "failed",
         Kind::Todo => "to-do",
     }
@@ -403,7 +399,6 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: O
         (Kind::NeedsYou, Some(Needs::Tool)) => ("A chat wants to use a tool.", "Wants to use a tool."),
         (Kind::NeedsYou, Some(Needs::Question)) => ("A chat has a question.", "Has a question."),
         (Kind::NeedsYou, _) => ("A chat needs you.", "Needs you."),
-        (Kind::Finished, _) => ("A chat finished.", "Finished."),
         (Kind::Failed, _) => ("A chat stopped with an error.", "Stopped with an error."),
         (Kind::Todo, _) => ("A to-do is due.", "A to-do is due."),
     };
@@ -472,7 +467,6 @@ fn alert_for(slot: &str, kind: Kind, ask: Option<&Ask>, title: Option<&str>, pro
     let answerable = ask.filter(|a| a.answerable());
     let category = match (kind, answerable) {
         (Kind::NeedsYou, Some(_)) => Some(CATEGORY_DECIDE),
-        (Kind::Finished, _) => Some(CATEGORY_REPLY),
         _ => None,
     };
     let mut alert = serde_json::json!({"title": title, "body": body});
@@ -704,21 +698,35 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn opening_the_chat_on_the_phone_makes_the_next_one_news() {
         let r = rig(1);
-        r.event("a", done(false)).await;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
+        r.event("a", done(true)).await;
         assert_eq!(r.pushed().len(), 1);
         r.notifier.opened("a");
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         assert_eq!(r.pushed().len(), 2);
     }
 
     #[tokio::test]
-    async fn a_finished_turn_is_news_again_after_the_next_message() {
+    async fn a_failed_turn_is_news_again_after_the_next_message() {
         let r = rig(1);
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         r.event("a", UiEvent::UserText { text: "next".into(), at: None, sent_by: None, images: 0 }).await;
-        r.event("a", done(false)).await;
-        assert_eq!(r.pushed().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), vec!["A chat finished.", "A chat finished."]);
+        r.event("a", done(true)).await;
+        assert_eq!(r.pushed().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), vec!["A chat stopped with an error.", "A chat stopped with an error."]);
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_finished_well_is_never_pushed_through_expo_or_apple() {
+        let expo = rig(1);
+        expo.event("a", done(false)).await;
+        expo.event("b", done(false)).await;
+        assert!(expo.pushed().is_empty());
+        let apple = rig_apple(1);
+        apple.event("a", done(false)).await;
+        assert!(apple.alerts().is_empty());
+        // What needs the user still is.
+        apple.event("a", ask("p1")).await;
+        assert_eq!(apple.alerts().len(), 1);
     }
 
     #[tokio::test]
@@ -738,9 +746,9 @@ pub(crate) mod tests {
         let r = rig(1);
         r.watching.lock().unwrap().insert("a".into());
         r.event("a", ask("p1")).await;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         assert!(r.pushed().is_empty());
-        r.event("b", done(false)).await;
+        r.event("b", done(true)).await;
         assert_eq!(r.pushed().len(), 1);
     }
 
@@ -788,10 +796,10 @@ pub(crate) mod tests {
     async fn when_expo_can_not_be_reached_the_next_event_of_that_kind_tries_again() {
         let r = rig(1);
         *r.outbox.fail.lock().unwrap() = true;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         assert!(r.pushed().is_empty());
         *r.outbox.fail.lock().unwrap() = false;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         assert_eq!(r.pushed().len(), 1);
     }
 
@@ -909,13 +917,13 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_question_is_sealed_too_and_a_finished_chat_has_nothing_to_seal() {
+    async fn a_question_is_sealed_too_and_an_error_has_nothing_to_seal() {
         let r = rig_apple(1);
         give_keys(&r);
         r.store.set_rich_notifications(true).unwrap();
         r.hub.opened("a", "/p");
         r.event("a", question("q1")).await;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         let sent = r.alerts();
         assert_eq!(words_of(&sent[0].1)["body"], "Has a question:\nSECRET-QUESTION?");
         assert!(sent[1].1["body"].get("enc").is_none(), "what Claude said is not in a push");
@@ -934,18 +942,18 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_question_a_merge_and_an_error_have_no_buttons_and_no_request_id_a_finished_chat_has_reply() {
+    async fn a_question_a_merge_and_an_error_have_no_buttons_and_no_request_id() {
         let r = rig_apple(1);
         r.event("a", question("q1")).await;
         r.event("b", UiEvent::MergeProposed { worker: "w".into(), name: "SECRET-NAME".into(), branch: "b".into(), into: "main".into(), summary: "s".into(), commits: 1, files: vec![], uncommitted: 0, loose: vec![] }).await;
         r.event("c", done(true)).await;
         r.event("d", done(false)).await;
         let sent = r.alerts();
+        assert_eq!(sent.len(), 3, "a chat that finished well is not pushed");
         let shape = |i: usize| (sent[i].1["aps"]["alert"]["body"].as_str().unwrap().to_string(), sent[i].1["aps"]["category"].as_str().map(str::to_string), sent[i].1["body"]["request_id"].as_str().map(str::to_string));
         assert_eq!(shape(0), ("A chat has a question.".to_string(), None, None));
         assert_eq!(shape(1), ("A chat needs you.".to_string(), None, None));
         assert_eq!(shape(2), ("A chat stopped with an error.".to_string(), None, None));
-        assert_eq!(shape(3), ("A chat finished.".to_string(), Some("lantern_reply".to_string()), None));
         assert!(!serde_json::to_string(&sent).unwrap().contains("SECRET"));
     }
 
@@ -1030,9 +1038,9 @@ pub(crate) mod tests {
         assert!(r.store.saved().devices[0].push_token.is_none());
         let r = rig_apple(1);
         *r.apple.answer.lock().unwrap() = Some(Err("no network".into()));
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         *r.apple.answer.lock().unwrap() = None;
-        r.event("a", done(false)).await;
+        r.event("a", done(true)).await;
         assert_eq!(r.alerts().len(), 2, "the first never got through, so the same kind is news again");
         assert!(r.store.saved().devices[0].push_token.is_some());
     }

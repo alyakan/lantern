@@ -225,7 +225,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.show_titles} onChange={(e) => act(api.remoteSetShowTitles(e.target.checked))} />
               <span>Show chat and to-do titles in notifications</span>
             </label>
-            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or finished. On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use; a to-do's reminder gives the to-do's title.</span>
+            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or stopped with an error (a chat that finished well shows on the lock-screen card, not as a notification). On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use; a to-do's reminder gives the to-do's title.</span>
             <label className="general-option">
               <input type="checkbox" checked={view.rich_notifications} onChange={(e) => act(api.remoteSetRichNotifications(e.target.checked))} />
               <span>Show what Claude asks in notifications</span>
