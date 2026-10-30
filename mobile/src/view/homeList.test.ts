@@ -43,6 +43,14 @@ describe("the labelled stretches of the recent list", () => {
     ]);
   });
 
+  it("sets the asleep chats last, the most recent first", () => {
+    const parts = sections(rows([chat({ slot: "a", status: "asleep", active_at: 10 }), chat({ slot: "i", status: "idle", active_at: 1 }), chat({ slot: "b", status: "asleep", active_at: 20 }), chat({ slot: "e", status: "ended", active_at: 2 })], NOW));
+    expect(parts.map((s) => [s.label, s.rows.map((r) => r.slot)])).toEqual([
+      ["Earlier", ["e", "i"]],
+      ["Asleep", ["b", "a"]],
+    ]);
+  });
+
   it("is one stretch when every chat is alike", () => {
     expect(sections(rows([chat({ slot: "a" }), chat({ slot: "b" })], NOW)).map((s) => s.key)).toEqual(["earlier"]);
     expect(sections([])).toEqual([]);
