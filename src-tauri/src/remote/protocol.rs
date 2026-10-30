@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -862,6 +862,7 @@ pub enum RemoteTodoEdit {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
 pub struct RemoteLiveCard {
+    /// The chat the card is for; empty for a summary card.
     pub slot: String,
     /// The card's own push token, as Apple gave it to the phone (hex).
     pub token: String,
@@ -870,6 +871,11 @@ pub struct RemoteLiveCard {
     /// When the turn it shows began (ms since the epoch).
     #[ts(type = "number")]
     pub since: u64,
+    /// The card is about every chat (what is working, what needs you, what finished), not one (a Mac that lists
+    /// "livesummary"); `slot` and `project` mean nothing then.
+    #[serde(default)]
+    #[ts(optional)]
+    pub summary: Option<bool>,
 }
 
 /// A phone's message.
@@ -1045,7 +1051,7 @@ mod tests {
         let bare: Request = serde_json::from_str(r#"{"op":"live_activity"}"#).unwrap();
         assert_eq!(bare, Request::LiveActivity { start_token: None, card: None });
         let card: Request = serde_json::from_str(r#"{"op":"live_activity","card":{"slot":"a","token":"ab","project":"p","since":5}}"#).unwrap();
-        assert_eq!(card, Request::LiveActivity { start_token: None, card: Some(RemoteLiveCard { slot: "a".into(), token: "ab".into(), project: "p".into(), since: 5 }) });
+        assert_eq!(card, Request::LiveActivity { start_token: None, card: Some(RemoteLiveCard { slot: "a".into(), token: "ab".into(), project: "p".into(), since: 5, summary: None }) });
         assert!(FEATURES.contains(&"liveactivity"));
     }
 

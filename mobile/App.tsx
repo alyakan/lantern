@@ -69,7 +69,10 @@ export default function App() {
 
   useEffect(() => {
     void controller.start();
-    const sub = AppState.addEventListener("change", (s) => s === "active" && controller.resume());
+    const sub = AppState.addEventListener("change", (s) => {
+      controller.setForeground(s === "active");
+      if (s === "active") controller.resume();
+    });
     return () => sub.remove();
   }, [controller]);
 

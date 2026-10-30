@@ -1,4 +1,4 @@
-import { chatLink, LiveCards, slotOfLink, STALE_MS, type CardFactory, type CardInstance, type CardProps } from "./liveActivity";
+import { chatLink, LiveCards, slotOfLink, STALE_MS, SUMMARY_RENEW_MS, type CardFactory, type CardInstance, type CardProps, type World } from "./liveActivity";
 
 /** A card the fake native side started: what it was started with, what became of it, and a way to give it a token. */
 class FakeCard implements CardInstance {
@@ -212,5 +212,115 @@ describe("a tap on the card", () => {
     for (const other of ["lantern://pair?v=1", "lantern://chat/", "lantern://chat/a/b", "https://chat/a", "lantern://chat/%E0%A4%A", `lantern://chat/${"a".repeat(65)}`, "", null, undefined]) {
       expect(slotOfLink(other)).toBeNull();
     }
+  });
+});
+
+describe("the summary card (a Mac that keeps one)", () => {
+  const world = (over: Partial<World> = {}): World => ({ summary: true, connected: true, foreground: true, busy: true, ...over });
+  let now = 5_000;
+  function summaryRig(left: FakeCard[] = [], reply: () => unknown = () => ({ ended: false })) {
+    const started: FakeCard[] = [];
+    const told: { card: unknown }[] = [];
+    const factory: CardFactory = {
+      start: (props, url, stale) => {
+        const card = new FakeCard(props, url, "ab".repeat(32), stale);
+        started.push(card);
+        return card;
+      },
+      getInstances: () => left,
+    };
+    const cards = new LiveCards({
+      factory: () => factory,
+      tell: async (s) => {
+        told.push(s);
+        return reply();
+      },
+      now: () => now,
+    });
+    return { cards, started, told };
+  }
+  beforeEach(() => (now = 5_000));
+
+  it("starts in front, connected, while a chat works, and hands the Mac its token as a summary", async () => {
+    const { cards, started, told } = summaryRig();
+    for (const w of [world({ busy: false }), world({ foreground: false }), world({ connected: false }), world({ summary: false })]) await cards.look(w);
+    expect(started).toHaveLength(0);
+    await cards.look(world());
+    expect(started).toHaveLength(1);
+    expect(started[0].props.chats).toEqual([]);
+    expect(started[0].url).toBeUndefined();
+    expect(told).toEqual([{ card: { slot: "", token: "ab".repeat(32), project: "Lantern", since: 5_000, summary: true } }]);
+    // Looked at again while it is up: no second card.
+    await cards.look(world());
+    expect(started).toHaveLength(1);
+  });
+
+  it("is left to the Mac to end, and the next busy spell in front starts a new one", async () => {
+    const { cards, started } = summaryRig();
+    await cards.look(world());
+    await cards.look(world({ busy: false }));
+    expect(started[0].ended).toBeNull();
+    // Busy again in the back: nothing can start yet.
+    await cards.look(world({ foreground: false }));
+    expect(started).toHaveLength(1);
+    await cards.look(world());
+    expect(started).toHaveLength(2);
+    expect(started[0].ended).toBe("immediate");
+  });
+
+  it("is started afresh before iOS would end it", async () => {
+    const { cards, started } = summaryRig();
+    await cards.look(world());
+    now += SUMMARY_RENEW_MS;
+    await cards.look(world({ foreground: false }));
+    await cards.look(world());
+    expect(started).toHaveLength(2);
+  });
+
+  it("ends the cards the app's last run left, and starts its own", async () => {
+    const left = [new FakeCard({ project: "Lantern", status: "working", since: 1 }, undefined, "cd".repeat(32)), new FakeCard({ project: "x", status: "done", since: 1 }, undefined)];
+    const { cards, started, told } = summaryRig(left);
+    await cards.look(world());
+    expect(left.map((c) => c.ended)).toEqual(["immediate", "immediate"]);
+    expect(started).toHaveLength(1);
+    expect(told).toEqual([{ card: expect.objectContaining({ token: "ab".repeat(32), summary: true }) }]);
+  });
+
+  it("starts the next one when the Mac says it ended the last while the phone was away", async () => {
+    let ended = false;
+    const { cards, started } = summaryRig([], () => ({ ended }));
+    await cards.look(world());
+    // The chats went quiet with the phone in a pocket; then a new turn, and the app is opened again.
+    ended = true;
+    await cards.connected();
+    await cards.look(world());
+    expect(started).toHaveLength(2);
+    expect(started[0].ended).toBe("immediate");
+  });
+
+  it("waits on a card an older answer says nothing about", async () => {
+    const { cards, started } = summaryRig([], () => undefined);
+    await cards.look(world());
+    await cards.connected();
+    await cards.look(world());
+    expect(started).toHaveLength(1);
+  });
+
+  it("isn't ended by opening a chat, and a message sent starts no card of its own", async () => {
+    const { cards, started, told } = summaryRig();
+    await cards.look(world());
+    await cards.begin("m1", "a", "lantern");
+    await cards.opened("a");
+    expect(started).toHaveLength(1);
+    expect(started[0].ended).toBeNull();
+    expect(told.filter((t) => t.card === null)).toHaveLength(0);
+  });
+
+  it("is told to the Mac again when the connection comes back", async () => {
+    const { cards, told } = summaryRig();
+    await cards.look(world());
+    await cards.connected();
+    expect(told).toHaveLength(2);
+    expect(told[1]).toEqual(told[0]);
   });
 });

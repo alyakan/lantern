@@ -161,6 +161,94 @@ pub struct LiveCard {
     pub needs: Option<Needs>,
     /// What the card shows besides the project and state, as it was last pushed.
     pub detail: Detail,
+    /// A summary card (a phone that asked for one, of a Mac that lists "livesummary"): about every chat, not `slot`'s.
+    pub summary: Option<SummaryState>,
+}
+
+/// How many chats a summary card lists; the rest are only counted. A card's push is at most 4 KB.
+pub const SUMMARY_ROWS: usize = 3;
+/// The longest a chat's title is on a summary card's row, in characters.
+const ROW_TITLE_MAX: usize = 40;
+/// How long nothing has to be working or waiting before a summary card is ended: a queued message starts the next turn a
+/// moment after the last one ends, and that is not the end of the card.
+pub const SUMMARY_END_AFTER_MS: u64 = 60 * 1000;
+/// How often summary cards are looked at for one whose quiet spell is long enough to end it.
+const SUMMARY_CHECK: Duration = Duration::from_secs(20);
+
+/// What a summary card keeps between pushes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SummaryState {
+    /// The chats whose turn ended while the card was up, and how (Done or Failed), oldest first.
+    pub finished: Vec<(String, Status)>,
+    /// When each chat's turn began, as the card saw it (ms since the epoch).
+    pub started: HashMap<String, u64>,
+    /// What was last pushed: a push that would change nothing is not sent.
+    pub last_props: Option<String>,
+    /// How many chats needed you then: one more is pushed at once and wakes the screen.
+    pub last_needs: usize,
+    /// Since when nothing has been working or waiting (ms): after SUMMARY_END_AFTER_MS of it the card is ended.
+    pub idle_since: Option<u64>,
+}
+
+/// One chat on a summary card.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Row {
+    pub project: String,
+    pub title: Option<String>,
+    pub status: Status,
+    /// When its turn began, for one that is working (the card's timer counts from it).
+    pub since: Option<u64>,
+}
+
+/// What a summary card shows: the state it is in as a whole, its rows, and how many chats are in each state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Summary {
+    pub status: Status,
+    pub rows: Vec<Row>,
+    pub needs_you: usize,
+    pub working: usize,
+    pub done: usize,
+    pub failed: usize,
+    /// When the oldest working turn began (ms): the card's own timer.
+    pub since: u64,
+}
+
+impl Summary {
+    /// Something is working or waits for you: the card stays up. Otherwise it is ended, showing what finished.
+    pub fn active(&self) -> bool {
+        self.needs_you + self.working > 0
+    }
+
+    /// The card's data, as the phone's layout reads it (a JSON string inside the push: `props`).
+    pub fn props(&self) -> String {
+        let rows: Vec<Value> = self
+            .rows
+            .iter()
+            .map(|r| {
+                let mut row = json!({"project": r.project, "status": r.status.as_str()});
+                if let Some(t) = &r.title {
+                    row["title"] = json!(t);
+                }
+                if let Some(since) = r.since {
+                    row["since"] = json!(since);
+                }
+                row
+            })
+            .collect();
+        json!({
+            "project": "Lantern",
+            "status": self.status.as_str(),
+            "since": self.since,
+            "chats": rows,
+            "counts": {"needs_you": self.needs_you, "working": self.working, "done": self.done, "failed": self.failed},
+        })
+        .to_string()
+    }
+}
+
+/// A project's name from a chat's folder: its last part, as the lock screen may show it.
+fn project_of(folder: Option<&str>) -> String {
+    clean_project(&folder.and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
 /// What a phone has told the Mac about its Live Activities.
@@ -189,7 +277,7 @@ impl LiveBook {
         // The same card said again (a phone does, each time it connects) is the card the Mac already follows: what it knows
         // of where it stands is kept, rather than started over (and an end it already sent sent again).
         let card = match (card, states.get(device).and_then(|s| s.card.as_ref())) {
-            (Some(new), Some(old)) if new.slot == old.slot && new.token == old.token => Some(old.clone()),
+            (Some(new), Some(old)) if new.slot == old.slot && new.token == old.token && new.summary.is_some() == old.summary.is_some() => Some(old.clone()),
             (new, _) => new,
         };
         states.insert(device.to_string(), LiveState { start_token, card });
@@ -209,7 +297,7 @@ impl LiveBook {
         self.states.lock().unwrap().get(device).cloned()
     }
 
-    fn edit(&self, device: &str, f: impl FnOnce(&mut LiveCard)) {
+    pub(crate) fn edit(&self, device: &str, f: impl FnOnce(&mut LiveCard)) {
         if let Some(card) = self.states.lock().unwrap().get_mut(device).and_then(|s| s.card.as_mut()) {
             f(card);
         }
@@ -539,10 +627,15 @@ pub fn payload(event: &str, status: Status, project: &str, since: u64, now: u64)
 
 /// The same, with what the card shows besides the project and state.
 pub fn payload_with(event: &str, status: Status, project: &str, since: u64, now: u64, detail: &Detail) -> Value {
+    payload_of(event, props_json(project, status, since, detail), now)
+}
+
+/// The body of a push to a card, from the props it shows.
+fn payload_of(event: &str, props: String, now: u64) -> Value {
     let mut aps = json!({
         "timestamp": now,
         "event": event,
-        "content-state": {"name": ACTIVITY_NAME, "props": props_json(project, status, since, detail)},
+        "content-state": {"name": ACTIVITY_NAME, "props": props},
     });
     if event == "end" {
         aps["dismissal-date"] = json!(now + DISMISS_AFTER_SECS);
@@ -590,9 +683,11 @@ impl LiveActivities {
     pub async fn run(self: Arc<Self>, bus: Arc<EventBus>) {
         let mut events = bus.subscribe();
         let mut beat = tokio::time::interval(HEARTBEAT);
+        let mut quiet = tokio::time::interval(SUMMARY_CHECK);
         loop {
             tokio::select! {
                 _ = beat.tick() => self.heartbeat().await,
+                _ = quiet.tick() => self.end_quiet_summaries().await,
                 ev = events.recv() => match ev {
                     Ok(ev) => self.handle(&ev).await,
                     // Behind: events were missed (a turn's end among them, perhaps), so the cards are brought right with the chats now.
@@ -625,7 +720,11 @@ impl LiveActivities {
         let now = (self.now_ms)();
         for (device, card) in self.store.live.cards() {
             if !card.ended && now.saturating_sub(card.last_push) >= REFRESH_AFTER_MS {
-                self.push(&device, Next::Refresh).await;
+                if card.summary.is_some() {
+                    self.push_summary(&device, true).await;
+                } else {
+                    self.push(&device, Next::Refresh).await;
+                }
             }
         }
     }
@@ -637,6 +736,10 @@ impl LiveActivities {
         }
         for (device, card) in self.store.live.cards() {
             if card.ended {
+                continue;
+            }
+            if card.summary.is_some() {
+                self.push_summary(&device, false).await;
                 continue;
             }
             if let Some(next) = self.current(&card.slot) {
@@ -680,6 +783,14 @@ impl LiveActivities {
             _ => None,
         };
         for (device, card) in self.store.live.cards() {
+            // A summary card is about every chat: what this one did is kept, and the card pushed if it now looks different.
+            if card.summary.is_some() {
+                if next != Next::Detail {
+                    self.track(&device, &ev.slot, next);
+                    self.push_summary(&device, false).await;
+                }
+                continue;
+            }
             if card.slot == ev.slot {
                 if let Some(needs) = asks {
                     self.store.live.edit(&device, |c| c.needs = Some(needs));
@@ -697,6 +808,151 @@ impl LiveActivities {
             steps: self.hub.steps(&card.slot),
             needs: if status == Status::NeedsYou { card.needs } else { None },
             plan: self.hub.plan().map(|(used, _, _)| (used * 100.0).round().clamp(0.0, 100.0) as u8),
+        }
+    }
+
+    /// Ends each summary card whose chats have all been quiet for long enough.
+    async fn end_quiet_summaries(&self) {
+        let now = (self.now_ms)();
+        for (device, card) in self.store.live.cards() {
+            let due = card.summary.as_ref().and_then(|s| s.idle_since).is_some_and(|at| now.saturating_sub(at) >= SUMMARY_END_AFTER_MS);
+            if !card.ended && due {
+                self.push_summary(&device, false).await;
+            }
+        }
+    }
+
+    /// What a summary card keeps of one chat's event: when its turn began, and how it ended.
+    fn track(&self, device: &str, slot: &str, next: Next) {
+        let now = (self.now_ms)();
+        self.store.live.edit(device, |c| {
+            let Some(s) = c.summary.as_mut() else { return };
+            match next {
+                Next::Restart => {
+                    s.started.insert(slot.to_string(), now);
+                    s.finished.retain(|(f, _)| f != slot);
+                }
+                Next::End(status) => {
+                    s.started.remove(slot);
+                    s.finished.retain(|(f, _)| f != slot);
+                    s.finished.push((slot.to_string(), status));
+                }
+                _ => {}
+            }
+        });
+    }
+
+    /// What a summary card shows now, from the chats the hub knows: those that need you, then those working (the longest
+    /// first), then those that ended while it was up (the latest first). A chat closed since is simply not there.
+    fn summary_for(&self, card: &LiveCard) -> Summary {
+        let state = card.summary.clone().unwrap_or_default();
+        // The titles of every chat, not only one the phone messaged: on the lock screen only if the user turned titles on.
+        let show_titles = self.store.saved().show_titles;
+        let mut needs = Vec::new();
+        let mut working = Vec::new();
+        let mut ended = Vec::new();
+        for chat in self.hub.chats() {
+            let row = |status: Status, since: Option<u64>| Row {
+                project: project_of(chat.folder.as_deref()),
+                title: if show_titles { self.hub.real_title(&chat.slot).and_then(|t| clean_title(&t)).map(|t| t.chars().take(ROW_TITLE_MAX).collect()) } else { None },
+                status,
+                since,
+            };
+            match chat.status {
+                ChatStatus::NeedsYou => needs.push(row(Status::NeedsYou, None)),
+                ChatStatus::Working => {
+                    let since = state.started.get(&chat.slot).copied().unwrap_or(card.since);
+                    working.push(row(Status::Working, Some(since)));
+                }
+                _ => {
+                    if let Some(at) = state.finished.iter().position(|(f, _)| *f == chat.slot) {
+                        ended.push((at, row(state.finished[at].1, None)));
+                    }
+                }
+            }
+        }
+        working.sort_by_key(|r| r.since);
+        ended.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        let failed = ended.iter().filter(|(_, r)| r.status == Status::Failed).count();
+        let done = ended.len() - failed;
+        let since = working.iter().filter_map(|r| r.since).min().unwrap_or(card.since);
+        let status = if !needs.is_empty() {
+            Status::NeedsYou
+        } else if !working.is_empty() {
+            Status::Working
+        } else if failed > 0 {
+            Status::Failed
+        } else {
+            Status::Done
+        };
+        let (needs_you, working_n) = (needs.len(), working.len());
+        let rows = needs.into_iter().chain(working).chain(ended.into_iter().map(|(_, r)| r)).take(SUMMARY_ROWS).collect();
+        Summary { status, rows, needs_you, working: working_n, done, failed, since }
+    }
+
+    /// Brings a summary card up to date: an update while anything works or waits for you, and when that stops, an update
+    /// showing what finished; once nothing has worked or waited for SUMMARY_END_AFTER_MS, its end (the phone keeps it, still
+    /// showing what finished, for DISMISS_AFTER_SECS). Nothing is sent when it would look the same, unless `refresh` (the
+    /// heartbeat, which keeps it from going stale) or it is time to end it.
+    async fn push_summary(&self, device: &str, refresh: bool) {
+        let Some(card) = self.store.live.state(device).and_then(|s| s.card) else { return };
+        let now = (self.now_ms)();
+        if card.ended {
+            return;
+        }
+        if now.saturating_sub(card.registered_at) > CARD_LIFETIME_MS {
+            self.store.live.drop_card(device);
+            return;
+        }
+        // The chats the Mac no longer has are forgotten.
+        let known: std::collections::HashSet<String> = self.hub.chats().into_iter().map(|c| c.slot).collect();
+        self.store.live.edit(device, |c| {
+            if let Some(s) = c.summary.as_mut() {
+                s.finished.retain(|(f, _)| known.contains(f));
+                s.started.retain(|f, _| known.contains(f));
+            }
+        });
+        let Some(card) = self.store.live.state(device).and_then(|s| s.card) else { return };
+        let kept = card.summary.clone().unwrap_or_default();
+        let summary = self.summary_for(&card);
+        let props = summary.props();
+        let idle_since = if summary.active() { None } else { Some(kept.idle_since.unwrap_or(now)) };
+        let end = idle_since.is_some_and(|at| now.saturating_sub(at) >= SUMMARY_END_AFTER_MS);
+        if idle_since != kept.idle_since {
+            self.store.live.edit(device, |c| {
+                if let Some(s) = c.summary.as_mut() {
+                    s.idle_since = idle_since;
+                }
+            });
+        }
+        if !refresh && !end && kept.last_props.as_deref() == Some(props.as_str()) {
+            return;
+        }
+        let event = if end { "end" } else { "update" };
+        // At once (and lighting the screen) only for one more chat that needs you; what finished is no reason to wake anyone.
+        let priority = if summary.needs_you > kept.last_needs { 10 } else { 5 };
+        let push = Push { event, priority, body: payload_of(event, props.clone(), now / 1000) };
+        match self.apns.send(&card.token, &push).await {
+            Ok(reply) if reply.ok() => {
+                self.store.live.said("Apple accepted the last update.".into());
+                self.store.live.edit(device, |c| {
+                    c.status = summary.status;
+                    c.since = summary.since;
+                    c.ended = event == "end";
+                    c.last_push = now;
+                    if let Some(s) = c.summary.as_mut() {
+                        s.last_props = Some(props.clone());
+                        s.last_needs = summary.needs_you;
+                    }
+                });
+            }
+            Ok(reply) => {
+                self.store.live.said(reply.words());
+                if reply.gone() {
+                    self.store.live.drop_card(device);
+                }
+            }
+            Err(e) => self.store.live.said(e),
         }
     }
 
@@ -809,7 +1065,7 @@ pub(crate) mod tests {
     impl Rig {
         /// A phone with a card on `slot`, as the gateway registers it.
         fn card(&self, device: &str, slot: &str) {
-            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - 5_000, last_push: clock() - 5_000, needs: None, detail: Detail::default() }));
+            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - 5_000, last_push: clock() - 5_000, needs: None, detail: Detail::default(), summary: None }));
         }
 
         async fn event(&self, slot: &str, event: UiEvent) {
@@ -1047,7 +1303,7 @@ pub(crate) mod tests {
     async fn two_phones_each_get_their_own_cards_pushes() {
         let r = rig();
         r.card("phone-1", "a");
-        r.store.live.register("phone-2", None, Some(LiveCard { slot: "a".into(), token: "f".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default() }));
+        r.store.live.register("phone-2", None, Some(LiveCard { slot: "a".into(), token: "f".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default(), summary: None }));
         r.event("a", asked()).await;
         let tokens: Vec<String> = r.sent().into_iter().map(|(t, _)| t).collect();
         assert_eq!(tokens.len(), 2);
@@ -1176,7 +1432,7 @@ pub(crate) mod tests {
         r.event("a", asked()).await;
         assert_eq!(r.sent().len(), 1);
         // A card with a token of its own is a new card.
-        r.store.live.register("phone-1", None, Some(LiveCard { slot: "a".into(), token: "e".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default() }));
+        r.store.live.register("phone-1", None, Some(LiveCard { slot: "a".into(), token: "e".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default(), summary: None }));
         assert!(!r.store.live.cards()[0].1.ended);
         r.event("a", asked()).await;
         assert_eq!(r.sent().len(), 2);
@@ -1219,7 +1475,7 @@ pub(crate) mod tests {
     impl Rig {
         /// A card whose last push was `age_ms` ago.
         fn card_aged(&self, device: &str, slot: &str, age_ms: u64) {
-            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - age_ms - 5_000, last_push: clock() - age_ms, needs: None, detail: Detail::default() }));
+            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - age_ms - 5_000, last_push: clock() - age_ms, needs: None, detail: Detail::default(), summary: None }));
         }
     }
 
@@ -1328,6 +1584,183 @@ pub(crate) mod tests {
         for (_, push) in r.sent() {
             let text = push.body.to_string();
             for secret in ["rm -rf", "secrets", "hunter2", "SECRET", "Bash", "SECRET-RESULT"] {
+                assert!(!text.contains(secret), "{secret} in {text}");
+            }
+        }
+    }
+
+    // ---- summary cards
+
+    fn go() -> UiEvent {
+        UiEvent::UserText { text: "SECRET MESSAGE".into(), at: None, sent_by: None, images: 0 }
+    }
+
+    impl Rig {
+        /// A phone with a summary card, as the gateway registers it.
+        fn summary_card(&self, device: &str) {
+            self.store.live.register(device, None, Some(LiveCard { slot: String::new(), token: TOKEN.into(), project: "Lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - 5_000, last_push: clock() - 5_000, needs: None, detail: Detail::default(), summary: Some(SummaryState::default()) }));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_follows_every_chat_and_pushes_only_what_changes_it() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.opened("b", "/code/web");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        r.event("b", go()).await;
+        // Something that doesn't change the card (the plan's usage, a second message to a chat that is working) sends nothing.
+        r.event("a", UiEvent::Todos { parent: None, items: vec![] }).await;
+        let sent = r.sent();
+        assert_eq!(sent.len(), 2);
+        let p = props(&sent[1].1);
+        assert_eq!(p["status"], "working");
+        assert_eq!(p["counts"], json!({"needs_you": 0, "working": 2, "done": 0, "failed": 0}));
+        assert_eq!(p["chats"].as_array().unwrap().iter().map(|c| c["project"].as_str().unwrap()).collect::<Vec<_>>(), vec!["app", "web"]);
+        assert_eq!(sent[1].1.body["aps"]["event"], "update");
+        assert_eq!(sent[1].1.priority, 5);
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_needs_you_leads_the_summary_and_is_pushed_at_once() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.opened("b", "/code/web");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        r.event("b", go()).await;
+        r.event("b", asked()).await;
+        let last = r.sent().last().unwrap().1.clone();
+        assert_eq!(last.priority, 10);
+        let p = props(&last);
+        assert_eq!(p["status"], "needs_you");
+        assert_eq!(p["chats"][0], json!({"project": "web", "status": "needs_you"}));
+        assert_eq!(p["chats"][1]["status"], "working");
+        // Answered: back to working, not urgent.
+        r.event("b", resolved()).await;
+        let last = r.sent().last().unwrap().1.clone();
+        assert_eq!((last.priority, props(&last)["status"].clone()), (5, json!("working")));
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_ends_showing_what_finished_once_nothing_works_or_waits() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.opened("b", "/code/web");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        r.event("b", go()).await;
+        r.event("a", done(true)).await;
+        let mid = r.sent().last().unwrap().1.clone();
+        assert_eq!(mid.body["aps"]["event"], "update", "b is still working");
+        r.event("b", done(false)).await;
+        // Quiet now: shown at once, but not ended yet (a queued message may start the next turn a moment later).
+        let quiet = r.sent().last().unwrap().1.clone();
+        assert_eq!((quiet.body["aps"]["event"].clone(), quiet.priority), (json!("update"), 5));
+        let before = r.sent().len();
+        r.service.end_quiet_summaries().await;
+        assert_eq!(r.sent().len(), before, "not quiet for long enough");
+        r.store.live.edit("phone-1", |c| c.summary.as_mut().unwrap().idle_since = Some(clock() - SUMMARY_END_AFTER_MS));
+        r.service.end_quiet_summaries().await;
+        let last = r.sent().last().unwrap().1.clone();
+        assert_eq!(last.body["aps"]["event"], "end");
+        assert_eq!(last.priority, 5, "what finished wakes nobody");
+        assert!(last.body["aps"]["dismissal-date"].is_u64());
+        let p = props(&last);
+        assert_eq!(p["counts"], json!({"needs_you": 0, "working": 0, "done": 1, "failed": 1}));
+        // The latest to finish first.
+        assert_eq!(p["chats"], json!([{"project": "web", "status": "done"}, {"project": "app", "status": "failed"}]));
+        // Over: nothing more goes to it, however the chats go on.
+        let count = r.sent().len();
+        r.event("a", go()).await;
+        assert_eq!(r.sent().len(), count);
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_lists_a_few_chats_and_counts_the_rest() {
+        let r = rig();
+        for i in 0..6 {
+            r.hub.opened(&format!("c{i}"), &format!("/code/p{i}"));
+        }
+        r.summary_card("phone-1");
+        for i in 0..6 {
+            r.event(&format!("c{i}"), go()).await;
+        }
+        let p = props(&r.sent().last().unwrap().1);
+        assert_eq!(p["chats"].as_array().unwrap().len(), SUMMARY_ROWS);
+        assert_eq!(p["counts"]["working"], 6);
+        assert!(r.sent().last().unwrap().1.body.to_string().len() < 4096);
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_is_refreshed_by_the_heartbeat_even_when_nothing_changed() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        assert_eq!(r.sent().len(), 1);
+        r.store.live.edit("phone-1", |c| c.last_push = clock() - REFRESH_AFTER_MS);
+        r.service.heartbeat().await;
+        assert_eq!(r.sent().len(), 2);
+        assert_eq!(props(&r.sent()[1].1), props(&r.sent()[0].1));
+    }
+
+    #[tokio::test]
+    async fn a_plain_card_beside_a_summary_card_still_follows_only_its_chat() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.opened("b", "/code/web");
+        r.card("phone-old", "a");
+        r.summary_card("phone-new");
+        r.event("b", go()).await;
+        // Only the summary card heard of b.
+        assert_eq!(r.sent().len(), 1);
+        assert!(props(&r.sent()[0].1).get("chats").is_some());
+        r.event("a", done(false)).await;
+        let ends: Vec<_> = r.sent().iter().filter(|(_, p)| p.body["aps"]["event"] == "end").map(|(_, p)| props(p)).collect();
+        assert_eq!(ends.len(), 1, "a's plain card ends; the summary card goes on, b is working");
+        assert!(ends[0].get("chats").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_starts_right_after_another_ends_keeps_the_summary_card() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        r.event("a", done(false)).await;
+        r.event("a", go()).await;
+        r.store.live.edit("phone-1", |c| assert_eq!(c.summary.as_ref().unwrap().idle_since, None));
+        r.service.end_quiet_summaries().await;
+        assert!(r.sent().iter().all(|(_, p)| p.body["aps"]["event"] == "update"));
+        assert_eq!(props(&r.sent().last().unwrap().1)["status"], "working");
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_shows_chats_titles_only_when_the_user_turned_titles_on() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.titled("a", "Release 0.1.90");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        assert!(props(&r.sent()[0].1)["chats"][0].get("title").is_none());
+        r.store.set_show_titles(true).unwrap();
+        r.event("a", asked()).await;
+        assert_eq!(props(&r.sent().last().unwrap().1)["chats"][0]["title"], "Release 0.1.90");
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_says_nothing_a_lock_screen_shouldnt() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.summary_card("phone-1");
+        r.event("a", UiEvent::UserText { text: "my password is hunter2".into(), at: None, sent_by: None, images: 0 }).await;
+        r.event("a", asked()).await;
+        r.event("a", done(false)).await;
+        for (_, push) in r.sent() {
+            let text = push.body.to_string();
+            for secret in ["rm -rf", "secrets", "hunter2", "SECRET", "Bash"] {
                 assert!(!text.contains(secret), "{secret} in {text}");
             }
         }
