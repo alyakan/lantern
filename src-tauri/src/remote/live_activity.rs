@@ -1950,7 +1950,10 @@ pub(crate) mod tests {
         let p = props(&sent[1].1);
         assert_eq!(p["status"], "working");
         assert_eq!(p["counts"], json!({"needs_you": 0, "working": 2, "done": 0, "failed": 0}));
-        assert_eq!(p["chats"].as_array().unwrap().iter().map(|c| c["project"].as_str().unwrap()).collect::<Vec<_>>(), vec!["app", "web"]);
+        // Both began on the same tick of the tests' still clock, so either may come first.
+        let mut projects = p["chats"].as_array().unwrap().iter().map(|c| c["project"].as_str().unwrap()).collect::<Vec<_>>();
+        projects.sort();
+        assert_eq!(projects, vec!["app", "web"]);
         assert_eq!(sent[1].1.body["aps"]["event"], "update");
         assert_eq!(sent[1].1.priority, 5);
     }
