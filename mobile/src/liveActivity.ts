@@ -116,8 +116,10 @@ export class LiveCards {
   private summaryCard: SummaryCard | null = null;
   /** The phone last saw a Mac that keeps summary cards: a message sent starts no card of its own. */
   private summaryMode = false;
-  /** The cards left by the app's last run have been looked at. */
-  private adopted = false;
+  /** The cards left by the app's last run have been cleared. */
+  private cleared = false;
+  /** What the summary card was last looked at for: the Mac saying it ended it looks again with this. */
+  private world: World | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly factory: () => CardFactory | null;
   private readonly now: () => number;
@@ -210,18 +212,20 @@ export class LiveCards {
   /**
    * With a Mac that keeps summary cards: the one card about every chat. It is started while the app is in front, connected,
    * and some chat is working or needs you, and there is none (or the last one is over, or nearly as old as iOS lets one get);
-   * from then on the Mac keeps it right, and ends it when nothing works or waits. The phone never ends it itself except to
-   * start the next one. A card the app's last run left is taken over, not doubled.
+   * from then on the Mac keeps it right, and ends it when nothing works or waits (and says so when it is next told of it). The
+   * phone never ends it itself except to start the next one. Cards the app's last run left are ended at launch: one can't be
+   * told from a card the Mac has ended that is still on screen for a while.
    */
   look(world: World): Promise<void> {
     return this.chain(async () => {
       this.summaryMode = world.summary;
+      this.world = world;
       if (!world.summary) return;
       const factory = this.factory();
       if (!factory) return;
-      if (!this.adopted) {
-        this.adopted = true;
-        this.adopt(factory);
+      if (!this.cleared) {
+        this.cleared = true;
+        await this.clearLeftovers(factory);
       }
       const card = this.summaryCard;
       if (card && !world.busy) {
@@ -238,17 +242,14 @@ export class LiveCards {
     });
   }
 
-  private adopt(factory: CardFactory) {
+  private async clearLeftovers(factory: CardFactory) {
     let left: CardInstance[] = [];
     try {
       left = factory.getInstances?.() ?? [];
     } catch {
       return;
     }
-    const [keep, ...rest] = left;
-    for (const extra of rest) void extra.end("immediate").catch(() => {});
-    // Its age isn't known: it is taken as new, and the Mac (told its token again) goes on with it or ends it.
-    if (keep) this.follow(keep, this.now());
+    for (const card of left) await card.end("immediate").catch(() => {});
   }
 
   private startSummary(factory: CardFactory) {
@@ -290,8 +291,15 @@ export class LiveCards {
   private async reportSummary(): Promise<void> {
     const c = this.summaryCard;
     if (!c?.token) return;
+    const again = c.reported;
     c.reported = true;
-    await this.d.tell({ card: { slot: "", token: c.token, project: "Lantern", since: c.since, summary: true } }).catch(() => {});
+    const reply = await this.d.tell({ card: { slot: "", token: c.token, project: "Lantern", since: c.since, summary: true } }).catch(() => null);
+    // The Mac ended it while the phone was away (its chats went quiet): the next one is started now if it should be. Only a
+    // card the Mac had heard of before can have been ended, so a new one is never started over again.
+    if (again && reply && typeof reply === "object" && (reply as { ended?: unknown }).ended === true && this.summaryCard === c && !c.over) {
+      c.over = true;
+      if (this.world) void this.look(this.world);
+    }
   }
 
   private async endSummary(): Promise<void> {

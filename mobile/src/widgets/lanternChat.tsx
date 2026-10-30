@@ -21,7 +21,7 @@ export type ChatCardProps = {
   /** How much of the plan's five-hour window is used, 0 to 100. */
   plan?: number;
   /**
-   * A summary card (a Mac that lists "livesummary"): a few chats, those that need you first, then those working, then those
+   * A summary card (a Mac that lists "livesummary"): up to three chats (a lock-screen card is short), those that need you first, then those working, then those
    * that finished while it was up; each its project, state, its own title when it has one, and when a working one began.
    */
   chats?: { project: string; status: "working" | "needs_you" | "done" | "failed"; title?: string; since?: number }[];
@@ -57,7 +57,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
     const top = late ? "zzz" : symbolOf(props.status);
     const topHue = hueOf(props.status);
     const list = props.chats;
-    const shown = list.length;
+    const shown = Math.min(list.length, 3);
     const more = needsN + workingN + doneN + failedN - shown;
     const row = (i: number) => {
       if (i >= shown) return null;
@@ -85,7 +85,6 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
         {row(0)}
         {row(1)}
         {row(2)}
-        {row(3)}
         {more > 0 ? <Text modifiers={[font({ size: 12 }), opacity(0.6)]}>{`and ${more} more`}</Text> : null}
       </VStack>
     );

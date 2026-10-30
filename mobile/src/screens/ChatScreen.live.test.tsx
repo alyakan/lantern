@@ -109,3 +109,27 @@ describe("the lock-screen card, from the chat screen", () => {
     expect(started[0].ended).toEqual([]);
   });
 });
+
+describe("the summary card, with a Mac that keeps one", () => {
+  it("starts while a chat works, tells the Mac it is a summary, and a message sent starts no second card", async () => {
+    const { started, factory } = fakeCards();
+    const { lastOf } = await chatScreen(["liveactivity", "livesummary"], () => factory, undefined, { live_activity: { ended: false } }, { status: "working" });
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0].props).toMatchObject({ project: "Lantern", chats: [] });
+    await waitFor(() => expect(lastOf("live_activity")).toEqual({ op: "live_activity", card: { slot: "", token: "ab".repeat(32), project: "Lantern", since: expect.any(Number), summary: true } }));
+    await send("and the docs");
+    await waitFor(() => expect(lastOf("send")).toBeTruthy());
+    expect(started).toHaveLength(1);
+  });
+
+  it("starts nothing while every chat is idle, or with the app in the back", async () => {
+    const { started, factory } = fakeCards();
+    const { controller } = await chatScreen(["liveactivity", "livesummary"], () => factory);
+    expect(started).toHaveLength(0);
+    controller.setForeground(false);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "working" })] } } as never));
+    expect(started).toHaveLength(0);
+    controller.setForeground(true);
+    await waitFor(() => expect(started).toHaveLength(1));
+  });
+});

@@ -121,7 +121,9 @@ describe("the summary card", () => {
   it("lists its chats, says how many need you and work, and how many more there are", () => {
     const out = draw({ status: "needs_you", chats, counts });
     const words = texts(out.banner);
-    expect(words).toEqual(expect.arrayContaining(["Lantern", "1 needs you · 3 working", "web", "Needs you", "app", "Release 0.1.90", "docs", "Done", "api", "Stopped", "and 2 more"]));
+    expect(words).toEqual(expect.arrayContaining(["Lantern", "1 needs you · 3 working", "web", "Needs you", "app", "Release 0.1.90", "docs", "Done", "and 3 more"]));
+    // Three rows at most: a lock-screen card is short.
+    expect(words).not.toContain("api");
     // A working chat's own timer, from when its turn began.
     const timers = all(out.banner, "Text").filter((t) => t.props.dateStyle === "timer");
     expect(timers.map((t) => (t.props.date as Date).getTime())).toEqual([2_000]);

@@ -218,7 +218,7 @@ describe("a tap on the card", () => {
 describe("the summary card (a Mac that keeps one)", () => {
   const world = (over: Partial<World> = {}): World => ({ summary: true, connected: true, foreground: true, busy: true, ...over });
   let now = 5_000;
-  function summaryRig(left: FakeCard[] = []) {
+  function summaryRig(left: FakeCard[] = [], reply: () => unknown = () => ({ ended: false })) {
     const started: FakeCard[] = [];
     const told: { card: unknown }[] = [];
     const factory: CardFactory = {
@@ -229,7 +229,14 @@ describe("the summary card (a Mac that keeps one)", () => {
       },
       getInstances: () => left,
     };
-    const cards = new LiveCards({ factory: () => factory, tell: async (s) => void told.push(s), now: () => now });
+    const cards = new LiveCards({
+      factory: () => factory,
+      tell: async (s) => {
+        told.push(s);
+        return reply();
+      },
+      now: () => now,
+    });
     return { cards, started, told };
   }
   beforeEach(() => (now = 5_000));
@@ -270,15 +277,33 @@ describe("the summary card (a Mac that keeps one)", () => {
     expect(started).toHaveLength(2);
   });
 
-  it("takes over a card the app's last run left, rather than starting a second, and ends any others", async () => {
-    const kept = new FakeCard({ project: "Lantern", status: "working", since: 1 }, undefined, "cd".repeat(32));
-    const extra = new FakeCard({ project: "x", status: "working", since: 1 }, undefined);
-    const { cards, started, told } = summaryRig([kept, extra]);
+  it("ends the cards the app's last run left, and starts its own", async () => {
+    const left = [new FakeCard({ project: "Lantern", status: "working", since: 1 }, undefined, "cd".repeat(32)), new FakeCard({ project: "x", status: "done", since: 1 }, undefined)];
+    const { cards, started, told } = summaryRig(left);
     await cards.look(world());
-    expect(started).toHaveLength(0);
-    expect(extra.ended).toBe("immediate");
-    expect(kept.ended).toBeNull();
-    expect(told).toEqual([{ card: expect.objectContaining({ token: "cd".repeat(32), summary: true }) }]);
+    expect(left.map((c) => c.ended)).toEqual(["immediate", "immediate"]);
+    expect(started).toHaveLength(1);
+    expect(told).toEqual([{ card: expect.objectContaining({ token: "ab".repeat(32), summary: true }) }]);
+  });
+
+  it("starts the next one when the Mac says it ended the last while the phone was away", async () => {
+    let ended = false;
+    const { cards, started } = summaryRig([], () => ({ ended }));
+    await cards.look(world());
+    // The chats went quiet with the phone in a pocket; then a new turn, and the app is opened again.
+    ended = true;
+    await cards.connected();
+    await cards.look(world());
+    expect(started).toHaveLength(2);
+    expect(started[0].ended).toBe("immediate");
+  });
+
+  it("waits on a card an older answer says nothing about", async () => {
+    const { cards, started } = summaryRig([], () => undefined);
+    await cards.look(world());
+    await cards.connected();
+    await cards.look(world());
+    expect(started).toHaveLength(1);
   });
 
   it("isn't ended by opening a chat, and a message sent starts no card of its own", async () => {

@@ -1036,7 +1036,14 @@ impl<'a> Session<'a> {
                     }
                     None => None,
                 };
+                let summary = card.as_ref().is_some_and(|c| c.summary.is_some());
                 self.gw.store.live.register(&self.device, start_token, card);
+                // A summary card the Mac has ended (its chats went quiet while the phone was away) is said to be over, so the
+                // phone starts the next one rather than waiting on a card nothing is pushed to any more.
+                if summary {
+                    let ended = self.gw.store.live.state(&self.device).and_then(|s| s.card).is_none_or(|c| c.ended);
+                    return Ok(serde_json::json!({ "ended": ended }));
+                }
                 Ok(serde_json::Value::Null)
             }
         }
@@ -1674,10 +1681,18 @@ pub(crate) mod tests {
         }
         assert!(r.store.live.cards().is_empty());
         // Whatever slot or project the phone sends with it, a summary card is kept as about no chat.
-        assert!(p.ask(ask(card("nope", &token, Some(true)))).await.1.is_none());
+        let (reply, err, _) = p.ask(ask(card("nope", &token, Some(true)))).await;
+        assert!(err.is_none());
+        assert_eq!(reply, Some(json!({"ended": false})));
         let kept = r.store.live.cards();
         assert_eq!(kept.len(), 1);
         assert_eq!((kept[0].1.slot.as_str(), kept[0].1.project.as_str(), kept[0].1.summary.is_some()), ("", "Lantern", true));
+        // The Mac ended it while the phone was away: told again of the same card, the phone hears it is over.
+        let device = kept[0].0.clone();
+        r.store.live.edit(&device, |c| c.ended = true);
+        assert_eq!(p.ask(ask(card("", &token, Some(true)))).await.0, Some(json!({"ended": true})));
+        // A plain card's answer is as it always was.
+        assert!(p.ask(ask(card("a", &token, None))).await.0.unwrap_or_default().get("ended").is_none());
     }
 
     #[tokio::test]

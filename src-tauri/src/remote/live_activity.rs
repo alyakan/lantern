@@ -166,9 +166,14 @@ pub struct LiveCard {
 }
 
 /// How many chats a summary card lists; the rest are only counted. A card's push is at most 4 KB.
-pub const SUMMARY_ROWS: usize = 4;
+pub const SUMMARY_ROWS: usize = 3;
 /// The longest a chat's title is on a summary card's row, in characters.
 const ROW_TITLE_MAX: usize = 40;
+/// How long nothing has to be working or waiting before a summary card is ended: a queued message starts the next turn a
+/// moment after the last one ends, and that is not the end of the card.
+pub const SUMMARY_END_AFTER_MS: u64 = 60 * 1000;
+/// How often summary cards are looked at for one whose quiet spell is long enough to end it.
+const SUMMARY_CHECK: Duration = Duration::from_secs(20);
 
 /// What a summary card keeps between pushes.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -181,6 +186,8 @@ pub struct SummaryState {
     pub last_props: Option<String>,
     /// How many chats needed you then: one more is pushed at once and wakes the screen.
     pub last_needs: usize,
+    /// Since when nothing has been working or waiting (ms): after SUMMARY_END_AFTER_MS of it the card is ended.
+    pub idle_since: Option<u64>,
 }
 
 /// One chat on a summary card.
@@ -290,7 +297,7 @@ impl LiveBook {
         self.states.lock().unwrap().get(device).cloned()
     }
 
-    fn edit(&self, device: &str, f: impl FnOnce(&mut LiveCard)) {
+    pub(crate) fn edit(&self, device: &str, f: impl FnOnce(&mut LiveCard)) {
         if let Some(card) = self.states.lock().unwrap().get_mut(device).and_then(|s| s.card.as_mut()) {
             f(card);
         }
@@ -676,9 +683,11 @@ impl LiveActivities {
     pub async fn run(self: Arc<Self>, bus: Arc<EventBus>) {
         let mut events = bus.subscribe();
         let mut beat = tokio::time::interval(HEARTBEAT);
+        let mut quiet = tokio::time::interval(SUMMARY_CHECK);
         loop {
             tokio::select! {
                 _ = beat.tick() => self.heartbeat().await,
+                _ = quiet.tick() => self.end_quiet_summaries().await,
                 ev = events.recv() => match ev {
                     Ok(ev) => self.handle(&ev).await,
                     // Behind: events were missed (a turn's end among them, perhaps), so the cards are brought right with the chats now.
@@ -802,6 +811,17 @@ impl LiveActivities {
         }
     }
 
+    /// Ends each summary card whose chats have all been quiet for long enough.
+    async fn end_quiet_summaries(&self) {
+        let now = (self.now_ms)();
+        for (device, card) in self.store.live.cards() {
+            let due = card.summary.as_ref().and_then(|s| s.idle_since).is_some_and(|at| now.saturating_sub(at) >= SUMMARY_END_AFTER_MS);
+            if !card.ended && due {
+                self.push_summary(&device, false).await;
+            }
+        }
+    }
+
     /// What a summary card keeps of one chat's event: when its turn began, and how it ended.
     fn track(&self, device: &str, slot: &str, next: Next) {
         let now = (self.now_ms)();
@@ -826,13 +846,15 @@ impl LiveActivities {
     /// first), then those that ended while it was up (the latest first). A chat closed since is simply not there.
     fn summary_for(&self, card: &LiveCard) -> Summary {
         let state = card.summary.clone().unwrap_or_default();
+        // The titles of every chat, not only one the phone messaged: on the lock screen only if the user turned titles on.
+        let show_titles = self.store.saved().show_titles;
         let mut needs = Vec::new();
         let mut working = Vec::new();
         let mut ended = Vec::new();
         for chat in self.hub.chats() {
             let row = |status: Status, since: Option<u64>| Row {
                 project: project_of(chat.folder.as_deref()),
-                title: self.hub.real_title(&chat.slot).and_then(|t| clean_title(&t)).map(|t| t.chars().take(ROW_TITLE_MAX).collect()),
+                title: if show_titles { self.hub.real_title(&chat.slot).and_then(|t| clean_title(&t)).map(|t| t.chars().take(ROW_TITLE_MAX).collect()) } else { None },
                 status,
                 since,
             };
@@ -868,9 +890,10 @@ impl LiveActivities {
         Summary { status, rows, needs_you, working: working_n, done, failed, since }
     }
 
-    /// Brings a summary card up to date: an update while anything works or waits for you, else its end (the phone keeps it,
+    /// Brings a summary card up to date: an update while anything works or waits for you, and when that stops, an update
+    /// showing what finished; once nothing has worked or waited for SUMMARY_END_AFTER_MS, its end (the phone keeps it, still
     /// showing what finished, for DISMISS_AFTER_SECS). Nothing is sent when it would look the same, unless `refresh` (the
-    /// heartbeat, which keeps it from going stale).
+    /// heartbeat, which keeps it from going stale) or it is time to end it.
     async fn push_summary(&self, device: &str, refresh: bool) {
         let Some(card) = self.store.live.state(device).and_then(|s| s.card) else { return };
         let now = (self.now_ms)();
@@ -893,12 +916,21 @@ impl LiveActivities {
         let kept = card.summary.clone().unwrap_or_default();
         let summary = self.summary_for(&card);
         let props = summary.props();
-        if !refresh && kept.last_props.as_deref() == Some(props.as_str()) {
+        let idle_since = if summary.active() { None } else { Some(kept.idle_since.unwrap_or(now)) };
+        let end = idle_since.is_some_and(|at| now.saturating_sub(at) >= SUMMARY_END_AFTER_MS);
+        if idle_since != kept.idle_since {
+            self.store.live.edit(device, |c| {
+                if let Some(s) = c.summary.as_mut() {
+                    s.idle_since = idle_since;
+                }
+            });
+        }
+        if !refresh && !end && kept.last_props.as_deref() == Some(props.as_str()) {
             return;
         }
-        let event = if summary.active() { "update" } else { "end" };
-        // At once (and lighting the screen) for one more chat that needs you, and for the end; the rest goes as Apple can.
-        let priority = if event == "end" || summary.needs_you > kept.last_needs { 10 } else { 5 };
+        let event = if end { "end" } else { "update" };
+        // At once (and lighting the screen) only for one more chat that needs you; what finished is no reason to wake anyone.
+        let priority = if summary.needs_you > kept.last_needs { 10 } else { 5 };
         let push = Push { event, priority, body: payload_of(event, props.clone(), now / 1000) };
         match self.apns.send(&card.token, &push).await {
             Ok(reply) if reply.ok() => {
@@ -1623,8 +1655,17 @@ pub(crate) mod tests {
         let mid = r.sent().last().unwrap().1.clone();
         assert_eq!(mid.body["aps"]["event"], "update", "b is still working");
         r.event("b", done(false)).await;
+        // Quiet now: shown at once, but not ended yet (a queued message may start the next turn a moment later).
+        let quiet = r.sent().last().unwrap().1.clone();
+        assert_eq!((quiet.body["aps"]["event"].clone(), quiet.priority), (json!("update"), 5));
+        let before = r.sent().len();
+        r.service.end_quiet_summaries().await;
+        assert_eq!(r.sent().len(), before, "not quiet for long enough");
+        r.store.live.edit("phone-1", |c| c.summary.as_mut().unwrap().idle_since = Some(clock() - SUMMARY_END_AFTER_MS));
+        r.service.end_quiet_summaries().await;
         let last = r.sent().last().unwrap().1.clone();
         assert_eq!(last.body["aps"]["event"], "end");
+        assert_eq!(last.priority, 5, "what finished wakes nobody");
         assert!(last.body["aps"]["dismissal-date"].is_u64());
         let p = props(&last);
         assert_eq!(p["counts"], json!({"needs_you": 0, "working": 0, "done": 1, "failed": 1}));
@@ -1680,6 +1721,33 @@ pub(crate) mod tests {
         let ends: Vec<_> = r.sent().iter().filter(|(_, p)| p.body["aps"]["event"] == "end").map(|(_, p)| props(p)).collect();
         assert_eq!(ends.len(), 1, "a's plain card ends; the summary card goes on, b is working");
         assert!(ends[0].get("chats").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_starts_right_after_another_ends_keeps_the_summary_card() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        r.event("a", done(false)).await;
+        r.event("a", go()).await;
+        r.store.live.edit("phone-1", |c| assert_eq!(c.summary.as_ref().unwrap().idle_since, None));
+        r.service.end_quiet_summaries().await;
+        assert!(r.sent().iter().all(|(_, p)| p.body["aps"]["event"] == "update"));
+        assert_eq!(props(&r.sent().last().unwrap().1)["status"], "working");
+    }
+
+    #[tokio::test]
+    async fn a_summary_card_shows_chats_titles_only_when_the_user_turned_titles_on() {
+        let r = rig();
+        r.hub.opened("a", "/code/app");
+        r.hub.titled("a", "Release 0.1.90");
+        r.summary_card("phone-1");
+        r.event("a", go()).await;
+        assert!(props(&r.sent()[0].1)["chats"][0].get("title").is_none());
+        r.store.set_show_titles(true).unwrap();
+        r.event("a", asked()).await;
+        assert_eq!(props(&r.sent().last().unwrap().1)["chats"][0]["title"], "Release 0.1.90");
     }
 
     #[tokio::test]
