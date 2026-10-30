@@ -324,6 +324,18 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
     expect(run([event("b", 1, done(200_000))]).views.b.context).toBeNull();
   });
 
+  it("keep what runs in the background as it was last said, until the chat's claude ends or sleeps", () => {
+    const background = (...tasks: string[]): RemoteEvent => ({ kind: "background", tasks });
+    let s = run([event("a", 1, background("npm run dev", "cargo watch"))]);
+    expect(s.views.a.background).toEqual(["npm run dev", "cargo watch"]);
+    expect(items(s)).toEqual([]);
+    s = run([event("a", 2, background("cargo watch"))], s);
+    expect(s.views.a.background).toEqual(["cargo watch"]);
+    expect(run([event("a", 3, { kind: "asleep", asleep: true })], s).views.a.background).toEqual([]);
+    expect(run([event("a", 3, { kind: "asleep", asleep: false })], s).views.a.background).toEqual(["cargo watch"]);
+    expect(run([event("a", 3, { kind: "session_ended", code: 0 })], s).views.a.background).toEqual([]);
+  });
+
   it("stay through a catch-up that starts the chat over, and come again with it", () => {
     const hi: RemoteEvent = { kind: "user_text", text: "hi", at: 1, sent_by: null };
     const s = run([event("a", 1, commands), reset("a", 9, [hi])]);

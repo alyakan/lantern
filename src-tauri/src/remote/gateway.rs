@@ -1687,10 +1687,11 @@ pub(crate) mod tests {
         let usage = |msgs: &[ServerMessage]| msgs.iter().find_map(|m| if let ServerMessage::Plan { used, resets_at, week_used, week_resets_at, .. } = m { Some((*used, *resets_at, *week_used, *week_resets_at)) } else { None });
         let mut plan = usage(&before);
         let events: Vec<RemoteEvent> = reset_of(before).into_iter().filter(|e| e.is_extra()).collect();
-        assert_eq!(events.len(), 3, "the latest of each, however many were said: {events:?}");
+        assert_eq!(events.len(), 4, "the latest of each, however many were said: {events:?}");
         assert!(matches!(&events[0], RemoteEvent::Commands { commands } if commands[0].name == "review"));
         assert!(matches!(&events[1], RemoteEvent::Todos { items } if items.len() == 1 && items[0].status == "completed"));
         assert_eq!(events[2], RemoteEvent::Context { tokens: 90_000, window: Some(200_000) });
+        assert_eq!(events[3], RemoteEvent::Background { tasks: vec![] }, "nothing in the background, said so it clears what the phone had");
         // The account's usage comes as a message of its own, once it has been said (by any chat).
         while plan.is_none() {
             plan = usage(&[new.next().await.unwrap()]);

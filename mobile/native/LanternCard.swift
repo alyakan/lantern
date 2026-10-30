@@ -246,6 +246,26 @@ struct LanternMark: View {
 
 // MARK: - Pieces
 
+extension View {
+  /// A number that rolls to its next value when the Mac's update changes it (counting the right way from iOS 17).
+  @ViewBuilder func rollingCount(_ value: Int) -> some View {
+    if #available(iOS 17.0, macOS 14.0, *) {
+      contentTransition(.numericText(value: Double(value)))
+    } else {
+      contentTransition(.numericText())
+    }
+  }
+
+  /// A symbol that swaps to the next state's with the system's own replace effect (iOS 17), else just changes.
+  @ViewBuilder func swapsSymbol() -> some View {
+    if #available(iOS 17.0, macOS 14.0, *) {
+      contentTransition(.symbolEffect(.replace))
+    } else {
+      self
+    }
+  }
+}
+
 /// The state as a small coloured pill: a dot and a word.
 struct LanternStatusPill: View {
   let look: LanternCardLook
@@ -254,11 +274,13 @@ struct LanternStatusPill: View {
     HStack(spacing: 6) {
       Circle().fill(look.hue).frame(width: 7, height: 7)
       Text(look.pillWords).font(.system(size: 13, weight: .semibold)).foregroundColor(look.hue).lineLimit(1)
+        .contentTransition(.interpolate)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 5)
     .background(Capsule().fill(look.hue.opacity(0.18)))
     .fixedSize()
+    .animation(.easeInOut(duration: 0.4), value: look.props.status)
   }
 }
 
@@ -297,7 +319,11 @@ struct LanternSteps: View {
           .font(.system(size: 12))
           .monospacedDigit()
           .foregroundColor(Color.white.opacity(0.65))
+          .rollingCount(look.stepsDone)
       }
+      // A card can't move by itself (the system draws it once per update): what moves is the change the Mac's update brings,
+      // the bar sliding on and the count rolling to the next step.
+      .animation(.spring(response: 0.6, dampingFraction: 0.8), value: look.stepsDone)
     }
   }
 }
@@ -369,8 +395,11 @@ struct LanternCompactTrailing: View {
       Text(look.short).font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundColor(look.hue)
     } else if look.working, look.stepsTotal > 0 {
       Text("\(look.stepsDone)/\(look.stepsTotal)").font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundColor(look.hue)
+        .rollingCount(look.stepsDone)
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: look.stepsDone)
     } else {
       Image(systemName: look.symbol).font(.system(size: 12, weight: .bold)).foregroundColor(look.hue)
+        .swapsSymbol()
     }
   }
 }
@@ -444,6 +473,8 @@ struct LanternCardSmall: View {
         }
       }
       Text(look.smallLine)
+        .rollingCount(look.stepsDone)
+        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: look.stepsDone)
         .font(.system(size: 12))
         .foregroundColor(Color.white.opacity(0.7))
         .lineLimit(1)

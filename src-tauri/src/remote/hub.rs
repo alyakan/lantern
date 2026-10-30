@@ -109,6 +109,8 @@ struct Log {
     /// The tokens the chat holds, and its model's context size once a turn's result said it.
     context: Option<u64>,
     window: Option<u64>,
+    /// What the chat still runs in the background (a dev server, a subagent): the transcript a phone's history comes from doesn't say.
+    background: Vec<crate::ui_event::BackgroundTask>,
     /// The chat runs on another provider than Claude Code (a gateway's model, Codex): what is said in it is never put to Claude
     /// for the phone's suggestions, which are made on the user's own Claude login.
     off_claude: bool,
@@ -200,8 +202,15 @@ impl Log {
             UiEvent::SessionEnded { .. } => {
                 (self.working, self.ended) = (false, true);
                 self.pending.clear();
+                self.background.clear();
             }
-            UiEvent::AgentAsleep { asleep } => self.asleep = *asleep,
+            UiEvent::AgentAsleep { asleep } => {
+                self.asleep = *asleep;
+                if *asleep {
+                    self.background.clear();
+                }
+            }
+            UiEvent::BackgroundTasks { tasks } => self.background = tasks.clone(),
             UiEvent::ConversationReset => {
                 self.first_prompt = None;
                 (self.todos, self.context, self.review) = (None, None, None);
@@ -506,8 +515,8 @@ impl SessionHub {
         self.chats.lock().unwrap().get(slot).map(|log| log.info(slot))
     }
 
-    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan and the context
-    /// it holds (each only if it has been said), since the kept events may no longer reach them.
+    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan, the context
+    /// it holds (each only if it has been said) and what it runs in the background, since the kept events may no longer reach them.
     pub fn extras(&self, slot: &str) -> Vec<super::protocol::RemoteEvent> {
         let chats = self.chats.lock().unwrap();
         let Some(log) = chats.get(slot) else { return Vec::new() };
@@ -515,6 +524,7 @@ impl SessionHub {
         out.extend(log.commands.clone().and_then(|commands| super::protocol::to_remote(&UiEvent::Commands { commands })));
         out.extend(log.todos.clone().and_then(|items| super::protocol::to_remote(&UiEvent::Todos { parent: None, items })));
         out.extend(log.context.map(|tokens| super::protocol::RemoteEvent::Context { tokens, window: log.window }));
+        out.extend(super::protocol::to_remote(&UiEvent::BackgroundTasks { tasks: log.background.clone() }));
         out
     }
 
@@ -688,7 +698,8 @@ mod tests {
         let told = hub.extras("a");
         assert!(matches!(&told[0], R::Todos { items } if items[0].status == "completed"));
         assert_eq!(told[1], R::Context { tokens: 50_000, window: None });
-        assert_eq!(told.len(), 2);
+        assert_eq!(told[2], R::Background { tasks: vec![] });
+        assert_eq!(told.len(), 3);
         assert_eq!(hub.plan(), Some((0.3, Some(5), "allowed".to_string())), "the account's usage is the last one said, by any chat");
         assert_eq!(hub.week(), None, "nothing has said the week yet");
         feed(&hub, "a", vec![UiEvent::WeekUsage { used: 0.12, resets_at: Some(900) }]);
@@ -702,7 +713,23 @@ mod tests {
         feed(&hub, "a", vec![finished]);
         assert_eq!(hub.extras("a")[1], R::Context { tokens: 50_000, window: Some(200_000) });
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
-        assert!(hub.extras("a").is_empty(), "a new conversation has no plan and holds nothing");
+        assert_eq!(hub.extras("a"), vec![R::Background { tasks: vec![] }], "a new conversation has no plan and holds nothing");
+    }
+
+    #[test]
+    fn what_runs_in_the_background_is_told_until_it_ends_or_the_chat_sleeps() {
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), cap: 10, now: || 1 };
+        let task = |d: &str| crate::ui_event::BackgroundTask { id: d.into(), task_type: "local_bash".into(), description: d.into() };
+        use super::super::protocol::RemoteEvent as R;
+        let background = |hub: &SessionHub| hub.extras("a").into_iter().find(|e| matches!(e, R::Background { .. }));
+        feed(&hub, "a", vec![UiEvent::BackgroundTasks { tasks: vec![task("npm run dev"), task("cargo watch")] }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec!["npm run dev".into(), "cargo watch".into()] }));
+        feed(&hub, "a", vec![UiEvent::BackgroundTasks { tasks: vec![task("cargo watch")] }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec!["cargo watch".into()] }));
+        feed(&hub, "a", vec![UiEvent::AgentAsleep { asleep: true }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec![] }), "a sleeping chat's claude runs nothing");
+        feed(&hub, "a", vec![UiEvent::AgentAsleep { asleep: false }, UiEvent::BackgroundTasks { tasks: vec![task("x")] }, UiEvent::SessionEnded { code: Some(0), stderr_tail: String::new() }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec![] }), "nor does one that ended");
     }
 
     #[test]
