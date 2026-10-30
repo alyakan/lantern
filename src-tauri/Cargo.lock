@@ -2249,7 +2249,7 @@ dependencies = [
 
 [[package]]
 name = "lantern"
-version = "0.1.89"
+version = "0.1.90"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
