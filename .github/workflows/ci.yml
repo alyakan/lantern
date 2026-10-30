@@ -37,6 +37,15 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # On a self-hosted Mac, checkout wipes everything untracked in the repo, the target folder too, so every run would
+      # compile from scratch: the target lives beside the checkout instead, and kept between runs. Without incremental
+      # builds (as rust-cache sets on GitHub), it doesn't grow by GBs a run on a disk that is also someone's own.
+      - name: Keep the target folder between runs
+        if: runner.environment == 'self-hosted'
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_WORKSPACE/../cargo-target" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
       - run: npm ci
 
       - run: npm test
@@ -62,10 +71,8 @@ jobs:
       - run: npm ci
         working-directory: mobile
       - name: Phone app against the real gateway
-        run: npm test
+        run: LANTERN_FIXTURE_GATEWAY="${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/src-tauri/target}/debug/examples/fixture_gateway" npm test
         working-directory: mobile
-        env:
-          LANTERN_FIXTURE_GATEWAY: ${{ github.workspace }}/src-tauri/target/debug/examples/fixture_gateway
 
   # The phone app (mobile/): its tests (Noise against the Mac's transcripts and the published vectors, the sync, the
   # connection) and its types.
