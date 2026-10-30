@@ -19,7 +19,7 @@ describe("the Desk's feed", () => {
   });
 
   it("leaves out a turn still going, and says when one failed or was stopped", () => {
-    const c = chats({ s1: idle({ items: [said("one", 1), answer("x"), turn("t1", { isError: true }), said("two", 2), turn("t2", { stopped: true }), said("three", 3), answer("going")] }) });
+    const c = chats({ s1: idle({ status: "running", items: [said("one", 1), answer("x"), turn("t1", { isError: true }), said("two", 2), turn("t2", { stopped: true }), said("three", 3), answer("going")] }) });
     expect(feed(c).map((k) => [k.asked, k.outcome])).toEqual([
       ["one", "failed"],
       ["two", "stopped"],
@@ -38,9 +38,23 @@ describe("the Desk's feed", () => {
     ]);
   });
 
-  it("doesn't take what the post-hook's run said as the answer", () => {
-    const c = chats({ s1: idle({ items: [said("Ship it", 1), answer("Shipped."), { type: "hook", id: "h", text: "Update the brain" }, turn("t1")] }) });
-    expect(feed(c)[0].said).toBe("");
+  it("ends the card where the post-hook starts: what its run says isn't the answer", () => {
+    const c = chats({ s1: idle({ items: [said("Ship it", 1), answer("Shipped."), { type: "hook", id: "h", text: "Update the brain" }, answer("Nothing new to save."), turn("t1")] }) });
+    expect(feed(c).map((k) => k.said)).toEqual(["Shipped."]);
+  });
+
+  it("has the cards of a chat reopened from its transcript, which has no turn ends, with the post-hook's run left out", () => {
+    const hook: ChatItem = { type: "hook", id: "h1", text: "Update the brain" };
+    const c = chats({ s1: idle({ items: [said("Fix it", 1), answer("Fixed."), hook, answer("Nothing new to save."), said("Ship it", 2), answer("Shipped.")] }) });
+    expect(feed(c).map((k) => [k.asked, k.said])).toEqual([
+      ["Fix it", "Fixed."],
+      ["Ship it", "Shipped."],
+    ]);
+  });
+
+  it("has no card yet for a reopened chat's last message while it is being answered", () => {
+    const c = chats({ s1: idle({ status: "running", items: [said("Fix it", 1), answer("Fixed."), said("Ship it", 2), answer("Working on")] }) });
+    expect(feed(c).map((k) => k.asked)).toEqual(["Fix it"]);
   });
 
   it("keeps only the newest cards", () => {

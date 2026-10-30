@@ -68,32 +68,40 @@ function deskChats(open: Record<string, ProjectOpen>): { slot: string; title: st
   return folders.flatMap((folder, i) => open[folder].items.map((item) => ({ slot: item.slot, title: item.title, where: item.kind === "team" ? `${labels[i]} · team` : labels[i] })));
 }
 
-/** A chat's finished turns, as cards: each from the message that started it up to its end. */
+/**
+ * A chat's finished turns, as cards: each from the message that started it up to its end. A turn ends at its `turn` item,
+ * or (in a chat reopened from its transcript, which has none) where the post-hook starts, where the next message starts,
+ * or at the end of a chat that isn't working.
+ */
 export function turnCards(slot: string, title: string, where: string, s: State): DeskCard[] {
   const cards: DeskCard[] = [];
   let start: Extract<State["items"][number], { type: "user" }> | null = null;
   let said = "";
+  const close = (key: string, outcome: DeskCard["outcome"]) => {
+    if (start) cards.push({ key: `${slot}:${key}`, slot, title, where, at: start.at ?? null, asked: clip(start.text, ASKED_CHARS), auto: !!start.auto, said: clip(plain(said), SAID_CHARS), outcome });
+    start = null;
+  };
   for (const it of s.items) {
     if (it.type === "user") {
+      close(`end-${it.id}`, "done");
       start = it;
       said = "";
     } else if (it.type === "assistant" && it.text.trim()) said = it.text;
-    else if (it.type === "hook") said = "";
-    else if (it.type === "turn" && start) {
-      cards.push({
-        key: `${slot}:${it.id}`,
-        slot,
-        title,
-        where,
-        at: start.at ?? null,
-        asked: clip(start.text, ASKED_CHARS),
-        auto: !!start.auto,
-        said: clip(plain(said), SAID_CHARS),
-        outcome: it.stopped ? "stopped" : it.isError ? "failed" : "done",
-      });
-      start = null;
-    }
+    else if (it.type === "hook") close(`end-${it.id}`, "done");
+    else if (it.type === "turn") close(it.id, it.stopped ? "stopped" : it.isError ? "failed" : "done");
   }
+  if (said && chatState(s) === "done") close("end", "done");
+  return cards;
+}
+
+// Each chat's cards, kept while its state is the same object: the Desk draws again with every streamed event of every
+// chat, and only the chats that changed are read again.
+const cached = new WeakMap<State, { title: string; where: string; cards: DeskCard[] }>();
+function cardsOf(slot: string, title: string, where: string, s: State): DeskCard[] {
+  const hit = cached.get(s);
+  if (hit && hit.title === title && hit.where === where) return hit.cards;
+  const cards = turnCards(slot, title, where, s);
+  cached.set(s, { title, where, cards });
   return cards;
 }
 
@@ -104,7 +112,7 @@ export function turnCards(slot: string, title: string, where: string, s: State):
 export function deskFeed(chats: Chats, open: Record<string, ProjectOpen>): DeskCard[] {
   const all = deskChats(open).flatMap((c) => {
     const s = chats.slots[c.slot];
-    return s ? turnCards(c.slot, c.title, c.where, s) : [];
+    return s ? cardsOf(c.slot, c.title, c.where, s) : [];
   });
   const time = (c: DeskCard) => c.at ?? -1;
   return all
