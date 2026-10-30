@@ -135,10 +135,10 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
 
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={[{ flexShrink: 1 }]}>
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
-          <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Txt variant="title" accessibilityRole="header">
                 {continueChat ? "Carry on" : "New chat"}

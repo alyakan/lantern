@@ -42,14 +42,14 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
   const [selecting, setSelecting] = useState(false);
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }]}>
           {selecting ? (
             <>
               <Txt variant="heading" accessibilityRole="header">
                 Select text
               </Txt>
-              <ScrollView style={{ maxHeight: 360 }}>
+              <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
                 <Text selectable accessibilityLabel="The message's text" style={{ fontSize: 15, lineHeight: 21, color: colors.ink }}>
                   {text}
                 </Text>
@@ -384,7 +384,7 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
   }, []);
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }]}>
           <Txt variant="heading" accessibilityRole="header" numberOfLines={2}>
             {title}
@@ -398,7 +398,7 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
               {state.error}
             </Txt>
           ) : (
-            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 4 }}>
+            <ScrollView ref={scroll} style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 4 }}>
               <Text selectable accessibilityLabel="What it printed" style={{ fontFamily: fonts.mono, fontSize: 12, lineHeight: 17, color: colors.ink }}>
                 {state.text.trim() === "" ? "It printed nothing." : state.text}
               </Text>

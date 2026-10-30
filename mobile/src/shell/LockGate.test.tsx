@@ -99,30 +99,30 @@ describe("the lock's switch in the Mac's sheet", () => {
   });
 });
 
-describe("the lock over a sheet", () => {
-  it("is drawn inside the sheet too, so a sheet on top of the lock's own Modal doesn't show the app", async () => {
+describe("the lock and a sheet", () => {
+  it("puts the sheet away when the app locks: a sheet sized to its content can't hide the app around it", async () => {
     const { lock } = setup({ enabled: true, results: ["cancelled"] });
-    // The lock is not in the tree: only the sheet is, as when the sheet's Modal is the one on top.
+    const onClose = jest.fn();
     await render(
       <LockContext.Provider value={lock}>
-        <Sheet onClose={jest.fn()}>{() => <Text>the sheet</Text>}</Sheet>
+        <Sheet onClose={onClose}>{() => <Text>the sheet</Text>}</Sheet>
       </LockContext.Provider>,
     );
-    expect(screen.queryByText("Lantern is locked")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
     await act(async () => lock.start());
-    expect(screen.getByText("Lantern is locked")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Unlock with Face ID" })).toBeTruthy();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it("is not there when the lock is off", async () => {
+  it("leaves it open when the lock is off", async () => {
     const { lock } = setup();
+    const onClose = jest.fn();
     await render(
       <LockContext.Provider value={lock}>
-        <Sheet onClose={jest.fn()}>{() => <Text>the sheet</Text>}</Sheet>
+        <Sheet onClose={onClose}>{() => <Text>the sheet</Text>}</Sheet>
       </LockContext.Provider>,
     );
     await act(async () => lock.start());
     expect(screen.getByText("the sheet")).toBeTruthy();
-    expect(screen.queryByText("Lantern is locked")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

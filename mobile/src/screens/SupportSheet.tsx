@@ -5,7 +5,7 @@ import { useTipJar, useTips } from "../shell/tipsContext";
 import { EMBER, EMBER_NIGHT } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, type SheetScroll } from "../ui/Sheet";
 import { Bar, Dots, Pulse } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
 
@@ -58,9 +58,10 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <Content
           close={close}
+          scroll={scroll}
           bottom={Math.max(insets.bottom, 16) + 8}
           thanked={tips.phase === "thanked"}
           onThanksSeen={() => {
@@ -73,7 +74,7 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
+function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () => void; scroll: SheetScroll; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
   const colors = useColors();
   // Ember as words: lighter on Night, where the plain one is too dim to read.
   const ember = colors.isDark ? EMBER_NIGHT : EMBER;
@@ -110,7 +111,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
           </FadeSlideIn>
         </View>
       ) : (
-        <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: bottom, gap: 14 }}>
+        <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: bottom, gap: 14 }}>
           <Txt variant="title" accessibilityRole="header">
             Support development
           </Txt>

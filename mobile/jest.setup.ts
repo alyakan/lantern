@@ -63,6 +63,31 @@ jest.mock("expo-haptics", () => ({
   ImpactFeedbackStyle: { Light: "light", Medium: "medium" },
 }));
 
+// No sheets on Node: a sheet is its content, there at once; put away, it says so as the native one does (onDidDismiss), after a
+// tick, as the native one does after its animation.
+jest.mock("@lodev09/react-native-true-sheet", () => {
+  const React = require("react");
+  const { View } = require("react-native");
+  class TrueSheet extends React.Component<{ children?: unknown; onDidDismiss?: () => void }> {
+    static dismissAll = jest.fn(async () => {});
+    gone = false;
+    dismiss = jest.fn(async () => {
+      if (this.gone) return;
+      this.gone = true;
+      await Promise.resolve();
+      this.props.onDidDismiss?.();
+    });
+    present = jest.fn(async () => {});
+    resize = jest.fn(async () => {});
+    // Its props stay on what it draws, for a test to read what the sheet was asked to be.
+    render() {
+      const { children, ...props } = this.props;
+      return React.createElement(View, { ...props, testID: "true-sheet" }, children);
+    }
+  }
+  return { TrueSheet };
+});
+
 // No screen to take a picture of on Node: a marked-up picture comes back as a file at once.
 jest.mock("react-native-view-shot", () => ({ captureRef: jest.fn(async () => "file:///marked.jpg") }));
 // No voice on Node: speech finishes at once.
