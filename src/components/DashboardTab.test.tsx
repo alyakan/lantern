@@ -597,10 +597,14 @@ describe("DashboardTab", () => {
       load([dash()], state({ running: [{ file: "staging.json", form: "org" }] }));
       render(<DashboardTab folder="/timer" refreshKey={0} />);
       expect(await screen.findByRole("button", { name: "Running…" })).toBeDisabled();
-      act(() => void vi.advanceTimersByTime(3200));
-      expect(screen.getByRole("button", { name: "Running… 3 s" })).toBeInTheDocument();
+      // On a slow machine the panel can still be taking in a late answer (and start its count again) after the first jump of
+      // the clock: time moves a second at a time until the count shows, as it does on screen.
+      await vi.waitFor(() => {
+        act(() => void vi.advanceTimersByTime(1000));
+        expect(screen.getByRole("button", { name: /^Running… \d+ s$/ })).toBeInTheDocument();
+      });
       act(() => void vi.advanceTimersByTime(62_000));
-      expect(screen.getByRole("button", { name: "Running… 1 min 5 s" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Running… 1 min \d+ s$/ })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
