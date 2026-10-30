@@ -175,7 +175,7 @@ describe("Home", () => {
     await renderWith(<HomeScreen {...h} />, {
       chats: [chat({ slot: "old", title: "Network tab filters", project: "network-monitor", status: "asleep", active_at: 1 }), chat({ slot: "w", title: "Mobile gateway design", status: "working" }), chat({ slot: "n", title: "Storage audit", status: "needs_you", active_at: 5 })],
     });
-    expect(screen.getByText("Asleep")).toBeTruthy();
+    expect(screen.getAllByText("Asleep")).toHaveLength(2); // the section's label and the chat's note
     expect(screen.getByText("Needs you")).toBeTruthy();
     expect(screen.getByLabelText("Working")).toBeTruthy();
     const names = screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /lantern|network-monitor/.test(l));

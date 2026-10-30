@@ -116,7 +116,7 @@ export function rows(chats: RemoteChat[], now: number, seen: Record<string, numb
 }
 
 /** The labelled stretches of the recent list. */
-export type SectionKey = "pinned" | "needs_you" | "working" | "earlier";
+export type SectionKey = "pinned" | "needs_you" | "working" | "earlier" | "asleep";
 
 export interface Section {
   key: SectionKey;
@@ -124,18 +124,21 @@ export interface Section {
   rows: Row[];
 }
 
-const SECTION_LABEL: Record<SectionKey, string> = { pinned: "Pinned", needs_you: "Waiting on you", working: "Working", earlier: "Earlier" };
+const SECTION_LABEL: Record<SectionKey, string> = { pinned: "Pinned", needs_you: "Waiting on you", working: "Working", earlier: "Earlier", asleep: "Asleep" };
+const SECTION_ORDER: SectionKey[] = ["pinned", "needs_you", "working", "earlier", "asleep"];
 
-/** The rows of the list (already in `byOrder`) cut into the stretches it is made of: pinned, then what needs you, what works, the rest. */
+/**
+ * The rows of the list (already in `byOrder`) cut into the stretches it is made of: pinned, then what needs you, what works,
+ * the rest, and last the chats that are asleep, each the most recent first. Only this recent list sets the asleep ones apart;
+ * under their projects they stay among their project's chats.
+ */
 export function sections(list: Row[]): Section[] {
-  const out: Section[] = [];
+  const by = new Map<SectionKey, Row[]>();
   for (const r of list) {
-    const key: SectionKey = r.pinned ? "pinned" : r.rank === 0 ? "needs_you" : r.rank === 1 ? "working" : "earlier";
-    const last = out[out.length - 1];
-    if (last?.key === key) last.rows.push(r);
-    else out.push({ key, label: SECTION_LABEL[key], rows: [r] });
+    const key: SectionKey = r.pinned ? "pinned" : r.rank === 0 ? "needs_you" : r.rank === 1 ? "working" : r.status === "asleep" ? "asleep" : "earlier";
+    by.set(key, [...(by.get(key) ?? []), r]);
   }
-  return out;
+  return SECTION_ORDER.flatMap((key): Section[] => (by.has(key) ? [{ key, label: SECTION_LABEL[key], rows: by.get(key)! }] : []));
 }
 
 /** Whether a chat answers a search: every word typed is somewhere in its title, project or preview (case aside); nothing typed matches all. */

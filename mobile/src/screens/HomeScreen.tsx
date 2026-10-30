@@ -579,7 +579,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         ) : grouping === "project" ? (
           groups(shown).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={setActing} swipeFor={swipeFor} selectedSlot={selectedSlot} placeOf={placeOf} />)
         ) : (
-          // Labelled stretches (Pinned, Waiting on you, Working, Earlier) once there is more than one of them.
+          // Labelled stretches (Pinned, Waiting on you, Working, Earlier, Asleep) once there is more than one of them.
           (() => {
             const parts = sections(shown);
             let n = 0;
