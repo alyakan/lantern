@@ -167,17 +167,17 @@ describe("a chat", () => {
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
     });
 
-    // The search is the first of the tools: the circle opens them, and Search turns their row into the field.
+    // The search is the first of the tools: Tools opens them, and Search turns the box into the field.
     const openSearch = async () => {
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       await fireEvent.press(screen.getByRole("button", { name: "Search" }));
     };
 
-    it("searches from the chat bar: the circle beside it makes the bar the search field, which steps through the matches, and Cancel puts it all back", async () => {
+    it("searches from the message box: it becomes the search field, which steps through the matches, and Cancel puts it all back", async () => {
       await withSession(talk);
       expect(screen.getByLabelText("Message")).toBeTruthy();
       await openSearch();
-      // The circle is gone and the bar is the search field: the message box is out of the way (and keeps what was in it).
+      // The box is the search field: the message box is out of the way (and keeps what was in it).
       expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
       expect(screen.queryByLabelText("Message")).toBeNull();
       expect(screen.getByLabelText("Search")).toBeTruthy();
@@ -221,26 +221,26 @@ describe("a chat", () => {
       await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("half a thought"));
     });
 
-    it("gives the circle's room to the bar while words are being typed in it, and takes it back when they stop", async () => {
+    // Whether `node` is `outer` or inside it.
+    const within = (node: unknown, outer: unknown) => {
+      for (let n = node as { parent?: unknown } | null | undefined; n; n = n.parent as typeof n) if (n === outer) return true;
+      return false;
+    };
+
+    it("is one box: the words on top, and the tools in a row under them with Send at its end", async () => {
       await withSession(talk);
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
-      await fireEvent(screen.getByLabelText("Message"), "focus");
-      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
-      await fireEvent(screen.getByLabelText("Message"), "blur");
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+      const box = screen.getByTestId("chat-box");
+      const row = screen.getByTestId("chat-box-tools");
+      expect(within(screen.getByLabelText("Message"), box)).toBe(true);
+      expect(within(screen.getByLabelText("Message"), row)).toBe(false);
+      for (const name of ["Tools", "Send"]) expect(within(screen.getByRole("button", { name }), row)).toBe(true);
     });
 
-    it("makes the circle as tall as the bar is at rest, and not taller when the bar grows with a long message", async () => {
+    it("keeps the tools in the box while words are typed in it", async () => {
       await withSession(talk);
-      const lay = (height: number) => fireEvent(screen.getByTestId("chat-bar"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });
-      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height;
-      await lay(52);
-      expect(circle()).toBe(52);
-      await lay(96);
-      expect(circle()).toBe(52);
-      // Text size changing it for the better: the least it has been.
-      await lay(50);
-      expect(circle()).toBe(50);
+      await fireEvent(screen.getByLabelText("Message"), "focus");
+      await fireEvent.changeText(screen.getByLabelText("Message"), "typing a message");
+      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
     });
 
     // Whether this node, or anything above it, takes no touches (by prop or by style).
@@ -269,46 +269,14 @@ describe("a chat", () => {
       expect(screen.getByLabelText("Message").props.value).toBe("still works");
     });
 
-    // The phone's keyboard, for a test to bring up: every handler the screen gave Keyboard for each event.
-    const keyboardEvents = () => {
-      const handlers = new Map<string, ((e?: unknown) => void)[]>();
-      const spy = jest.spyOn(Keyboard, "addListener").mockImplementation(((name: string, handler: (e?: unknown) => void) => {
-        handlers.set(name, [...(handlers.get(name) ?? []), handler]);
-        return { remove: () => handlers.set(name, (handlers.get(name) ?? []).filter((h) => h !== handler)) };
-      }) as never);
-      return { emit: (name: string) => act(async () => (handlers.get(name) ?? []).forEach((h) => h())), restore: () => spy.mockRestore() };
-    };
-
-    // The opacity the nearest drawn layer above this node says (the message box's row fades while a search is on).
-    const opacityOf = (node: { props?: ViewProps; parent?: unknown } | null | undefined): number | undefined => {
-      for (let n = node as { props?: ViewProps; parent?: unknown } | null | undefined; n; n = n.parent as typeof n) {
-        const o = StyleSheet.flatten(n.props?.style)?.opacity;
-        if (typeof o === "number") return o;
-      }
-      return undefined;
-    };
-
-    it("never fades the message box while words are typed in it: the bar only gives the circle's room away, it doesn't go blank", async () => {
-      await withSession(talk);
-      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
-      await fireEvent(screen.getByLabelText("Message"), "focus");
-      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
-      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
-      await fireEvent.changeText(screen.getByLabelText("Message"), "typing a message");
-      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
-      await fireEvent(screen.getByLabelText("Message"), "blur");
-      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
-    });
-
-    it("fades the message box out only while the search is on, and brings it back", async () => {
-      const kb = keyboardEvents();
+    it("makes the box the search field and back, keeping the message box mounted (out of sight) for the draft and the keyboard", async () => {
       await withSession(talk);
       await openSearch();
-      await kb.emit("keyboardWillShow");
-      kb.restore();
-      expect(opacityOf(screen.getByLabelText("Message", { includeHiddenElements: true }))).toBe(0);
+      expect(within(screen.getByLabelText("Search"), screen.getByTestId("chat-box"))).toBe(true);
+      expect(screen.getByLabelText("Message", { includeHiddenElements: true })).toBeTruthy();
+      expect(screen.queryByLabelText("Message")).toBeNull();
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
-      await waitFor(() => expect(opacityOf(screen.getByLabelText("Message"))).toBe(1));
+      await waitFor(() => expect(screen.getByLabelText("Message")).toBeTruthy());
     });
 
     // The first height (a number) a node or anything below it says.
@@ -323,44 +291,6 @@ describe("a chat", () => {
       return undefined;
     };
 
-    it("grows the circle into the field while the bar shrinks away beside it (it doesn't slide over the bar), and back", async () => {
-      await withSession(talk);
-      await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
-      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
-      // (The bar is hidden from screen readers while searching, which is why it is asked for as hidden too.)
-      const bar = () => StyleSheet.flatten(screen.getByTestId("chat-bar", { includeHiddenElements: true }).props.style);
-      // At rest: a circle (as wide as it is tall), and the bar leaves room for it.
-      expect(circle().width).toBe(circle().height);
-      const room = bar().marginRight;
-      expect(room).toBeGreaterThan(0);
-      const kb = keyboardEvents();
-      await openSearch();
-      await kb.emit("keyboardWillShow");
-      kb.restore();
-      // Searching: the circle has grown to the whole row, and the bar has given all of it up (it is as wide as nothing), and faded.
-      expect(circle().width).toBe(300);
-      expect(bar().marginRight).toBeGreaterThanOrEqual(300);
-      expect(bar().opacity).toBe(0);
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
-      await waitFor(() => expect(circle().width).toBe(circle().height));
-      // And back: the bar has its width again, beside the circle.
-      expect(bar().marginRight).toBe(room);
-      expect(bar().opacity).toBe(1);
-    });
-
-    it("grows the tools' row at the press (it has no keyboard to wait for), and stays grown as Search turns it into the field", async () => {
-      await withSession(talk);
-      await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
-      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(circle().width).toBe(300);
-      await fireEvent.press(screen.getByRole("button", { name: "Search" }));
-      expect(screen.getByLabelText("Search")).toBeTruthy();
-      expect(circle().width).toBe(300);
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
-      await waitFor(() => expect(circle().width).toBe(circle().height));
-    });
-
     it("asks for the keyboard the moment the search opens, so the bar rides it from the start", async () => {
       await withSession(talk);
       // (The test TextInput's focus is one shared mock.)
@@ -369,28 +299,6 @@ describe("a chat", () => {
       await openSearch();
       // At once: no wait for a timer (it used to come 80 ms later, after the keyboard had to catch up).
       expect(focus).toHaveBeenCalled();
-    });
-
-    it("keeps the bar's words at their width as the bar shrinks, so a typed draft doesn't wrap and make it taller", async () => {
-      await withSession(talk);
-      const content = (hidden = false) => screen.getByTestId("chat-bar-content", { includeHiddenElements: hidden });
-      await fireEvent(content(), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 240, height: 36 } } });
-      expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined();
-      await openSearch();
-      expect(StyleSheet.flatten(content(true).props.style).minWidth).toBe(240);
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
-      await waitFor(() => expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined());
-    });
-
-    it("lets the bar widen into the circle's room only while words are typed in it, not while it is searched", async () => {
-      await withSession(talk);
-      const bar = () => StyleSheet.flatten(screen.getByTestId("chat-bar").props.style);
-      const room = bar().marginRight;
-      expect(room).toBeGreaterThan(0);
-      await fireEvent(screen.getByLabelText("Message"), "focus");
-      expect(bar().marginRight).toBe(0);
-      await fireEvent(screen.getByLabelText("Message"), "blur");
-      expect(bar().marginRight).toBe(room);
     });
 
     it("moves the messages up with the keyboard by as much as the bar, instead of making the list shorter (that scrolled twice)", async () => {
@@ -413,7 +321,7 @@ describe("a chat", () => {
       expect(all.some((n) => (n.props.offset as { opened?: number } | undefined)?.opened === lift)).toBe(true);
     });
 
-    it("gives the back button, the title bar, the search circle and the chat bar one height", async () => {
+    it("gives the back button, the title bar and the message field one height", async () => {
       await withSession(talk);
       expect(heightWithin(screen.getByRole("button", { name: "Back" }))).toBe(control);
       // The title bar: the nearest box above the title that has a height.
@@ -424,22 +332,8 @@ describe("a chat", () => {
         if (typeof h === "number") titleHeight = h;
       }
       expect(titleHeight).toBe(control);
-      expect(StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height).toBe(control);
-      // The message box at rest is the same height: its field's minimum is the shared height less the capsule's own padding.
+      // The message field's minimum is the shared height less the box's own padding.
       expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 12);
-    });
-
-    it("sizes the circle by the bar at rest, not by a layout in passing", async () => {
-      await withSession(talk);
-      const lay = (height: number) => fireEvent(screen.getByTestId("chat-bar"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });
-      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height;
-      await lay(52);
-      expect(circle()).toBe(52);
-      // The bar with nothing in it yet (just its padding), and an absurd height: neither is the bar, so the circle keeps its size.
-      await lay(12);
-      await lay(0);
-      await lay(400);
-      expect(circle()).toBe(52);
     });
 
     it("keeps the room under the chat bar the same when the keyboard comes, so nothing changes size at that moment", async () => {
@@ -571,36 +465,32 @@ describe("a chat", () => {
     expect(screen.getByLabelText("2 running in the background: npm run dev, cargo watch")).toBeTruthy();
   });
 
-  it("makes the tools circle Stop while Claude works: Send stays, and Stop is beside the bar, not in the header", async () => {
+  it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps Tools", async () => {
     const quiet = await withSession(turn);
-    expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     await quiet.unmount();
     await withSession(turn, {}, {}, { status: "working" });
-    // The circle is Stop now (a square, no words: the label is for a screen reader), and Send is still Send.
-    expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
+    // A square, no words: the label is for a screen reader.
     expect(screen.queryByText("Stop")).toBeNull();
-    const stop = screen.getByRole("button", { name: "Stop" });
-    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
-    // It is the circle, beside the bar, and the title bar has nothing but the title.
-    const above = (node: { parent?: unknown } | null | undefined) => {
-      const chain: unknown[] = [];
-      for (let n = node; n; n = n.parent as typeof n) chain.push(n);
-      return chain;
+    const row = screen.getByTestId("chat-box-tools");
+    const inRow = (name: string) => {
+      for (let n = screen.getByRole("button", { name }) as { parent?: unknown } | null; n; n = n.parent as typeof n) if (n === row) return true;
+      return false;
     };
-    expect(above(stop as never).includes(screen.getByTestId("search-circle"))).toBe(true);
-    expect(above(stop as never).includes(screen.getByRole("header"))).toBe(false);
+    expect(inRow("Stop")).toBe(true);
+    expect(inRow("Send")).toBe(true);
+    expect(inRow("Tools")).toBe(true);
   });
 
-  it("keeps Stop while a message is typed during a turn (the circle gives its room away only when it is the tools)", async () => {
+  it("keeps Stop while a message is typed during a turn", async () => {
     await withSession(turn, {}, {}, { status: "working" });
     await fireEvent(screen.getByLabelText("Message"), "focus");
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
   });
 
-  it("opens the tools when Stop is held, so the chat can still be searched while Claude works", async () => {
+  it("can still be searched while Claude works, from Tools", async () => {
     await withSession(turn, {}, {}, { status: "working" });
-    await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
+    await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
     await fireEvent.press(screen.getByRole("button", { name: "Search" }));
     expect(screen.getByLabelText("Search")).toBeTruthy();
   });
@@ -616,12 +506,13 @@ describe("a chat", () => {
   });
 
   describe("the tools", () => {
-    it("open from the circle as a row: Search, Compact, Clear, and a way out that closes it", async () => {
+    it("open in the box's row: Search, Compact, Clear, and a way out that closes it", async () => {
       await withSession(turn);
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       for (const name of ["Search", "Compact", "Clear", "Close tools"]) expect(screen.getByRole("button", { name })).toBeTruthy();
-      // The message box is out of the way while the row is out.
-      expect(screen.queryByLabelText("Message")).toBeNull();
+      // The row takes the place of the box's own buttons; the words stay above it.
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      expect(screen.getByLabelText("Message")).toBeTruthy();
       await fireEvent.press(screen.getByRole("button", { name: "Close tools" }));
       await waitFor(() => expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy());
       expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
@@ -658,9 +549,9 @@ describe("a chat", () => {
       expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
     });
 
-    it("opens the tools when Stop is held in Step by step too", async () => {
+    it("opens the tools while Claude works in Step by step too", async () => {
       await withSession(turn, {}, {}, { workflow: "steps", status: "working" });
-      await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
     });
 
@@ -675,7 +566,7 @@ describe("a chat", () => {
 
     it("waits for the turn to end before Compact or Clear, as the Mac does", async () => {
       const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
-      await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
       expect(screen.getByRole("button", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
       expect(screen.getByRole("button", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
       await fireEvent.press(screen.getByRole("button", { name: "Compact" }));

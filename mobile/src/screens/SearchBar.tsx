@@ -95,7 +95,7 @@ function useSwap(active: boolean, spring = true): Animated.Value {
 }
 
 /** A small round button inside the bar. */
-function RoundButton({ label, onPress, disabled, children }: { label: string; onPress: () => void; disabled?: boolean; children: ReactNode }) {
+export function RoundButton({ label, onPress, disabled, children }: { label: string; onPress: () => void; disabled?: boolean; children: ReactNode }) {
   const colors = useColors();
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} hitSlop={4} haptic="select" scaleTo={0.88} opacity={disabled ? 0.35 : 1}>
@@ -105,7 +105,7 @@ function RoundButton({ label, onPress, disabled, children }: { label: string; on
 }
 
 /** What the grown circle holds beside its magnifier: the field, "2 of 5", the arrows, and the way out. */
-function SearchContents({ search, input, onFocused, onCancel }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null>; onFocused: () => void; onCancel: () => void }) {
+export function SearchContents({ search, input, onFocused, onCancel }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null>; onFocused: () => void; onCancel: () => void }) {
   const colors = useColors();
   const typed = search.query.trim().length >= 2;
   const none = typed && search.count === 0;
@@ -151,7 +151,7 @@ function SearchContents({ search, input, onFocused, onCancel }: { search: BarSea
 }
 
 /** A small ×, for a way out. */
-function Cross() {
+export function Cross() {
   const colors = useColors();
   return (
     <View accessibilityElementsHidden style={{ width: 12, height: 12 }}>
@@ -171,7 +171,7 @@ const STOP_SQUARE = 13;
  * The tools circle's drawing: four small squares in a grid that, as `work` goes to 1, slide together and grow into one square (Stop's),
  * changing from the ink to the colour on ink as the circle under them goes dark.
  */
-function ToolsGlyph({ work }: { work: Animated.Value }) {
+export function ToolsGlyph({ work }: { work: Animated.Value }) {
   const colors = useColors();
   const tint = work.interpolate({ inputRange: [0, 1], outputRange: [colors.ink, colors.onInk], extrapolate: "clamp" });
   const scale = work.interpolate({ inputRange: [0, 1], outputRange: [1, STOP_SQUARE / SQUARE], extrapolate: "clamp" });
@@ -235,7 +235,7 @@ function Breath({ size }: { size: number }) {
 const CHIP_MAX = 64;
 
 /** What the grown tools circle holds: Search, the other tools, and the way out (at the right, where the circle was). */
-function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; onSearch?: () => void; onPick: (tool: BarTool) => void; onClose: () => void }) {
+export function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; onSearch?: () => void; onPick: (tool: BarTool) => void; onClose: () => void }) {
   const colors = useColors();
   const chip = (label: string, icon: ReactNode, onPress: () => void, disabled?: boolean, hint?: string) => (
     <PressScale key={label} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} haptic="select" scaleTo={0.92} opacity={disabled ? 0.35 : 1} style={{ flex: 1, maxWidth: CHIP_MAX }}>
@@ -261,10 +261,12 @@ function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; 
  * in the message box when the search ends, if the keyboard was up when it began (else the keyboard goes down, as it was).
  * With `tools` the circle is the tools circle (Search is the first of them), and with `onStop` it is Stop while `working`.
  */
-export function SearchBar({ search, tools, working = false, onStop, circle = true, typing = false, capsule, lift, fill, back, children }: { search?: BarSearch; /** The bar's tools besides Search: the circle opens a row of them. */ tools?: BarTool[]; /** Claude is in the middle of a turn: with `onStop`, the circle is Stop (held, it still opens the tools). */ working?: boolean; onStop?: () => void; /** Words are being typed in the message box: the circle gives its room to the bar. */ typing?: boolean; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; back?: () => void; children: ReactNode }) {
-  const colors = useColors();
+/**
+ * A search opened from a bar: whether it is open, its field, and opening and cancelling it, with the keyboard handed over as
+ * described above (shared by the circle here and the message box's own Search).
+ */
+export function useSearchOpening(search: BarSearch | undefined, back?: () => void) {
   const keyboard = useKeyboardUp();
-  const { width: screenWidth } = useWindowDimensions();
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   // The search opens here first: the field is shown and asks for the keyboard at once, and the chat is told once the field has
   // it. Told first, the chat drew itself again before the field could ask (about 70 ms on the simulator, more on a phone), and
@@ -288,6 +290,45 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opening]);
+  const keyboardBefore = useRef(false);
+  const was = useRef(false);
+  useEffect(() => {
+    if (active) {
+      keyboardBefore.current = keyboard;
+      was.current = true;
+      // The keyboard comes at once, with the field starting to grow: the bar rides it from the start, as when the message box is
+      // tapped. (It used to wait 80 ms for the field, and the bar then caught up with a keyboard already on its way.) The field is
+      // laid out by now: this runs after the render that shows it.
+      input.current?.focus();
+      return;
+    }
+    if (was.current) {
+      was.current = false;
+      if (keyboardBefore.current) back?.();
+      else Keyboard.dismiss();
+    }
+    // (Only the search starting or ending runs this: the keyboard moving is read here, not a reason to run it again.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  return {
+    active,
+    input,
+    keyboard,
+    open: () => setOpening(true),
+    onFocused: () => {
+      if (opening) tell();
+    },
+    cancel: () => {
+      setOpening(false);
+      search?.onCancel();
+    },
+  };
+}
+
+export function SearchBar({ search, tools, working = false, onStop, circle = true, typing = false, capsule, lift, fill, back, children }: { search?: BarSearch; /** The bar's tools besides Search: the circle opens a row of them. */ tools?: BarTool[]; /** Claude is in the middle of a turn: with `onStop`, the circle is Stop (held, it still opens the tools). */ working?: boolean; onStop?: () => void; /** Words are being typed in the message box: the circle gives its room to the bar. */ typing?: boolean; /** False where there is no room for it (a terminal). */ circle?: boolean; capsule: StyleProp<ViewStyle>; lift?: number; fill?: string; back?: () => void; children: ReactNode }) {
+  const colors = useColors();
+  const { width: screenWidth } = useWindowDimensions();
+  const { active, input, keyboard, open: openSearch, onFocused, cancel } = useSearchOpening(search, back);
   const hasCircle = !!search && circle;
   // The tools circle is the same in every chat, whatever else is in its row (a Step by step chat has Search and little more).
   const hasTools = !!tools;
@@ -355,26 +396,6 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     const id = open.addListener(({ value }) => setShrunk(value > 0.01));
     return () => open.removeListener(id);
   }, [open]);
-  const keyboardBefore = useRef(false);
-  const was = useRef(false);
-  useEffect(() => {
-    if (active) {
-      keyboardBefore.current = keyboard;
-      was.current = true;
-      // The keyboard comes at once, with the field starting to grow: the bar rides it from the start, as when the message box is
-      // tapped. (It used to wait 80 ms for the field, and the bar then caught up with a keyboard already on its way.) The field is
-      // laid out by now: this runs after the render that shows it.
-      input.current?.focus();
-      return;
-    }
-    if (was.current) {
-      was.current = false;
-      if (keyboardBefore.current) back?.();
-      else Keyboard.dismiss();
-    }
-    // (Only the search starting or ending runs this: the keyboard moving is read here, not a reason to run it again.)
-  }, [active]);
-
   // The circle: its width is the circle's (which goes to nothing as the bar takes its room) until it opens, then the whole row's.
   const base = gone.interpolate({ inputRange: [0, 1], outputRange: [size, 0], extrapolateRight: "clamp" });
   const notOpen = open.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
@@ -401,7 +422,7 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
   const press = () => {
     if (stops) onStop?.();
     else if (hasTools) setTray(true);
-    else setOpening(true);
+    else openSearch();
   };
   const label = stops ? "Stop" : hasTools ? "Tools" : "Search this chat";
   const hint = stops ? (hasTools ? "Stops what Claude is doing. Hold for the tools." : "Stops what Claude is doing. Hold to search.") : hasTools ? "Search, compact and more" : undefined;
@@ -455,7 +476,7 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
               disabled={expanded}
               onPress={press}
               // Held while it is Stop, it opens the tools all the same (or, with none, the search).
-              onLongPress={stops ? () => (hasTools ? setTray(true) : setOpening(true)) : undefined}
+              onLongPress={stops ? () => (hasTools ? setTray(true) : openSearch()) : undefined}
               scaleTo={0.94}
               haptic="light"
               style={{ flex: 1 }}
@@ -473,7 +494,7 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
                         tools={tools}
                         onSearch={() => {
                           setTray(false);
-                          setOpening(true);
+                          openSearch();
                         }}
                         onPick={(t) => {
                           setTray(false);
@@ -491,13 +512,8 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
                   <SearchContents
                     search={search}
                     input={input}
-                    onFocused={() => {
-                      if (opening) tell();
-                    }}
-                    onCancel={() => {
-                      setOpening(false);
-                      search.onCancel();
-                    }}
+                    onFocused={onFocused}
+                    onCancel={cancel}
                   />
                 </Animated.View>
               </Glass>
