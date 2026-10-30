@@ -360,26 +360,6 @@ describe("a chat", () => {
       await waitFor(() => expect(circle().width).toBe(circle().height));
     });
 
-    it("grows a plain search circle's field when the keyboard starts coming, not before, so the bar rides the keyboard up (or anyway, if it doesn't come)", async () => {
-      const kb = keyboardEvents();
-      // (The sleeping chat's bar has the search circle alone.)
-      await withSession(talk, {}, {}, { status: "asleep" });
-      await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
-      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
-      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
-      // Pressed: the field is asking for the keyboard, and hasn't grown yet.
-      expect(screen.getByLabelText("Search")).toBeTruthy();
-      expect(circle().width).toBe(circle().height);
-      await kb.emit("keyboardWillShow");
-      expect(circle().width).toBe(300);
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
-      await waitFor(() => expect(circle().width).toBe(circle().height));
-      // No keyboard says it is coming: it grows all the same, a moment later.
-      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
-      await waitFor(() => expect(circle().width).toBe(300), { timeout: 1000 });
-      kb.restore();
-    });
-
     it("asks for the keyboard the moment the search opens, so the bar rides it from the start", async () => {
       await withSession(talk);
       // (The test TextInput's focus is one shared mock.)
@@ -485,10 +465,10 @@ describe("a chat", () => {
       spy.mockRestore();
     });
 
-    it("can still be searched while it sleeps: the circle is beside the Wake button, and the field replaces it while searching", async () => {
+    it("can still be searched while it sleeps: the tools circle is beside the Wake button, and the field replaces it while searching", async () => {
       await withSession(talk, {}, {}, { status: "asleep" });
       expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy();
-      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await openSearch();
       expect(screen.queryByRole("button", { name: "Wake this chat" })).toBeNull();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
       await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
@@ -658,18 +638,27 @@ describe("a chat", () => {
       alert.mockRestore();
     });
 
-    it("has no Compact or Clear in Step by step, whose pages they would cut across: with nothing else, the circle is the search's alone", async () => {
+    it("has no Compact or Clear in Step by step, whose pages they would cut across, but the circle is still the tools circle, not a search circle", async () => {
       await withSession(turn, {}, {}, { workflow: "steps" });
-      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
-      expect(screen.getByLabelText("Search")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
     });
 
-    it("searches straight away when Stop is held in a chat with no other tools", async () => {
+    it("opens the tools when Stop is held in Step by step too", async () => {
       await withSession(turn, {}, {}, { workflow: "steps", status: "working" });
       await fireEvent(screen.getByRole("button", { name: "Stop" }), "longPress");
-      expect(screen.getByLabelText("Search")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+    });
+
+    it("is the tools circle in a sleeping chat too, with Compact and Clear waiting for it to wake", async () => {
+      const { lastOf } = await withSession(turn, {}, {}, { status: "asleep" });
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      expect(screen.getByRole("button", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
+      expect(screen.getByRole("button", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      expect(lastOf("send")).toBeUndefined();
     });
 
     it("waits for the turn to end before Compact or Clear, as the Mac does", async () => {
