@@ -722,6 +722,9 @@ pub enum RemoteDeskRoute {
     /// The message asked which chat has something: past chats of the Desk's projects that say it, newest first (`failed`: the
     /// search couldn't be done).
     Search { terms: String, hits: Vec<RemoteDeskHit>, failed: bool },
+    /// The message asked how something stands: the Desk's own answer (Markdown, with [1], [2] for its `sources`, in order), made
+    /// from the Desk's chats about `terms`. No sources: no chat talks about it. `error`: why there is no answer.
+    Answer { terms: String, text: String, sources: Vec<RemoteDeskHit>, error: Option<String> },
 }
 
 /// A past chat a Desk's search found.

@@ -69,6 +69,18 @@ describe("the Desk in the app", () => {
     expect(await screen.findAllByText("Add retries to fetchJson")).not.toHaveLength(0);
   });
 
+  it("answers a question about how things stand itself, from the chats about it, which it lists and opens", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    await type("How is the login redirect");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: How is the login redirect" });
+    await waitFor(() => expect(entry).toHaveTextContent("Fix the login redirect after OAuth callback: going well [1]"));
+    const read = within(entry).getByRole("list", { name: "The chats it read" });
+    expect(within(read).getAllByRole("button")).toHaveLength(1);
+    // Nothing was sent anywhere: the Desk stays, and no chat got the question.
+    expect(entry).not.toHaveTextContent(/sent to|started/);
+  });
+
   it("lets the Desk start a chat for new work, in a project on the Desk", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());

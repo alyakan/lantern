@@ -2555,10 +2555,23 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           const folder = sentProjects.find((p) => p.label === r.project)?.folder;
           if (folder) now.deskStartIn(entry, folder, r.workflow);
           else ask([], true);
-        } else if (r.kind === "search") {
-          deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "search", terms: r.terms, hits: null } }));
+        } else if (r.kind === "search" || r.kind === "answer") {
+          const answering = r.kind === "answer";
+          deskEdit(entry.id, (e) => ({ ...e, outcome: answering ? { kind: "answer", terms: r.terms, hits: null, text: null } : { kind: "search", terms: r.terms, hits: null } }));
+          // A question about how things stand: the Desk answers it from the chats found (only you are shown it).
+          const answer = (hits: ChatHit[]) => {
+            const done = (text: string | null, error?: string) => deskEdit(entry.id, (e) => (e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, text, ...(error ? { error } : {}) } } : e));
+            if (hits.length === 0) return done("");
+            api.deskAnswer(state.claudePath ?? "", text, hits.map((h) => ({ id: h.id, folder: h.folder, title: h.title.map((p) => p.text).join(""), project: h.project }))).then(
+              (t) => done(t),
+              (err) => done(null, errText(err)),
+            );
+          };
           // Found once and kept with the message. A newer search cancels this one: it looks again, once.
-          const found = (hits: ChatHit[] | "failed") => deskEdit(entry.id, (e) => (e.outcome.kind === "search" ? { ...e, outcome: { ...e.outcome, hits } } : e));
+          const found = (hits: ChatHit[] | "failed") => {
+            deskEdit(entry.id, (e) => (e.outcome.kind === "search" || e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, hits } } : e));
+            if (answering && hits !== "failed") answer(hits);
+          };
           const look = (again: boolean): Promise<void> =>
             searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));
           look(true).catch(() => found("failed"));

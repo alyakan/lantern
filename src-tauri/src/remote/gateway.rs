@@ -148,6 +148,10 @@ pub trait Host: Send + Sync + 'static {
     fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
         Box::pin(async { Err("This Mac can't search its chats.".to_string()) })
     }
+    /// The Desk's own answer to `question`, from these past chats (see desk.rs `answer`). A host that can't ask says so.
+    fn desk_answer(&self, _question: String, _chats: Vec<crate::desk::PastChat>) -> BoxFut<Result<String, String>> {
+        Box::pin(async { Err("This Mac can't answer that.".to_string()) })
+    }
     /// The artifacts in the chat's folder, newest first (see artifacts.rs). A host with none says so.
     fn artifacts(&self, _slot: String) -> BoxFut<Result<Vec<protocol::RemoteArtifact>, String>> {
         Box::pin(async { Err(NO_ARTIFACTS.to_string()) })
@@ -323,6 +327,7 @@ impl Gateway {
     /// that runs on another provider than Claude by its id and project only (what is said there is never put to Claude); what it
     /// answers is checked against them, and a new chat's project against the user's projects. Nothing is sent from here.
     pub async fn desk_route(&self, desk: String, text: String) -> Result<serde_json::Value, String> {
+        let question = text.clone();
         use crate::desk::Route;
         use protocol::RemoteDeskRoute as R;
         if text.trim().is_empty() || text.len() > TEXT_MAX {
@@ -348,30 +353,48 @@ impl Gateway {
                 }
             }
             Route::Ask { chats: picked, unsure } => R::Ask { slots: picked.into_iter().filter(|id| chats.iter().any(|c| c.id == *id)).collect(), unsure },
-            Route::Search { terms } => {
-                match host.desk_search(terms.clone()).await {
-                    Ok(found) => {
-                        let open = self.hub.chats();
-                        let hits = found
-                            .into_iter()
-                            .filter(|h| routing.has_folder(&h.folder))
-                            .take(5)
-                            .map(|h| protocol::RemoteDeskHit {
-                                title: h.title.iter().map(|p| p.text.as_str()).collect(),
-                                project: h.project,
-                                updated_ms: h.updated_ms,
-                                snippet: h.snippets.first().map(|s| s.pieces.iter().map(|p| p.text.as_str()).collect()).unwrap_or_default(),
-                                slot: open.iter().find(|c| c.session_id.as_deref() == Some(h.id.as_str())).map(|c| c.slot.clone()),
-                            })
-                            .collect();
-                        R::Search { terms, hits, failed: false }
+            Route::Search { terms } => match self.desk_found(&terms, &routing).await {
+                Ok(found) => R::Search { terms, hits: found.into_iter().map(|(hit, _)| hit).collect(), failed: false },
+                Err(_) => R::Search { terms, hits: vec![], failed: true },
+            },
+            // Answered here, from the Desk's chats about it, open or past: only the user is shown it.
+            Route::Answer { terms } => match self.desk_found(&terms, &routing).await {
+                Ok(found) if found.is_empty() => R::Answer { terms, text: String::new(), sources: vec![], error: None },
+                Ok(found) => {
+                    let (sources, chats): (Vec<_>, Vec<_>) = found.into_iter().unzip();
+                    match host.desk_answer(question, chats).await {
+                        Ok(text) => R::Answer { terms, text, sources, error: None },
+                        Err(e) => R::Answer { terms, text: String::new(), sources, error: Some(e) },
                     }
-                    Err(_) => R::Search { terms, hits: vec![], failed: true },
                 }
-            }
+                Err(e) => R::Answer { terms, text: String::new(), sources: vec![], error: Some(e) },
+            },
             Route::Route { .. } => R::Ask { slots: first(&chats), unsure: true },
         };
         serde_json::to_value(&answer).map_err(|e| e.to_string())
+    }
+
+    /// The past chats of a Desk's projects that say `terms`, newest first, the first few: as a phone is shown them, and as the
+    /// Desk's answer reads them.
+    async fn desk_found(&self, terms: &str, routing: &super::desk::Routing) -> Result<Vec<(protocol::RemoteDeskHit, crate::desk::PastChat)>, String> {
+        let found = self.host.clone().desk_search(terms.to_string()).await?;
+        let open = self.hub.chats();
+        Ok(found
+            .into_iter()
+            .filter(|h| routing.has_folder(&h.folder))
+            .take(crate::desk::ANSWER_CHATS)
+            .map(|h| {
+                let title: String = h.title.iter().map(|p| p.text.as_str()).collect();
+                let hit = protocol::RemoteDeskHit {
+                    title: title.clone(),
+                    project: h.project.clone(),
+                    updated_ms: h.updated_ms,
+                    snippet: h.snippets.first().map(|s| s.pieces.iter().map(|p| p.text.as_str()).collect()).unwrap_or_default(),
+                    slot: open.iter().find(|c| c.session_id.as_deref() == Some(h.id.as_str())).map(|c| c.slot.clone()),
+                };
+                (hit, crate::desk::PastChat { id: h.id, folder: h.folder, title, project: h.project })
+            })
+            .collect())
     }
 
     /// Starts a chat for `device` in `project` with `text`: the answer to Request::NewChat. The folder must be exactly one
@@ -1366,6 +1389,10 @@ pub(crate) mod tests {
         fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
             let hits = self.desk_hits.lock().unwrap().clone();
             Box::pin(async move { Ok(hits) })
+        }
+        fn desk_answer(&self, question: String, chats: Vec<crate::desk::PastChat>) -> BoxFut<Result<String, String>> {
+            let answer = format!("{question}: from {}", chats.iter().map(|c| c.id.as_str()).collect::<Vec<_>>().join(", "));
+            Box::pin(async move { Ok(answer) })
         }
         fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
             self.prompts.lock().unwrap().push(prompt);
@@ -3007,6 +3034,16 @@ pub(crate) mod tests {
                 {"title": "Pricing page", "project": "app", "updated_ms": 9, "snippet": "the pricing page", "slot": null}
             ]})
         );
+        // A question about how things stand is answered from the same chats, which come with it.
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Answer { terms: "pricing".into() });
+        let answered = p.ask(route()).await.0.unwrap();
+        assert_eq!(answered["kind"], "answer");
+        assert_eq!(answered["text"], "add a dark mode: from 0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10, old");
+        assert_eq!(answered["sources"].as_array().map(Vec::len), Some(2));
+        *r.host.desk_hits.lock().unwrap() = vec![hit("other", "/Users/me/job")];
+        assert_eq!(p.ask(route()).await.0.unwrap(), json!({"kind": "answer", "terms": "pricing", "text": "", "sources": [], "error": null}));
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Search { terms: "pricing".into() });
+        *r.host.desk_hits.lock().unwrap() = vec![hit("0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10", "/Users/me/app"), hit("other", "/Users/me/job"), hit("old", "/Users/me/closed")];
         // On the Work Desk, only its own.
         let (ok, _, _) = p.ask(Request::DeskRoute { desk: "work".into(), text: "pricing?".into() }).await;
         assert_eq!(ok.unwrap()["hits"].as_array().map(Vec::len), Some(1));

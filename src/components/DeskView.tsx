@@ -5,6 +5,7 @@ import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
 import type { ChatHit } from "../types";
 import { AllowButton } from "./Inbox";
+import { Md } from "./Md";
 
 /** A chat a message can be sent to from the box, as its "to" menu lists it. */
 export interface DeskTarget {
@@ -79,6 +80,31 @@ function SearchHits({ terms, hits, onOpenPast }: { terms: string; hits: ChatHit[
   );
 }
 
+/** The Desk's own answer to a question about how things stand, and the chats it was made from, numbered as it cites them. */
+function Answer({ outcome, onOpenPast }: { outcome: Extract<DeskEntry["outcome"], { kind: "answer" }>; onOpenPast: DeskViewProps["onOpenPast"] }) {
+  const { terms, hits, text, error } = outcome;
+  if (hits === null) return <div className="desk-note muted">Looking through your chats about “{terms}”…</div>;
+  if (hits === "failed") return <div className="desk-note">Couldn't look through your chats just now.</div>;
+  if (hits.length === 0) return <div className="desk-note">No chat on this Desk talks about “{terms}”.</div>;
+  return (
+    <div className="desk-note desk-answer">
+      {text ? <Md>{text}</Md> : error ? <div className="desk-failed">No answer: {error}</div> : <div className="muted">Reading {hits.length === 1 ? "the chat" : `${hits.length} chats`} about “{terms}”…</div>}
+      <ol className="desk-hits desk-sources" aria-label="The chats it read">
+        {hits.map((h) => (
+          <li key={h.id}>
+            <button className="desk-hit" onClick={() => onOpenPast(h)}>
+              <span className="desk-hit-title">{h.title.map((p) => p.text).join("") || "Untitled chat"}</span>
+              <span className="desk-where">
+                {h.project} · {new Date(h.updated_ms).toLocaleDateString([], { month: "short", day: "numeric" })}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /** "Send it there too": the chats on this Desk the message hasn't gone to. */
 function SendToo({ entry, targets, onSendTo }: { entry: DeskEntry; targets: DeskTarget[]; onSendTo: DeskViewProps["onSendTo"] }) {
   const sent = new Set([...(entry.outcome.kind === "sent" ? [entry.outcome.slot] : []), ...entry.also.map((a) => a.slot)]);
@@ -111,6 +137,7 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
       <div className="desk-me">{entry.text}</div>
       <div className="desk-route">
         {o.kind === "routing" && <span className="muted">Finding the chat…</span>}
+        {o.kind === "answer" && <span className="muted">→ the Desk answers</span>}
         {o.kind === "sent" && (
           <>
             <span>
@@ -151,6 +178,7 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
         </div>
       )}
       {o.kind === "search" && <SearchHits terms={o.terms} hits={o.hits} onOpenPast={p.onOpenPast} />}
+      {o.kind === "answer" && <Answer outcome={o} onOpenPast={p.onOpenPast} />}
     </article>
   );
 }

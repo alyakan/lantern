@@ -190,6 +190,8 @@ export type DeskOutcome =
   | { kind: "ask"; chats: { slot: string; title: string; where: string }[]; projects: { folder: string; label: string }[]; unsure: boolean }
   /** `hits`: null while it looks, "failed" when it couldn't; found once and kept with the message. */
   | { kind: "search"; terms: string; hits: ChatHit[] | null | "failed" }
+  /** The Desk's own answer, from the chats about `terms` (`hits`, found first, as for a search): `text` null while it is written. */
+  | { kind: "answer"; terms: string; hits: ChatHit[] | null | "failed"; text: string | null; error?: string }
   | { kind: "failed"; why: string };
 
 /** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
@@ -211,7 +213,7 @@ export function readLog(raw: unknown): DeskEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
-    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome }))
+    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome.kind === "answer" && (!Array.isArray(e.outcome.hits) || (e.outcome.text === null && !e.outcome.error)) ? { ...e.outcome, hits: Array.isArray(e.outcome.hits) ? e.outcome.hits : ("failed" as const), error: e.outcome.error ?? "Lantern closed before it answered." } : e.outcome }))
     .slice(-LOG_MAX);
 }
 

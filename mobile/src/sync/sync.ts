@@ -36,8 +36,8 @@ const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "f
 let ids = 0;
 const defaultId = () => `m-${Date.now().toString(36)}-${(++ids).toString(36)}`;
 
-/** How long the Mac has to say where a Desk's message goes: its router may take half a minute. */
-export const DESK_WAIT = 40_000;
+/** How long the Mac has to say where a Desk's message goes: its router may take half a minute, and an answer two minutes more. */
+export const DESK_WAIT = 170_000;
 
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;

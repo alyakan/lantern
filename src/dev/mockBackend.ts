@@ -2135,7 +2135,9 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           const projects = (a.projects ?? []) as string[];
           const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
           const hit = chats.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
-          const answer = /^(which|where)\b/i.test(text)
+          const answer = /^(how|what's the status|where are we)\b/i.test(text)
+            ? { kind: "answer", terms: words.slice(-2).join(" ") }
+            : /^(which|where)\b/i.test(text)
             ? { kind: "search", terms: words.slice(-2).join(" ") }
             : /^new\b/i.test(text) && projects[0]
               ? { kind: "start", project: projects[0], workflow: "chat" }
@@ -2144,6 +2146,9 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
                 : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
           return new Promise((r) => setTimeout(() => r(answer), 500));
         }
+        case "desk_answer":
+          // Like the Sonnet call: a little later, a few bullets citing the chats it was given.
+          return new Promise((r) => setTimeout(() => r(((a.chats ?? []) as { title: string }[]).map((c, i) => `- ${c.title}: going well [${i + 1}]`).join("\n")), 900));
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

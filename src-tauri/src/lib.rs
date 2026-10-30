@@ -592,6 +592,20 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn desk_answer(&self, question: String, chats: Vec<desk::PastChat>) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let claude = state.remote.claude_path().ok_or("Lantern doesn't know where Claude is yet. Open a chat in Lantern first.")?;
+            let sources = desk_sources(&state, chats).await;
+            if sources.is_empty() {
+                return Err("Those chats couldn't be read.".to_string());
+            }
+            let path_env = login_path(&state).await;
+            desk::answer(std::path::Path::new(&claude), path_env.as_deref(), &question, &sources).await
+        })
+    }
+
     fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -3095,6 +3109,36 @@ async fn desk_route(state: State<'_, AppState>, claude_path: String, text: Strin
     Ok(desk::route(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &chats, &projects).await)
 }
 
+/// The end of what was said in each of `chats` (the first few), read from their transcripts, for the Desk's answer.
+async fn desk_sources(state: &AppState, chats: Vec<desk::PastChat>) -> Vec<desk::Source> {
+    let Ok(root) = projects_root() else { return Vec::new() };
+    let mut out = Vec::new();
+    for c in chats.into_iter().take(desk::ANSWER_CHATS) {
+        if !history::valid_id(&c.id) {
+            continue;
+        }
+        let aliases = aliases_for(state, &c.folder);
+        let (root, folder, id) = (root.clone(), c.folder.clone(), c.id.clone());
+        let read = tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).map(|p| desk::said(&history::replay(&p).events, 20_000))).await;
+        if let Ok(Ok(text)) = read {
+            out.push(desk::Source { title: c.title, project: c.project, text });
+        }
+    }
+    out
+}
+
+/// The Desk's own answer to a question about how things stand, from the past chats the search found (see desk.rs `answer`). It is
+/// shown to the user only.
+#[tauri::command]
+async fn desk_answer(state: State<'_, AppState>, claude_path: String, question: String, chats: Vec<desk::PastChat>) -> Result<String, String> {
+    let sources = desk_sources(&state, chats).await;
+    if sources.is_empty() {
+        return Err("Those chats couldn't be read.".into());
+    }
+    let path_env = login_path(&state).await;
+    desk::answer(std::path::Path::new(&claude_path), path_env.as_deref(), &question, &sources).await
+}
+
 /// Folders the user has used Claude Code in lately, for the folder menu.
 #[tauri::command]
 async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
@@ -3587,6 +3631,7 @@ pub fn run() {
             session_events,
             title_session,
             desk_route,
+            desk_answer,
             open_session,
             relocations_list,
             folders_gone,

@@ -413,7 +413,9 @@ export type DeskRoute =
   | { kind: "start"; project: string; workflow: "chat" | "steps" }
   /** `unsure`: the router couldn't be asked, or answered something unusable. */
   | { kind: "ask"; chats: string[]; unsure: boolean }
-  | { kind: "search"; terms: string };
+  | { kind: "search"; terms: string }
+  /** The Desk answers it itself, from the chats about `terms` (see deskAnswer). */
+  | { kind: "answer"; terms: string };
 
 export interface ChatSearchResults {
   /** Newest first. */
