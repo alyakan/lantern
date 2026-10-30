@@ -288,7 +288,7 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
-  const { chats, desk, waiting } = useSyncState();
+  const { chats, desk, waiting, epoch } = useSyncState();
   const [chosen, setChosen] = useState<string | null>(null);
   const [entries, setEntries] = useState<DeskEntry[]>([]);
   const [text, setText] = useState("");
@@ -327,12 +327,12 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
     const why = cantSend(chat);
     if (why || !chat) return failed(entry.id, why ?? "That chat is closed.");
     void sync.send(slot, entry.text);
-    edit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: chat.title ?? "A chat", started: false, queued: chat.status === "working" || chat.status === "needs_you" }, ...(talks ? { reply: { status: "waiting", after: chat.last_seq } } : {}) }));
+    edit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: chat.title ?? "A chat", started: false, queued: chat.status === "working" || chat.status === "needs_you" }, ...(talks ? { reply: { status: "waiting", after: chat.last_seq, ...(epoch !== null ? { epoch } : {}) } } : {}) }));
   };
   const startIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
     outcome(entry.id, { kind: "routing" });
     sync.newChat(folder, entry.text, workflow === "steps" ? { workflow: "steps" } : {}).then(
-      (slot) => edit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false }, ...(talks ? { reply: { status: "waiting", after: 0 } } : {}) })),
+      (slot) => edit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false }, ...(talks ? { reply: { status: "waiting", after: 0, ...(epoch !== null ? { epoch } : {}) } } : {}) })),
       (e: Error) => failed(entry.id, e.message || "The chat didn't start."),
     );
   };
@@ -362,31 +362,44 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
     } else sync.deskRoute(shown.id, said).then((r) => act(entry, r), why);
   };
 
-  // What came back: once the chat a message went to has moved on past it and stopped working, the Mac is asked for it (once
-  // for each step the chat takes, never two at a time).
-  const asking = useRef(new Map<string, number>());
+  // What came back: once the chat a message went to has moved on past it and stopped working, the Mac is asked for it. One
+  // question at a time for the whole Desk (the Mac takes only a few slow ones at once, and a message typed now must get through),
+  // and once for each step the chat takes.
+  const asked = useRef(new Map<string, number>());
+  const busy = useRef(false);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
+    if (busy.current) return;
     for (const e of entries) {
       if (e.outcome.kind !== "sent" || e.reply?.status !== "waiting") continue;
       const { slot } = e.outcome;
       const chat = chats.find((c) => c.slot === slot);
-      const check = replyCheck(e.reply, chat);
+      const check = replyCheck(e.reply, chat, epoch);
       if (check === "lost") {
         edit(e.id, (x) => ({ ...x, reply: { status: "lost" } }));
         continue;
       }
-      if (check !== "ask" || !chat || asking.current.get(e.id) === chat.last_seq) continue;
-      asking.current.set(e.id, chat.last_seq);
-      sync.deskReply(e.desk, slot, e.text, e.reply.after).then(
-        (r) => {
-          if (!r.done) return;
-          edit(e.id, (x) => ({ ...x, reply: r.off ? { status: "off" } : r.summary !== null ? { status: "done", failed: r.failed, summary: r.summary, full: r.full || undefined } : { status: "failed", why: r.error ?? "It couldn't be summed up.", full: r.full || undefined } }));
-        },
-        // Asked again when the chat next moves.
-        () => asking.current.delete(e.id),
-      );
+      if (check !== "ask" || !chat || asked.current.get(e.id) === chat.last_seq) continue;
+      asked.current.set(e.id, chat.last_seq);
+      busy.current = true;
+      sync
+        .deskReply(e.desk, slot, e.text, e.reply.after)
+        .then(
+          (r) => {
+            if (!r.done) return;
+            edit(e.id, (x) => ({ ...x, reply: r.off ? { status: "off" } : r.summary !== null ? { status: "done", failed: r.failed, summary: r.summary, full: r.full || undefined } : { status: "failed", why: r.error ?? "It couldn't be summed up.", full: r.full || undefined } }));
+          },
+          // Asked again when the chat next moves.
+          () => asked.current.delete(e.id),
+        )
+        .finally(() => {
+          busy.current = false;
+          // The next one waiting, if any, is asked now.
+          setTick((t) => t + 1);
+        });
+      return;
     }
-  }, [chats, entries]);
+  }, [chats, entries, epoch, tick]);
 
   // The conversation keeps to its end as things come, unless it was scrolled up to read.
   const scroller = useRef<ScrollViewInstance>(null);

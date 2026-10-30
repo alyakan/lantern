@@ -422,15 +422,19 @@ impl Gateway {
     /// chat's event `after`, once finished, summed up. Only a chat on that Desk; nothing from a chat on another provider is summed up.
     pub async fn desk_reply(&self, desk: String, slot: String, text: String, after: u64) -> Result<serde_json::Value, String> {
         use protocol::RemoteDeskReply as R;
-        let routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
-        if !routing.chats.iter().any(|c| c.id == slot) || self.hub.chat(&slot).is_none() {
-            return Err("That chat isn't on this Desk any more.".into());
-        }
-        let events = match self.hub.since(&slot, 0).ok_or("That chat is closed.")? {
-            super::hub::Since::Events(events) | super::hub::Since::TooOld { kept: events } => events,
+        // A reply that can't be found any more is said once, as final: the phone stops asking.
+        let gone = |why: &str| serde_json::to_value(R { done: true, failed: false, off: false, summary: None, full: String::new(), error: Some(why.to_string()) }).map_err(|e| e.to_string());
+        let on_desk = self.hub.desk.routing(&desk).is_some_and(|r| r.chats.iter().any(|c| c.id == slot));
+        let Some(since) = self.hub.since(&slot, after).filter(|_| on_desk) else { return gone("That chat isn't on this Desk any more: open it to see what it said.") };
+        // The events right after the message aren't kept any more (a long turn): its start can't be found.
+        let (events, dropped) = match since {
+            super::hub::Since::Events(events) => (events, false),
+            super::hub::Since::TooOld { kept } => (kept, true),
         };
         let waiting = R { done: false, failed: false, off: false, summary: None, full: String::new(), error: None };
-        let Some(replied) = crate::desk::reply_in(events.iter().map(|e| (e.seq, &e.event)), &text, after) else { return serde_json::to_value(waiting).map_err(|e| e.to_string()) };
+        let Some(replied) = crate::desk::reply_in(events.iter().map(|e| (e.seq, &e.event)), &text, after) else {
+            return if dropped { gone("It ran long, so the Desk can't sum it up: open the chat to see it.") } else { serde_json::to_value(waiting).map_err(|e| e.to_string()) };
+        };
         let answer = if self.hub.is_off_claude(&slot) {
             R { done: true, failed: replied.failed, off: true, summary: None, full: String::new(), error: None }
         } else if replied.said.trim().is_empty() {
@@ -3153,9 +3157,11 @@ pub(crate) mod tests {
         }
         assert_eq!(p.ask(reply("b", 0)).await.0.unwrap(), json!({"done": true, "failed": false, "off": true, "summary": null, "full": "", "error": null}));
         assert_eq!(*r.host.desk_summed.lock().unwrap(), vec!["Capped it at 8s.".to_string()]);
-        // A chat open on the Mac but not on this Desk is never read for it.
-        let (_, err, _) = p.ask(reply("w", 0)).await;
-        assert!(err.is_some_and(|e| e.contains("isn't on this Desk")));
+        // A chat open on the Mac but not on this Desk is never read for it: a final answer, so the phone stops asking.
+        let off_desk = p.ask(reply("w", 0)).await.0.unwrap();
+        assert_eq!((off_desk["done"].as_bool(), off_desk["summary"].is_null()), (Some(true), true));
+        assert!(off_desk["error"].as_str().is_some_and(|e| e.contains("isn't on this Desk")));
+        assert_eq!(r.host.desk_summed.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

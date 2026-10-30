@@ -29,7 +29,8 @@ export type DeskOutcome =
  * runs on another provider, so the Mac doesn't read it. `lost`: the chat isn't the one it went to any more (the Mac restarted).
  */
 export type DeskReply =
-  | { status: "waiting"; after: number }
+  /** `epoch`: the Mac's run it was sent in (its Welcome's): another run's chats are not the ones it went to. */
+  | { status: "waiting"; after: number; epoch?: number }
   | { status: "done"; failed: boolean; summary: string; full?: string }
   | { status: "failed"; why: string; full?: string }
   | { status: "off" }
@@ -237,11 +238,12 @@ function readReply(r: unknown): DeskReply | undefined {
 
 /**
  * Whether to ask the Mac what came back for a message still waiting: the chat it went to has moved on past the message and isn't
- * working any more. `lost` when that chat's events start over below where the message was sent (the Mac restarted: the place may
- * be another chat's now).
+ * working any more. `lost` when the Mac has restarted since (another `epoch`, or the chat's events start over below where the
+ * message was sent): the place may be another chat's now.
  */
-export function replyCheck(reply: DeskReply | undefined, chat: RemoteChat | undefined): "ask" | "wait" | "lost" {
+export function replyCheck(reply: DeskReply | undefined, chat: RemoteChat | undefined, epoch: number | null = null): "ask" | "wait" | "lost" {
   if (!reply || reply.status !== "waiting") return "wait";
+  if (reply.epoch !== undefined && epoch !== null && reply.epoch !== epoch) return "lost";
   if (!chat) return "wait";
   if (chat.last_seq < reply.after) return "lost";
   return chat.last_seq > reply.after && (chat.status === "idle" || chat.status === "ended") ? "ask" : "wait";

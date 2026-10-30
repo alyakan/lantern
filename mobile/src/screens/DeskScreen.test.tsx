@@ -177,7 +177,7 @@ describe("the Desk on the phone", () => {
       expect(session.lastOf("desk_talk")).toEqual({ op: "desk_talk", desk: "home", text: "and quieter at night", history: [{ you: "fewer pushes", desk: 'On it. (sent to "Phone notifications")' }] });
       expect(screen.getByText("Got it: quieter at night too.")).toBeTruthy();
       expect(session.lastOf("send")).toMatchObject({ slot: "a", text: "and quieter at night" });
-      expect(mockLog[mockLog.length - 1].reply).toEqual({ status: "waiting", after: chats[0].last_seq });
+      expect(mockLog[mockLog.length - 1].reply).toMatchObject({ status: "waiting", after: chats[0].last_seq });
     });
 
     it("asks the Mac what came back once the chat moved on and stopped working, once, and shows it summed up", async () => {

@@ -106,3 +106,13 @@ describe("the Desk that talks, on the phone", () => {
     expect(answerShape("- just a list")).toBeNull();
   });
 });
+
+describe("a reply waited for across a Mac restart", () => {
+  it("is lost once the Mac runs again (another epoch), as its chats' places may be other chats' now", () => {
+    const waiting = { status: "waiting" as const, after: 10, epoch: 7 };
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), 7)).toBe("ask");
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), 8)).toBe("lost");
+    // Not known yet (connecting): it waits.
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), null)).toBe("ask");
+  });
+});

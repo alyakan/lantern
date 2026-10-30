@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "desk", "desktalk"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -1242,6 +1242,8 @@ mod tests {
         assert!(FEATURES.contains(&"shell"));
         // The phone shows its Desk only to a Mac that lists it: without it the Desk stays hidden on every phone.
         assert!(FEATURES.contains(&PHONE_DESK));
+        // The Desk that talks: a phone only asks a Mac that lists it (its own tests mock the list, so it is checked here).
+        assert!(FEATURES.contains(&DESK_TALK));
         assert!(phone_shell_id("ph-abcd1234") && phone_shell_id(&format!("ph-{}", "a".repeat(28))));
         assert!(!phone_shell_id(&format!("ph-{}", "a".repeat(29))) && !phone_shell_id("ph-abc") && !phone_shell_id("ph-ab-cd12") && !phone_shell_id(""));
     }
