@@ -174,3 +174,16 @@ describe("the Desk's answer, laid out", () => {
     expect(answerShape("")).toBeNull();
   });
 });
+
+describe("the Desk's answer as Sonnet really writes it", () => {
+  it("lays out a real answer (from `cargo test real_desk_answer -- --ignored`)", () => {
+    const text = "Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.\n\n**Done**\n- Aruana's PR merged into spike/testo; Mac advertises real readings [1]\n\n**Open**\n- iPad pairing screen still left to do [1]\n- Unpairing a sensor is next [2]\n- Demo build on TestFlight after that [2]\n\n**Blocked**\n- Probe firmware needed for temperature units [2]";
+    const shape = answerShape(text);
+    expect(shape?.lead).toBe("Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.");
+    expect(shape?.parts.map((p) => [p.part, p.points.length])).toEqual([
+      ["done", 1],
+      ["open", 3],
+      ["blocked", 1],
+    ]);
+  });
+});

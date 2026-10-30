@@ -130,7 +130,7 @@ function Answer({ outcome, onOpenPast }: { outcome: Extract<DeskEntry["outcome"]
           <li key={h.id}>
             <button className="desk-source" onClick={() => onOpenPast(h)} title={`${h.project}, ${new Date(h.updated_ms).toLocaleDateString([], { month: "short", day: "numeric" })}`}>
               <span className="desk-source-n">{i + 1}</span>
-              {h.title.map((p) => p.text).join("") || "Untitled chat"}
+              <span className="desk-source-title">{h.title.map((p) => p.text).join("") || "Untitled chat"}</span>
             </button>
           </li>
         ))}
@@ -413,7 +413,8 @@ function JustFinished({ cards, now, onOpen }: { cards: DeskCard[]; now: number; 
     <section className="desk-finished" aria-label="Just finished">
       <h2 className="desk-h">Just finished</h2>
       {shown.map((c) => {
-        const line = c.outcome === "done" ? firstSentence(c.said) : OUTCOME[c.outcome];
+        // A failed or stopped answer says why when Claude did, else just that it failed or stopped.
+        const line = c.said ? firstSentence(c.said) : OUTCOME[c.outcome];
         return (
           <button key={c.key} className={`desk-line ${c.outcome}`} aria-label={`${c.title}: ${c.said || c.asked}`} title={c.said || c.asked} onClick={() => onOpen(c.slot)}>
             <span className="desk-mark" aria-hidden>
