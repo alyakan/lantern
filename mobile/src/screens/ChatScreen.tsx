@@ -693,7 +693,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (

@@ -30,7 +30,7 @@ function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, foot
 }
 
 /** Step by step's pages side by side, one on screen: a swipe goes to the one before or after, as the Mac's Previous and Next do. */
-export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, footer, lift = 0 }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** Under the newest page: what Claude is doing. */ footer?: ReactNode; /** What the keyboard's height is cut by before the pages rise with it (the room the bar has under it already). */ lift?: number }) {
+export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, footer, lift = 0, held = false }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** Under the newest page: what Claude is doing. */ footer?: ReactNode; /** What the keyboard's height is cut by before the pages rise with it (the room the bar has under it already). */ lift?: number; /** A swipe to allow is being dragged: the pages hold still, so the drag can't take them to the one before. */ held?: boolean }) {
   const screen = useWindowDimensions().width;
   const [width, setWidth] = useState(screen);
   const list = useRef<FlatList<StepPage>>(null);
@@ -55,6 +55,7 @@ export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBot
         testID="step-pager"
         horizontal
         pagingEnabled
+        scrollEnabled={!held}
         data={pages}
         extraData={renderRow}
         keyExtractor={(p) => p.key}
