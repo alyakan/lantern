@@ -1172,7 +1172,7 @@ describe("Step by step's pages", () => {
       expect(screen.queryByText("Show the whole page")).toBeNull();
     });
 
-    it("keeps the newest page's buttons at its end while the step is talked about", async () => {
+    it("keeps the newest page's buttons floating while the step is talked about", async () => {
       const { lastOf } = await steps([
         ...run,
         { kind: "user_text", text: "Why the changelog?", at: 3, sent_by: "desktop" },
@@ -1180,11 +1180,36 @@ describe("Step by step's pages", () => {
         { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
       ]);
       expect(screen.getByRole("header", { name: "Step 2 of 2, page 3 of 3" })).toBeTruthy();
-      // Once on the page: at its end, not in its heading card as well.
+      // Once: floating, not in its heading card as well.
       expect(screen.getAllByRole("button", { name: "Commit, next" })).toHaveLength(1);
       await fireEvent.press(screen.getByRole("button", { name: "Commit, next" }));
       await waitFor(() => expect(lastOf("send")).toMatchObject({ text: "Next. Commit this step first." }));
       expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
+    });
+
+    it("floats the newest page's buttons above the message box, not on the page, and has none on an older page", async () => {
+      await steps();
+      expect(within(screen.getByTestId("step-page-2")).queryByRole("button", { name: "Commit, next" })).toBeNull();
+      expect(within(screen.getByLabelText("This page's buttons")).getByRole("button", { name: "Commit, next" })).toBeTruthy();
+      expect(within(screen.getByLabelText("This page's buttons")).getByRole("button", { name: "Don't commit" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
+    });
+
+    it("opens again on the page it was left on, and says when a new one came meanwhile", async () => {
+      const first = await steps(run.slice(0, 2));
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      expect(screen.getByRole("header", { name: "Start, page 1 of 2" })).toBeTruthy();
+      await first.unmount();
+      const again = await steps(run.slice(0, 2));
+      expect(screen.getByRole("header", { name: "Start, page 1 of 2" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "New page" })).toBeNull();
+      // Back on the newest, then away while Claude writes the next page.
+      await fireEvent.press(screen.getByRole("button", { name: "Next page" }));
+      await again.unmount();
+      await steps();
+      expect(screen.getByRole("header", { name: "Step 1 of 2, page 2 of 3" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "New page" })).toBeTruthy();
     });
 
     it("has no buttons while Claude is at work on the page", async () => {

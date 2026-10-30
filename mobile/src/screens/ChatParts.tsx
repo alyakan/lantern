@@ -26,7 +26,7 @@ import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
-import { barButton, control, fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
@@ -332,14 +332,30 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
   );
 });
 
-/** The newest page's buttons, at the end of the page: they stay while the step is talked about, until one is pressed. */
-export function PageActionsBar({ actions, onAction }: { actions: PageAction[]; onAction: (a: PageAction) => void }) {
+/**
+ * The newest page's buttons, floating on the right just above the message box, so the next step is a press away wherever the
+ * page is scrolled to. They stay while the step is talked about, until one is pressed. Long ones (or large text) wrap to a
+ * second row; `onHeight` says how tall they are, so the page can make room for them under its last line.
+ */
+export function PageActionsFloat({ actions, onAction, lift = 0, onHeight }: { actions: PageAction[]; onAction: (a: PageAction) => void; /** How far above the bottom of its box it sits, where the message box floats over the page. */ lift?: number; onHeight?: (h: number) => void }) {
   return (
-    <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: space.lg, paddingTop: 14 }}>
-      {actions.map((a) => (
-        <Button key={a.label} label={a.label} kind={a.primary ? "ink" : "ghost"} style={{ flex: 1 }} onPress={() => onAction(a)} />
-      ))}
-    </View>
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift }}>
+      <View pointerEvents="box-none" accessibilityLabel="This page's buttons" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
+        {actions.map((a) =>
+          a.primary ? (
+            <Button key={a.label} label={a.label} style={[shadow.float, { shadowOpacity: 0.18 }]} onPress={() => onAction(a)} />
+          ) : (
+            <PressScale key={a.label} accessibilityRole="button" accessibilityLabel={a.label} onPress={() => onAction(a)} scaleTo={0.95}>
+              <Glass lift={0.16} style={{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center" }}>
+                <Txt variant="body" style={{ fontWeight: "700" }}>
+                  {a.label}
+                </Txt>
+              </Glass>
+            </PressScale>
+          ),
+        )}
+      </View>
+    </FadeSlideIn>
   );
 }
 
