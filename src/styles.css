@@ -1804,6 +1804,8 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .dash-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dash-head-title { font-size: calc(16px * var(--font-scale)); font-weight: 650; letter-spacing: -0.01em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-reload { flex: none; width: 28px; height: 28px; padding: 0; border-radius: var(--radius-pill); font-size: calc(15px * var(--font-scale)); line-height: 1; }
+.artifact-refresh { flex: none; height: 28px; padding: 0 10px; border-radius: var(--radius-pill); font: 500 calc(12px * var(--font-scale)) var(--ui); white-space: nowrap; }
+.artifact-refreshing { flex: none; padding: 0; white-space: nowrap; }
 .dash-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .dash-tabs::-webkit-scrollbar { display: none; }
 button.dash-tab { position: relative; flex: none; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 0; color: var(--muted-text); font: 500 calc(13px * var(--font-scale)) var(--ui); }

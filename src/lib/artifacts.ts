@@ -34,6 +34,11 @@ export function artifactName(path: string, folder: string | null): string | null
   return name.split("/").some((part) => part === "" || part === "." || part === "..") ? null : name;
 }
 
+/** What an artifact's Refresh data asks Claude in the chat: the same page, with its data gathered again. */
+export function refreshArtifact(name: string): string {
+  return `Refresh the data in the artifact ${ARTIFACTS_DIR}/${name}: gather it again from where it came from, and rewrite the file with the new numbers, keeping its layout.`;
+}
+
 /** Where the sandboxed frame loads an HTML or SVG artifact from. */
 export function artifactUrl(key: string, name: string, stamp = 0): string {
   const path = name.split("/").map(encodeURIComponent).join("/");

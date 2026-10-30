@@ -58,6 +58,30 @@ describe("ArtifactsTab", () => {
     expect(api.artifactsRead).toHaveBeenCalledWith("/p", "notes.md");
     expect(document.querySelector("iframe")).toBeNull();
   });
+
+  it("asks Claude to refresh the artifact on screen, and reads it again when the turn ends", async () => {
+    vi.mocked(api.artifactsList).mockResolvedValue(listing(item("stats.html", "html")));
+    const onRefresh = vi.fn();
+    const { rerender } = render(<ArtifactsTab folder="/p" refreshKey={0} onRefresh={onRefresh} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh data" }));
+    expect(onRefresh).toHaveBeenCalledWith("stats.html");
+    expect(screen.getByRole("status")).toHaveTextContent("Refreshing…");
+    // Claude works on it (the button is gone while it isn't free), then the turn ends: the folder is read again.
+    rerender(<ArtifactsTab folder="/p" refreshKey={0} busy />);
+    const reads = vi.mocked(api.artifactsList).mock.calls.length;
+    vi.mocked(api.artifactsList).mockResolvedValue(listing(item("stats.html", "html", 5_000)));
+    rerender(<ArtifactsTab folder="/p" refreshKey={0} onRefresh={onRefresh} />);
+    await waitFor(() => expect(vi.mocked(api.artifactsList).mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(screen.getByTitle("stats.html").getAttribute("src")).toMatch(/\?v=5000\d*$/));
+    expect(screen.getByRole("button", { name: "Refresh data" })).toBeInTheDocument();
+  });
+
+  it("offers no Refresh data with no chat free to ask", async () => {
+    vi.mocked(api.artifactsList).mockResolvedValue(listing(item("stats.html", "html")));
+    render(<ArtifactsTab folder="/p" refreshKey={0} />);
+    expect(await screen.findByTitle("stats.html")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh data" })).toBeNull();
+  });
 });
 
 describe("ReviewPanel and artifacts", () => {

@@ -9,6 +9,7 @@ import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
+import { forgetPanels } from "../view/panelChoice";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { control } from "../ui/theme";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
@@ -1347,11 +1348,13 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(screen.queryByText("2 files · +5 −1")).toBeNull());
   });
 
-  it("offers the folder's artifacts from the sheet's menu only on a Mac that lists them, and opens on the changes again", async () => {
+  it("offers the folder's artifacts from the sheet's menu only on a Mac that lists them, and the chat opens on them again, another chat on its changes", async () => {
+    forgetPanels();
     const { controller } = makeController();
     const features = ["artifacts"];
     const { lastOf } = attachSession(controller, { artifacts: [{ name: "map.md", kind: "markdown", modified: 5, size: 9 }], artifact_read: "# The map" }, features);
-    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(features) }, controller);
+    const state = { chats: [chat(), chat({ slot: "b" })], events: { a: turn, b: turn }, connection: connectedWith(features) };
+    const first = await renderWith(<ChatScreen {...handlers()} />, state, controller);
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
     await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
@@ -1361,7 +1364,18 @@ describe("what a turn changed", () => {
     expect(lastOf("artifact_read")).toEqual({ op: "artifact_read", slot: "a", name: "map.md" });
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
+    expect(screen.getByRole("button", { name: "Showing Artifacts" })).toBeTruthy();
+    await first.unmount();
+    // Another chat has its own: nothing picked there, so its changes.
+    const second = await renderWith(<ChatScreen {...handlers()} slot="b" />, state, controller);
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
     expect(screen.getByRole("button", { name: "Showing Changes" })).toBeTruthy();
+    await second.unmount();
+    // The first chat opened again: its artifacts.
+    await renderWith(<ChatScreen {...handlers()} />, state, controller);
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
+    expect(screen.getByRole("button", { name: "Showing Artifacts" })).toBeTruthy();
+    forgetPanels();
   });
 
   it("has the Changes icon before anything changed, and says so in it", async () => {
