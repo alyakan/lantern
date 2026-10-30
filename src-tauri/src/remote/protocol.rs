@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "desk"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "desk", "desktalk"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -100,6 +100,8 @@ pub const STEP_OUTPUT_MAX: usize = 20_000;
 pub const PHONE_EXTRAS: &str = "extras";
 /// A phone that shows the Desk: it is pushed ServerMessage::Desk.
 pub const PHONE_DESK: &str = "desk";
+/// A Mac whose Desk talks back (Request::DeskTalk) and sums up what came back (Request::DeskReply).
+pub const DESK_TALK: &str = "desktalk";
 
 /// A slash command or skill the chat's claude offers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -732,6 +734,37 @@ pub enum RemoteDeskRoute {
     Answer { terms: String, text: String, sources: Vec<RemoteDeskHit>, error: Option<String> },
 }
 
+/// An earlier exchange on a phone's Desk, as the phone tells it: what the user said, and what came of it in a few words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskExchange {
+    pub you: String,
+    pub desk: String,
+}
+
+/// What the Desk says back to a message typed on a phone's Desk (the answer to Request::DeskTalk), and what it does with it, as
+/// RemoteDeskRoute (None: it only replied). `say` is plain text, only ever shown to the user.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskTalk {
+    pub say: String,
+    pub route: Option<RemoteDeskRoute>,
+}
+
+/// What came back from the chat a phone's Desk message went to (the answer to Request::DeskReply). `done` false: its turn hasn't
+/// finished yet. `off`: the chat runs on another provider than Claude, so nothing said there is summed up. `summary`: a sentence
+/// or two (None with `error` when it couldn't be made); `full`: Claude's last words in the turn, for "Show full answer".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteDeskReply {
+    pub done: bool,
+    pub failed: bool,
+    pub off: bool,
+    pub summary: Option<String>,
+    pub full: String,
+    pub error: Option<String>,
+}
+
 /// A past chat a Desk's search found.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -901,6 +934,18 @@ pub enum Request {
     /// Desk's chats as data. Nothing is sent: the phone sends the user's words there itself. A "which chat had…" answer brings
     /// the title and a line of past chats of the Desk's projects, closed ones too (History's search, as on the Mac's Desk).
     DeskRoute { desk: String, text: String },
+    /// The Desk talks (RemoteDeskTalk): what it says back to `text`, typed on the phone's Desk `desk`, given the last few
+    /// `history` exchanges there, and what it does with it (as DeskRoute does). Only sent to a Mac whose Welcome lists "desktalk".
+    DeskTalk { desk: String, text: String, history: Vec<RemoteDeskExchange> },
+    /// What came back from chat `slot` of Desk `desk` to the Desk message `text` sent there after the chat's event `after`
+    /// (RemoteDeskReply): the turn it started, once finished, summed up. Only sent to a Mac whose Welcome lists "desktalk".
+    DeskReply {
+        desk: String,
+        slot: String,
+        text: String,
+        #[ts(type = "number")]
+        after: u64,
+    },
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone

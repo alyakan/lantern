@@ -11,6 +11,9 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
+import type { RemoteDeskExchange } from "../protocol/generated/RemoteDeskExchange";
+import type { RemoteDeskReply } from "../protocol/generated/RemoteDeskReply";
+import type { RemoteDeskTalk } from "../protocol/generated/RemoteDeskTalk";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
@@ -166,6 +169,26 @@ export class Sync {
   deskRoute(desk: string, text: string) {
     if (!this.has("desk")) return Promise.reject(new Error("This Mac has no Desk yet. Update Lantern on it."));
     return this.ask<RemoteDeskRoute>({ op: "desk_route", desk, text }, DESK_WAIT);
+  }
+
+  /** Whether the Mac's Desk talks back and sums up what came back (Request::DeskTalk, Request::DeskReply). */
+  deskTalks() {
+    return this.has("desktalk");
+  }
+
+  /**
+   * What the Desk says back to `text` typed on the Desk `desk`, given the last few exchanges there, and what it does with it (as
+   * deskRoute does; null: it only replied). Nothing is sent: the caller sends it.
+   */
+  deskTalk(desk: string, text: string, history: RemoteDeskExchange[]) {
+    if (!this.has("desktalk")) return Promise.reject(new Error("Update Lantern on your Mac for the Desk to talk."));
+    return this.ask<RemoteDeskTalk>({ op: "desk_talk", desk, text, history }, DESK_WAIT);
+  }
+
+  /** What came back from chat `slot` to the Desk message `text`, sent there after its event `after`: summed up once its turn ended. */
+  deskReply(desk: string, slot: string, text: string, after: number) {
+    if (!this.has("desktalk")) return Promise.reject(new Error("Update Lantern on your Mac to see what came back."));
+    return this.ask<RemoteDeskReply>({ op: "desk_reply", desk, slot, text, after }, DESK_WAIT);
   }
 
   /** Opens a chat: its events come from now on. */

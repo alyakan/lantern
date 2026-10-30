@@ -3,7 +3,7 @@ import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, renderWith, waiting } from "../test/render";
-import type { DeskEntry } from "../view/desk";
+import { toKeep, type DeskEntry } from "../view/desk";
 import { HomeScreen } from "./HomeScreen";
 
 let mockMode: "desk" | "chats" = "desk";
@@ -66,17 +66,21 @@ const say = async (text: string) => {
 };
 
 describe("the Desk on the phone", () => {
-  it("is Home for a Mac that has one: this Desk's answers, what its chats are doing, and a tab for each Desk saying what waits there", async () => {
+  it("is Home for a Mac that has one: what needs you on top, this Desk's finished answers as one line each, and a tab for each Desk", async () => {
     const { h } = await open({ kind: "chat", slot: "a" });
-    expect(screen.getByText("Only approvals buzz now.")).toBeTruthy();
-    expect(screen.queryByText("Shipped 4.2.")).toBeNull();
-    expect(screen.getByText("Bash npm test")).toBeTruthy();
+    expect(screen.getByLabelText("Just finished")).toBeTruthy();
+    const line = screen.getByRole("button", { name: "Phone notifications: Only approvals buzz now." });
+    expect(screen.queryByRole("button", { name: "Release: Shipped 4.2." })).toBeNull();
+    // What the chats are doing now is the list's business, not the Desk's.
+    expect(screen.queryByText("Bash npm test")).toBeNull();
+    expect(screen.getByText("✓ Nothing needs you")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Work, 1 waiting" })).toBeTruthy();
-    await fireEvent.press(screen.getByText("Only approvals buzz now."));
+    await fireEvent.press(line);
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
-    // The other Desk: its own answers, and what waits on you there.
+    // The other Desk: its own answers, and what waits on you there, on top.
     await fireEvent.press(screen.getByRole("tab", { name: "Work, 1 waiting" }));
-    expect(screen.getByText("Shipped 4.2.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release: Shipped 4.2." })).toBeTruthy();
+    expect(screen.getByLabelText("Needs you")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Review" })).toBeTruthy();
   });
 
@@ -119,10 +123,19 @@ describe("the Desk on the phone", () => {
     const { h, session } = await open({ kind: "answer", terms: "testo", text: "- The demo is ready [1]", error: null, sources: [{ title: "Testo demo prep", project: "ios-app", updated_ms: 5, snippet: "", slot: "a" }, { title: "Plan Testo", project: "ios-app", updated_ms: 4, snippet: "", slot: null }] });
     await say("how are we on testo?");
     expect(screen.getByText("The demo is ready [1]")).toBeTruthy();
-    expect(screen.getByText("[2] Plan Testo · ios-app · on your Mac")).toBeTruthy();
-    await fireEvent.press(screen.getByText("[1] Testo demo prep · ios-app"));
+    expect(screen.getByText("2 Plan Testo · on your Mac")).toBeTruthy();
+    await fireEvent.press(screen.getByText("1 Testo demo prep"));
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
     expect(session.lastOf("send")).toBeUndefined();
+  });
+
+  it("lays out an answer in the Mac's shape: the sentence that answers, then Done, Open and Blocked", async () => {
+    await open({ kind: "answer", terms: "testo", text: "Almost done: one test is red.\n\n**Done**\n- Pairing [1]\n\n**Blocked**\n- UI test on CI [1]", error: null, sources: [{ title: "Testo", project: "ios-app", updated_ms: 5, snippet: "", slot: "a" }] });
+    await say("how are we on testo?");
+    expect(screen.getByText("Almost done: one test is red.")).toBeTruthy();
+    expect(screen.getByText("Done")).toBeTruthy();
+    expect(screen.getByText("UI test on CI [1]")).toBeTruthy();
+    expect(screen.queryByText("Open")).toBeNull();
   });
 
   it("says why when the Mac didn't answer, and doesn't send it anywhere", async () => {
@@ -137,5 +150,63 @@ describe("the Desk on the phone", () => {
     await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
     await waitFor(() => expect(screen.getByText("All chats")).toBeTruthy());
     expect(mockMode).toBe("chats");
+  });
+
+  describe("with a Mac whose Desk talks", () => {
+    async function talking(responses: Record<string, unknown>) {
+      const { controller } = makeController();
+      const session = attachSession(controller, { desk, send: null, ...responses }, ["desk", "desktalk"]);
+      const h = handlers();
+      await renderWith(<HomeScreen {...h} />, { connection: connectedWith(["desk", "desktalk"]), chats, waiting: [] }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+      return { h, session, controller };
+    }
+
+    it("only replies when it is only talked to, sending nothing", async () => {
+      const { session } = await talking({ desk_talk: { say: "Hi! Two chats are open.", route: null } });
+      await say("hi");
+      expect(screen.getByText("Hi! Two chats are open.")).toBeTruthy();
+      expect(session.lastOf("desk_route")).toBeUndefined();
+      expect(session.lastOf("send")).toBeUndefined();
+    });
+
+    it("tells the Mac the earlier exchanges, says what it understood, and sends it on, waiting for what comes back", async () => {
+      mockLog = [{ id: "old", desk: "home", at: 1, text: "fewer pushes", say: "On it.", outcome: { kind: "sent", slot: "a", title: "Phone notifications", started: false, queued: false } }];
+      const { session } = await talking({ desk_talk: { say: "Got it: quieter at night too.", route: { kind: "chat", slot: "a" } } });
+      await say("and quieter at night");
+      expect(session.lastOf("desk_talk")).toEqual({ op: "desk_talk", desk: "home", text: "and quieter at night", history: [{ you: "fewer pushes", desk: 'On it. (sent to "Phone notifications")' }] });
+      expect(screen.getByText("Got it: quieter at night too.")).toBeTruthy();
+      expect(session.lastOf("send")).toMatchObject({ slot: "a", text: "and quieter at night" });
+      expect(mockLog[mockLog.length - 1].reply).toEqual({ status: "waiting", after: chats[0].last_seq });
+    });
+
+    it("asks the Mac what came back once the chat moved on and stopped working, once, and shows it summed up", async () => {
+      const { session, controller } = await talking({
+        desk_talk: { say: "On it.", route: { kind: "chat", slot: "a" } },
+        desk_reply: { done: true, failed: false, off: false, summary: "Capped the delay at 8s and added a test.", full: "I capped it at **8s**.", error: null },
+      });
+      await say("cap the delay");
+      const after = chats[0].last_seq;
+      expect(session.lastOf("desk_reply")).toBeUndefined();
+      // The chat works on it, then is done: only then is the Mac asked.
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: chats.map((c) => (c.slot === "a" ? { ...c, status: "working", last_seq: after + 3 } : c)) } }));
+      expect(session.lastOf("desk_reply")).toBeUndefined();
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: chats.map((c) => (c.slot === "a" ? { ...c, status: "idle", last_seq: after + 6 } : c)) } }));
+      await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+      expect(session.lastOf("desk_reply")).toEqual({ op: "desk_reply", desk: "home", slot: "a", text: "cap the delay", after });
+      expect(screen.getByText("Capped the delay at 8s and added a test.")).toBeTruthy();
+      await fireEvent.press(screen.getByText("Show full answer"));
+      expect(screen.getByText("8s")).toBeTruthy();
+      expect(session.asked.filter((r) => r.op === "desk_reply")).toHaveLength(1);
+      // Kept on the phone without Claude's whole words.
+      expect(toKeep(mockLog[mockLog.length - 1]).reply).toEqual({ status: "done", failed: false, summary: "Capped the delay at 8s and added a test." });
+    });
+
+    it("drops what it said when the chat it picked can't take it", async () => {
+      await talking({ desk_talk: { say: "Sending it on.", route: { kind: "chat", slot: "gone" } } });
+      await say("fix it");
+      expect(screen.queryByText("Sending it on.")).toBeNull();
+      expect(screen.getByText("That chat is closed.")).toBeTruthy();
+    });
   });
 });

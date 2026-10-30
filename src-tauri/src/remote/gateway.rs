@@ -29,6 +29,8 @@ pub const HANDSHAKE_WAIT: Duration = Duration::from_secs(10);
 pub const HANDSHAKES_AT_ONCE: usize = 4;
 /// The longest message a phone may send to a chat.
 pub const TEXT_MAX: usize = 100_000;
+/// The most of a chat's reply a phone's Desk is sent with its summary, for "Show full answer".
+const DESK_FULL_MAX: usize = 8_000;
 /// About how big a page of a Reset is, in bytes of JSON.
 const PAGE_BYTES: usize = 512 << 10;
 /// How many slow requests (what Claude suggests, a chat starting, a reviewed file's diff) one phone may have going at once. They run beside the
@@ -143,6 +145,15 @@ pub trait Host: Send + Sync + 'static {
     /// and the `projects` (labels) as data. A host that can't ask says it can't tell.
     fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Route> {
         Box::pin(async move { crate::desk::Route::Ask { chats: chats.into_iter().take(3).map(|c| c.id).collect(), unsure: true } })
+    }
+    /// The Desk talking (see desk.rs `talk`): what it says back, and what it does, shown `history`, `chats` and `projects` as
+    /// data. A host that can't ask says nothing and lets the user pick.
+    fn desk_talk(&self, _text: String, _history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
+        Box::pin(async move { crate::desk::Talk { say: String::new(), route: Some(crate::desk::Route::Ask { chats: chats.into_iter().take(3).map(|c| c.id).collect(), unsure: true }) } })
+    }
+    /// A short summary of a chat's reply to what was asked from the Desk (see desk.rs `summary`). A host that can't ask says so.
+    fn desk_summary(&self, _question: String, _reply: String) -> BoxFut<Result<String, String>> {
+        Box::pin(async { Err("This Mac can't sum that up.".to_string()) })
     }
     /// Past chats whose words have `terms`, newest first, as History's search finds them. A host with no history says so.
     fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
@@ -327,39 +338,53 @@ impl Gateway {
     /// that runs on another provider than Claude by its id and project only (what is said there is never put to Claude); what it
     /// answers is checked against them, and a new chat's project against the user's projects. Nothing is sent from here.
     pub async fn desk_route(&self, desk: String, text: String) -> Result<serde_json::Value, String> {
-        let question = text.clone();
-        use crate::desk::Route;
-        use protocol::RemoteDeskRoute as R;
+        let (routing, chats, labels) = self.desk_shown(&desk, &text)?;
+        let route = self.host.clone().desk_route(text.clone(), chats.clone(), labels).await;
+        let answer = self.desk_act(route, text, &routing, &chats).await;
+        serde_json::to_value(&answer).map_err(|e| e.to_string())
+    }
+
+    /// What the Desk is shown of Desk `desk` for a message: its open chats (one on another provider than Claude by its id and project
+    /// only) and its projects' labels. Refused for an empty or too long message, or a Desk that isn't there.
+    fn desk_shown(&self, desk: &str, text: &str) -> Result<(super::desk::Routing, Vec<crate::desk::Candidate>, Vec<String>), String> {
         if text.trim().is_empty() || text.len() > TEXT_MAX {
             return Err("That message is empty, or too long.".into());
         }
-        let mut routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
+        let mut routing = self.hub.desk.routing(desk).ok_or("That Desk isn't on your Mac any more.")?;
         let chats: Vec<crate::desk::Candidate> = std::mem::take(&mut routing.chats)
             .into_iter()
             .filter(|c| self.hub.chat(&c.id).is_some())
             .map(|c| if self.hub.is_off_claude(&c.id) { crate::desk::Candidate { title: String::new(), last: String::new(), ..c } } else { c })
             .collect();
-        let first = |chats: &[crate::desk::Candidate]| chats.iter().take(3).map(|c| c.id.clone()).collect::<Vec<_>>();
         let labels: Vec<String> = routing.projects.iter().map(|(_, label)| label.clone()).collect();
+        Ok((routing, chats, labels))
+    }
+
+    /// The router's (or the talking Desk's) choice for `question`, checked against the Desk's chats and the user's projects, as
+    /// the phone is told it: a search or a question about how things stand is done here.
+    async fn desk_act(&self, route: crate::desk::Route, question: String, routing: &super::desk::Routing, chats: &[crate::desk::Candidate]) -> protocol::RemoteDeskRoute {
+        use crate::desk::Route;
+        use protocol::RemoteDeskRoute as R;
+        let first = |chats: &[crate::desk::Candidate]| chats.iter().take(3).map(|c| c.id.clone()).collect::<Vec<_>>();
         let host = self.host.clone();
-        let answer = match host.desk_route(text, chats.clone(), labels).await {
+        match route {
             Route::Route { chat } if chats.iter().any(|c| c.id == chat) => R::Chat { slot: chat },
             Route::Start { project, workflow } => {
                 let folder = routing.projects.iter().find(|(_, label)| *label == project).map(|(folder, _)| folder.clone());
                 let known = host.projects().await;
                 match (folder.filter(|f| known.iter().any(|(k, _)| k == f)), protocol::RemoteWorkflow::parse(&workflow)) {
                     (Some(project), Some(workflow)) if workflow != protocol::RemoteWorkflow::Team => R::Start { project, workflow },
-                    _ => R::Ask { slots: first(&chats), unsure: true },
+                    _ => R::Ask { slots: first(chats), unsure: true },
                 }
             }
             Route::Ask { chats: picked, unsure } => R::Ask { slots: picked.into_iter().filter(|id| chats.iter().any(|c| c.id == *id)).collect(), unsure },
-            Route::Search { terms } => match self.desk_found(&terms, &routing).await {
+            Route::Search { terms } => match self.desk_found(&terms, routing).await {
                 Ok(found) => R::Search { terms, hits: found.into_iter().take(5).map(|(hit, _)| hit).collect(), failed: false },
                 Err(_) => R::Search { terms, hits: vec![], failed: true },
             },
             // Answered here, from the Desk's chats about it, open or past: only the user is shown it.
             // A chat that ran on another provider is never read for it: nothing said there is put to Claude.
-            Route::Answer { terms } => match self.desk_found(&terms, &routing).await.map(|found| {
+            Route::Answer { terms } => match self.desk_found(&terms, routing).await.map(|found| {
                 found.into_iter().filter(|(hit, chat)| !self.hub.desk.off_claude(&chat.id) && !hit.slot.as_deref().is_some_and(|s| self.hub.is_off_claude(s))).take(crate::desk::ANSWER_CHATS).collect::<Vec<_>>()
             }) {
                 Ok(found) if found.is_empty() => R::Answer { terms, text: String::new(), sources: vec![], error: None },
@@ -372,9 +397,52 @@ impl Gateway {
                 }
                 Err(e) => R::Answer { terms, text: String::new(), sources: vec![], error: Some(e) },
             },
-            Route::Route { .. } => R::Ask { slots: first(&chats), unsure: true },
+            Route::Route { .. } => R::Ask { slots: first(chats), unsure: true },
+        }
+    }
+
+    /// What the Desk says back to a message typed on a phone's Desk, and what it does (Request::DeskTalk). What it does is checked
+    /// as the router's choice is; when that can't be done, what it said is dropped (it may say it did what wasn't).
+    pub async fn desk_talk(&self, desk: String, text: String, history: Vec<protocol::RemoteDeskExchange>) -> Result<serde_json::Value, String> {
+        use crate::desk::Route;
+        let (routing, chats, labels) = self.desk_shown(&desk, &text)?;
+        let history: Vec<crate::desk::Exchange> = history.into_iter().rev().take(crate::desk::HISTORY_MAX).rev().map(|h| crate::desk::Exchange { you: h.you, desk: h.desk }).collect();
+        let talk = self.host.clone().desk_talk(text.clone(), history, chats.clone(), labels).await;
+        let picked_ask = matches!(talk.route, Some(Route::Ask { .. }));
+        let route = match talk.route {
+            Some(route) => Some(self.desk_act(route, text, &routing, &chats).await),
+            None => None,
         };
-        serde_json::to_value(&answer).map_err(|e| e.to_string())
+        let fell_back = matches!(route, Some(protocol::RemoteDeskRoute::Ask { unsure: true, .. })) && !picked_ask;
+        let say = if fell_back { String::new() } else { talk.say };
+        serde_json::to_value(protocol::RemoteDeskTalk { say, route }).map_err(|e| e.to_string())
+    }
+
+    /// What came back from the chat a phone's Desk message went to (Request::DeskReply): the turn the message started after the
+    /// chat's event `after`, once finished, summed up. Only a chat on that Desk; nothing from a chat on another provider is summed up.
+    pub async fn desk_reply(&self, desk: String, slot: String, text: String, after: u64) -> Result<serde_json::Value, String> {
+        use protocol::RemoteDeskReply as R;
+        let routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
+        if !routing.chats.iter().any(|c| c.id == slot) || self.hub.chat(&slot).is_none() {
+            return Err("That chat isn't on this Desk any more.".into());
+        }
+        let events = match self.hub.since(&slot, 0).ok_or("That chat is closed.")? {
+            super::hub::Since::Events(events) | super::hub::Since::TooOld { kept: events } => events,
+        };
+        let waiting = R { done: false, failed: false, off: false, summary: None, full: String::new(), error: None };
+        let Some(replied) = crate::desk::reply_in(events.iter().map(|e| (e.seq, &e.event)), &text, after) else { return serde_json::to_value(waiting).map_err(|e| e.to_string()) };
+        let answer = if self.hub.is_off_claude(&slot) {
+            R { done: true, failed: replied.failed, off: true, summary: None, full: String::new(), error: None }
+        } else if replied.said.trim().is_empty() {
+            R { done: true, failed: replied.failed, off: false, summary: Some(if replied.failed { "It failed without saying why.".into() } else { "It finished without saying anything.".into() }), full: String::new(), error: None }
+        } else {
+            let full: String = replied.said.chars().take(DESK_FULL_MAX).collect();
+            match self.host.clone().desk_summary(text, full.clone()).await {
+                Ok(summary) => R { done: true, failed: replied.failed, off: false, summary: Some(summary), full, error: None },
+                Err(e) => R { done: true, failed: replied.failed, off: false, summary: None, full, error: Some(e) },
+            }
+        };
+        serde_json::to_value(answer).map_err(|e| e.to_string())
     }
 
     /// The past chats of a Desk's projects that say `terms`, newest first, the first few: as a phone is shown them, and as the
@@ -757,11 +825,13 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
                         Request::DeskRoute { desk, text } => slow.push(Box::pin(async move { (id, gw.desk_route(desk, text).await) })),
+                        Request::DeskTalk { desk, text, history } => slow.push(Box::pin(async move { (id, gw.desk_talk(desk, text, history).await) })),
+                        Request::DeskReply { desk, slot, text, after } => slow.push(Box::pin(async move { (id, gw.desk_reply(desk, slot, text, after).await) })),
                         Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
                         Request::Diff { slot, path } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path).await) })),
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
@@ -1123,6 +1193,8 @@ impl<'a> Session<'a> {
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::Desk => Ok(json(&self.gw.hub.desk.phone().0)),
             Request::DeskRoute { desk, text } => self.gw.desk_route(desk, text).await,
+            Request::DeskTalk { desk, text, history } => self.gw.desk_talk(desk, text, history).await,
+            Request::DeskReply { desk, slot, text, after } => self.gw.desk_reply(desk, slot, text, after).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
             Request::PushKey { key } => self.gw.store.set_push_key(&self.device, &key).map(|()| serde_json::Value::Null),
             Request::LiveActivity { start_token, card } => {
@@ -1292,6 +1364,11 @@ pub(crate) mod tests {
         pub desk_answer: Mutex<Option<crate::desk::Route>>,
         pub desk_shown: Mutex<Vec<(Vec<crate::desk::Candidate>, Vec<String>)>>,
         pub desk_hits: Mutex<Vec<crate::history_search::ChatHit>>,
+        /// What the talking Desk says (it does what `desk_answer` says, or only replies when that is None), what it was shown of
+        /// the earlier exchanges, and the replies it was asked to sum up.
+        pub desk_say: Mutex<String>,
+        pub desk_history: Mutex<Vec<Vec<crate::desk::Exchange>>>,
+        pub desk_summed: Mutex<Vec<String>>,
     }
 
     impl Host for FakeHost {
@@ -1388,6 +1465,16 @@ pub(crate) mod tests {
             self.desk_shown.lock().unwrap().push((chats, projects));
             let answer = self.desk_answer.lock().unwrap().clone().unwrap_or(crate::desk::Route::Ask { chats: vec![], unsure: true });
             Box::pin(async move { answer })
+        }
+        fn desk_talk(&self, _text: String, history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
+            self.desk_shown.lock().unwrap().push((chats, projects));
+            self.desk_history.lock().unwrap().push(history);
+            let talk = crate::desk::Talk { say: self.desk_say.lock().unwrap().clone(), route: self.desk_answer.lock().unwrap().clone() };
+            Box::pin(async move { talk })
+        }
+        fn desk_summary(&self, _question: String, reply: String) -> BoxFut<Result<String, String>> {
+            self.desk_summed.lock().unwrap().push(reply.clone());
+            Box::pin(async move { Ok(format!("In short: {reply}")) })
         }
         fn desk_search(&self, _terms: String) -> BoxFut<Result<Vec<crate::history_search::ChatHit>, String>> {
             let hits = self.desk_hits.lock().unwrap().clone();
@@ -3009,6 +3096,66 @@ pub(crate) mod tests {
         assert!(err.is_some_and(|e| e.contains("isn't on your Mac")));
         let (_, err, _) = p.ask(Request::DeskRoute { desk: "home".into(), text: "  ".into() }).await;
         assert!(err.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_phones_desk_talks_back_follows_the_conversation_and_drops_what_it_said_when_what_it_picked_cant_be_done() {
+        let r = rig();
+        for slot in ["a", "w"] {
+            r.hub.opened(slot, "/Users/me/app");
+        }
+        r.hub.desk.set(desk_said(&["a"]));
+        let (_, mut p) = paired(&r).await;
+        let talk = |text: &str, history: usize| Request::DeskTalk { desk: "home".into(), text: text.into(), history: (0..history).map(|i| protocol::RemoteDeskExchange { you: format!("said {i}"), desk: format!("did {i}") }).collect() };
+        // Only talking: nothing to do.
+        *r.host.desk_say.lock().unwrap() = "Hi! One chat is open.".into();
+        *r.host.desk_answer.lock().unwrap() = None;
+        assert_eq!(p.ask(talk("hi", 0)).await.0.unwrap(), json!({"say": "Hi! One chat is open.", "route": null}));
+        // To a chat on the Desk, with the last exchanges (only the last few).
+        *r.host.desk_say.lock().unwrap() = "On it.".into();
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Route { chat: "a".into() });
+        assert_eq!(p.ask(talk("and the footer", 12)).await.0.unwrap(), json!({"say": "On it.", "route": {"kind": "chat", "slot": "a"}}));
+        let seen = r.host.desk_history.lock().unwrap().last().unwrap().clone();
+        assert_eq!((seen.len(), seen[0].you.as_str()), (crate::desk::HISTORY_MAX, "said 4"));
+        // A chat of another Desk: the user is asked, and what the Desk said (it sent it) is dropped.
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Route { chat: "w".into() });
+        assert_eq!(p.ask(talk("the login bug", 0)).await.0.unwrap(), json!({"say": "", "route": {"kind": "ask", "slots": ["a"], "unsure": true}}));
+        // Asking of its own accord keeps what it said.
+        *r.host.desk_say.lock().unwrap() = "Which one?".into();
+        *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Ask { chats: vec!["a".into()], unsure: false });
+        assert_eq!(p.ask(talk("fix it", 0)).await.0.unwrap()["say"], "Which one?");
+    }
+
+    #[tokio::test]
+    async fn a_phones_desk_message_is_summed_up_once_its_turn_finished_and_never_from_a_chat_off_claude_or_off_the_desk() {
+        let r = rig();
+        for slot in ["a", "b", "w"] {
+            r.hub.opened(slot, "/Users/me/app");
+        }
+        r.hub.set_off_claude("b", true);
+        r.hub.desk.set(desk_said(&["a", "b"]));
+        let (_, mut p) = paired(&r).await;
+        let user = |t: &str| UiEvent::UserText { text: t.into(), at: None, sent_by: None, images: 0 };
+        let claude = |t: &str| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: t.into() };
+        let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        let reply = |slot: &str, after: u64| Request::DeskReply { desk: "home".into(), slot: slot.into(), text: "cap the delay".into(), after };
+        // An earlier turn with the same words, before the message was sent (event 2), isn't it.
+        for (seq, e) in [user("cap the delay"), claude("Old answer."), done.clone(), user("[Lantern: a note]\n\ncap the delay"), claude("Looking.")].into_iter().enumerate() {
+            r.hub.record(&BusEvent { slot: "a".into(), seq: seq as u64 + 1, event: e });
+        }
+        assert_eq!(p.ask(reply("a", 3)).await.0.unwrap()["done"], false, "still running");
+        r.hub.record(&BusEvent { slot: "a".into(), seq: 6, event: claude("Capped it at 8s.") });
+        r.hub.record(&BusEvent { slot: "a".into(), seq: 7, event: done.clone() });
+        assert_eq!(p.ask(reply("a", 3)).await.0.unwrap(), json!({"done": true, "failed": false, "off": false, "summary": "In short: Capped it at 8s.", "full": "Capped it at 8s.", "error": null}));
+        // A chat on another provider: finished, but nothing said there is summed up.
+        for (seq, e) in [user("cap the delay"), claude("Secret."), done.clone()].into_iter().enumerate() {
+            r.hub.record(&BusEvent { slot: "b".into(), seq: seq as u64 + 1, event: e });
+        }
+        assert_eq!(p.ask(reply("b", 0)).await.0.unwrap(), json!({"done": true, "failed": false, "off": true, "summary": null, "full": "", "error": null}));
+        assert_eq!(*r.host.desk_summed.lock().unwrap(), vec!["Capped it at 8s.".to_string()]);
+        // A chat open on the Mac but not on this Desk is never read for it.
+        let (_, err, _) = p.ask(reply("w", 0)).await;
+        assert!(err.is_some_and(|e| e.contains("isn't on this Desk")));
     }
 
     #[tokio::test]

@@ -211,6 +211,12 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     go({ type: tablet ? "jump_to_chat" : "open_chat", slot });
     setChatsOpen(false);
   };
+  // A tablet's Desk is in its main area, where no chat is open: back to that.
+  const openDesk = () => {
+    movePanes();
+    go({ type: "home" });
+    setChatsOpen(false);
+  };
   const review = (slot: string, requestId: string) => {
     go({ type: tablet ? "jump_to_review" : "review", slot, requestId });
     setChatsOpen(false);
@@ -273,7 +279,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} onOpenDesk={tablet ? openDesk : undefined} deskShown={tablet && !selectedSlot} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {
@@ -293,7 +299,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} onStartNew={startNew} />
+          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
