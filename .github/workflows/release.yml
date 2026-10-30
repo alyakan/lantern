@@ -7,16 +7,32 @@ on:
 permissions:
   contents: write
 
+# A tag pushed by someone in CI_RUNNER_USERS builds on CI_RUNNER, that person's own Mac (as CI does, see ci.yml); anyone else's
+# on GitHub's. On that Mac the Developer ID certificate goes into a keychain of tauri's own, made for the build and deleted
+# after it (the login keychain and the default one are left alone), and the notarization key is deleted however the job ends.
 jobs:
   macos:
-    runs-on: macos-latest
+    runs-on: ${{ contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"macos-latest"') || 'macos-latest' }}
     # The Apple signing secrets live in this environment, which only v* tags can use.
     environment: release
+    env:
+      # A self-hosted runner's background service sets no locale.
+      LANG: en_US.UTF-8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The release notes read the history back to the previous tag.
           fetch-depth: 0
+
+      # The keychains this user searches, as they are before the build: a build cancelled half-way leaves tauri's own behind
+      # (with the certificate in it), and the last step takes it away again.
+      - name: Note the keychains
+        run: security list-keychains -d user | sed -e 's/^ *"//' -e 's/" *$//' > "$RUNNER_TEMP/keychains-before.txt"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
 
       - name: Tag matches the app version
         env:
@@ -40,11 +56,6 @@ jobs:
             done
             exit 1
           fi
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
 
       # Apple Silicon only (from 0.1.32): one build instead of a universal one's two. Intel Macs stay on 0.1.31, the last
       # universal release; the updater's manifest only lists darwin-aarch64 from here on.
@@ -120,3 +131,21 @@ jobs:
           spctl -a -vv -t exec "$app" 2>&1 | tee "$RUNNER_TEMP/app-assessment.txt"
           grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/app-assessment.txt"
           gh release upload "$TAG" "$dmg" --clobber
+
+      # A runner that is someone's own Mac keeps its files: the key goes, whatever happened above.
+      - name: Remove the notarization key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      # Any keychain the build added and left (a cancel kills tauri before it deletes its own) goes, and the list is put back.
+      - name: Put the keychains back
+        if: always()
+        run: |
+          before="$RUNNER_TEMP/keychains-before.txt"
+          [ -s "$before" ] || exit 0
+          security list-keychains -d user | sed -e 's/^ *"//' -e 's/" *$//' | while IFS= read -r k; do
+            if ! grep -qxF "$k" "$before"; then
+              security delete-keychain "$k" || true
+            fi
+          done
+          tr '\n' '\0' < "$before" | xargs -0 security list-keychains -d user -s
