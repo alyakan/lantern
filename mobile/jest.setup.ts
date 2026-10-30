@@ -104,3 +104,6 @@ try {
 } catch {
   // The integration tests run on plain Node, with no React Native.
 }
+
+// Where Step by step chats were read is held for the app's life: each test starts with none.
+beforeEach(() => require("./src/view/stepPlace").forgetPlaces());

@@ -20,7 +20,8 @@ import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
-import { StepNav, StepPager } from "./StepPager";
+import { StepNav, StepPager, type PagePlaces } from "./StepPager";
+import { keepOffset, keepPage, placeOf } from "../view/stepPlace";
 import { changedFiles } from "../view/changes";
 import { ChangesPane } from "./ChangesPane";
 import { ArtifactsPane } from "./ArtifactsPane";
@@ -35,7 +36,7 @@ import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsBar, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
@@ -172,9 +173,27 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const newest = pages.length ? [...pages[pages.length - 1].rows].reverse().find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page") : undefined;
   const paged = stepsChat && !asList && pages.length > 0;
   const [picked, setPicked] = useState<{ index: number; of: number } | null>(null);
+  // Opened again, it is on the page it was left on (and says so if new ones came meanwhile), as soon as its pages are loaded:
+  // before the pages are first drawn, so they don't slide there from the newest.
+  const placed = useRef(false);
+  if (!placed.current && pages.length > 0) {
+    placed.current = true;
+    const left = placeOf(slot);
+    const i = left ? pages.findIndex((p) => p.key === left.page) : -1;
+    const of = left?.of || pages.length;
+    if (i >= 0 && (i < pages.length - 1 || pages.length > of)) setPicked({ index: i, of });
+  }
   const pageAt = picked ? Math.min(picked.index, pages.length - 1) : pages.length - 1;
   const freshPage = !!picked && pages.length > picked.of;
   const toPage = (i: number) => setPicked(i >= pages.length - 1 ? null : { index: i, of: pages.length });
+  const pageKey = pages[pageAt]?.key;
+  const pageOf = picked ? picked.of : pages.length;
+  useEffect(() => {
+    if (paged && pageKey) keepPage(slot, pageKey, pageOf);
+  }, [paged, slot, pageKey, pageOf]);
+  const places = useMemo<PagePlaces>(() => ({ offset: (page) => placeOf(slot)?.offsets[page], keep: (page, y) => keepOffset(slot, page, y) }), [slot]);
+  // How tall the newest page's floating buttons are: the page makes that much more room under its last line.
+  const [floatHeight, setFloatHeight] = useState(0);
   // Opening the search (nothing typed yet) changes none of these, so the list isn't drawn again then, while the keyboard comes.
   const query = find?.query ?? null;
   const matches = useMemo(() => (query === null ? NO_MATCHES : findRows(rows, query)), [rows, query]);
@@ -708,8 +727,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         }
       />
   );
-  // The newest page's buttons go at its end, and stay while the step is talked about (until one is pressed, or Claude is at work).
-  const heading = paged ? newest : undefined;
+  // The newest page's buttons float above the message box while it is on screen, and stay while the step is talked about (until
+  // one is pressed, or Claude is at work). On an older page there are none: they would answer a page not on screen.
+  const heading = paged && pageAt === pages.length - 1 ? newest : undefined;
   // A Review file page's Next carries its verdicts, as the Mac's does ("Next. Agreed: line 42."; a plain "Next" with none).
   const nextOf = (h: Extract<Row, { kind: "page" }>, a: PageAction): PageAction => {
     const file = a.reply === "Next" ? reviewOf(h) : null;
@@ -717,8 +737,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const message = verdictMessage(file.findings, verdicts[h.item.id]);
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
-  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
+  const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (
@@ -736,6 +756,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             {body}
           </View>
           {riding(jump)}
+          {riding(pageBar)}
           {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
               the top, where the clock is, to nothing below) so the words under them never run into them. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
@@ -757,6 +778,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
             {body}
             {riding(jump)}
+            {riding(pageBar)}
           </View>
           <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>
         </>

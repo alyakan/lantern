@@ -12,6 +12,7 @@ import { forgetLastKnown } from "../lastKnown";
 import { forgetUsageHistory } from "../usageHistory";
 import { forgetDrafts } from "../drafts";
 import { forgetPins } from "../pins";
+import { forgetPlaces } from "../view/stepPlace";
 import { pushKeyStore } from "../platformPushKey";
 
 export interface ControllerDeps {
@@ -129,11 +130,12 @@ export class Controller {
   async unpair() {
     await this.connection.forget();
     this.sync.reset();
-    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, pins) goes with it.
+    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, pins, where Step by step chats were read) goes with it.
     void forgetLastKnown();
     void forgetUsageHistory();
     void forgetDrafts();
     void forgetPins();
+    forgetPlaces();
     // The key for the words of notifications was for this Mac: it goes with the pairing.
     void pushKeyStore?.forget().catch(() => {});
   }

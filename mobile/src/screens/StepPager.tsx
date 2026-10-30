@@ -8,19 +8,51 @@ import { control, useColors } from "../ui/theme";
 import type { StepPage } from "../view/stepPages";
 import type { Row } from "../view/timeline";
 
+/** Where each page was scrolled to, kept by the chat so it opens there again (see view/stepPlace.ts). */
+export interface PagePlaces {
+  offset: (page: string) => number | undefined;
+  keep: (page: string, y: number) => void;
+}
+
 /**
  * One page, read top to bottom. The newest one goes down to what was just said, as a chat does. It rises with the keyboard as the
  * chat's list does (`lift`: the keyboard's height less the room the bar already has under it), so what was just said stays above the bar.
+ *
+ * It opens where it was left (`places`). A page never read opens at its top, unless it is the newest and was talked about after
+ * Claude wrote it: then at its end, where the talk is.
  */
-function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, footer, lift }: { page: StepPage; n: number; width: number; newest: boolean; renderRow: (r: { item: Row }) => ReactElement; padTop: number; padBottom: number; footer: ReactNode; lift: number }) {
+function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, footer, lift, places }: { page: StepPage; n: number; width: number; newest: boolean; renderRow: (r: { item: Row }) => ReactElement; padTop: number; padBottom: number; footer: ReactNode; lift: number; places?: PagePlaces }) {
   const scroll = useRef<ScrollViewInstance>(null);
   const count = useRef(page.rows.length);
   useEffect(() => {
     if (newest && page.rows.length > count.current) scroll.current?.scrollToEnd({ animated: true });
     count.current = page.rows.length;
   }, [newest, page.rows.length]);
+  // Put back where it was once there is something to scroll; until then a scroll (the page being laid out) isn't a place to keep.
+  const placed = useRef(false);
+  const seen = useRef(0);
+  const place = (height: number) => {
+    if (placed.current || height <= 0) return;
+    placed.current = true;
+    const y = places?.offset(page.key);
+    if (y !== undefined) scroll.current?.scrollTo({ y: Math.max(0, Math.min(y, height - seen.current)), animated: false });
+    else if (newest && talkedAbout(page)) scroll.current?.scrollToEnd({ animated: false });
+  };
   return (
-    <KeyboardChatScrollView ref={scroll} testID={`step-page-${n}`} style={{ width }} contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" offset={lift} keyboardLiftBehavior="always">
+    <KeyboardChatScrollView
+      ref={scroll}
+      testID={`step-page-${n}`}
+      style={{ width }}
+      contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
+      offset={lift}
+      keyboardLiftBehavior="always"
+      onLayout={(e) => (seen.current = e.nativeEvent.layout.height)}
+      onContentSizeChange={(_, h) => place(h)}
+      scrollEventThrottle={100}
+      onScroll={(e) => placed.current && places?.keep(page.key, e.nativeEvent.contentOffset.y)}
+    >
       {page.rows.map((r) => (
         <View key={r.key}>{renderRow({ item: r })}</View>
       ))}
@@ -29,8 +61,11 @@ function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, foot
   );
 }
 
+/** Something was said on the page after its newest heading (a question about the step, its answer). */
+const talkedAbout = (page: StepPage) => page.rows.length > 0 && page.rows[page.rows.length - 1].kind !== "page";
+
 /** Step by step's pages side by side, one on screen: a swipe goes to the one before or after, as the Mac's Previous and Next do. */
-export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, footer, lift = 0, held = false }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** Under the newest page: what Claude is doing. */ footer?: ReactNode; /** What the keyboard's height is cut by before the pages rise with it (the room the bar has under it already). */ lift?: number; /** A swipe to allow is being dragged: the pages hold still, so the drag can't take them to the one before. */ held?: boolean }) {
+export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBottom = 0, endRoom = 0, footer, lift = 0, held = false, places }: { pages: StepPage[]; index: number; onIndex: (i: number) => void; renderRow: (r: { item: Row }) => ReactElement; padTop?: number; padBottom?: number; /** More room under the newest page's end: its buttons float there. */ endRoom?: number; /** Where each page was left. */ places?: PagePlaces; /** Under the newest page: what Claude is doing. */ footer?: ReactNode; /** What the keyboard's height is cut by before the pages rise with it (the room the bar has under it already). */ lift?: number; /** A swipe to allow is being dragged: the pages hold still, so the drag can't take them to the one before. */ held?: boolean }) {
   const screen = useWindowDimensions().width;
   const [width, setWidth] = useState(screen);
   const list = useRef<FlatList<StepPage>>(null);
@@ -68,7 +103,10 @@ export function StepPager({ pages, index, onIndex, renderRow, padTop = 0, padBot
           shown.current = i;
           if (i !== index) onIndex(i);
         }}
-        renderItem={({ item, index: i }) => <PageScroll page={item} n={i} width={width} newest={i === pages.length - 1} renderRow={renderRow} padTop={padTop} padBottom={padBottom} footer={footer} lift={lift} />}
+        renderItem={({ item, index: i }) => {
+          const newest = i === pages.length - 1;
+          return <PageScroll page={item} n={i} width={width} newest={newest} renderRow={renderRow} padTop={padTop} padBottom={padBottom + (newest ? endRoom : 0)} footer={footer} lift={lift} places={places} />;
+        }}
       />
     </View>
   );
