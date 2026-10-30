@@ -9,7 +9,8 @@ import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { RouteCandidate } from "./lib/desk";
+import type { AsideEvent, ChatSearchResults, DeskRoute, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -217,6 +218,8 @@ export const api = {
   stopTask: (slot: string, taskId: string) => invoke<void>("stop_task", { slot, taskId }),
   listSessions: (folder: string) => invoke<SessionSummary[]>("list_sessions", { folder }),
   searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
+  /** Where a message typed on the Desk goes (see desk.rs): the window then sends the user's own words there. */
+  deskRoute: (claudePath: string, text: string, chats: RouteCandidate[], projects: string[]) => invoke<DeskRoute>("desk_route", { claudePath, text, chats, projects }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
   renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
   /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */

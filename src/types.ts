@@ -407,6 +407,14 @@ export interface ChatHit {
   snippets: { role: "user" | "assistant"; pieces: ChatPiece[] }[];
 }
 
+/** Where the Desk's router sends a message (desk.rs's Route). */
+export type DeskRoute =
+  | { kind: "route"; chat: string }
+  | { kind: "start"; project: string; workflow: "chat" | "steps" }
+  /** `unsure`: the router couldn't be asked, or answered something unusable. */
+  | { kind: "ask"; chats: string[]; unsure: boolean }
+  | { kind: "search"; terms: string };
+
 export interface ChatSearchResults {
   /** Newest first. */
   chats: ChatHit[];

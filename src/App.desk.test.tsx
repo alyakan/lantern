@@ -47,6 +47,45 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeNull());
   });
 
+  const type = async (text: string) => {
+    const box = await screen.findByRole("textbox", { name: "Tell Lantern" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeDisabled());
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.keyDown(box, { key: "Enter" });
+  };
+
+  it("sends what is typed to the chat picked in the box, and says where it went", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const to = screen.getByRole("combobox", { name: "Send to" });
+    const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
+    fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
+    await type("Add retries to fetchJson");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: Add retries to fetchJson" });
+    await waitFor(() => expect(entry).toHaveTextContent(/sent to/));
+    // It went into the chat, as if typed there.
+    fireEvent.click(within(entry).getByRole("button", { name: /New chat|Add retries/ }));
+    await waitFor(() => expect(desk()).toBeNull());
+    expect(await screen.findAllByText("Add retries to fetchJson")).not.toHaveLength(0);
+  });
+
+  it("lets the Desk start a chat for new work, in a project on the Desk", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    await type("new: a dark mode for the docs");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: new: a dark mode for the docs" });
+    await waitFor(() => expect(entry).toHaveTextContent(/started/));
+    expect(desk()).toBeInTheDocument();
+  });
+
+  it("answers \"which chat…?\" with the past chats that mention it", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    await type("which chat had the oauth redirect");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: which chat had the oauth redirect" });
+    await waitFor(() => expect(within(entry).getByText(/Chats that mention|No chat on this Desk mentions/)).toBeInTheDocument());
+  });
+
   it("opens on the chat as before when not asked to start on the Desk", async () => {
     await launch(false);
     await screen.findByRole("button", { name: /^Permissions: / });

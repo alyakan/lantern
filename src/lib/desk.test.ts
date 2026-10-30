@@ -86,8 +86,8 @@ describe("the Desk's live line", () => {
 });
 
 describe("a card's text", () => {
-  it("drops markdown's marks", () => {
-    expect(plain("# Done\n\n- **bold** and `code`, a [link](http://x)\n```\nhidden\n```")).toBe("Done\n\nbold and code, a link\n ");
+  it("drops markdown's marks, keeping a bullet for each item of a list", () => {
+    expect(plain("# Done\n\n- **bold** and `code`, a [link](http://x)\n```\nhidden\n```")).toBe("Done\n\n• bold and code, a link\n ");
   });
 
   it("is left whole when it fits", () => {

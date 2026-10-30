@@ -7,6 +7,7 @@
 import type { State } from "../store";
 import { chatState, type Chats } from "../sessions";
 import { projectLabels, type ProjectOpen } from "./sidebar";
+import { workflowOf } from "./workflow";
 
 /** One answer that finished, in some chat. */
 export interface DeskCard {
@@ -51,12 +52,12 @@ export function clip(text: string, max: number): string {
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}…`;
 }
 
-/** Markdown's marks left out of a card's plain line: headings, emphasis, code ticks, link targets, list bullets. */
+/** Markdown's marks left out of a card's plain line: headings, emphasis, code ticks, link targets; a list's items keep a bullet, so they don't run together. */
 export function plain(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/gm, "")
+    .replace(/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/gm, "• ")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/[*_`~]+/g, "");
 }
@@ -143,4 +144,62 @@ export function deskLive(chats: Chats, open: Record<string, ProjectOpen>): DeskL
     else if (state === "running") out.push({ ...c, waiting: false, line: doing(s) });
   }
   return out.sort((a, b) => Number(b.waiting) - Number(a.waiting));
+}
+
+/** A chat as the Desk's router is shown it (see desk.rs): never more than its name, project, settings and last line. */
+export interface RouteCandidate {
+  id: string;
+  title: string;
+  project: string;
+  workflow: string;
+  status: "working" | "waiting" | "idle";
+  last: string;
+}
+
+/** The chats a Desk's message may go to, the ones last active first (the router's "ask" falls back to the first few). */
+export function routeCandidates(chats: Chats, open: Record<string, ProjectOpen>): RouteCandidate[] {
+  return deskChats(open)
+    .map((c) => {
+      const s = chats.slots[c.slot];
+      if (!s || !s.folder) return null;
+      const state = chatState(s);
+      const last = [...s.items].reverse().find((it) => it.type === "assistant" && it.text.trim());
+      return { at: s.activityAt ?? 0, c: { id: c.slot, title: c.title, project: c.where.split(" · ")[0], workflow: workflowOf(s), status: state === "waiting" ? "waiting" : state === "running" ? "working" : "idle", last: last?.type === "assistant" ? clip(plain(last.text), 200) : "" } as RouteCandidate };
+    })
+    .filter((x): x is { at: number; c: RouteCandidate } => x !== null)
+    .sort((a, b) => b.at - a.at)
+    .map((x) => x.c);
+}
+
+/** What happened to a message typed on the Desk. */
+export type DeskOutcome =
+  | { kind: "routing" }
+  /** Sent to a chat (`started`: a new one; `queued`: behind the turn it was working on). */
+  | { kind: "sent"; slot: string; title: string; started: boolean; queued: boolean }
+  /** The router couldn't tell (or couldn't be asked): the user picks a chat, or a project to start one in. */
+  | { kind: "ask"; chats: { slot: string; title: string; where: string }[]; projects: { folder: string; label: string }[]; unsure: boolean }
+  | { kind: "search"; terms: string }
+  | { kind: "failed"; why: string };
+
+/** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
+export interface DeskEntry {
+  id: string;
+  /** The Desk it was typed on. */
+  desk: string;
+  at: number;
+  text: string;
+  outcome: DeskOutcome;
+  also: { slot: string; title: string }[];
+}
+
+/** How many Desk messages are kept (the newest). */
+export const LOG_MAX = 50;
+
+/** The Desk's messages read back from storage: a message left "routing" when the app closed is said to have gone nowhere. */
+export function readLog(raw: unknown): DeskEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
+    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome }))
+    .slice(-LOG_MAX);
 }

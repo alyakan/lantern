@@ -2126,6 +2126,23 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           }
           return new Promise((r) => setTimeout(() => r({ project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 }), 400));
         }
+        case "desk_route": {
+          // Like the Haiku router (desk.rs), a moment later: "which/where…?" searches, "new …" starts a chat in the first
+          // project, a word of a chat's title sends it there, and anything else is asked about.
+          const text = String(a.text);
+          const chats = (a.chats ?? []) as { id: string; title: string }[];
+          const projects = (a.projects ?? []) as string[];
+          const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+          const hit = chats.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
+          const answer = /^(which|where)\b/i.test(text)
+            ? { kind: "search", terms: words.slice(-2).join(" ") }
+            : /^new\b/i.test(text) && projects[0]
+              ? { kind: "start", project: projects[0], workflow: "chat" }
+              : hit
+                ? { kind: "route", chat: hit.id }
+                : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
+          return new Promise((r) => setTimeout(() => r(answer), 500));
+        }
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

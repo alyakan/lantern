@@ -46,7 +46,7 @@ import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
 import { NotesApplied } from "./components/NotesApplied";
 import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
-import { stepFile, usePersistentState } from "./lib/layout";
+import { readStored, stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
@@ -87,8 +87,9 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
-import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
-import { deskFeed, deskLive } from "./lib/desk";
+import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
+import { clip, deskFeed, deskLive, LOG_MAX, readLog, routeCandidates, type DeskEntry } from "./lib/desk";
+import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
@@ -254,6 +255,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [view, setView] = useState<"chat" | "canvas">("chat");
   // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
   const [desk, setDesk] = useState(startOnDesk);
+  // The Desks (see lib/desks.ts) and the messages typed on them (see lib/desk.ts), kept across launches.
+  const [desksStored, setDesks] = usePersistentState<unknown>("desk.desks", NO_DESKS);
+  const desks = useMemo(() => readDesks(desksStored), [desksStored]);
+  const [deskLog, setDeskLog] = useState<DeskEntry[]>(() => readLog(readStored("desk.log", [])));
+  useEffect(() => {
+    try {
+      localStorage.setItem("desk.log", JSON.stringify(deskLog.slice(-LOG_MAX)));
+    } catch {
+      // storage unavailable; the Desk's messages just won't survive a restart
+    }
+  }, [deskLog]);
   const canvasLayout = useRef(newLayout());
   const [chatStore] = useState(createChatStore);
   chatStore.assign(chats.slots);
@@ -2467,6 +2479,73 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
   const deskShown = desk && Object.keys(openByProject).length > 0;
+  // What the Desk on screen has: its projects' chats only.
+  const deskOpen = openOn(desks, desks.on, openByProject);
+  const onThisDesk = (slot: string) => {
+    const folder = projectFolderOf(slot);
+    return folder !== null && deskOf(desks, folder) === desks.on;
+  };
+  const deskCandidates = routeCandidates(chats, deskOpen);
+  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
+  // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
+  const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
+  const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
+  const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
+  // A message goes to a chat as if typed there: now when the chat is free, queued behind its turn when it's working.
+  const deliver = (slot: string, text: string): { queued: boolean } | string => {
+    const s = chats.slots[slot];
+    if (!s) return "That chat is closed.";
+    if (s.status === "idle") {
+      sendIn(slot, text);
+      return { queued: false };
+    }
+    if (s.status === "running") {
+      to(slot)({ type: "queue_set", items: [...s.queued, text] });
+      return { queued: true };
+    }
+    return s.status === "asleep" ? "That chat is asleep. Open it to wake it, then send it again." : s.status === "starting" ? "That chat is still starting. Send it again in a moment." : "That chat isn't running.";
+  };
+  const deskSendTo = (entry: DeskEntry, slot: string) => {
+    const done = deliver(slot, entry.text);
+    const title = deskTargets.find((t) => t.slot === slot)?.title ?? chatTitle(chats.slots[slot] ?? initialState, titles);
+    if (typeof done === "string") {
+      if (entry.outcome.kind !== "sent") deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: done } }));
+      else setHud({ key: Date.now(), kind: "warning", body: done });
+      return;
+    }
+    deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued } }));
+  };
+  const deskStartIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
+    if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
+    const slot = takeSlot();
+    startIn(slot, folder, false, false, entry.text, undefined, undefined, workflow === "steps" ? { permissions: permissionsFor(folder), preset: null, workflow } : false);
+    deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false } }));
+  };
+  // The router answers after the chats may have changed: what it says is carried out with the newest of these.
+  const deskNow = useRef({ deskSendTo, deskStartIn, deskTargets, deskProjects });
+  deskNow.current = { deskSendTo, deskStartIn, deskTargets, deskProjects };
+  const deskSend = (text: string, picked: string | null) => {
+    const entry: DeskEntry = { id: `desk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, desk: desks.on, at: Date.now(), text, outcome: { kind: "routing" }, also: [] };
+    setDeskLog((all) => [...all, entry].slice(-LOG_MAX));
+    if (picked) return deskSendTo(entry, picked);
+    const labels = deskProjects.map((p) => p.label);
+    api.deskRoute(state.claudePath ?? "", text, deskCandidates, labels).then(
+      (r) => {
+        const now = deskNow.current;
+        if (r.kind === "route") now.deskSendTo(entry, r.chat);
+        else if (r.kind === "start") {
+          const folder = now.deskProjects.find((p) => p.label === r.project)?.folder;
+          if (folder) now.deskStartIn(entry, folder, r.workflow);
+        } else if (r.kind === "search") deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "search", terms: r.terms } }));
+        else {
+          const asked = r.chats.map((slot) => now.deskTargets.find((t) => t.slot === slot)).filter((t): t is (typeof now.deskTargets)[number] => !!t);
+          // Unsure, or nothing to pick from: a new chat is offered too.
+          deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: r.unsure || asked.length === 0 ? now.deskProjects : [], unsure: r.unsure } }));
+        }
+      },
+      (e) => deskEdit(entry.id, (x) => ({ ...x, outcome: { kind: "failed", why: errText(e) } })),
+    );
+  };
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -2769,7 +2848,39 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
-                <DeskView cards={deskFeed(chats, openByProject)} live={deskLive(chats, openByProject)} needs={inbox} onOpen={switchTo} onGo={goToInbox} onDecide={answerFromInbox} />
+                <DeskView
+                  cards={deskFeed(chats, deskOpen)}
+                  live={deskLive(chats, deskOpen)}
+                  needs={inbox.filter((it) => onThisDesk(it.slot))}
+                  entries={deskLog.filter((e) => e.desk === desks.on)}
+                  targets={deskTargets}
+                  desks={{
+                    value: desks,
+                    waiting: waitingBy(desks, openByProject),
+                    projects: (() => {
+                      const all = [...new Set([...Object.keys(openByProject), ...desks.list.flatMap((d) => d.projects)])];
+                      const labels = projectLabels(all);
+                      return all.map((folder, i) => ({ folder, label: labels[i] }));
+                    })(),
+                    onChange: setDesks,
+                    onAdd: (name) => {
+                      const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
+                      if (next) setDesks(next);
+                    },
+                  }}
+                  canSend={!!state.claudePath}
+                  onSend={deskSend}
+                  onSendTo={deskSendTo}
+                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                  search={(terms) => searchPast(terms).then((r) => r.chats.filter((c) => deskOf(desks, c.folder) === desks.on))}
+                  onOpenPast={(hit) => {
+                    setDesk(false);
+                    openSession(hit.id, hit.folder);
+                  }}
+                  onOpen={switchTo}
+                  onGo={goToInbox}
+                  onDecide={answerFromInbox}
+                />
               </ErrorBoundary>
             ) : showCanvas ? (
               <ChatStoreContext.Provider value={chatStore}>
