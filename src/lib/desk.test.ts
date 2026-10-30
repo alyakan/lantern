@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Chats } from "../sessions";
-import { answerShape, clip, deskFeed, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
+import { answerShape, clip, deskFeed, deskHistory, replyOf, type DeskEntry, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
 import { addDesk, moveProject, NO_DESKS } from "./desks";
 import { openProjects } from "./sidebar";
 
@@ -185,5 +185,50 @@ describe("the Desk's answer as Sonnet really writes it", () => {
       ["open", 3],
       ["blocked", 1],
     ]);
+  });
+});
+
+describe("what came back to a Desk message", () => {
+  it("finds the turn the message started in its chat, once it finished, with the whole of Claude's last words", () => {
+    const s = idle({ items: [said("older ask", 50), answer("old"), turn("t0"), said("[Lantern: a note]\n\nCap the delay at 8s", 1000), answer("Looking."), answer("Capped it at **8s** and added a test."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 990)).toEqual({ key: "s1:t1", said: "Capped it at **8s** and added a test.", outcome: "done" });
+  });
+
+  it("finds a queued message in the turn it was sent with, joined to the others queued", () => {
+    const s = idle({ items: [said("first\n\nCap the delay at 8s", 2000), answer("Both done."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 1500)?.key).toBe("s1:t1");
+  });
+
+  it("finds nothing while the turn runs, in a turn from before the message, or ending at the post-hook's reply", () => {
+    expect(replyOf("s1", idle({ status: "running", items: [said("Cap it", 1000), answer("Working on")] }), "Cap it", 990)).toBeNull();
+    expect(replyOf("s1", idle({ items: [said("Cap it", 100), answer("Done."), turn("t1")] }), "Cap it", 10_000)).toBeNull();
+    const hook: ChatItem = { type: "hook", id: "h", text: "Update the brain" };
+    expect(replyOf("s1", idle({ items: [said("Ship it", 1000), answer("Shipped."), hook, answer("Nothing new to save."), turn("t1")] }), "Ship it", 990)?.said).toBe("Shipped.");
+  });
+
+  it("tells the Desk the last exchanges on this Desk only, with what came back, and nothing from a chat on another provider", () => {
+    const base = { also: [], at: 1 };
+    const entries: DeskEntry[] = [
+      { ...base, id: "a", desk: "home", text: "cap the delay", say: "On it.", outcome: { kind: "sent", slot: "s1", title: "Retries", started: false, queued: false }, reply: { status: "done", key: "k", full: "x", outcome: "done", summary: "Capped at 8s." } },
+      { ...base, id: "b", desk: "work", text: "elsewhere", outcome: { kind: "talk" } },
+      { ...base, id: "c", desk: "home", text: "fix the copy", outcome: { kind: "sent", slot: "s2", title: "Gemini chat", started: false, queued: false }, reply: { status: "done", key: "k2", full: "y", outcome: "done", summary: "secret" } },
+      { ...base, id: "d", desk: "home", text: "hi", say: "Hi!", outcome: { kind: "talk" } },
+    ];
+    expect(deskHistory(entries, "home", (slot) => slot === "s2")).toEqual([
+      { you: "cap the delay", desk: 'On it. (sent to "Retries"; it replied: Capped at 8s.)' },
+      { you: "fix the copy", desk: "(sent to)" },
+      { you: "hi", desk: "Hi!" },
+    ]);
+  });
+
+  it("reads back what the Desk said and what came back, a summary cut short by closing as failed, and older messages as they were", () => {
+    const [kept, cut, old] = readLog([
+      { id: "a", desk: "home", at: 1, text: "x", also: [], say: "On it.", outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "done", key: "k", full: "f", outcome: "done", summary: "S" } },
+      { id: "b", desk: "home", at: 2, text: "y", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "summarizing", key: "k", full: "f", outcome: "done" } },
+      { id: "c", desk: "home", at: 3, text: "z", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false } },
+    ]);
+    expect([kept.say, kept.reply?.status]).toEqual(["On it.", "done"]);
+    expect(cut.reply).toMatchObject({ status: "failed", why: expect.stringMatching(/closed/) });
+    expect(old.reply).toBeUndefined();
   });
 });

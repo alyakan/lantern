@@ -3772,6 +3772,17 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-me { max-width: 80%; padding: 7px 13px; border-radius: var(--radius-hud) var(--radius-hud) var(--radius-inner) var(--radius-hud); background: var(--bg-user); color: var(--text); font-size: calc(13.5px * var(--font-scale)); white-space: pre-wrap; overflow-wrap: anywhere; }
 .desk-route { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 .desk-route .desk-time { margin-left: 4px; }
+/* What the Desk says back: on the left, as the other side of the conversation. */
+.desk-says { align-self: flex-start; max-width: 80%; padding: 7px 13px; border-radius: var(--radius-hud) var(--radius-hud) var(--radius-hud) var(--radius-inner); background: var(--field); border: 0.5px solid var(--line); color: var(--text); font-size: calc(13.5px * var(--font-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What came back from the chat: the summary, then the whole answer on asking. */
+.desk-reply { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-left: 3px solid var(--add); border-radius: var(--radius-inner); background: var(--field); font-size: calc(13.5px * var(--font-scale)); color: var(--text); }
+.desk-reply.failed { border-left-color: var(--del); }
+.desk-reply.waiting { padding: 6px 14px; border-left-color: var(--line-strong); background: none; font-size: calc(12.5px * var(--font-scale)); }
+.desk-reply p { margin: 0; line-height: 1.45; }
+.desk-full { max-height: 360px; overflow-y: auto; padding: 8px 10px; border-radius: var(--radius-inner); background: var(--pane); border: 0.5px solid var(--line); }
+.desk-full > :first-child { margin-top: 0; }
+.desk-reply-actions { display: flex; gap: 6px; }
+.desk-reply-actions button { height: 26px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .desk-chat.inline { max-width: none; font-size: inherit; font-weight: 600; color: var(--text-2); }
 .desk-failed { color: var(--del); }
 /* "Send it there too" waits until the message is pointed at. */

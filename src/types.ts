@@ -417,6 +417,12 @@ export type DeskRoute =
   /** The Desk answers it itself, from the chats about `terms` (see deskAnswer). */
   | { kind: "answer"; terms: string };
 
+/** What the Mac's Desk says back to a message, and what it does with it (null: it only replied). desk.rs's Talk. */
+export interface DeskTalk {
+  say: string;
+  route: DeskRoute | null;
+}
+
 export interface ChatSearchResults {
   /** Newest first. */
   chats: ChatHit[];

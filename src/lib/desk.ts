@@ -77,11 +77,22 @@ function deskChats(open: Record<string, ProjectOpen>): { slot: string; title: st
  * or at the end of a chat that isn't working.
  */
 export function turnCards(slot: string, title: string, where: string, s: State): DeskCard[] {
-  const cards: DeskCard[] = [];
+  return turns(slot, title, where, s).map((t) => t.card);
+}
+
+/** A finished turn: its card, and the whole of what started it and of Claude's last words, for the Desk's reply to a message. */
+interface Turn {
+  card: DeskCard;
+  asked: string;
+  said: string;
+}
+
+function turns(slot: string, title: string, where: string, s: State): Turn[] {
+  const out: Turn[] = [];
   let start: Extract<State["items"][number], { type: "user" }> | null = null;
   let said = "";
   const close = (key: string, outcome: DeskCard["outcome"]) => {
-    if (start) cards.push({ key: `${slot}:${key}`, slot, title, where, at: start.at ?? null, asked: clip(start.text, ASKED_CHARS), auto: !!start.auto, said: clip(plain(said), SAID_CHARS), outcome });
+    if (start) out.push({ card: { key: `${slot}:${key}`, slot, title, where, at: start.at ?? null, asked: clip(start.text, ASKED_CHARS), auto: !!start.auto, said: clip(plain(said), SAID_CHARS), outcome }, asked: start.text, said });
     start = null;
   };
   for (const it of s.items) {
@@ -94,7 +105,21 @@ export function turnCards(slot: string, title: string, where: string, s: State):
     else if (it.type === "turn") close(it.id, it.stopped ? "stopped" : it.isError ? "failed" : "done");
   }
   if (said && chatState(s) === "done") close("end", "done");
-  return cards;
+  return out;
+}
+
+/** How long before a Desk message was logged its turn may say it started (clocks and the order of state updates). */
+const REPLY_SLACK_MS = 5_000;
+
+/**
+ * The turn a message sent from the Desk started in a chat, once it finished: the first turn there since the message, whose
+ * opening message holds the message's words (a queued message goes with the others queued, joined; Lantern may add notes).
+ * Null while it hasn't finished, or when no turn in that chat is it.
+ */
+export function replyOf(slot: string, s: State, text: string, at: number): { key: string; said: string; outcome: DeskCard["outcome"] } | null {
+  const words = text.trim();
+  const turn = turns(slot, "", "", s).find((t) => (t.card.at ?? 0) >= at - REPLY_SLACK_MS && t.asked.includes(words));
+  return turn ? { key: turn.card.key, said: turn.said, outcome: turn.card.outcome } : null;
 }
 
 // Each chat's cards, kept while its state is the same object: the Desk draws again with every streamed event of every
@@ -192,7 +217,24 @@ export type DeskOutcome =
   | { kind: "search"; terms: string; hits: ChatHit[] | null | "failed" }
   /** The Desk's own answer, from the chats about `terms` (`hits`, found first, as for a search): `text` null while it is written. */
   | { kind: "answer"; terms: string; hits: ChatHit[] | null | "failed"; text: string | null; error?: string }
+  /** The Desk only replied: nothing was sent anywhere. */
+  | { kind: "talk" }
   | { kind: "failed"; why: string };
+
+/**
+ * What came back from the chat a Desk message was sent to: `waiting` until its turn finishes, then a short summary of Claude's
+ * reply (`full`, the reply itself, for "Show full answer"). `off`: the chat runs on another provider, so nothing it said is
+ * put to Claude to summarize.
+ */
+export type DeskReply =
+  | { status: "waiting" }
+  | { status: "summarizing"; key: string; full: string; outcome: DeskCard["outcome"] }
+  | { status: "done"; key: string; full: string; outcome: DeskCard["outcome"]; summary: string }
+  | { status: "failed"; key: string; full: string; outcome: DeskCard["outcome"]; why: string }
+  | { status: "off"; key: string; outcome: DeskCard["outcome"] };
+
+/** The most of a chat's reply kept with a Desk message, for "Show full answer". */
+export const FULL_MAX = 20_000;
 
 /** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
 export interface DeskEntry {
@@ -203,6 +245,10 @@ export interface DeskEntry {
   text: string;
   outcome: DeskOutcome;
   also: { slot: string; title: string }[];
+  /** What the Desk said back, as plain text (only shown to you). */
+  say?: string;
+  /** What came back from the chat it was sent to. Only messages sent since the Desk talks have one: older ones are never summarized. */
+  reply?: DeskReply;
 }
 
 /** How many Desk messages are kept (the newest). */
@@ -213,8 +259,49 @@ export function readLog(raw: unknown): DeskEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
-    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome.kind === "answer" && (!Array.isArray(e.outcome.hits) || (e.outcome.text === null && !e.outcome.error)) ? { ...e.outcome, hits: Array.isArray(e.outcome.hits) ? e.outcome.hits : ("failed" as const), error: e.outcome.error ?? "Lantern closed before it answered." } : e.outcome }))
+    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], say: typeof e.say === "string" ? e.say : undefined, reply: readReply(e.reply), outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome.kind === "answer" && (!Array.isArray(e.outcome.hits) || (e.outcome.text === null && !e.outcome.error)) ? { ...e.outcome, hits: Array.isArray(e.outcome.hits) ? e.outcome.hits : ("failed" as const), error: e.outcome.error ?? "Lantern closed before it answered." } : e.outcome }))
     .slice(-LOG_MAX);
+}
+
+/** A reply read back: one being summarized when the app closed is kept as failed (it isn't asked for again by itself). */
+function readReply(r: unknown): DeskReply | undefined {
+  if (!r || typeof r !== "object") return undefined;
+  const reply = r as DeskReply;
+  if (reply.status === "summarizing") return { status: "failed", key: reply.key, full: reply.full, outcome: reply.outcome, why: "Lantern closed before it summarized the reply." };
+  return ["waiting", "done", "failed", "off"].includes(reply.status) ? reply : undefined;
+}
+
+/** An earlier exchange as the Desk is shown it (see desk.rs `Exchange`). */
+export interface Exchange {
+  you: string;
+  desk: string;
+}
+
+/**
+ * The Desk's last few exchanges on one Desk, for it to follow the conversation: your words, and what it said and did in a few
+ * words. A chat that ran on another provider is named by nothing, and its reply is left out: nothing said there is put to Claude.
+ */
+export function deskHistory(entries: DeskEntry[], desk: string, offClaude: (slot: string) => boolean = () => false, max = 8): Exchange[] {
+  return entries
+    .filter((e) => e.desk === desk && e.outcome.kind !== "routing")
+    .slice(-max)
+    .map((e) => {
+      const o = e.outcome;
+      const off = o.kind === "sent" && offClaude(o.slot);
+      const did =
+        o.kind === "sent"
+          ? `(${o.started ? "started a chat" : "sent to"}${off ? "" : ` "${o.title}"`}${e.reply?.status === "done" && !off ? `; it replied: ${e.reply.summary}` : ""})`
+          : o.kind === "ask"
+            ? "(asked which chat)"
+            : o.kind === "search"
+              ? `(looked for chats about "${o.terms}")`
+              : o.kind === "answer"
+                ? `(answered from the chats about "${o.terms}")`
+                : o.kind === "failed"
+                  ? "(not sent)"
+                  : "";
+      return { you: clip(e.text, 300), desk: clip([e.say ?? "", did].filter(Boolean).join(" "), 400) };
+    });
 }
 
 /** What the window tells the backend of its Desks, for a phone's Desk (see remote/desk.rs). */

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { answerShape, type AnswerPart, type DeskCard, type DeskEntry, type DeskLive } from "../lib/desk";
+import { answerShape, type AnswerPart, type DeskCard, type DeskEntry, type DeskLive, type DeskReply } from "../lib/desk";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
@@ -174,14 +174,46 @@ function SendToo({ entry, targets, onSendTo }: { entry: DeskEntry; targets: Desk
   );
 }
 
-/** A message typed on the Desk: your words, then where they went (or the Desk's question, or what it found). */
+/** What came back from the chat a Desk message went to: a short summary, the whole reply on asking, and the way to the chat. */
+function Reply({ reply, slot, open, onOpen }: { reply: DeskReply; slot: string; open: boolean; onOpen: (slot: string) => void }) {
+  const [full, setFull] = useState(false);
+  if (reply.status === "waiting") return open ? <div className="desk-reply waiting muted">Working on it…</div> : null;
+  const failed = reply.outcome === "failed";
+  const stopped = reply.outcome === "stopped";
+  return (
+    <div className={`desk-reply${failed ? " failed" : ""}`} aria-label="What came back">
+      {reply.status === "summarizing" && <p className="muted">Finished. Summing it up…</p>}
+      {reply.status === "done" && (
+        <p>
+          {failed && <span className="desk-bad">Failed: </span>}
+          {stopped && <span className="muted">Stopped: </span>}
+          {reply.summary}
+        </p>
+      )}
+      {reply.status === "failed" && <p className="muted">Finished. {reply.why}</p>}
+      {reply.status === "off" && <p className="muted">Finished. It runs on another provider, so the Desk doesn't read it: open the chat to see what it said.</p>}
+      {full && reply.status !== "off" && (
+        <div className="desk-full">
+          <Md>{reply.full}</Md>
+        </div>
+      )}
+      <div className="desk-reply-actions">
+        {reply.status !== "off" && reply.full.trim() !== "" && <button onClick={() => setFull(!full)}>{full ? "Hide full answer" : "Show full answer"}</button>}
+        <button onClick={() => onOpen(slot)}>Open chat</button>
+      </div>
+    </div>
+  );
+}
+
+/** A message typed on the Desk: your words, what the Desk said back, where they went (or its question, or what it found), and what came back. */
 function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<DeskViewProps, "targets" | "onSendTo" | "onStartIn" | "onOpenPast" | "onOpen">) {
   const o = entry.outcome;
   return (
     <article className="desk-entry" aria-label={`You on the Desk: ${entry.text}`}>
       <div className="desk-me">{entry.text}</div>
+      {entry.say && <div className="desk-says">{entry.say}</div>}
       <div className="desk-route">
-        {o.kind === "routing" && <span className="muted">Finding the chat…</span>}
+        {o.kind === "routing" && <span className="muted">Thinking…</span>}
         {o.kind === "answer" && <span className="muted">The Desk answers</span>}
         {o.kind === "sent" && (
           <>
@@ -223,6 +255,7 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
         </div>
       )}
       {o.kind === "search" && <SearchHits terms={o.terms} hits={o.hits} onOpenPast={p.onOpenPast} />}
+      {o.kind === "sent" && entry.reply && <Reply reply={entry.reply} slot={o.slot} open={p.targets.some((t) => t.slot === o.slot)} onOpen={p.onOpen} />}
       {o.kind === "answer" && <Answer outcome={o} onOpenPast={p.onOpenPast} />}
     </article>
   );
@@ -454,12 +487,15 @@ export function DeskView(props: DeskViewProps) {
   const atEnd = useRef(true);
   const waiting = needs.filter((n) => n.needsYou);
   const last = entries[entries.length - 1];
-  const shape = `${entries.length}:${last?.outcome.kind ?? ""}:${last?.outcome.kind === "answer" ? (last.outcome.text?.length ?? 0) : 0}`;
+  const shape = `${entries.length}:${last?.outcome.kind ?? ""}:${last?.outcome.kind === "answer" ? (last.outcome.text?.length ?? 0) : 0}:${last?.say ? 1 : 0}:${last?.reply?.status ?? ""}`;
   useLayoutEffect(() => {
     const el = feed.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [shape]);
   const said = [...entries].sort((a, b) => a.at - b.at);
+  // An answer to a Desk message shows under the message, not again in Just finished.
+  const linked = new Set(entries.flatMap((e) => (e.reply && e.reply.status !== "waiting" ? [e.reply.key] : [])));
+  const finished = cards.filter((c) => !linked.has(c.key));
   const empty = !cards.length && !entries.length && !waiting.length;
 
   return (
@@ -480,7 +516,7 @@ export function DeskView(props: DeskViewProps) {
       >
         <div className="desk-col">
           {empty && <div className="desk-empty muted">Nothing here yet. Tell Lantern what to do below: it goes to the right chat, or starts one.</div>}
-          <JustFinished cards={cards} now={now} onOpen={onOpen} />
+          <JustFinished cards={finished} now={now} onOpen={onOpen} />
           {said.length > 0 && (
             <section className="desk-talk" aria-label="You and the Desk">
               <h2 className="desk-h">You and the Desk</h2>

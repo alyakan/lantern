@@ -89,7 +89,7 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
-import { clip, deskFeed, deskLive, LOG_MAX, readLog, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
+import { clip, deskFeed, deskHistory, deskLive, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { anythingWorking } from "./lib/awake";
@@ -2523,13 +2523,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       else setHud({ key: Date.now(), kind: "warning", body: done });
       return;
     }
-    deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued } }));
+    deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued }, reply: { status: "waiting" } }));
   };
   const deskStartIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
     if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
     const slot = takeSlot();
     startIn(slot, folder, false, false, entry.text, undefined, undefined, workflow === "steps" ? { permissions: permissionsFor(folder), preset: null, workflow } : false);
-    deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false } }));
+    deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false }, reply: { status: "waiting" } }));
   };
   // The router answers after the chats may have changed: what it says is carried out with the newest of these.
   const deskNow = useRef({ deskSendTo, deskStartIn });
@@ -2549,10 +2549,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       // Unsure, or nothing to pick from: a new chat is offered too.
       deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
     };
-    api.deskRoute(state.claudePath ?? "", text, deskCandidates, sentProjects.map((p) => p.label)).then(
-      (r) => {
+    // The Desk talks (Sonnet): what it says back is shown to you only; what it does is checked as the router's choice is.
+    const history = deskHistory(deskLog, deskId, offClaude);
+    api.deskTalk(state.claudePath ?? "", text, history, deskCandidates, sentProjects.map((p) => p.label)).then(
+      ({ say, route: r }) => {
         const now = deskNow.current;
-        if (r.kind === "route") now.deskSendTo(entry, r.chat);
+        if (say) deskEdit(entry.id, (e) => ({ ...e, say }));
+        if (r === null) deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "talk" } }));
+        else if (r.kind === "route") now.deskSendTo(entry, r.chat);
         else if (r.kind === "start") {
           const folder = sentProjects.find((p) => p.label === r.project)?.folder;
           if (folder) now.deskStartIn(entry, folder, r.workflow);
@@ -2585,6 +2589,35 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       (e) => deskEdit(entry.id, (x) => ({ ...x, outcome: { kind: "failed", why: errText(e) } })),
     );
   };
+  // What came back from the chat a Desk message went to: once its turn finishes, a short summary (Haiku) under the message.
+  // Each is asked for once (the in-flight set guards a redraw), and only for messages sent since the Desk talks; a chat on
+  // another provider gets none, as nothing said there is put to Claude.
+  const summarizing = useRef(new Set<string>());
+  useEffect(() => {
+    for (const e of deskLog) {
+      if (e.outcome.kind !== "sent" || e.reply?.status !== "waiting" || summarizing.current.has(e.id)) continue;
+      const slot = e.outcome.slot;
+      const s = chats.slots[slot];
+      const found = s ? replyOf(slot, s, e.text, e.at) : null;
+      if (!found) continue;
+      if (offClaude(slot)) {
+        deskEdit(e.id, (x) => ({ ...x, reply: { status: "off", key: found.key, outcome: found.outcome } }));
+        continue;
+      }
+      const full = found.said.slice(0, FULL_MAX);
+      const base = { key: found.key, full, outcome: found.outcome };
+      if (!full.trim()) {
+        deskEdit(e.id, (x) => ({ ...x, reply: { status: "done", ...base, summary: found.outcome === "done" ? "It finished without saying anything." : found.outcome === "failed" ? "It failed without saying why." : "It was stopped." } }));
+        continue;
+      }
+      summarizing.current.add(e.id);
+      deskEdit(e.id, (x) => ({ ...x, reply: { status: "summarizing", ...base } }));
+      api.deskSummary(state.claudePath ?? "", e.text, full).then(
+        (summary) => deskEdit(e.id, (x) => ({ ...x, reply: { status: "done", ...base, summary } })),
+        (err) => deskEdit(e.id, (x) => ({ ...x, reply: { status: "failed", ...base, why: errText(err) } })),
+      );
+    }
+  }, [chats, deskLog]);
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {

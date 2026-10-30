@@ -54,6 +54,52 @@ describe("the Desk in the app", () => {
     fireEvent.keyDown(box, { key: "Enter" });
   };
 
+  it("talks back without sending anything when it is only talked to", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    await type("hi there");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: hi there" });
+    await waitFor(() => expect(entry).toHaveTextContent(/Hi! \d+ chats are open on this Desk/));
+    expect(entry).not.toHaveTextContent(/Sent to|Started/);
+  });
+
+  it("sums up what came back from the chat a message went to, under the message, once", async () => {
+    const { installMockBackend } = await import("./dev/mockBackend");
+    installMockBackend();
+    // Count the summaries asked for: a redraw must not ask again.
+    const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, ...rest: unknown[]) => Promise<unknown> } }).__TAURI_INTERNALS__;
+    const invoke = internals.invoke;
+    let summaries = 0;
+    internals.invoke = (cmd, ...rest) => {
+      if (cmd === "desk_summary") summaries++;
+      return invoke(cmd, ...rest);
+    };
+    const { default: App } = await import("./App");
+    render(<App startOnDesk />);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const to = screen.getByRole("combobox", { name: "Send to" });
+    const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
+    fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
+    await type("Add retries to fetchJson");
+    const entry = await screen.findByRole("article", { name: "You on the Desk: Add retries to fetchJson" });
+    // The demo turn asks to run its tests on the way: allowed from the Desk, as you would.
+    await waitFor(
+      () => {
+        const allow = screen.queryByRole("region", { name: "Needs you" }) && within(screen.getByRole("region", { name: "Needs you" })).queryByRole("button", { name: /^Allow / });
+        if (allow && allow.getAttribute("aria-disabled") !== "true") fireEvent.click(allow);
+        expect(within(entry).getByLabelText("What came back")).toHaveTextContent(/^Done: /);
+      },
+      { timeout: 40_000, interval: 300 },
+    );
+    const back = within(entry).getByLabelText("What came back");
+    expect(within(back).getByRole("button", { name: "Show full answer" })).toBeInTheDocument();
+    expect(within(back).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
+    // Shown under the message, it isn't listed again in Just finished.
+    expect(screen.queryByRole("button", { name: /^Add retries to fetchJson: / })).toBeNull();
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(summaries).toBe(1);
+  });
+
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());

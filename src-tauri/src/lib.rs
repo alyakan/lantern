@@ -3109,6 +3109,21 @@ async fn desk_route(state: State<'_, AppState>, claude_path: String, text: Strin
     Ok(desk::route(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &chats, &projects).await)
 }
 
+/// The Mac's Desk talking (see desk.rs `talk`): what it says back to `text`, and what it does with it, checked as the router's
+/// choice is. `history` is the Desk's last few exchanges, as the window tells them. What it says is only shown to the user.
+#[tauri::command]
+async fn desk_talk(state: State<'_, AppState>, claude_path: String, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> Result<desk::Talk, String> {
+    let path_env = login_path(&state).await;
+    Ok(desk::talk(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &history, &chats, &projects).await)
+}
+
+/// A short summary of what a chat replied to a message sent from the Desk (see desk.rs `summary`), shown under it there.
+#[tauri::command]
+async fn desk_summary(state: State<'_, AppState>, claude_path: String, question: String, reply: String) -> Result<String, String> {
+    let path_env = login_path(&state).await;
+    desk::summary(std::path::Path::new(&claude_path), path_env.as_deref(), &question, &reply).await
+}
+
 /// The end of what was said in each of `chats` (the first few), read from their transcripts, for the Desk's answer: in their order,
 /// one that can't be read said so in its place (the answer cites them by number, as the user is shown them). Empty when none could.
 async fn desk_sources(state: &AppState, chats: Vec<desk::PastChat>) -> Vec<desk::Source> {
@@ -3638,6 +3653,8 @@ pub fn run() {
             title_session,
             desk_route,
             desk_answer,
+            desk_talk,
+            desk_summary,
             open_session,
             relocations_list,
             folders_gone,
