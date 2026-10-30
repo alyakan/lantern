@@ -339,8 +339,9 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
  */
 export function PageActionsFloat({ actions, onAction, lift = 0, onHeight }: { actions: PageAction[]; onAction: (a: PageAction) => void; /** How far above the bottom of its box it sits, where the message box floats over the page. */ lift?: number; onHeight?: (h: number) => void }) {
   return (
-    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift }}>
-      <View pointerEvents="box-none" accessibilityLabel="This page's buttons" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
+    // The row is as wide as the screen so long buttons can wrap; only the buttons take touches, so a drag or a tap beside them reaches the page.
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift, pointerEvents: "box-none" }}>
+      <View pointerEvents="box-none" testID="page-actions" accessibilityLabel="This page's buttons" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
         {actions.map((a) =>
           a.primary ? (
             <Button key={a.label} label={a.label} style={[shadow.float, { shadowOpacity: 0.18 }]} onPress={() => onAction(a)} />

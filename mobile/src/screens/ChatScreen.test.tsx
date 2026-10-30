@@ -1192,6 +1192,9 @@ describe("Step by step's pages", () => {
       expect(within(screen.getByTestId("step-page-2")).queryByRole("button", { name: "Commit, next" })).toBeNull();
       expect(within(screen.getByLabelText("This page's buttons")).getByRole("button", { name: "Commit, next" })).toBeTruthy();
       expect(within(screen.getByLabelText("This page's buttons")).getByRole("button", { name: "Don't commit" })).toBeTruthy();
+      // Beside the buttons, touches reach the page under them.
+      expect(screen.getByTestId("page-actions").props.pointerEvents).toBe("box-none");
+      expect(StyleSheet.flatten(screen.getByTestId("page-actions").parent?.props.style)).toMatchObject({ pointerEvents: "box-none" });
       await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
       expect(screen.queryByRole("button", { name: "Commit, next" })).toBeNull();
     });
