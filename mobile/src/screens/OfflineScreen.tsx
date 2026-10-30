@@ -258,9 +258,21 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
   const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
   const canTodos = state.kind === "connected" && state.welcome.features?.includes("todos") === true && !!onTodos;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
+  // What a button opens comes once this sheet is away: iOS shows no sheet while another is still going.
+  const next = useRef<(() => void) | null>(null);
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
+    <Sheet
+      onClose={() => {
+        onClose();
+        next.current?.();
+      }}
+    >
+      {(close) => {
+        const then = (open?: () => void) => () => {
+          next.current = open ?? null;
+          close();
+        };
+        return (
         <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
           <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
           <Txt variant="body" tone="ink2">
@@ -275,15 +287,16 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>
           <LockRow />
-          {canPair && <Button label="Pair another device" kind="ghost" onPress={() => onPairDevice?.()} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
-          {canTodos && <Button label="Your to-dos" kind="ghost" onPress={() => onTodos?.()} accessibilityHint="Shows the to-do list of each project on your Mac." />}
-          {canStorage && <Button label="Mac storage" kind="ghost" onPress={() => onStorage?.()} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
-          {onWhatsNew && <Button label="What's new" kind="ghost" onPress={onWhatsNew} />}
-          {onSupport &&<Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
-          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />
+          {canPair && <Button label="Pair another device" kind="ghost" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+          {canTodos && <Button label="Your to-dos" kind="ghost" onPress={then(onTodos)} accessibilityHint="Shows the to-do list of each project on your Mac." />}
+          {canStorage && <Button label="Mac storage" kind="ghost" onPress={then(onStorage)} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
+          {onWhatsNew && <Button label="What's new" kind="ghost" onPress={then(onWhatsNew)} />}
+          {onSupport &&<Button label="Support development" kind="ghost" onPress={then(onSupport)} style={{ marginTop: 6 }} />}
+          <Button label="Unpair this phone" kind="ghost" onPress={then(onUnpair)} style={{ marginTop: onSupport ? 0 : 6 }} />
           <Button label="Close" onPress={close} />
         </View>
-      )}
+        );
+      }}
     </Sheet>
   );
 }

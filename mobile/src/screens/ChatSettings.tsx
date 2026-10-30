@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
@@ -68,11 +68,17 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const next = useRef<(() => void) | null>(null);
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
+    <Sheet
+      onClose={() => {
+        onClose();
+        next.current?.();
+      }}
+    >
+      {(close, scroll) => (
         <View style={[{ flexShrink: 1 }]}>
-          <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
             <Txt variant="title" accessibilityRole="header">
               Chat settings
             </Txt>
@@ -163,8 +169,9 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
                 accessibilityRole="button"
                 accessibilityLabel="Close this chat"
                 onPress={() => {
+                  // The question comes once this sheet is away: iOS shows no sheet while another is still going.
+                  next.current = onAskClose;
                   close();
-                  onAskClose();
                 }}
                 haptic="select"
                 scaleTo={0.98}

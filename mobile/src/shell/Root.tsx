@@ -54,12 +54,12 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   const colors = useColors();
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={{ flexShrink: 1, paddingBottom: insets.bottom + space.lg }}>
           <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
             Message which chat?
           </Txt>
-          <ScrollView style={{ flexShrink: 1 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }}>
             {rows(chats, Date.now(), null, workingSince).map((r) => (
               <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
                 <Txt variant="body" style={{ fontWeight: "600" }}>
@@ -299,32 +299,18 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
         <AnimatedStack items={items} onBack={back} />
       )}
       {macSheet && (
+        // Each of its buttons opens what it names once the sheet itself has gone (MacSheet waits for that).
         <MacSheet
           state={connection}
           onClose={() => setMacSheet(false)}
           onUnpair={unpair}
-          onSupport={() => {
-            setMacSheet(false);
-            setSupporting(true);
-          }}
-          onPairDevice={() => {
-            setMacSheet(false);
-            setPairingDevice(true);
-          }}
-          onStorage={() => {
-            setMacSheet(false);
-            setStorageOpen(true);
-          }}
-          onTodos={() => {
-            setMacSheet(false);
-            setTodos({ project: null });
-          }}
+          onSupport={() => setSupporting(true)}
+          onPairDevice={() => setPairingDevice(true)}
+          onStorage={() => setStorageOpen(true)}
+          onTodos={() => setTodos({ project: null })}
           onWhatsNew={
             hasNotes(releaseNotes)
-              ? () => {
-                  setMacSheet(false);
-                  setNotesOpen(true);
-                }
+              ? () => setNotesOpen(true)
               : undefined
           }
         />

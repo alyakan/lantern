@@ -11,7 +11,7 @@ export function WhatsNewSheet({ notes, onClose }: { notes: ReleaseNotes; onClose
   const insets = useSafeAreaInsets();
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={{ flexShrink: 1, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
           <Txt variant="heading" accessibilityRole="header">
             What's new
@@ -19,7 +19,7 @@ export function WhatsNewSheet({ notes, onClose }: { notes: ReleaseNotes; onClose
           <Txt variant="small" tone="ink3">
             Build {notes.build}
           </Txt>
-          <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 10, paddingVertical: space.sm }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 10, paddingVertical: space.sm }}>
             {notes.notes.map((note, i) => (
               <View key={i} style={{ flexDirection: "row", gap: 10 }}>
                 <Txt variant="body" tone="ink2" accessibilityElementsHidden importantForAccessibility="no">

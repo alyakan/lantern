@@ -1058,7 +1058,7 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
   }, [path, load]);
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <View style={{ flexShrink: 1, paddingBottom: insets.bottom + 8 }}>
           <View style={{ padding: space.lg, gap: 8 }}>
             <Txt variant="heading">What changed</Txt>
@@ -1075,7 +1075,7 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
               {path}
             </Txt>
           </View>
-          <ScrollView style={{ flexShrink: 1 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }}>
             {text === null && !error && (
               <View style={{ paddingHorizontal: space.lg }}>
                 <DiffSkeleton />
