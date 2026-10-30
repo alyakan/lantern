@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Chats } from "../sessions";
-import { clip, deskFeed, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
+import { answerShape, clip, deskFeed, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
 import { addDesk, moveProject, NO_DESKS } from "./desks";
 import { openProjects } from "./sidebar";
 
@@ -147,5 +147,30 @@ describe("the Desk's messages read back", () => {
       { kind: "answer", terms: "it", hits: "failed", text: null, error: "Lantern closed before it answered." },
       { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" },
     ]);
+  });
+});
+
+describe("the Desk's answer, laid out", () => {
+  it("reads the sentence that answers, then Done, Open and Blocked, in that order whatever order they came in", () => {
+    const text = "Almost done: pairing works, one test is red.\n\n**Blocked**\n- UI test fails on CI only [3]\n\n**Done**\n- Pairing screen [1]\n- Fake sensor for **demos** [2]\n\n**Open**\n- Reconnect after sleep [1]";
+    expect(answerShape(text)).toEqual({
+      lead: "Almost done: pairing works, one test is red.",
+      parts: [
+        { part: "done", points: ["Pairing screen [1]", "Fake sensor for demos [2]"] },
+        { part: "open", points: ["Reconnect after sleep [1]"] },
+        { part: "blocked", points: ["UI test fails on CI only [3]"] },
+      ],
+    });
+  });
+
+  it("takes the parts written as `Done:` or a heading, leaves out empty ones, and joins a point that runs onto a second line", () => {
+    expect(answerShape("Started.\nDone:\n- one\n  and more\n## Open\n**Blocked**")).toEqual({ lead: "Started.", parts: [{ part: "done", points: ["one and more"] }] });
+  });
+
+  it("takes a lone sentence (the chats didn't tell), and shows anything else as it came", () => {
+    expect(answerShape("The chats don't say how far it got.")).toEqual({ lead: "The chats don't say how far it got.", parts: [] });
+    expect(answerShape("- a bullet first\n- another")).toBeNull();
+    expect(answerShape("Para one.\nPara two.\nPara three.")).toBeNull();
+    expect(answerShape("")).toBeNull();
   });
 });

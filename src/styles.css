@@ -3709,42 +3709,49 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .mb-link:hover { background: var(--bg-active); color: var(--text); }
 
 /* The Desk: every open chat at once. A line for each chat working or waiting along the top, then a card per finished answer. */
-.desk { min-height: 0; }
-.desk-head { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 14px 20px 10px; border-bottom: 0.5px solid var(--line); }
+/* The Desk, calm: one column the width of reading, what needs you pinned at the top, quiet lines below, the box under it. */
+.desk { min-height: 0; --desk-w: 600px; }
+.desk-col { width: 100%; max-width: var(--desk-w); margin: 0 auto; padding: 0 24px; box-sizing: border-box; display: flex; flex-direction: column; }
+.desk-head { flex: none; padding: 14px 0 6px; }
+.desk-head .desk-col { gap: 14px; }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
-.desk-live { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.desk-live-row { display: inline-flex; align-items: center; gap: 6px; max-width: 360px; height: 26px; padding: 0 10px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
-.desk-live-row:hover { color: var(--text); background: var(--bg-hover); }
-.desk-live-row.waiting { border-color: color-mix(in srgb, var(--attn) 45%, transparent); }
-.desk-live-name { flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
-.desk-live-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 10px; }
-.desk-empty { margin: auto; max-width: 360px; text-align: center; font-size: calc(13px * var(--font-scale)); }
-.desk-card { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-chip); background: var(--field); }
-.desk-card.failed { border-color: color-mix(in srgb, var(--del) 40%, transparent); }
-.desk-card.needs { border-color: color-mix(in srgb, var(--attn) 55%, transparent); background: color-mix(in srgb, var(--attn) 5%, var(--field)); }
-.desk-card-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 0 18px; mask-image: linear-gradient(to bottom, transparent, var(--text) 18px); }
+.desk-feed .desk-col { gap: 30px; }
+.desk-empty { margin: 48px auto 0; max-width: 360px; text-align: center; font-size: calc(13.5px * var(--font-scale)); }
 .desk-chat { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: none; color: var(--text); font-size: calc(13px * var(--font-scale)); font-weight: 650; text-align: left; }
 .desk-chat:hover { text-decoration: underline; }
-.desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.desk-outcome { flex: none; padding: 0 6px; border-radius: var(--radius-pill); font-size: calc(10.5px * var(--font-scale)); font-weight: 600; }
-.desk-outcome.failed { background: var(--error-bg); color: var(--del); }
-.desk-outcome.stopped { background: var(--bg-subtle); color: var(--muted-text); }
-.desk-outcome.needs { background: color-mix(in srgb, var(--attn) 16%, transparent); color: var(--attn-text); }
+.desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 .desk-time { flex: none; margin-left: auto; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.desk-asked { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
-.desk-asked.auto { font-style: italic; }
-.desk-you { font-weight: 600; }
-.desk-said { margin: 0; font-size: calc(13px * var(--font-scale)); color: var(--text); line-height: 1.45; overflow-wrap: anywhere; }
-.desk-actions { display: flex; gap: 6px; margin-top: 4px; }
-.desk-actions button { height: 26px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
+.desk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.desk-actions button { height: 30px; padding: 0 16px; font-size: calc(13px * var(--font-scale)); font-weight: 600; }
 .sb-button.desk-button { position: relative; }
-/* Many chats at work: two rows of them, the rest a scroll away. */
-.desk-live { max-height: 62px; overflow-y: auto; }
-/* Cards keep a reading width on a wide window. */
-.desk-feed > * { width: 100%; max-width: 860px; margin-left: auto; margin-right: auto; box-sizing: border-box; }
 /* With its label beside it, the Desk's count sits after the word, not over the corner. */
 .sb-button.desk-button.labelled .inbox-badge { position: static; margin-left: 6px; }
+
+/* Needs you: one thing at a time, big; the next one peeks out behind it. */
+.desk-focus { position: relative; }
+.desk-focus.stacked { margin-bottom: 7px; }
+.desk-focus.stacked::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -7px; height: 20px; border: 0.5px solid var(--line); border-radius: var(--radius-float); background: var(--field); z-index: 0; }
+.desk-need { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; padding: 16px 18px 14px; border: 1px solid color-mix(in srgb, var(--attn) 60%, transparent); border-radius: var(--radius-float); background: var(--pane); box-shadow: 0 10px 28px -16px color-mix(in srgb, var(--attn) 60%, transparent); }
+.desk-who { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.desk-ask { margin: 2px 0 4px; font: 650 calc(17px * var(--font-scale)) / 1.3 var(--ui); letter-spacing: -0.01em; color: var(--text); overflow-wrap: anywhere; }
+.desk-detail { margin: 0 0 6px; max-height: 120px; overflow: auto; padding: 8px 10px; border-radius: var(--radius-inner); background: var(--code-bg, var(--field)); font: calc(12.5px * var(--font-scale)) / 1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.desk-actions .desk-next { margin-left: auto; padding: 0 4px; border: none; background: none; color: var(--muted-text); font-weight: 500; }
+.desk-actions .desk-next:hover { color: var(--text); }
+.desk-clear { padding: 9px 14px; border-radius: var(--radius-chip); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
+
+/* Just finished: one quiet line each. */
+.desk-finished { display: flex; flex-direction: column; }
+.desk-line { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: baseline; gap: 10px; margin: 0 -10px; padding: 6px 10px; border: none; border-radius: var(--radius-inner); background: none; color: var(--text-2); font-size: calc(13px * var(--font-scale)); text-align: left; }
+.desk-line:hover { background: var(--bg-hover); }
+.desk-mark { font-weight: 700; color: var(--add); }
+.desk-line.failed .desk-mark, .desk-bad { color: var(--del); }
+.desk-line.stopped .desk-mark { color: var(--muted-text); }
+.desk-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-line-text b { color: var(--text); font-weight: 600; }
+.desk-more { align-self: flex-start; margin-top: 2px; padding: 2px 0; border: none; background: none; color: var(--accent); font-size: calc(12.5px * var(--font-scale)); }
+
 /* The Desks: tabs when there are several, and the editor that says which project is on which. */
 .desk-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .desk-tablist { display: flex; gap: 4px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
@@ -3758,31 +3765,53 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-editor-row input { flex: 1; min-width: 0; }
 .desk-editor-projects { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 220px; overflow-y: auto; }
 .desk-editor-projects li { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-/* What you typed on the Desk: your words on the right, where they went under them. */
-.desk-entry { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.desk-me { max-width: 75%; padding: 7px 12px; border-radius: var(--radius-hud) var(--radius-hud) var(--radius-inner) var(--radius-hud); background: var(--bg-user); color: var(--text); font-size: calc(13px * var(--font-scale)); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* You and the Desk: your words on the right, where they went under them; the Desk's answers across. */
+.desk-talk { display: flex; flex-direction: column; gap: 16px; }
+.desk-entry { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.desk-me { max-width: 80%; padding: 7px 13px; border-radius: var(--radius-hud) var(--radius-hud) var(--radius-inner) var(--radius-hud); background: var(--bg-user); color: var(--text); font-size: calc(13.5px * var(--font-scale)); white-space: pre-wrap; overflow-wrap: anywhere; }
 .desk-route { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 .desk-route .desk-time { margin-left: 4px; }
-.desk-chat.inline { max-width: none; font-size: inherit; font-weight: 600; }
+.desk-chat.inline { max-width: none; font-size: inherit; font-weight: 600; color: var(--text-2); }
 .desk-failed { color: var(--del); }
-.desk-too { height: 22px; font-size: calc(11.5px * var(--font-scale)); }
-.desk-note { align-self: stretch; display: flex; flex-direction: column; gap: 6px; padding: 9px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-chip); background: var(--field); font-size: calc(13px * var(--font-scale)); color: var(--text); }
-.desk-note .desk-actions { flex-wrap: wrap; margin-top: 0; }
+/* "Send it there too" waits until the message is pointed at. */
+.desk-too { height: 22px; max-width: 0; padding: 0; border: 0 solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: calc(11.5px * var(--font-scale)) var(--ui); opacity: 0; }
+.desk-entry:hover .desk-too, .desk-entry:focus-within .desk-too { max-width: 180px; padding: 0 8px; border-width: 0.5px; opacity: 1; }
+.desk-note { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-float); background: var(--field); font-size: calc(13.5px * var(--font-scale)); color: var(--text); }
+.desk-note .desk-actions { margin-top: 0; }
+.desk-note .desk-actions button { height: 28px; font-weight: 500; }
 .desk-hits { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-/* The Desk's own answer: Claude's markdown, then the chats it read, numbered as it cites them. */
-.desk-answer > :first-child { margin-top: 0; }
-.desk-answer p, .desk-answer ul, .desk-answer ol:not(.desk-sources) { margin: 4px 0; }
-.desk-sources { list-style: decimal; padding-left: 20px; margin-top: 8px; color: var(--muted); }
 .desk-hit { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 8px; border: none; border-radius: var(--radius-inner); background: none; color: var(--text); text-align: left; }
 .desk-hit:hover { background: var(--bg-hover); }
 .desk-hit-title { font-weight: 600; }
 .desk-hit-snippet { font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
 .desk-hit-snippet mark { background: color-mix(in srgb, var(--attn) 30%, transparent); color: inherit; border-radius: 2px; }
-/* The Desk's box: where it sends, what to say, Send. */
-.desk-box { flex: none; display: flex; align-items: flex-end; gap: 8px; margin: 0 16px 14px; padding: 8px 8px 8px 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-hud); background: var(--field); }
-.desk-to { flex: none; max-width: 220px; height: 28px; font-size: calc(12px * var(--font-scale)); }
-.desk-box textarea { flex: 1; min-height: 28px; max-height: 160px; padding: 5px 2px; border: none; background: none; color: var(--text); font: calc(13.5px * var(--font-scale)) / 1.4 var(--ui); resize: none; field-sizing: content; outline: none; }
-.desk-box button { flex: none; height: 28px; padding: 0 14px; }
-.desk-too { max-width: 180px; }
-.desk-editor input, .desk-editor select, .desk-to, .desk-too { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
+
+/* The Desk's own answer: the sentence that answers, Done / Open / Blocked, then the chats it read as chips. */
+.desk-answer { padding: 16px 18px; }
+.desk-answer > :first-child { margin-top: 0; }
+.desk-answer > p, .desk-answer > ul { margin: 0; }
+.desk-lead { margin: 0; font: 650 calc(16px * var(--font-scale)) / 1.35 var(--ui); letter-spacing: -0.005em; color: var(--text); }
+.desk-answer > .desk-from { margin: -4px 0 4px; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.desk-parts { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.desk-part { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 12px; }
+.desk-part dt { display: flex; align-items: center; gap: 6px; height: 1.45em; font-size: calc(12.5px * var(--font-scale)); font-weight: 650; }
+.desk-part dt::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.desk-part.done dt { color: var(--add); }
+.desk-part.open dt { color: var(--accent); }
+.desk-part.blocked dt { color: var(--del); }
+.desk-part dd { margin: 0; }
+.desk-part ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.desk-answer sup { margin-left: 2px; color: var(--accent); font-size: 0.7em; font-weight: 700; }
+.desk-sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.desk-source { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; height: 24px; padding: 0 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--pane); color: var(--text-2); font-size: calc(12px * var(--font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-source:hover { color: var(--text); }
+.desk-source-n { color: var(--accent); font-weight: 700; }
+
+/* The Desk's box: as wide as the column, round, where it sends tucked in beside Send. */
+.desk-box { flex: none; display: flex; align-items: flex-end; gap: 8px; width: calc(100% - 48px); max-width: calc(var(--desk-w) - 48px); margin: 0 auto 16px; padding: 6px 6px 6px 16px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--card-shadow); box-sizing: border-box; }
+.desk-box textarea { flex: 1; min-height: 30px; max-height: 160px; padding: 6px 0; border: none; background: none; color: var(--text); font: calc(14px * var(--font-scale)) / 1.4 var(--ui); resize: none; field-sizing: content; outline: none; }
+.desk-to { flex: none; max-width: 160px; height: 30px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font: calc(12px * var(--font-scale)) var(--ui); }
+.desk-box > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
+.desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }

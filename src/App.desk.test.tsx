@@ -62,7 +62,7 @@ describe("the Desk in the app", () => {
     fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
     await type("Add retries to fetchJson");
     const entry = await screen.findByRole("article", { name: "You on the Desk: Add retries to fetchJson" });
-    await waitFor(() => expect(entry).toHaveTextContent(/sent to/));
+    await waitFor(() => expect(entry).toHaveTextContent(/Sent to/));
     // It went into the chat, as if typed there.
     fireEvent.click(within(entry).getByRole("button", { name: /New chat|Add retries/ }));
     await waitFor(() => expect(desk()).toBeNull());
@@ -74,11 +74,14 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeInTheDocument());
     await type("How is the login redirect");
     const entry = await screen.findByRole("article", { name: "You on the Desk: How is the login redirect" });
-    await waitFor(() => expect(entry).toHaveTextContent("Fix the login redirect after OAuth callback: going well [1]"));
+    // Laid out: the sentence that answers, then Done / Open / Blocked, each point citing a chat.
+    await waitFor(() => expect(within(entry).getByText("Mostly done: retries work, one test is still red.")).toBeInTheDocument());
+    expect(within(entry).getByText("Done")).toBeInTheDocument();
+    expect(within(entry).getByText("Blocked")).toBeInTheDocument();
     const read = within(entry).getByRole("list", { name: "The chats it read" });
     expect(within(read).getAllByRole("button")).toHaveLength(1);
     // Nothing was sent anywhere: the Desk stays, and no chat got the question.
-    expect(entry).not.toHaveTextContent(/sent to|started/);
+    expect(entry).not.toHaveTextContent(/Sent to|Started/);
   });
 
   it("lets the Desk start a chat for new work, in a project on the Desk", async () => {
@@ -86,7 +89,7 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeInTheDocument());
     await type("new: a dark mode for the docs");
     const entry = await screen.findByRole("article", { name: "You on the Desk: new: a dark mode for the docs" });
-    await waitFor(() => expect(entry).toHaveTextContent(/started/));
+    await waitFor(() => expect(entry).toHaveTextContent(/Started/));
     expect(desk()).toBeInTheDocument();
   });
 

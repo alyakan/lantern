@@ -242,3 +242,52 @@ export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desk
     off_claude: offClaudeSessions,
   };
 }
+
+/** A part of the Desk's answer: what is done, what is left, what is stuck. */
+export type AnswerPart = "done" | "open" | "blocked";
+
+/** The Desk's answer laid out: one sentence that answers, then its points by part, in that order. */
+export interface AnswerShape {
+  lead: string;
+  parts: { part: AnswerPart; points: string[] }[];
+}
+
+const PART_ORDER: AnswerPart[] = ["done", "open", "blocked"];
+const PART_HEAD = /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(done|open|blocked)\s*:?\s*(?:\*\*|__)?\s*:?\s*$/i;
+const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/;
+const marks = (s: string) => s.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * The Desk's answer as the Desk asks Claude for it (one sentence, then `**Done**`, `**Open**`, `**Blocked**` with bullets), or
+ * null when it isn't in that shape: then it is shown as it came.
+ */
+export function answerShape(text: string): AnswerShape | null {
+  const lines = text.split(/\r?\n/);
+  const lead: string[] = [];
+  const found = new Map<AnswerPart, string[]>();
+  let current: string[] | null = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const head = PART_HEAD.exec(line);
+    if (head) {
+      const part = head[1].toLowerCase() as AnswerPart;
+      current = found.get(part) ?? [];
+      found.set(part, current);
+      continue;
+    }
+    const bullet = BULLET.exec(line);
+    if (!current) {
+      if (bullet) return null;
+      lead.push(line);
+    } else if (bullet) current.push(marks(bullet[1]));
+    // A line under a part that isn't a bullet carries on its last point.
+    else if (current.length) current[current.length - 1] = marks(`${current[current.length - 1]} ${line}`);
+    else current.push(marks(line));
+  }
+  const first = marks(lead.join(" "));
+  if (!first) return null;
+  const parts = PART_ORDER.filter((p) => found.get(p)?.some(Boolean)).map((part) => ({ part, points: found.get(part)!.filter(Boolean) }));
+  // Just a sentence (the chats didn't tell) is a shape too; a long block of prose with no parts isn't.
+  if (!parts.length && lead.length > 2) return null;
+  return { lead: first, parts };
+}

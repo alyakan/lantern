@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { DeskCard, DeskEntry, DeskLive } from "../lib/desk";
+import { answerShape, type AnswerPart, type DeskCard, type DeskEntry, type DeskLive } from "../lib/desk";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
@@ -86,22 +86,67 @@ function Answer({ outcome, onOpenPast }: { outcome: Extract<DeskEntry["outcome"]
   if (hits === null) return <div className="desk-note muted">Looking through your chats about “{terms}”…</div>;
   if (hits === "failed") return <div className="desk-note">Couldn't look through your chats just now.</div>;
   if (hits.length === 0) return <div className="desk-note">No chat on this Desk talks about “{terms}”.</div>;
+  const shape = text ? answerShape(text) : null;
+  const projects = [...new Set(hits.map((h) => h.project))];
   return (
     <div className="desk-note desk-answer">
-      {text ? <Md>{text}</Md> : error ? <div className="desk-failed">No answer: {error}</div> : <div className="muted">Reading {hits.length === 1 ? "the chat" : `${hits.length} chats`} about “{terms}”…</div>}
-      <ol className="desk-hits desk-sources" aria-label="The chats it read">
-        {hits.map((h) => (
+      {shape ? (
+        <>
+          <p className="desk-lead">
+            <Cited text={shape.lead} />
+          </p>
+          <p className="desk-from">
+            From {hits.length === 1 ? "1 chat" : `${hits.length} chats`}
+            {projects.length === 1 ? ` in ${projects[0]}` : ""}
+          </p>
+          {shape.parts.length > 0 && (
+            <dl className="desk-parts">
+              {shape.parts.map(({ part, points }) => (
+                <div key={part} className={`desk-part ${part}`}>
+                  <dt>{PART_NAME[part]}</dt>
+                  <dd>
+                    <ul>
+                      {points.map((pt, i) => (
+                        <li key={i}>
+                          <Cited text={pt} />
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </>
+      ) : text ? (
+        <Md>{text}</Md>
+      ) : error ? (
+        <div className="desk-failed">No answer: {error}</div>
+      ) : (
+        <div className="muted">Reading {hits.length === 1 ? "the chat" : `${hits.length} chats`} about “{terms}”…</div>
+      )}
+      <ol className="desk-sources" aria-label="The chats it read">
+        {hits.map((h, i) => (
           <li key={h.id}>
-            <button className="desk-hit" onClick={() => onOpenPast(h)}>
-              <span className="desk-hit-title">{h.title.map((p) => p.text).join("") || "Untitled chat"}</span>
-              <span className="desk-where">
-                {h.project} · {new Date(h.updated_ms).toLocaleDateString([], { month: "short", day: "numeric" })}
-              </span>
+            <button className="desk-source" onClick={() => onOpenPast(h)} title={`${h.project}, ${new Date(h.updated_ms).toLocaleDateString([], { month: "short", day: "numeric" })}`}>
+              <span className="desk-source-n">{i + 1}</span>
+              {h.title.map((p) => p.text).join("") || "Untitled chat"}
             </button>
           </li>
         ))}
       </ol>
     </div>
+  );
+}
+
+const PART_NAME: Record<AnswerPart, string> = { done: "Done", open: "Open", blocked: "Blocked" };
+
+/** A line of the Desk's answer as text, with its [1], [2] as small numbers. */
+function Cited({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\[\d+\])/).map((piece, i) => (/^\[\d+\]$/.test(piece) ? <sup key={i}>{piece.slice(1, -1)}</sup> : piece))}
+    </>
   );
 }
 
@@ -137,11 +182,11 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
       <div className="desk-me">{entry.text}</div>
       <div className="desk-route">
         {o.kind === "routing" && <span className="muted">Finding the chat…</span>}
-        {o.kind === "answer" && <span className="muted">→ the Desk answers</span>}
+        {o.kind === "answer" && <span className="muted">The Desk answers</span>}
         {o.kind === "sent" && (
           <>
             <span>
-              → {o.started ? "started " : o.queued ? "queued in " : "sent to "}
+              {o.started ? "Started " : o.queued ? "Queued in " : "Sent to "}
               <button className="desk-chat inline" onClick={() => p.onOpen(o.slot)}>
                 {o.title}
               </button>
@@ -284,15 +329,15 @@ function DeskBox({ targets, canSend, onSend }: Pick<DeskViewProps, "targets" | "
   };
   return (
     <div className="desk-box">
-      <select className="desk-to" aria-label="Send to" value={target} onChange={(e) => setTo(e.target.value)} title="Where what you type goes">
-        <option value="">→ Desk picks</option>
+      <textarea aria-label="Tell Lantern" placeholder={canSend ? "Tell Lantern what to do" : "Waiting for Claude Code…"} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={keys} />
+      <select className="desk-to" aria-label="Send to" value={target} onChange={(e) => setTo(e.target.value)} title="Where what you type goes: the Desk picks the right chat, or starts one">
+        <option value="">Desk picks</option>
         {targets.map((t) => (
           <option key={t.slot} value={t.slot}>
-            → {t.title} · {t.where}
+            {t.title} ({t.where})
           </option>
         ))}
       </select>
-      <textarea aria-label="Tell Lantern" placeholder={canSend ? "Tell Lantern… (it goes to the right chat, or starts one)" : "Waiting for Claude Code…"} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={keys} />
       <button className="primary" aria-label="Send" disabled={!text.trim() || !canSend} onClick={send}>
         Send
       </button>
@@ -300,49 +345,129 @@ function DeskBox({ targets, canSend, onSend }: Pick<DeskViewProps, "targets" | "
   );
 }
 
+/** How many finished answers show before "Show more". */
+const FINISHED_SHOWN = 3;
+const MARK: Record<DeskCard["outcome"], string> = { done: "✓", failed: "✕", stopped: "■" };
+
+/** The first sentence of what Claude said, for a finished answer's one line. */
+const firstSentence = (said: string) => {
+  // A list's items come joined by bullets: the first item is enough.
+  const first = said.replace(/^\s*•\s*/, "").split(" • ")[0];
+  const end = first.search(/[.!?](\s|$)/);
+  return end > 0 && end < first.length - 1 ? first.slice(0, end + 1) : first;
+};
+
+/** What waits on you, one thing at a time: the first, big, with what it asks; the rest a click away. */
+function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now: number } & Pick<DeskViewProps, "onGo" | "onDecide">) {
+  const [at, setAt] = useState(0);
+  const i = at < waiting.length ? at : 0;
+  const it = waiting[i];
+  if (!it) return null;
+  const more = waiting.length - 1;
+  return (
+    <section className="desk-needs" aria-label="Needs you">
+      <h2 className="desk-h">Needs you</h2>
+      <div className={`desk-focus${more > 0 ? " stacked" : ""}`}>
+        <article className="desk-need" aria-label={`${it.title} needs you: ${it.need}`}>
+          <div className="desk-who">
+            <span className="node-dot waiting" aria-hidden />
+            <button className="desk-chat" onClick={() => onGo(it)} title="Go there">
+              {it.title}
+            </button>
+            <span className="desk-where">
+              in {it.where}
+              {it.since !== null && `, ${elapsed(now - it.since)}`}
+            </span>
+          </div>
+          <p className="desk-ask">{it.need}</p>
+          {it.detail !== null && <pre className="desk-detail">{it.detail}</pre>}
+          <div className="desk-actions">
+            {it.requestId && it.canAllow && <AllowButton key={it.key + (it.requestId ?? "")} title={it.title} onAllow={() => onDecide(it, true)} />}
+            {it.requestId && (
+              <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
+                Deny
+              </button>
+            )}
+            <button className={it.requestId ? undefined : "primary"} aria-label={`Go to ${it.title}`} onClick={() => onGo(it)}>
+              Open chat
+            </button>
+            {more > 0 && (
+              <button className="desk-next" onClick={() => setAt((i + 1) % waiting.length)}>
+                {more} more waiting
+              </button>
+            )}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+/** The answers that finished, one quiet line each, newest first: a few, and the rest when asked. */
+function JustFinished({ cards, now, onOpen }: { cards: DeskCard[]; now: number; onOpen: (slot: string) => void }) {
+  const [all, setAll] = useState(false);
+  if (!cards.length) return null;
+  const newest = [...cards].sort((a, b) => (b.at ?? -1) - (a.at ?? -1));
+  const shown = all ? newest : newest.slice(0, FINISHED_SHOWN);
+  return (
+    <section className="desk-finished" aria-label="Just finished">
+      <h2 className="desk-h">Just finished</h2>
+      {shown.map((c) => {
+        const line = c.outcome === "done" ? firstSentence(c.said) : OUTCOME[c.outcome];
+        return (
+          <button key={c.key} className={`desk-line ${c.outcome}`} aria-label={`${c.title}: ${c.said || c.asked}`} title={c.said || c.asked} onClick={() => onOpen(c.slot)}>
+            <span className="desk-mark" aria-hidden>
+              {MARK[c.outcome]}
+            </span>
+            <span className="desk-line-text">
+              <b>{c.title}</b>
+              {line ? <span className={c.outcome === "done" ? undefined : "desk-bad"}>: {line}</span> : null}
+            </span>
+            {c.at !== null && <time className="desk-time">{ago(now, c.at)}</time>}
+          </button>
+        );
+      })}
+      {newest.length > FINISHED_SHOWN && (
+        <button className="desk-more" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show ${newest.length - FINISHED_SHOWN} more`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 /**
- * The Desk: every open chat at once. Along the top, a line for each chat working or waiting on you. Below, one card for
- * each answer that finished, oldest first, each saying which chat it was in, what started it, and the start of what Claude
- * said, with your Desk messages among them where they were sent; then what waits on you, which can be answered here as in
- * the inbox. At the bottom, the box: what you type goes to the right chat. A chat's name opens it.
+ * The Desk, calm: what waits on you at the top, one thing at a time and always in view; below it, the answers that just
+ * finished as one quiet line each, then what you said on the Desk and where it went, with the Desk's own answers. At the
+ * bottom, the box: what you type goes to the right chat. The chats themselves are in the sidebar, as always.
  */
 export function DeskView(props: DeskViewProps) {
-  const { cards, live, needs, entries, onOpen, onGo, onDecide } = props;
+  const { cards, needs, entries, onOpen, onGo, onDecide } = props;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, []);
-  // It opens at the end, and stays there as cards come, unless it was scrolled up to read.
+  // It opens at the end, and stays there as messages come, unless it was scrolled up to read.
   const feed = useRef<HTMLDivElement>(null);
   const atEnd = useRef(true);
   const waiting = needs.filter((n) => n.needsYou);
   const last = entries[entries.length - 1];
-  const shape = `${cards.length}:${waiting.length}:${entries.length}:${last?.outcome.kind ?? ""}`;
+  const shape = `${entries.length}:${last?.outcome.kind ?? ""}:${last?.outcome.kind === "answer" ? (last.outcome.text?.length ?? 0) : 0}`;
   useLayoutEffect(() => {
     const el = feed.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [shape]);
-  // Cards and Desk messages in the order they were said; one whose time isn't known goes first.
-  const rows: ({ kind: "card"; at: number; card: DeskCard } | { kind: "entry"; at: number; entry: DeskEntry })[] = [...cards.map((card) => ({ kind: "card" as const, at: card.at ?? -1, card })), ...entries.map((entry) => ({ kind: "entry" as const, at: entry.at, entry }))].sort((a, b) => a.at - b.at);
+  const said = [...entries].sort((a, b) => a.at - b.at);
+  const empty = !cards.length && !entries.length && !waiting.length;
 
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
-        <DeskTabs desks={props.desks} />
-        {live.length > 0 && (
-          <ul className="desk-live" aria-label="Working now">
-            {live.map((l) => (
-              <li key={l.slot}>
-                <button className={`desk-live-row${l.waiting ? " waiting" : ""}`} onClick={() => onOpen(l.slot)} title={`${l.title} · ${l.where}`}>
-                  <span className={`node-dot ${l.waiting ? "waiting" : "working"}`} aria-hidden />
-                  <span className="desk-live-name">{l.title}</span>
-                  <span className="desk-live-line">{l.line}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="desk-col">
+          <DeskTabs desks={props.desks} />
+          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : !empty && <div className="desk-clear">✓ Nothing needs you</div>}
+        </div>
       </header>
       <div
         ref={feed}
@@ -352,62 +477,18 @@ export function DeskView(props: DeskViewProps) {
           atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
         }}
       >
-        {rows.length === 0 && waiting.length === 0 && <div className="desk-empty muted">Nothing here yet. Type below and it goes to the right chat; when a chat finishes an answer, it shows up here, with which chat it was in.</div>}
-        {rows.map((r) =>
-          r.kind === "entry" ? (
-            <Entry key={r.entry.id} entry={r.entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} onOpenPast={props.onOpenPast} onOpen={onOpen} />
-          ) : (
-            <article key={r.card.key} className={`desk-card ${r.card.outcome}`} aria-label={`${r.card.title}: ${r.card.said || r.card.asked}`}>
-              <div className="desk-card-head">
-                <button className="desk-chat" onClick={() => onOpen(r.card.slot)} title="Open this chat">
-                  {r.card.title}
-                </button>
-                <span className="desk-where">{r.card.where}</span>
-                {OUTCOME[r.card.outcome] && <span className={`desk-outcome ${r.card.outcome}`}>{OUTCOME[r.card.outcome]}</span>}
-                {r.card.at !== null && (
-                  <time className="desk-time" dateTime={new Date(r.card.at).toISOString()} title={new Date(r.card.at).toLocaleString()}>
-                    {ago(now, r.card.at)}
-                  </time>
-                )}
-              </div>
-              <div className={`desk-asked${r.card.auto ? " auto" : ""}`}>
-                {r.card.auto ? (
-                  "Claude went on by itself"
-                ) : (
-                  <>
-                    <span className="desk-you">You:</span> {r.card.asked}
-                  </>
-                )}
-              </div>
-              {r.card.said && <p className="desk-said">{r.card.said}</p>}
-            </article>
-          ),
-        )}
-        {waiting.map((it, at) => (
-          <article key={`${it.key}:${it.requestId ?? ""}`} className="desk-card needs" aria-label={`${it.title} needs you: ${it.need}`}>
-            <div className="desk-card-head">
-              <button className="desk-chat" onClick={() => onGo(it)} title="Go there">
-                {it.title}
-              </button>
-              <span className="desk-where">{it.where}</span>
-              <span className="desk-outcome needs">Needs you</span>
-              {it.since !== null && <span className="desk-time">{elapsed(now - it.since)}</span>}
-            </div>
-            <p className="desk-said">{it.need}</p>
-            {it.detail !== null && <pre className="inbox-full">{it.detail}</pre>}
-            <div className="desk-actions">
-              {it.requestId && it.canAllow && <AllowButton key={at} title={it.title} onAllow={() => onDecide(it, true)} />}
-              {it.requestId && (
-                <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
-                  Deny
-                </button>
-              )}
-              <button aria-label={`Go to ${it.title}`} onClick={() => onGo(it)}>
-                Open
-              </button>
-            </div>
-          </article>
-        ))}
+        <div className="desk-col">
+          {empty && <div className="desk-empty muted">Nothing here yet. Tell Lantern what to do below: it goes to the right chat, or starts one.</div>}
+          <JustFinished cards={cards} now={now} onOpen={onOpen} />
+          {said.length > 0 && (
+            <section className="desk-talk" aria-label="You and the Desk">
+              <h2 className="desk-h">You and the Desk</h2>
+              {said.map((entry) => (
+                <Entry key={entry.id} entry={entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} onOpenPast={props.onOpenPast} onOpen={onOpen} />
+              ))}
+            </section>
+          )}
+        </div>
       </div>
       <DeskBox targets={props.targets} canSend={props.canSend} onSend={props.onSend} />
     </section>

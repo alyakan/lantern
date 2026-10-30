@@ -2147,8 +2147,14 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return new Promise((r) => setTimeout(() => r(answer), 500));
         }
         case "desk_answer":
-          // Like the Sonnet call: a little later, a few bullets citing the chats it was given.
-          return new Promise((r) => setTimeout(() => r(((a.chats ?? []) as { title: string }[]).map((c, i) => `- ${c.title}: going well [${i + 1}]`).join("\n")), 900));
+          // Like the Sonnet call: a little later, one sentence, then Done / Open / Blocked citing the chats it was given.
+          return new Promise((r) =>
+            setTimeout(() => {
+              const chats = (a.chats ?? []) as { title: string }[];
+              const cite = (i: number) => `[${(i % Math.max(chats.length, 1)) + 1}]`;
+              r(`Mostly done: retries work, one test is still red.\n\n**Done**\n- Retry on 5xx with backoff ${cite(0)}\n- Cap the delay at 8 seconds ${cite(1)}\n\n**Open**\n- Log each retry once ${cite(0)}\n\n**Blocked**\n- The timeout test is flaky on CI ${cite(2)}`);
+            }, 900),
+          );
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));
