@@ -112,6 +112,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const canShell = useMacCan("shell");
   const canImages = useMacCan("images");
   const canTodos = useMacCan("todos");
+  const canRename = useMacCan("rename");
   const lock = useAppLock();
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
@@ -372,17 +373,19 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     void sync.send(slot, text);
   };
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
-  // Step by step, whose pages they would cut across, and not during a turn, which the Mac waits for too); Clear asks first, as the
-  // Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
+  // Step by step, whose pages they would cut across, not during a turn, which the Mac waits for too, and not while the chat sleeps);
+  // Clear asks first, as the Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
+  const commandHint = (what: string) => (asleep ? "Wake the chat first" : working ? "Once Claude has finished its turn" : what);
   const barTools: BarTool[] = [
     ...(stepsChat
       ? []
       : [
-          { label: "Compact", hint: working ? "Once Claude has finished its turn" : "Summarises the chat so far to free up context", disabled: !online || working, onPress: () => void sync.send(slot, "/compact") },
+          { label: "Compact", icon: "compact" as const, hint: commandHint("Summarises the chat so far to free up context"), disabled: !online || working || asleep, onPress: () => void sync.send(slot, "/compact") },
           {
             label: "Clear",
-            hint: working ? "Once Claude has finished its turn" : "Starts the conversation afresh",
-            disabled: !online || working,
+            icon: "clear" as const,
+            hint: commandHint("Starts the conversation afresh"),
+            disabled: !online || working || asleep,
             onPress: () =>
               Alert.alert("Clear this conversation?", "Claude forgets this conversation. The files it changed stay as they are.", [
                 { text: "Keep it", style: "cancel" },
@@ -394,12 +397,34 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ? [
           {
             label: "To-dos",
+            icon: "todos" as const,
             hint: "This project's to-do list",
             onPress: () => {
               if (onTodos) return onTodos();
               setPanel("todos");
               setChangesOpen(true);
             },
+          },
+        ]
+      : []),
+    ...(canRename && chat?.workflow !== "team"
+      ? [
+          {
+            label: "Rename",
+            icon: "rename" as const,
+            hint: "Names this chat, here and on the Mac",
+            disabled: !online,
+            onPress: () =>
+              Alert.prompt("Rename this chat", undefined, [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Rename",
+                  onPress: (name?: string) => {
+                    const title = name?.trim();
+                    if (title) sync.rename(slot, title).catch(fail);
+                  },
+                },
+              ], "plain-text", chat?.title?.trim() ?? ""),
           },
         ]
       : []),
@@ -591,7 +616,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             This chat is asleep to save memory. It picks up where it left off.
           </Txt>
           {/* The chat can still be searched while it sleeps: the same circle, beside the one button there is. */}
-          <SearchBar search={barSearch} capsule={{ flexDirection: "row", alignItems: "center", borderRadius: 26, padding: 6 }}>
+          <SearchBar search={barSearch} tools={barTools} capsule={{ flexDirection: "row", alignItems: "center", borderRadius: 26, padding: 6 }}>
             <View style={{ flex: 1 }}>
               <Button
                 label={waking ? "Waking…" : "Wake this chat"}
@@ -693,7 +718,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsBar actions={heading.page.actions} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : pageBar} /> : listEl;
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (

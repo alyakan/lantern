@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -705,6 +705,10 @@ pub enum Request {
     /// the chat is working or waiting on someone (stop it first), and for a team's Lead or agent (the window decides that).
     /// Only sent to a Mac whose Welcome lists "close" in `features`: an older Mac ends the connection at a request it doesn't know.
     Close { slot: String },
+    /// Names a chat, as the History menu's Rename does on the Mac (the name beats every other title, and the window's chat takes it
+    /// too). Refused for a chat that has no conversation yet, and for a name with nothing in it.
+    /// Only sent to a Mac whose Welcome lists "rename" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Rename { slot: String, title: String },
     /// The projects a chat may be started in from the phone.
     Projects,
     /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message, without switching what the Mac's

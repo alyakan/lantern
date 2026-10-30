@@ -288,6 +288,11 @@ export class Sync {
     await this.ask({ op: "close", slot });
   }
 
+  /** Names a chat on the Mac, as its History menu's Rename does (the chat's title everywhere changes with it); rejects with why not (no conversation yet, no name). */
+  async rename(slot: string, title: string): Promise<void> {
+    await this.ask({ op: "rename", slot, title });
+  }
+
   /** What may be chosen for a chat: whether Auto is allowed, and the presets. Null for a Mac that can't say. */
   async controls(): Promise<Controls | null> {
     if (!this.hasControls) return null;

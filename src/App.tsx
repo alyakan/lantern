@@ -1905,6 +1905,28 @@ export default function App() {
   // Short titles for the open chats, by session id, made once each session has its first prompt.
   const [titles, setTitles] = useState<Record<string, string>>({});
   const titling = useRef(new Set<string>());
+  // Naming a session: the name beats every other title it has, and the open chat of that session takes it too.
+  const renameSession = async (id: string, typed: string) => {
+    // Trimmed as the backend keeps it, so the chat shows what was saved.
+    const title = typed.trim();
+    await api.renameSession(id, title);
+    setTitles((all) => ({ ...all, [id]: title }));
+  };
+  // A paired phone asked to name a chat (the backend checked it has a conversation and the name is one): named as the History
+  // menu's Rename names one. A team's Lead or agent keeps its own name.
+  const renameChat = (slot: string, title: string) => {
+    const s = chats.slots[slot];
+    if (!s?.sessionId || s.orchestrator || chats.agents[slot] || !title.trim()) return;
+    renameSession(s.sessionId, title).catch(() => {});
+  };
+  const remoteRenameRef = useRef<(slot: string, title: string) => void>(() => {});
+  remoteRenameRef.current = renameChat;
+  useEffect(() => {
+    const off = api.onRemoteRename((r) => remoteRenameRef.current(r.slot, r.title)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
+    };
+  }, []);
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) {
       const prompt = firstPrompt(s);
@@ -2316,10 +2338,7 @@ export default function App() {
             const pinned = pinnedBy[folder] ?? [];
             setPinnedBy({ ...pinnedBy, [folder]: pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id] });
           },
-          onRename: async (id, title) => {
-            await api.renameSession(id, title);
-            setTitles((all) => ({ ...all, [id]: title }));
-          },
+          onRename: renameSession,
           onExport: (id, title) => {
             // The transcript as the chat would show it, read without starting claude: its prompts, replies and steps.
             api
@@ -2467,6 +2486,7 @@ export default function App() {
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
   const sidebarHandlers = {
+    onRename: renameChat,
     onChat: switchTo,
     // Its canvas, unless the team was left with a chat full size, which it comes back to (a click while in it is the way back to the canvas).
     onTeam: (slot: string) => {

@@ -3480,6 +3480,10 @@ nav > .sb-note { padding-left: 14px; }
 .sb-confirm-actions button:hover:not(:disabled) { background: var(--bg-hover); }
 .sb-confirm-actions .sb-confirm-yes { border-color: var(--del); color: var(--del); }
 .sb-context { position: fixed; z-index: 40; min-width: 150px; }
+.sb-rename { position: fixed; z-index: 40; display: flex; gap: 6px; width: 260px; padding: 7px; border: 1px solid var(--line-strong); border-radius: var(--radius-card); background: var(--field); box-shadow: var(--shadow); }
+.sb-rename input { flex: 1; min-width: 0; height: 26px; padding: 0 8px; font-size: calc(12px * var(--font-scale)); }
+.sb-rename-save { height: 26px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(11.5px * var(--font-scale)); }
+.sb-rename-save:hover:not(:disabled) { background: var(--bg-hover); }
 /* Closing. The open pane stays drawn while the bar narrows, and what the bar doesn't have (names, branch, notes, the New and
    History labels, agents, the foot) fades out and folds up in the same time and easing, as the bar's own squares stay where
    they are: at the end the pane is the bar, so swapping its markup for the bar's changes nothing on screen. What the bar has and

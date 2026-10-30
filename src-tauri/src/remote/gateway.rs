@@ -106,6 +106,9 @@ pub trait Host: Send + Sync + 'static {
     /// Asks the window to close a chat for a phone (the gateway has checked it is listed and idle, asleep or stopped; the window
     /// checks again, and refuses a team's Lead or agent).
     fn close(&self, slot: &str) -> Result<(), String>;
+    /// Asks the window to name a chat for a phone, as the History menu's Rename does (the gateway has checked the chat has a
+    /// conversation and that `title` is a name; the window checks again).
+    fn rename(&self, slot: &str, title: String) -> Result<(), String>;
     /// Runs a command a phone typed after "!" in the chat's folder, in a terminal of its own, as the window's own "!" mode does
     /// (the gateway has checked the chat is open and awake, and that the id and the command are well formed). Its output comes
     /// back as the chat's events.
@@ -869,6 +872,22 @@ impl<'a> Session<'a> {
                 }
                 host.close(&slot).map(|()| serde_json::Value::Null)
             }
+            Request::Rename { slot, title } => {
+                let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+                // The name is kept for the conversation, so a chat that hasn't started one has nothing to keep it for.
+                if chat.session_id.is_none() {
+                    return Err("This chat has no conversation yet. Send a message first, then name it.".into());
+                }
+                // A team's Lead keeps the team's name, which the window leaves alone: said here, not taken and dropped.
+                if chat.workflow.as_deref() == Some("team") {
+                    return Err("This chat leads a team: name it on your Mac.".into());
+                }
+                if title.chars().any(char::is_control) {
+                    return Err("A name is one line of words.".into());
+                }
+                let name = crate::titles::name(&title).ok_or("A chat needs a name.")?;
+                host.rename(&slot, name).map(|()| serde_json::Value::Null)
+            }
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
@@ -1112,6 +1131,8 @@ pub(crate) mod tests {
         pub sent_images: Mutex<Vec<Vec<protocol::RemoteImage>>>,
         pub woken: Mutex<Vec<String>>,
         pub closed: Mutex<Vec<String>>,
+        /// The chats it was asked to name, and what with.
+        pub renamed: Mutex<Vec<(String, String)>>,
         /// What it was asked about storage ("scan", or "clear:" and the ids), and the disk it says it has.
         pub storage_asked: Mutex<Vec<String>>,
         pub storage_on: Mutex<bool>,
@@ -1161,6 +1182,10 @@ pub(crate) mod tests {
         }
         fn close(&self, slot: &str) -> Result<(), String> {
             self.closed.lock().unwrap().push(slot.into());
+            Ok(())
+        }
+        fn rename(&self, slot: &str, title: String) -> Result<(), String> {
+            self.renamed.lock().unwrap().push((slot.into(), title));
             Ok(())
         }
         fn storage(&self) -> Result<protocol::RemoteStorage, String> {
@@ -1802,6 +1827,37 @@ pub(crate) mod tests {
         let (_, err, _) = p.ask(Request::Close { slot: "nope".into() }).await;
         assert!(err.is_some_and(|e| e.contains("isn't open")));
         assert_eq!(r.host.closed.lock().unwrap().len(), 2, "nothing busy or unknown reached the app");
+    }
+
+    #[tokio::test]
+    async fn a_phone_names_a_chat_that_has_a_conversation_and_what_is_no_name_never_reaches_the_app() {
+        let r = rig();
+        r.hub.opened("talked", "/p");
+        r.hub.session("talked", "0b1c2d3e-0000-4000-8000-000000000001");
+        r.hub.opened("fresh", "/p");
+        r.hub.opened("lead", "/p");
+        r.hub.session("lead", "0b1c2d3e-0000-4000-8000-000000000002");
+        r.hub.flow("lead", "team");
+        let (_, mut p) = paired(&r).await;
+        let rename = |slot: &str, title: &str| Request::Rename { slot: slot.into(), title: title.into() };
+        assert!(p.ask(rename("talked", "  Release 0.1.84  ")).await.1.is_none());
+        assert_eq!(*r.host.renamed.lock().unwrap(), vec![("talked".to_string(), "Release 0.1.84".to_string())], "trimmed, like the Mac's own Rename");
+        for (request, why) in [
+            (rename("fresh", "Name"), "no conversation yet"),
+            (rename("lead", "Name"), "leads a team"),
+            (rename("nope", "Name"), "isn't open"),
+            (rename("talked", "   "), "needs a name"),
+            (rename("talked", "one\ntwo"), "one line"),
+        ] {
+            let (_, err, _) = p.ask(request).await;
+            assert!(err.is_some_and(|e| e.contains(why)), "{why}");
+        }
+        assert_eq!(r.host.renamed.lock().unwrap().len(), 1, "none of those reached the app");
+    }
+
+    #[test]
+    fn this_mac_says_it_can_rename_chats_so_a_phone_may_ask_it_to() {
+        assert!(protocol::FEATURES.contains(&"rename"));
     }
 
     #[tokio::test]

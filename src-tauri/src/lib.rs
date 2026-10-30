@@ -470,6 +470,10 @@ impl remote::gateway::Host for RemoteHost {
         request_wake(&self.app, &self.app.state::<AppState>(), slot)
     }
 
+    fn rename(&self, slot: &str, title: String) -> Result<(), String> {
+        self.app.emit("remote-rename-chat", remote::RenameRequest { slot: slot.to_string(), title }).map_err(|e| e.to_string())
+    }
+
     fn close(&self, slot: &str) -> Result<(), String> {
         self.app.emit("remote-close-chat", remote::CloseRequest { slot: slot.to_string() }).map_err(|e| e.to_string())
     }

@@ -23,10 +23,13 @@ import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
 import { easeLayout, PressScale, skips, springLayout } from "../ui/motion";
 import { control, radius, useColors } from "../ui/theme";
+import { ToolIcon, type ToolIconName } from "../ui/ToolIcon";
 
 /** One of the bar's tools, beside Search in the row the tools circle grows into. */
 export interface BarTool {
   label: string;
+  /** Its picture in the row (the label is what a screen reader says). */
+  icon: ToolIconName;
   /** Said to a screen reader after the label. */
   hint?: string;
   onPress: () => void;
@@ -229,24 +232,22 @@ function Breath({ size }: { size: number }) {
 }
 
 /** How wide a tool's button gets, where the row has room to spare (an iPad's). */
-const CHIP_MAX = 120;
+const CHIP_MAX = 64;
 
 /** What the grown tools circle holds: Search, the other tools, and the way out (at the right, where the circle was). */
 function TrayContents({ tools, onSearch, onPick, onClose }: { tools: BarTool[]; onSearch?: () => void; onPick: (tool: BarTool) => void; onClose: () => void }) {
   const colors = useColors();
-  const chip = (label: string, onPress: () => void, disabled?: boolean, hint?: string) => (
+  const chip = (label: string, icon: ReactNode, onPress: () => void, disabled?: boolean, hint?: string) => (
     <PressScale key={label} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} haptic="select" scaleTo={0.92} opacity={disabled ? 0.35 : 1} style={{ flex: 1, maxWidth: CHIP_MAX }}>
       <View style={{ height: 32, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", paddingHorizontal: 6, backgroundColor: `${colors.ink}12` }}>
-        <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700" }}>
-          {label}
-        </Txt>
+        {icon}
       </View>
     </PressScale>
   );
   return (
     <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-      {onSearch && chip("Search", onSearch, false, "Searches this chat")}
-      {tools.map((t) => chip(t.label, () => onPick(t), t.disabled, t.hint))}
+      {onSearch && chip("Search", <Magnifier />, onSearch, false, "Searches this chat")}
+      {tools.map((t) => chip(t.label, <ToolIcon name={t.icon} />, () => onPick(t), t.disabled, t.hint))}
       <RoundButton label="Close tools" onPress={onClose}>
         <Cross />
       </RoundButton>
@@ -288,8 +289,8 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opening]);
   const hasCircle = !!search && circle;
-  // (A chat with no tools but Search has the plain search circle: no row of one.)
-  const hasTools = !!tools?.length;
+  // The tools circle is the same in every chat, whatever else is in its row (a Step by step chat has Search and little more).
+  const hasTools = !!tools;
   const stops = working && !!onStop;
   // The tools' row is out. Search there closes it and opens the search in the same breath, so the circle stays grown between them.
   const [tray, setTray] = useState(false);
