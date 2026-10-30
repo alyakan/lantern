@@ -1032,11 +1032,17 @@ impl<'a> Session<'a> {
                         // The turn it shows began a moment ago, not in the future or long ago: the card's timer counts from it.
                         let since = c.since.clamp(now.saturating_sub(60 * 60 * 1000), now);
                         let (slot, project) = if summary { (String::new(), "Lantern".to_string()) } else { (c.slot, clean_project(&c.project)) };
-                        Some(LiveCard { slot, token: c.token, project, since, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Default::default(), summary: summary.then(Default::default) })
+                        Some(LiveCard { slot, token: c.token, project, since, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Default::default(), summary: summary.then(Default::default), channel: None })
                     }
                     None => None,
                 };
                 let summary = card.as_ref().is_some_and(|c| c.summary.is_some());
+                // Kept across restarts, for starting a card while the app is closed. A phone that says none keeps the one it gave.
+                if let Some(t) = start_token.as_deref() {
+                    if let Err(e) = self.gw.store.set_start_token(&self.device, Some(t)) {
+                        self.gw.store.live.said(e);
+                    }
+                }
                 self.gw.store.live.register(&self.device, start_token, card);
                 // A summary card the Mac has ended (its chats went quiet while the phone was away) is said to be over, so the
                 // phone starts the next one rather than waiting on a card nothing is pushed to any more.

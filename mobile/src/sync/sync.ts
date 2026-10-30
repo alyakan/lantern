@@ -392,9 +392,12 @@ export class Sync {
     return this.ask({ op: "push_key", key });
   }
 
-  /** Tells the Mac which card this phone shows on its lock screen (null: none now). Only to a Mac that keeps them. */
-  liveActivity(state: { card: RemoteLiveCard | null }) {
+  /**
+   * Tells the Mac which card this phone shows on its lock screen (null: none now), and its token for starting one by push
+   * (the Mac keeps the last one it was given). Only to a Mac that keeps them.
+   */
+  liveActivity(state: { card: RemoteLiveCard | null; start_token?: string }) {
     if (!this.has("liveactivity")) return Promise.resolve();
-    return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}) });
+    return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}), ...(state.start_token ? { start_token: state.start_token } : {}) });
   }
 }

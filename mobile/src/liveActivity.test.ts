@@ -42,6 +42,7 @@ function rig(opts: { tokenAtStart?: string | null; startThrows?: boolean; tellFa
       told.push(state);
       if (opts.tellFails) throw new Error("offline");
     },
+    startTokens: () => null,
     now: () => 5_000,
   });
   return { cards, started, told };
@@ -235,6 +236,7 @@ describe("the summary card (a Mac that keeps one)", () => {
         told.push(s);
         return reply();
       },
+      startTokens: () => null,
       now: () => now,
     });
     return { cards, started, told };
@@ -322,5 +324,78 @@ describe("the summary card (a Mac that keeps one)", () => {
     await cards.connected();
     expect(told).toHaveLength(2);
     expect(told[1]).toEqual(told[0]);
+  });
+});
+
+describe("a card the Mac starts while the app is closed", () => {
+  const START = "5a".repeat(40);
+  function startRig(left: FakeCard[] = []) {
+    const told: { card: unknown; start_token?: string }[] = [];
+    let give: ((token: string) => void) | null = null;
+    const started: FakeCard[] = [];
+    const factory: CardFactory = {
+      start: (props, url, stale) => {
+        const card = new FakeCard(props, url, "ab".repeat(32), stale);
+        started.push(card);
+        return card;
+      },
+      getInstances: () => [...left, ...started],
+    };
+    const cards = new LiveCards({
+      factory: () => factory,
+      tell: async (s) => {
+        told.push(s);
+        return { ended: false };
+      },
+      startTokens: (listener) => {
+        give = listener;
+        return { remove: () => {} };
+      },
+      now: () => 5_000,
+    });
+    // Let what the constructor queued settle.
+    const token = async (t: string) => {
+      give?.(t);
+      await cards.connected().catch(() => {});
+    };
+    return { cards, told, token, started, left };
+  }
+
+  it("hands the Mac the phone's token for starting a card as soon as iOS gives it, and on every connection, with no card to tell of", async () => {
+    const { cards, told, token } = startRig();
+    await token(START);
+    expect(told[0]).toEqual({ card: null, start_token: START });
+    told.length = 0;
+    await cards.connected();
+    expect(told).toEqual([{ card: null, start_token: START }]);
+  });
+
+  it("sends the start token with the card it tells of, and the card again with a new token", async () => {
+    const { cards, told, token } = startRig();
+    await token(START);
+    await cards.look({ summary: true, connected: true, foreground: true, busy: true });
+    expect(told.at(-1)).toEqual({ card: expect.objectContaining({ summary: true }), start_token: START });
+    const NEW = "6b".repeat(40);
+    await token(NEW);
+    expect(told.some((t) => t.start_token === NEW && (t.card as { summary?: boolean } | null)?.summary === true)).toBe(true);
+  });
+
+  it("takes only what looks like Apple's token", async () => {
+    const { told, token } = startRig();
+    await token("not a token");
+    await token("../../x");
+    expect(told.every((t) => t.start_token === undefined)).toBe(true);
+  });
+
+  it("ends a card the Mac started (it is on the lock screen, not the app's own) when the app starts its own", async () => {
+    const fromMac = new FakeCard({ project: "Lantern", status: "working", since: 1, chats: [], counts: { needs_you: 0, working: 1, done: 0, failed: 0 } }, undefined);
+    const { cards, started } = startRig();
+    // The app ran before the Mac's card came up (no launch to clear it): it is found when the app starts its own.
+    await cards.look({ summary: true, connected: true, foreground: false, busy: true });
+    expect(started).toHaveLength(0);
+    started.push(fromMac);
+    await cards.look({ summary: true, connected: true, foreground: true, busy: true });
+    expect(fromMac.ended).toBe("immediate");
+    expect(started.at(-1)?.ended).toBeNull();
   });
 });
