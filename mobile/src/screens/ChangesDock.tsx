@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
-import { runPane } from "../ui/motion";
+import { runPane, skips } from "../ui/motion";
 import { radius, useColors } from "../ui/theme";
 import { floatFrame } from "../view/layout";
 
@@ -51,10 +51,13 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
   const [mounted, setMounted] = useState(mode !== "hidden");
   // Which way it leaves: to the right from beside the chat, down from the middle.
   const [via, setVia] = useState<"right" | "down">(mode === "float" ? "down" : "right");
-  // The frame it is laid out at, which changes a commit after the mode does: the chat's change of width (`movePanes`) is laid
-  // out by iOS in the commit the mode changes in, and that animation would carry this frame too, on top of its own move. While
-  // it floats or is put back, `from` is where it was, so it is carried from there.
+  // The frame it is laid out at, which changes a frame after the mode does: the chat's change of width (`movePanes`) is laid out
+  // by iOS in the commit the mode changes in, and that animation would carry this frame too, on top of its own move. (After a
+  // press React runs effects in the same task, so an effect alone could still land in that commit.) While it floats or is put
+  // back, `from` is where it was, so it is carried from there.
   const [laid, setLaid] = useState<"dock" | "float">(mode === "float" ? "float" : "dock");
+  const laidNow = useRef(laid);
+  laidNow.current = laid;
   const [from, setFrom] = useState<"dock" | "float" | null>(null);
   const last = useRef(mode);
   useEffect(() => {
@@ -77,11 +80,18 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
       runPane(p, 1);
       return;
     }
-    setLaid(mode);
-    setFrom(before);
-    t.setValue(0);
-    runPane(t, 1, () => last.current === mode && setFrom(null));
     runPane(f, mode === "float" ? 1 : 0);
+    const move = () => {
+      // Floated and put back again within the frame: it is carried from wherever it is laid out now, to where it is to be.
+      const to = last.current;
+      if (to === "hidden" || to === laidNow.current) return;
+      setFrom(laidNow.current);
+      setLaid(to);
+      t.setValue(0);
+      runPane(t, 1, () => last.current === to && setFrom(null));
+    };
+    if (skips()) move();
+    else requestAnimationFrame(move);
   }, [mode, f, p, t]);
 
   // What it showed stays on it as it goes (its chat may have gone first).
@@ -119,12 +129,14 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
   const at = laid === "float" ? card : dock;
   const was = from === "float" ? card : from === "dock" ? dock : at;
   const step = (a: number, b: number) => t.interpolate({ inputRange: [0, 1], outputRange: [a, b] });
-  const flip = [
-    { translateX: step(was.x + was.w / 2 - (at.x + at.w / 2), 0) },
-    { translateY: step(was.y + was.h / 2 - (at.y + at.h / 2), 0) },
-    { scaleX: step(was.w / at.w, 1) },
-    { scaleY: step(was.h / at.h, 1) },
-  ];
+  const sx = step(was.w / at.w, 1);
+  const sy = step(was.h / at.h, 1);
+  const flip = [{ translateX: step(was.x + was.w / 2 - (at.x + at.w / 2), 0) }, { translateY: step(was.y + was.h / 2 - (at.y + at.h / 2), 0) }, { scaleX: sx }, { scaleY: sy }];
+  // What it shows is scaled back by as much, so its words aren't squashed or stretched on the way: drawn at the size it lands at,
+  // from the frame's top left corner, and cut off by the frame as it grows or shrinks around them.
+  const ix = Animated.divide(1, sx);
+  const iy = Animated.divide(1, sy);
+  const unflip = [{ translateX: Animated.add(Animated.multiply(ix, at.w / 2), -at.w / 2) }, { translateY: Animated.add(Animated.multiply(iy, at.h / 2), -at.h / 2) }, { scaleX: ix }, { scaleY: iy }];
   const away = via === "right" ? { translateX: p.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) } : { translateY: p.interpolate({ inputRange: [0, 1], outputRange: [room.height - card.y, 0] }) };
   // Its corners are the card's from the start of its way there to the end of its way back.
   const rounded = at === card || from === "float";
@@ -144,7 +156,9 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
       >
         {/* Its shadow while it floats. */}
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.card, borderRadius: radius.sheet, opacity: f, shadowColor: "#000", shadowOpacity: 0.28, shadowRadius: 30, shadowOffset: { width: 0, height: 12 } }]} />
-        <View style={{ flex: 1, overflow: "hidden", backgroundColor: colors.card, borderRadius: rounded ? radius.sheet : 0 }}>{kept.current}</View>
+        <View style={{ flex: 1, overflow: "hidden", backgroundColor: colors.card, borderRadius: rounded ? radius.sheet : 0 }}>
+          <Animated.View testID="changes-content" style={{ flex: 1, transform: unflip }}>{kept.current}</Animated.View>
+        </View>
         {/* Its line against the chat while it is beside it. */}
         <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: f.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
       </Animated.View>

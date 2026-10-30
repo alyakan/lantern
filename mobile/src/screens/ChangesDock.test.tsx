@@ -86,17 +86,27 @@ describe("the Changes floated over a tablet's chat", () => {
   it("move there on the native driver, laid out once where they land and carried from where they were, never resized as they go", async () => {
     motion.instant = false;
     const timing = jest.spyOn(Animated, "timing");
+    const frames: FrameRequestCallback[] = [];
+    const raf = jest.spyOn(global, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
     const view = await render(<ChangesDock {...props("dock")} />);
     await view.rerender(<ChangesDock {...props("float")} />);
+    // Its frame is left alone in the commit the chat's width is laid out in, and moved a frame later.
+    expect(frame()).toMatchObject({ left: 683, width: 683 });
+    await act(async () => frames.splice(0).forEach((cb) => cb(0)));
+    raf.mockRestore();
     expect(timing).toHaveBeenCalled();
     expect(timing.mock.calls.every(([, c]) => c.useNativeDriver)).toBe(true);
     // At the start it is the card's frame drawn where the pane was: half as wide, the whole height, at the right.
+    const scale = (style: { transform: object[] }, key: string) => (style.transform.find((t) => key in t) as Record<string, number>)[key];
     const style = frame();
     expect(style).toMatchObject({ left: 137, top: 91, width: 1093, height: 822 });
-    const scaleX = style.transform.find((t: object) => "scaleX" in t).scaleX;
-    expect(scaleX).toBeCloseTo(683 / 1093);
+    expect(scale(style, "scaleX")).toBeCloseTo(683 / 1093);
+    expect(scale(style, "scaleY")).toBeCloseTo(1000 / 822);
+    // What it shows is scaled back, so the words keep their shape.
+    const words = StyleSheet.flatten(screen.getByTestId("changes-content").props.style);
+    expect(scale(words, "scaleX")).toBeCloseTo(1093 / 683);
     await played();
-    expect(frame().transform.find((t: object) => "scaleX" in t).scaleX).toBe(1);
+    expect(scale(frame(), "scaleX")).toBe(1);
     timing.mockRestore();
     await view.unmount();
   });
