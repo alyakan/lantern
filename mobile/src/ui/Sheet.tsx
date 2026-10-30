@@ -43,15 +43,17 @@ export function Sheet({ onClose, children }: { onClose: () => void; children: (c
   const close = () => void sheet.current?.dismiss();
   const lock = useLockState();
   const covered = lock.ready && (lock.locked || lock.covered);
-  // Covered when it was asked for: never presented.
+  // Covered when it was asked for: never presented. Covered while it was still coming up: put away once it is up.
   const blocked = useRef(covered).current;
+  const coveredNow = useRef(covered);
+  coveredNow.current = covered;
   useEffect(() => {
     if (blocked) return done();
     if (covered) void sheet.current?.dismiss(false);
   }, [covered]);
   if (blocked) return null;
   return (
-    <TrueSheet ref={sheet} detents={["auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidDismiss={done}>
+    <TrueSheet ref={sheet} detents={["auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
       <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
       {covered && (
