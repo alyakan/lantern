@@ -890,7 +890,8 @@ pub enum Request {
     /// "desk"). Only sent to a Mac whose Welcome lists "desk" in `features`.
     Desk,
     /// Where `text`, typed on the phone's Desk `desk`, goes (RemoteDeskRoute): one quick call to a small model on the Mac, shown the
-    /// Desk's chats as data. Nothing is sent: the phone sends the user's words there itself.
+    /// Desk's chats as data. Nothing is sent: the phone sends the user's words there itself. A "which chat had…" answer brings
+    /// the title and a line of past chats of the Desk's projects, closed ones too (History's search, as on the Mac's Desk).
     DeskRoute { desk: String, text: String },
 }
 

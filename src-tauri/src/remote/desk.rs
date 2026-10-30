@@ -56,6 +56,20 @@ pub struct WindowCard {
 pub struct Routing {
     pub chats: Vec<Candidate>,
     pub projects: Vec<(String, String)>,
+    /// The first Desk (home) has every project no other Desk has, open or not: `elsewhere` are the other Desks' folders.
+    pub home: bool,
+    pub elsewhere: Vec<String>,
+}
+
+impl Routing {
+    /// Whether a past chat in `folder` is one of this Desk's (a search finds only those).
+    pub fn has_folder(&self, folder: &str) -> bool {
+        if self.home {
+            !self.elsewhere.iter().any(|f| f == folder)
+        } else {
+            self.projects.iter().any(|(f, _)| f == folder)
+        }
+    }
 }
 
 #[derive(Default)]
@@ -104,7 +118,13 @@ impl Board {
                 slots: chats.iter().map(|c| c.id.clone()).collect(),
                 projects: projects.iter().map(|(folder, label)| RemoteProject { id: folder.clone(), name: label.clone() }).collect(),
             });
-            routing.push((d.id, Routing { chats, projects }));
+            routing.push((d.id, Routing { chats, projects, home: false, elsewhere: Vec::new() }));
+        }
+        // The first is home; what the others have is not home's.
+        let all: Vec<(String, Vec<String>)> = routing.iter().map(|(id, r): &(String, Routing)| (id.clone(), r.projects.iter().map(|(f, _)| f.clone()).collect())).collect();
+        for (i, (id, r)) in routing.iter_mut().enumerate() {
+            r.home = i == 0;
+            r.elsewhere = all.iter().filter(|(other, _)| other != id).flat_map(|(_, folders)| folders.clone()).collect();
         }
         let mut cards: Vec<RemoteDeskCard> = w
             .cards
@@ -148,7 +168,7 @@ impl Board {
     /// The chats and projects of Desk `id`, or None when the window has no such Desk.
     pub fn routing(&self, id: &str) -> Option<Routing> {
         let held = self.held.lock().unwrap();
-        held.routing.iter().find(|(d, _)| d == id).map(|(_, r)| Routing { chats: r.chats.clone(), projects: r.projects.clone() })
+        held.routing.iter().find(|(d, _)| d == id).map(|(_, r)| Routing { chats: r.chats.clone(), projects: r.projects.clone(), home: r.home, elsewhere: r.elsewhere.clone() })
     }
 }
 
@@ -189,6 +209,10 @@ mod tests {
         assert_eq!(r.chats.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["s1", "s2"]);
         assert_eq!(r.projects, vec![("/w/home".to_string(), "home".to_string())]);
         assert!(b.routing("nowhere").is_none());
+        // Home has every folder no other Desk has, open or not; another Desk only its own.
+        assert!(r.has_folder("/w/home") && r.has_folder("/w/closed-project") && !r.has_folder("/w/d0"));
+        let d0 = b.routing("d0").unwrap();
+        assert!(d0.has_folder("/w/d0") && !d0.has_folder("/w/closed-project"));
     }
 
     #[test]

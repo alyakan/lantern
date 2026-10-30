@@ -282,7 +282,7 @@ export function DeskScreen({ top, onOpenChat, renderNeeds }: DeskProps) {
         onContentSizeChange={() => atEnd.current && scroller.current?.scrollToEnd({ animated: false })}
         contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 14, paddingBottom: 12, gap: 12, flexGrow: 1, justifyContent: "flex-end" }}
       >
-        {!desk ? (
+        {!shown ? (
           <View accessibilityLabel="Loading the Desk" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
             <Dots />
           </View>
@@ -308,7 +308,7 @@ export function DeskScreen({ top, onOpenChat, renderNeeds }: DeskProps) {
       </ScrollView>
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: space.lg, paddingTop: 8, paddingBottom: barRoom(insets.bottom) }}>
         <TextInput
-          accessibilityLabel={shown && desk && desk.desks.length > 1 ? `Message the ${shown.name} Desk` : "Message the Desk"}
+          accessibilityLabel={shown && shown.name !== "Desk" ? `Message the ${shown.name} Desk` : "Message the Desk"}
           value={text}
           onChangeText={setText}
           placeholder="Tell the Desk…"

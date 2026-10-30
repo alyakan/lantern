@@ -328,9 +328,8 @@ impl Gateway {
         if text.trim().is_empty() || text.len() > TEXT_MAX {
             return Err("That message is empty, or too long.".into());
         }
-        let routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
-        let chats: Vec<crate::desk::Candidate> = routing
-            .chats
+        let mut routing = self.hub.desk.routing(&desk).ok_or("That Desk isn't on your Mac any more.")?;
+        let chats: Vec<crate::desk::Candidate> = std::mem::take(&mut routing.chats)
             .into_iter()
             .filter(|c| self.hub.chat(&c.id).is_some())
             .map(|c| if self.hub.is_off_claude(&c.id) { crate::desk::Candidate { title: String::new(), last: String::new(), ..c } } else { c })
@@ -350,13 +349,12 @@ impl Gateway {
             }
             Route::Ask { chats: picked, unsure } => R::Ask { slots: picked.into_iter().filter(|id| chats.iter().any(|c| c.id == *id)).collect(), unsure },
             Route::Search { terms } => {
-                let folders: HashSet<&str> = routing.projects.iter().map(|(folder, _)| folder.as_str()).collect();
                 match host.desk_search(terms.clone()).await {
                     Ok(found) => {
                         let open = self.hub.chats();
                         let hits = found
                             .into_iter()
-                            .filter(|h| folders.contains(h.folder.as_str()))
+                            .filter(|h| routing.has_folder(&h.folder))
                             .take(5)
                             .map(|h| protocol::RemoteDeskHit {
                                 title: h.title.iter().map(|p| p.text.as_str()).collect(),
@@ -2999,8 +2997,18 @@ pub(crate) mod tests {
         assert_eq!(p.ask(route()).await.0.unwrap()["kind"], "ask");
         *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Search { terms: "pricing".into() });
         let hit = |id: &str, folder: &str| ChatHit { id: id.into(), title: vec![Piece { text: "Pricing ".into(), hit: true }, Piece { text: "page".into(), hit: false }], folder: folder.into(), project: "app".into(), updated_ms: 9, snippets: vec![Snippet { role: "user", pieces: vec![Piece { text: "the pricing page".into(), hit: true }] }] };
-        *r.host.desk_hits.lock().unwrap() = vec![hit("0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10", "/Users/me/app"), hit("other", "/Users/me/job")];
+        // A past chat of a project with nothing open is home's too; one of the Work Desk's project isn't.
+        *r.host.desk_hits.lock().unwrap() = vec![hit("0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10", "/Users/me/app"), hit("other", "/Users/me/job"), hit("old", "/Users/me/closed")];
         let found = p.ask(route()).await.0.unwrap();
-        assert_eq!(found, json!({"kind": "search", "terms": "pricing", "failed": false, "hits": [{"title": "Pricing page", "project": "app", "updated_ms": 9, "snippet": "the pricing page", "slot": "a"}]}));
+        assert_eq!(
+            found,
+            json!({"kind": "search", "terms": "pricing", "failed": false, "hits": [
+                {"title": "Pricing page", "project": "app", "updated_ms": 9, "snippet": "the pricing page", "slot": "a"},
+                {"title": "Pricing page", "project": "app", "updated_ms": 9, "snippet": "the pricing page", "slot": null}
+            ]})
+        );
+        // On the Work Desk, only its own.
+        let (ok, _, _) = p.ask(Request::DeskRoute { desk: "work".into(), text: "pricing?".into() }).await;
+        assert_eq!(ok.unwrap()["hits"].as_array().map(Vec::len), Some(1));
     }
 }

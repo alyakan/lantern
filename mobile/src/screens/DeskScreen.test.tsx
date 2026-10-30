@@ -60,7 +60,7 @@ async function open(route: RemoteDeskRoute | Error, more: Record<string, unknown
 }
 
 const say = async (text: string) => {
-  await fireEvent.changeText(screen.getByLabelText("Message the Desk Desk"), text);
+  await fireEvent.changeText(screen.getByLabelText("Message the Desk"), text);
   await fireEvent.press(screen.getByRole("button", { name: "Send" }));
   await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
 };
