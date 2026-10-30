@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Chats } from "../sessions";
-import { clip, deskFeed, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
+import { answerShape, clip, deskFeed, deskHistory, replyOf, type DeskEntry, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
 import { addDesk, moveProject, NO_DESKS } from "./desks";
 import { openProjects } from "./sidebar";
 
@@ -147,5 +147,105 @@ describe("the Desk's messages read back", () => {
       { kind: "answer", terms: "it", hits: "failed", text: null, error: "Lantern closed before it answered." },
       { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" },
     ]);
+  });
+});
+
+describe("the Desk's answer, laid out", () => {
+  it("reads the sentence that answers, then Done, Open and Blocked, in that order whatever order they came in", () => {
+    const text = "Almost done: pairing works, one test is red.\n\n**Blocked**\n- UI test fails on CI only [3]\n\n**Done**\n- Pairing screen [1]\n- Fake sensor for **demos** [2]\n\n**Open**\n- Reconnect after sleep [1]";
+    expect(answerShape(text)).toEqual({
+      lead: "Almost done: pairing works, one test is red.",
+      parts: [
+        { part: "done", points: ["Pairing screen [1]", "Fake sensor for demos [2]"] },
+        { part: "open", points: ["Reconnect after sleep [1]"] },
+        { part: "blocked", points: ["UI test fails on CI only [3]"] },
+      ],
+    });
+  });
+
+  it("takes the parts written as `Done:` or a heading, leaves out empty ones, and joins a point that runs onto a second line", () => {
+    expect(answerShape("Started.\nDone:\n- one\n  and more\n## Open\n**Blocked**")).toEqual({ lead: "Started.", parts: [{ part: "done", points: ["one and more"] }] });
+  });
+
+  it("takes a lone sentence (the chats didn't tell), and shows anything else as it came", () => {
+    expect(answerShape("The chats don't say how far it got.")).toEqual({ lead: "The chats don't say how far it got.", parts: [] });
+    expect(answerShape("- a bullet first\n- another")).toBeNull();
+    expect(answerShape("Para one.\nPara two.\nPara three.")).toBeNull();
+    expect(answerShape("")).toBeNull();
+  });
+});
+
+describe("the Desk's answer as Sonnet really writes it", () => {
+  it("lays out a real answer (from `cargo test real_desk_answer -- --ignored`)", () => {
+    const text = "Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.\n\n**Done**\n- Aruana's PR merged into spike/testo; Mac advertises real readings [1]\n\n**Open**\n- iPad pairing screen still left to do [1]\n- Unpairing a sensor is next [2]\n- Demo build on TestFlight after that [2]\n\n**Blocked**\n- Probe firmware needed for temperature units [2]";
+    const shape = answerShape(text);
+    expect(shape?.lead).toBe("Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.");
+    expect(shape?.parts.map((p) => [p.part, p.points.length])).toEqual([
+      ["done", 1],
+      ["open", 3],
+      ["blocked", 1],
+    ]);
+  });
+});
+
+describe("what came back to a Desk message", () => {
+  it("finds the turn the message started in its chat, once it finished, with the whole of Claude's last words", () => {
+    const s = idle({ items: [said("older ask", 50), answer("old"), turn("t0"), said("[Lantern: a note]\n\nCap the delay at 8s", 1000), answer("Looking."), answer("Capped it at **8s** and added a test."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 990)).toEqual({ key: "s1:t1", said: "Capped it at **8s** and added a test.", outcome: "done" });
+  });
+
+  it("finds a queued message in the turn it was sent with, joined to the others queued", () => {
+    const s = idle({ items: [said("first\n\nCap the delay at 8s", 2000), answer("Both done."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 1500)?.key).toBe("s1:t1");
+  });
+
+  it("finds nothing while the turn runs, in a turn from before the message, or ending at the post-hook's reply", () => {
+    expect(replyOf("s1", idle({ status: "running", items: [said("Cap it", 1000), answer("Working on")] }), "Cap it", 990)).toBeNull();
+    expect(replyOf("s1", idle({ items: [said("Cap it", 100), answer("Done."), turn("t1")] }), "Cap it", 10_000)).toBeNull();
+    const hook: ChatItem = { type: "hook", id: "h", text: "Update the brain" };
+    expect(replyOf("s1", idle({ items: [said("Ship it", 1000), answer("Shipped."), hook, answer("Nothing new to save."), turn("t1")] }), "Ship it", 990)?.said).toBe("Shipped.");
+  });
+
+  it("tells the Desk the last exchanges on this Desk only, with what came back, and nothing from a chat on another provider", () => {
+    const base = { also: [], at: 1 };
+    const entries: DeskEntry[] = [
+      { ...base, id: "a", desk: "home", text: "cap the delay", say: "On it.", outcome: { kind: "sent", slot: "s1", title: "Retries", started: false, queued: false }, reply: { status: "done", key: "k", full: "x", outcome: "done", summary: "Capped at 8s." } },
+      { ...base, id: "b", desk: "work", text: "elsewhere", outcome: { kind: "talk" } },
+      { ...base, id: "c", desk: "home", text: "fix the copy", outcome: { kind: "sent", slot: "s2", title: "Gemini chat", started: false, queued: false }, reply: { status: "done", key: "k2", full: "y", outcome: "done", summary: "secret" } },
+      { ...base, id: "d", desk: "home", text: "hi", say: "Hi!", outcome: { kind: "talk" } },
+    ];
+    expect(deskHistory(entries, "home", (slot) => slot === "s2")).toEqual([
+      { you: "cap the delay", desk: 'On it. (sent to "Retries"; it replied: Capped at 8s.)' },
+      { you: "fix the copy", desk: "(sent to)" },
+      { you: "hi", desk: "Hi!" },
+    ]);
+  });
+
+  it("reads back what the Desk said and what came back, a summary cut short by closing as failed, and older messages as they were", () => {
+    const [kept, cut, old] = readLog([
+      { id: "a", desk: "home", at: 1, text: "x", also: [], say: "On it.", outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "done", key: "k", full: "f", outcome: "done", summary: "S" } },
+      { id: "b", desk: "home", at: 2, text: "y", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "summarizing", key: "k", full: "f", outcome: "done" } },
+      { id: "c", desk: "home", at: 3, text: "z", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false } },
+    ]);
+    expect([kept.say, kept.reply?.status]).toEqual(["On it.", "done"]);
+    expect(cut.reply).toMatchObject({ status: "failed", why: expect.stringMatching(/closed/) });
+    expect(old.reply).toBeUndefined();
+  });
+});
+
+describe("a Desk message's reply is never another turn's", () => {
+  it("doesn't take a turn that only holds its words inside something else, or one Claude went on with by itself", () => {
+    const typed = idle({ items: [said("yes, and also fix the footer", 2000), answer("Both."), turn("t1")] });
+    expect(replyOf("s1", typed, "yes", 1000)).toBeNull();
+    const auto = idle({ items: [said("yes", 2000, true), answer("Went on."), turn("t1")] });
+    expect(replyOf("s1", auto, "yes", 1000)).toBeNull();
+    // The whole message, or a whole part of a queue, after Lantern's notes.
+    expect(replyOf("s1", idle({ items: [said("[Lantern: a]\n\n[Lantern: b]\n\nyes", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+    expect(replyOf("s1", idle({ items: [said("yes\n\nand the footer", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+  });
+
+  it("stops waiting for a reply across a restart, as the chat's place may be another chat's by then", () => {
+    const [entry] = readLog([{ id: "a", desk: "home", at: 1, text: "x", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "waiting" } }]);
+    expect(entry.reply).toEqual({ status: "lost" });
   });
 });

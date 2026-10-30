@@ -9,8 +9,8 @@ import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
-import type { RouteCandidate, WindowDesk } from "./lib/desk";
-import type { AsideEvent, ChatSearchResults, DeskRoute, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
+import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -220,6 +220,10 @@ export const api = {
   searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
   /** Where a message typed on the Desk goes (see desk.rs): the window then sends the user's own words there. */
   deskRoute: (claudePath: string, text: string, chats: RouteCandidate[], projects: string[]) => invoke<DeskRoute>("desk_route", { claudePath, text, chats, projects }),
+  /** The Mac's Desk: what it says back to `text` (Sonnet), and what it does with it, given the last few exchanges. */
+  deskTalk: (claudePath: string, text: string, history: Exchange[], chats: RouteCandidate[], projects: string[]) => invoke<DeskTalk>("desk_talk", { claudePath, text, history, chats, projects }),
+  /** A short summary (Haiku) of what a chat replied to a message sent from the Desk. */
+  deskSummary: (claudePath: string, question: string, reply: string) => invoke<string>("desk_summary", { claudePath, question, reply }),
   /** The Desk's own answer to `question` (Markdown, citing the chats as [1], [2] in order), from the past chats the search found. */
   deskAnswer: (claudePath: string, question: string, chats: { id: string; folder: string; title: string; project: string }[]) => invoke<string>("desk_answer", { claudePath, question, chats }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */

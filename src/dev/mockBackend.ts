@@ -2146,9 +2146,41 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
                 : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
           return new Promise((r) => setTimeout(() => r(answer), 500));
         }
+        case "desk_talk": {
+          // Like Sonnet on the Desk (desk.rs talk): a greeting or thanks is only answered; anything else is routed as the router
+          // above would, with a sentence saying what it understood.
+          const text = String(a.text);
+          const chats = (a.chats ?? []) as { id: string; title: string }[];
+          const projects = (a.projects ?? []) as string[];
+          if (/^(hi|hey|hello|thanks|thank you)\b/i.test(text))
+            return new Promise((r) => setTimeout(() => r({ say: `Hi! ${chats.length} chats are open on this Desk; tell me what you need.`, route: null }), 500));
+          const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+          const hit = chats.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
+          const route = /^(how|what's the status|where are we)\b/i.test(text)
+            ? { kind: "answer", terms: words.slice(-2).join(" ") }
+            : /^(which|where)\b/i.test(text)
+              ? { kind: "search", terms: words.slice(-2).join(" ") }
+              : /^new\b/i.test(text) && projects[0]
+                ? { kind: "start", project: projects[0], workflow: "chat" }
+                : hit
+                  ? { kind: "route", chat: hit.id }
+                  : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
+          const say =
+            route.kind === "route" ? "On it: I'll pass that on and tell you what comes back." : route.kind === "start" ? "That's new work, so it gets a chat of its own." : route.kind === "ask" ? "Which chat is this for?" : route.kind === "search" ? "Let me look through your chats." : "Let me read what your chats say about it.";
+          return new Promise((r) => setTimeout(() => r({ say, route }), 500));
+        }
+        case "desk_summary":
+          // Like Haiku: a moment later, the start of the reply in a sentence.
+          return new Promise((r) => setTimeout(() => r(`Done: ${String(a.reply).split(/(?<=[.!?])\s/)[0].slice(0, 160)}`), 400));
         case "desk_answer":
-          // Like the Sonnet call: a little later, a few bullets citing the chats it was given.
-          return new Promise((r) => setTimeout(() => r(((a.chats ?? []) as { title: string }[]).map((c, i) => `- ${c.title}: going well [${i + 1}]`).join("\n")), 900));
+          // Like the Sonnet call: a little later, one sentence, then Done / Open / Blocked citing the chats it was given.
+          return new Promise((r) =>
+            setTimeout(() => {
+              const chats = (a.chats ?? []) as { title: string }[];
+              const cite = (i: number) => `[${(i % Math.max(chats.length, 1)) + 1}]`;
+              r(`Mostly done: retries work, one test is still red.\n\n**Done**\n- Retry on 5xx with backoff ${cite(0)}\n- Cap the delay at 8 seconds ${cite(1)}\n\n**Open**\n- Log each retry once ${cite(0)}\n\n**Blocked**\n- The timeout test is flaky on CI ${cite(2)}`);
+            }, 900),
+          );
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

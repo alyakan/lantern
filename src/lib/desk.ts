@@ -77,11 +77,22 @@ function deskChats(open: Record<string, ProjectOpen>): { slot: string; title: st
  * or at the end of a chat that isn't working.
  */
 export function turnCards(slot: string, title: string, where: string, s: State): DeskCard[] {
-  const cards: DeskCard[] = [];
+  return turns(slot, title, where, s).map((t) => t.card);
+}
+
+/** A finished turn: its card, and the whole of what started it and of Claude's last words, for the Desk's reply to a message. */
+interface Turn {
+  card: DeskCard;
+  asked: string;
+  said: string;
+}
+
+function turns(slot: string, title: string, where: string, s: State): Turn[] {
+  const out: Turn[] = [];
   let start: Extract<State["items"][number], { type: "user" }> | null = null;
   let said = "";
   const close = (key: string, outcome: DeskCard["outcome"]) => {
-    if (start) cards.push({ key: `${slot}:${key}`, slot, title, where, at: start.at ?? null, asked: clip(start.text, ASKED_CHARS), auto: !!start.auto, said: clip(plain(said), SAID_CHARS), outcome });
+    if (start) out.push({ card: { key: `${slot}:${key}`, slot, title, where, at: start.at ?? null, asked: clip(start.text, ASKED_CHARS), auto: !!start.auto, said: clip(plain(said), SAID_CHARS), outcome }, asked: start.text, said });
     start = null;
   };
   for (const it of s.items) {
@@ -94,7 +105,31 @@ export function turnCards(slot: string, title: string, where: string, s: State):
     else if (it.type === "turn") close(it.id, it.stopped ? "stopped" : it.isError ? "failed" : "done");
   }
   if (said && chatState(s) === "done") close("end", "done");
-  return cards;
+  return out;
+}
+
+/** How long before a Desk message was logged its turn may say it started (clocks and the order of state updates). */
+const REPLY_SLACK_MS = 5_000;
+
+/**
+ * The turn a message sent from the Desk started in a chat, once it finished: the first turn there since the message, whose
+ * opening message holds the message's words (a queued message goes with the others queued, joined; Lantern may add notes).
+ * Null while it hasn't finished, or when no turn in that chat is it.
+ */
+export function replyOf(slot: string, s: State, text: string, at: number): { key: string; said: string; outcome: DeskCard["outcome"] } | null {
+  const turn = turns(slot, "", "", s).find((t) => !t.card.auto && (t.card.at ?? 0) >= at - REPLY_SLACK_MS && carries(t.asked, text));
+  return turn ? { key: turn.card.key, said: turn.said, outcome: turn.card.outcome } : null;
+}
+
+/**
+ * Whether a turn's opening message is the Desk's message: the whole of it, after any notes Lantern put first, or one whole
+ * part of messages queued together (joined by a blank line). Never a few of its words inside something else ("yes" in "yes,
+ * and also…" typed in the chat).
+ */
+function carries(asked: string, text: string): boolean {
+  const words = text.trim();
+  const own = asked.replace(/^(?:\[Lantern:[\s\S]*?\]\n\n)+/, "").trim();
+  return own === words || own.startsWith(`${words}\n\n`) || own.endsWith(`\n\n${words}`) || own.includes(`\n\n${words}\n\n`);
 }
 
 // Each chat's cards, kept while its state is the same object: the Desk draws again with every streamed event of every
@@ -192,7 +227,26 @@ export type DeskOutcome =
   | { kind: "search"; terms: string; hits: ChatHit[] | null | "failed" }
   /** The Desk's own answer, from the chats about `terms` (`hits`, found first, as for a search): `text` null while it is written. */
   | { kind: "answer"; terms: string; hits: ChatHit[] | null | "failed"; text: string | null; error?: string }
+  /** The Desk only replied: nothing was sent anywhere. */
+  | { kind: "talk" }
   | { kind: "failed"; why: string };
+
+/**
+ * What came back from the chat a Desk message was sent to: `waiting` until its turn finishes, then a short summary of Claude's
+ * reply (`full`, the reply itself, for "Show full answer"). `off`: the chat runs on another provider, so nothing it said is
+ * put to Claude to summarize.
+ */
+export type DeskReply =
+  | { status: "waiting" }
+  | { status: "summarizing"; key: string; full: string; outcome: DeskCard["outcome"] }
+  | { status: "done"; key: string; full: string; outcome: DeskCard["outcome"]; summary: string }
+  | { status: "failed"; key: string; full: string; outcome: DeskCard["outcome"]; why: string }
+  | { status: "off"; key: string; outcome: DeskCard["outcome"] }
+  /** Lantern restarted before the reply came: a chat may have its old place since, so it is never looked for again. */
+  | { status: "lost" };
+
+/** The most of a chat's reply kept with a Desk message, for "Show full answer". */
+export const FULL_MAX = 8_000;
 
 /** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
 export interface DeskEntry {
@@ -203,6 +257,10 @@ export interface DeskEntry {
   text: string;
   outcome: DeskOutcome;
   also: { slot: string; title: string }[];
+  /** What the Desk said back, as plain text (only shown to you). */
+  say?: string;
+  /** What came back from the chat it was sent to. Only messages sent since the Desk talks have one: older ones are never summarized. */
+  reply?: DeskReply;
 }
 
 /** How many Desk messages are kept (the newest). */
@@ -213,8 +271,53 @@ export function readLog(raw: unknown): DeskEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
-    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome.kind === "answer" && (!Array.isArray(e.outcome.hits) || (e.outcome.text === null && !e.outcome.error)) ? { ...e.outcome, hits: Array.isArray(e.outcome.hits) ? e.outcome.hits : ("failed" as const), error: e.outcome.error ?? "Lantern closed before it answered." } : e.outcome }))
+    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], say: typeof e.say === "string" ? e.say : undefined, reply: readReply(e.reply), outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome.kind === "answer" && (!Array.isArray(e.outcome.hits) || (e.outcome.text === null && !e.outcome.error)) ? { ...e.outcome, hits: Array.isArray(e.outcome.hits) ? e.outcome.hits : ("failed" as const), error: e.outcome.error ?? "Lantern closed before it answered." } : e.outcome }))
     .slice(-LOG_MAX);
+}
+
+/**
+ * A reply read back: one being summarized when the app closed is kept as failed (it isn't asked for again by itself), and one
+ * still waiting is lost: after a restart a chat's place (its slot) may be another chat's, whose reply isn't this one.
+ */
+function readReply(r: unknown): DeskReply | undefined {
+  if (!r || typeof r !== "object") return undefined;
+  const reply = r as DeskReply;
+  if (reply.status === "summarizing") return { status: "failed", key: reply.key, full: reply.full, outcome: reply.outcome, why: "Lantern closed before it summarized the reply." };
+  if (reply.status === "waiting") return { status: "lost" };
+  return ["done", "failed", "off", "lost"].includes(reply.status) ? reply : undefined;
+}
+
+/** An earlier exchange as the Desk is shown it (see desk.rs `Exchange`). */
+export interface Exchange {
+  you: string;
+  desk: string;
+}
+
+/**
+ * The Desk's last few exchanges on one Desk, for it to follow the conversation: your words, and what it said and did in a few
+ * words. A chat that ran on another provider is named by nothing, and its reply is left out: nothing said there is put to Claude.
+ */
+export function deskHistory(entries: DeskEntry[], desk: string, offClaude: (slot: string) => boolean = () => false, max = 8): Exchange[] {
+  return entries
+    .filter((e) => e.desk === desk && e.outcome.kind !== "routing")
+    .slice(-max)
+    .map((e) => {
+      const o = e.outcome;
+      const off = o.kind === "sent" && offClaude(o.slot);
+      const did =
+        o.kind === "sent"
+          ? `(${o.started ? "started a chat" : "sent to"}${off ? "" : ` "${o.title}"`}${e.reply?.status === "done" && !off ? `; it replied: ${e.reply.summary}` : ""})`
+          : o.kind === "ask"
+            ? "(asked which chat)"
+            : o.kind === "search"
+              ? `(looked for chats about "${o.terms}")`
+              : o.kind === "answer"
+                ? `(answered from the chats about "${o.terms}")`
+                : o.kind === "failed"
+                  ? "(not sent)"
+                  : "";
+      return { you: clip(e.text, 300), desk: clip([e.say ?? "", did].filter(Boolean).join(" "), 400) };
+    });
 }
 
 /** What the window tells the backend of its Desks, for a phone's Desk (see remote/desk.rs). */
@@ -241,4 +344,53 @@ export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desk
     cards: deskFeed(chats, open).map((c) => ({ ...c, desk: deskOf(desks, folderOf.get(c.slot) ?? "") })),
     off_claude: offClaudeSessions,
   };
+}
+
+/** A part of the Desk's answer: what is done, what is left, what is stuck. */
+export type AnswerPart = "done" | "open" | "blocked";
+
+/** The Desk's answer laid out: one sentence that answers, then its points by part, in that order. */
+export interface AnswerShape {
+  lead: string;
+  parts: { part: AnswerPart; points: string[] }[];
+}
+
+const PART_ORDER: AnswerPart[] = ["done", "open", "blocked"];
+const PART_HEAD = /^\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(done|open|blocked)\s*:?\s*(?:\*\*|__)?\s*:?\s*$/i;
+const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/;
+const marks = (s: string) => s.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * The Desk's answer as the Desk asks Claude for it (one sentence, then `**Done**`, `**Open**`, `**Blocked**` with bullets), or
+ * null when it isn't in that shape: then it is shown as it came.
+ */
+export function answerShape(text: string): AnswerShape | null {
+  const lines = text.split(/\r?\n/);
+  const lead: string[] = [];
+  const found = new Map<AnswerPart, string[]>();
+  let current: string[] | null = null;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const head = PART_HEAD.exec(line);
+    if (head) {
+      const part = head[1].toLowerCase() as AnswerPart;
+      current = found.get(part) ?? [];
+      found.set(part, current);
+      continue;
+    }
+    const bullet = BULLET.exec(line);
+    if (!current) {
+      if (bullet) return null;
+      lead.push(line);
+    } else if (bullet) current.push(marks(bullet[1]));
+    // A line under a part that isn't a bullet carries on its last point.
+    else if (current.length) current[current.length - 1] = marks(`${current[current.length - 1]} ${line}`);
+    else current.push(marks(line));
+  }
+  const first = marks(lead.join(" "));
+  if (!first) return null;
+  const parts = PART_ORDER.filter((p) => found.get(p)?.some(Boolean)).map((part) => ({ part, points: found.get(part)!.filter(Boolean) }));
+  // Just a sentence (the chats didn't tell) is a shape too; a long block of prose with no parts isn't.
+  if (!parts.length && lead.length > 2) return null;
+  return { lead: first, parts };
 }
