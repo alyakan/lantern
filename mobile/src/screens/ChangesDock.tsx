@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Pressable, StyleSheet, View, type GestureResponderEvent } from "react-native";
-import { runPaneFrame } from "../ui/motion";
+import { runPane } from "../ui/motion";
 import { radius, useColors } from "../ui/theme";
 import { floatFrame } from "../view/layout";
 
@@ -29,20 +29,33 @@ export interface ChangesDockProps {
   children: ReactNode;
 }
 
+type Frame = { x: number; y: number; w: number; h: number };
+
 /**
  * The Changes pane on a tablet, as one view whatever it does, so what it shows (the file picked, its diff) stays as it moves.
  * Beside the chat it slides in from the right edge and back out, with a divider on its left edge that drags it wider or
- * narrower. Floated, its frame grows from where it sat into a big card in the middle, with rounded corners, a shadow, and the
- * chat dimmed around it; put back, it shrinks into its place beside the chat. Put away while it floats, it goes down.
+ * narrower. Floated, it grows from where it sat into a big card in the middle, with rounded corners, a shadow, and the chat
+ * dimmed around it; put back, it shrinks into its place beside the chat. Put away while it floats, it goes down.
+ *
+ * Every move runs on the native driver. Floating or putting back, the view is laid out once, at the frame it ends at, and a
+ * translate and a scale carry it there from the frame it had. Moving the frame itself (as it once did) laid the diff out
+ * again at every step, in JavaScript, and stuttered.
  */
 export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResize, onResizeEnd, onStep, share, children }: ChangesDockProps) {
   const colors = useColors();
-  // How far it floats (0 beside the chat, 1 the card) and how far in it is (0 away, 1 in).
+  // How far it floats (0 beside the chat, 1 the card: the dimming, the shadow), how far in it is (0 away, 1 in), and how far it
+  // has come from the frame it had (0) to the one it is laid out at (1).
   const f = useRef(new Animated.Value(mode === "float" ? 1 : 0)).current;
   const p = useRef(new Animated.Value(mode === "hidden" ? 0 : 1)).current;
+  const t = useRef(new Animated.Value(1)).current;
   const [mounted, setMounted] = useState(mode !== "hidden");
   // Which way it leaves: to the right from beside the chat, down from the middle.
   const [via, setVia] = useState<"right" | "down">(mode === "float" ? "down" : "right");
+  // The frame it is laid out at, which changes a commit after the mode does: the chat's change of width (`movePanes`) is laid
+  // out by iOS in the commit the mode changes in, and that animation would carry this frame too, on top of its own move. While
+  // it floats or is put back, `from` is where it was, so it is carried from there.
+  const [laid, setLaid] = useState<"dock" | "float">(mode === "float" ? "float" : "dock");
+  const [from, setFrom] = useState<"dock" | "float" | null>(null);
   const last = useRef(mode);
   useEffect(() => {
     const before = last.current;
@@ -50,19 +63,26 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
     if (before === mode) return;
     if (mode === "hidden") {
       setVia(before === "float" ? "down" : "right");
-      runPaneFrame(p, 0, () => last.current === "hidden" && setMounted(false));
+      runPane(p, 0, () => last.current === "hidden" && setMounted(false));
       return;
     }
     setMounted(true);
     if (before === "hidden") {
       // It comes in the way it would go: from the right to beside the chat, from below to the middle.
       f.setValue(mode === "float" ? 1 : 0);
+      t.setValue(1);
+      setLaid(mode);
+      setFrom(null);
       setVia(mode === "float" ? "down" : "right");
-      runPaneFrame(p, 1);
+      runPane(p, 1);
       return;
     }
-    runPaneFrame(f, mode === "float" ? 1 : 0);
-  }, [mode, f, p]);
+    setLaid(mode);
+    setFrom(before);
+    t.setValue(0);
+    runPane(t, 1, () => last.current === mode && setFrom(null));
+    runPane(f, mode === "float" ? 1 : 0);
+  }, [mode, f, p, t]);
 
   // What it showed stays on it as it goes (its chat may have gone first).
   const kept = useRef(children);
@@ -92,11 +112,22 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
   };
 
   if (!mounted && mode === "hidden") return null;
-  const card = floatFrame(room.width, room.height, room.top, room.bottom);
-  const dockX = room.width - width;
   const floating = mode === "float";
-  const between = (a: number, b: number) => f.interpolate({ inputRange: [0, 1], outputRange: [a, b] });
+  const card: Frame = floatFrame(room.width, room.height, room.top, room.bottom);
+  const dock: Frame = { x: room.width - width, y: 0, w: width, h: room.height };
+  // Laid out where it is going (where it was, while it slides away), carried there from where it was.
+  const at = laid === "float" ? card : dock;
+  const was = from === "float" ? card : from === "dock" ? dock : at;
+  const step = (a: number, b: number) => t.interpolate({ inputRange: [0, 1], outputRange: [a, b] });
+  const flip = [
+    { translateX: step(was.x + was.w / 2 - (at.x + at.w / 2), 0) },
+    { translateY: step(was.y + was.h / 2 - (at.y + at.h / 2), 0) },
+    { scaleX: step(was.w / at.w, 1) },
+    { scaleY: step(was.h / at.h, 1) },
+  ];
   const away = via === "right" ? { translateX: p.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) } : { translateY: p.interpolate({ inputRange: [0, 1], outputRange: [room.height - card.y, 0] }) };
+  // Its corners are the card's from the start of its way there to the end of its way back.
+  const rounded = at === card || from === "float";
   return (
     <>
       {/* The chat dimmed around the card: as deep as it floats, and only while it does. */}
@@ -109,15 +140,13 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
         accessibilityViewIsModal={floating}
         accessibilityElementsHidden={mode === "hidden"}
         importantForAccessibility={mode === "hidden" ? "no-hide-descendants" : "auto"}
-        style={{ position: "absolute", left: between(dockX, card.x), top: between(0, card.y), width: between(width, card.w), height: between(room.height, card.h), transform: [away] }}
+        style={{ position: "absolute", left: at.x, top: at.y, width: at.w, height: at.h, transform: [away, ...flip] }}
       >
         {/* Its shadow while it floats. */}
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.card, borderRadius: radius.sheet, opacity: f, shadowColor: "#000", shadowOpacity: 0.28, shadowRadius: 30, shadowOffset: { width: 0, height: 12 } }]} />
-        <Animated.View style={{ flex: 1, overflow: "hidden", backgroundColor: colors.card, borderRadius: between(0, radius.sheet) }}>
-          {kept.current}
-        </Animated.View>
+        <View style={{ flex: 1, overflow: "hidden", backgroundColor: colors.card, borderRadius: rounded ? radius.sheet : 0 }}>{kept.current}</View>
         {/* Its line against the chat while it is beside it. */}
-        <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: between(1, 0) }} />
+        <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: f.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
       </Animated.View>
       {mode === "dock" && (
         <View
@@ -128,7 +157,7 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
           accessibilityValue={{ text: share }}
           accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
           onAccessibilityAction={(e) => onStep(e.nativeEvent.actionName === "increment" ? 1 : -1)}
-          style={{ position: "absolute", top: 0, bottom: 0, left: dockX - GRAB / 2, width: GRAB, alignItems: "center", justifyContent: "center" }}
+          style={{ position: "absolute", top: 0, bottom: 0, left: dock.x - GRAB / 2, width: GRAB, alignItems: "center", justifyContent: "center" }}
           {...grab}
         >
           {/* A grip in the middle of the line, as iPadOS draws one between two apps side by side. */}

@@ -266,6 +266,26 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.getByRole("button", { name: "Put the changes beside the chat" })).toBeTruthy();
   });
 
+  it("show a file tapped in the chat in the pane, brought back if it was put away, not in a sheet beside it", async () => {
+    mockPinned = false;
+    const other = { kind: "file_edited" as const, tool_use_id: "t1", path: "/p/src/b.ts", created: false, added: 1, removed: 0 };
+    const said = { kind: "assistant_text" as const, block_id: "x1", text: "Fixed it in `a.ts`." };
+    const done = { kind: "turn_done" as const, is_error: false, result: "ok", duration_ms: 9000, context_window: null };
+    await open({ chats: two, events: { a: [...edited, other, said, done] } });
+    await press(/Release 0.1.53/);
+    await settle();
+    // The newest edit is shown at first; the pane is put away.
+    expect(screen.getByRole("button", { name: /^b\.ts,/ }).props.accessibilityState).toMatchObject({ selected: true });
+    await press("Hide");
+    expect(paneUp()).toBeNull();
+    await fireEvent.press(screen.getByRole("link", { name: "a.ts" }));
+    await settle();
+    expect(paneUp()).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^a\.ts,/ }).props.accessibilityState).toMatchObject({ selected: true });
+    // No sheet of what changed over the chat: its Close is the only way to tell it is there.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
   it("move from the sheet to the pane as the chats are put away", async () => {
     mockPinned = true;
     await openEdited();

@@ -8,7 +8,7 @@ import { space, useColors } from "../ui/theme";
 import { loadChangesShare, saveChangesShare } from "../prefs";
 import { useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { changedFiles } from "../view/changes";
+import { changedFileOf, changedFiles } from "../view/changes";
 import { CHANGES_SHARE, changesWidth, COLUMN_MAX, hasRoomForChanges, shareOf } from "../view/layout";
 import { useMacCan } from "../shell/useControls";
 import { ArtifactsPane } from "./ArtifactsPane";
@@ -90,6 +90,18 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     movePanes();
     setChangesOpen(open);
   };
+  // A file link tapped in the chat: one of the files it changed is shown in the pane (brought back if it was put away), not in a
+  // sheet over the chat with the pane right beside it.
+  const [focus, setFocus] = useState<{ path: string; n: number } | undefined>(undefined);
+  useEffect(() => setFocus(undefined), [slot]);
+  const showFile = (link: string) => {
+    const path = room ? changedFileOf(changed, link) : null;
+    if (!path) return false;
+    setFocus((f) => ({ path, n: (f?.n ?? 0) + 1 }));
+    setPanel("changes");
+    if (!changesOpen) toggleChanges(true);
+    return true;
+  };
   const toggleFloat = () => {
     movePanes();
     setFloating((f) => !f);
@@ -97,7 +109,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const main = slot ? (
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen) } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen), onFile: showFile } : undefined} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
@@ -142,7 +154,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
               {showing === "artifacts" ? (
                 <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
               ) : (
-                <ChangesPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+                <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts ? <PanelMenu value="changes" artifacts onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
               )}
             </View>
           </CrossFade>

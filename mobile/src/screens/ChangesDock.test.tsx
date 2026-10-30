@@ -1,4 +1,4 @@
-import { StyleSheet, Text } from "react-native";
+import { Animated, StyleSheet, Text } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { motion } from "../ui/motion";
 import { ChangesDock, type ChangesDockProps, type DockMode } from "./ChangesDock";
@@ -81,6 +81,24 @@ describe("the Changes floated over a tablet's chat", () => {
     expect(screen.queryByTestId("changes-divider")).toBeNull();
     await view.rerender(<ChangesDock {...props("dock")} />);
     expect(frame()).toMatchObject({ left: 683, top: 0, width: 683, height: 1000 });
+  });
+
+  it("move there on the native driver, laid out once where they land and carried from where they were, never resized as they go", async () => {
+    motion.instant = false;
+    const timing = jest.spyOn(Animated, "timing");
+    const view = await render(<ChangesDock {...props("dock")} />);
+    await view.rerender(<ChangesDock {...props("float")} />);
+    expect(timing).toHaveBeenCalled();
+    expect(timing.mock.calls.every(([, c]) => c.useNativeDriver)).toBe(true);
+    // At the start it is the card's frame drawn where the pane was: half as wide, the whole height, at the right.
+    const style = frame();
+    expect(style).toMatchObject({ left: 137, top: 91, width: 1093, height: 822 });
+    const scaleX = style.transform.find((t: object) => "scaleX" in t).scaleX;
+    expect(scaleX).toBeCloseTo(683 / 1093);
+    await played();
+    expect(frame().transform.find((t: object) => "scaleX" in t).scaleX).toBe(1);
+    timing.mockRestore();
+    await view.unmount();
   });
 
   it("dim the chat around them, and a tap on it puts them away (the screen reader stays in the card, which has its own Hide)", async () => {

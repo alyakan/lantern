@@ -37,3 +37,12 @@ export function changesLine(files: ChangedFile[]): string | null {
   const removed = files.reduce((n, f) => n + f.removed, 0);
   return `${files.length === 1 ? "1 file" : `${files.length} files`} · +${added} −${removed}`;
 }
+
+/**
+ * The changed file a link in the chat names, or null when it names none of them. A link may give the path whole or from the
+ * project's folder, so either may end the other (at a "/").
+ */
+export function changedFileOf(files: ChangedFile[], path: string): string | null {
+  const ends = (long: string, short: string) => long === short || long.endsWith("/" + short.replace(/^\.?\//, ""));
+  return files.find((f) => ends(f.path, path) || ends(path, f.path))?.path ?? null;
+}

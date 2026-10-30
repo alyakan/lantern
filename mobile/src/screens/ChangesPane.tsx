@@ -14,13 +14,16 @@ import { DiffView } from "./DiffView";
  * A tablet's right-hand pane: the files the open chat has changed, and a diff of the one chosen, read from the Mac the way the
  * chat's own "What changed" sheet reads it. Read-only: nothing here writes anything.
  */
-export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false, title, float }: { slot: string; onHide: () => void; /** What the button that puts it away says. */ hideLabel?: string; /** On a phone it is a sheet over the chat, which starts below the clock already. */ inSheet?: boolean; /** In place of the "Changes" heading (the phone's sheet: a menu of what it can show). */ title?: ReactNode; /** A tablet's pane beside the chat can float over it as a big card, and go back (`floating` says where it is). */ float?: { floating: boolean; onToggle: () => void } }) {
+export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false, title, float, focus }: { slot: string; onHide: () => void; /** What the button that puts it away says. */ hideLabel?: string; /** On a phone it is a sheet over the chat, which starts below the clock already. */ inSheet?: boolean; /** In place of the "Changes" heading (the phone's sheet: a menu of what it can show). */ title?: ReactNode; /** A tablet's pane beside the chat can float over it as a big card, and go back (`floating` says where it is). */ float?: { floating: boolean; onToggle: () => void }; /** A file link tapped in the chat: the file to show (`n` counts the taps, so the same file tapped again is picked again). */ focus?: { path: string; n: number } }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
   const { views } = useSyncState();
   const files = changedFiles((views[slot] ?? emptyView).items);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(focus?.path ?? null);
+  useEffect(() => {
+    if (focus) setPicked(focus.path);
+  }, [focus?.n]);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The file shown is the one chosen while it is still in the list, else the newest.
