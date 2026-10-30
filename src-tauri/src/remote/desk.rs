@@ -14,12 +14,17 @@ const DESKS_MAX: usize = 8;
 const CARDS_MAX: usize = 60;
 const PROJECTS_MAX: usize = 100;
 const ID_MAX: usize = 120;
+/// The most sessions kept as having run off Claude.
+const OFF_CLAUDE_MAX: usize = 5000;
 
 /// What the window says of its Desks.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowDesk {
     pub desks: Vec<WindowDeskInfo>,
     pub cards: Vec<WindowCard>,
+    /// The sessions that ran on another provider than Claude: nothing said in them is put to Claude for the Desk's answer.
+    #[serde(default)]
+    pub off_claude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +81,7 @@ impl Routing {
 struct Held {
     phone: RemoteDesk,
     routing: Vec<(String, Routing)>,
+    off_claude: std::collections::HashSet<String>,
     /// Counts each change, so a connection sends the Desk again only when it moved on.
     version: u64,
 }
@@ -153,12 +159,18 @@ impl Board {
         }
         held.phone = phone;
         held.routing = routing;
+        held.off_claude = w.off_claude.into_iter().take(OFF_CLAUDE_MAX).collect();
     }
 
     /// The Desk as a phone is sent it, and its version.
     pub fn phone(&self) -> (RemoteDesk, u64) {
         let held = self.held.lock().unwrap();
         (held.phone.clone(), held.version)
+    }
+
+    /// Whether the session ran on another provider than Claude, as the window last said.
+    pub fn off_claude(&self, session: &str) -> bool {
+        self.held.lock().unwrap().off_claude.contains(session)
     }
 
     pub fn version(&self) -> u64 {
@@ -193,7 +205,8 @@ mod tests {
         desks.extend((0..10).map(|i| desk(&format!("d{i}"), &[])));
         let mut cards = vec![card("k-gone", "nowhere")];
         cards.extend((0..70).map(|i| card(&format!("k{i}"), "home")));
-        b.set(WindowDesk { desks, cards });
+        b.set(WindowDesk { desks, cards, off_claude: vec!["s-local".into()] });
+        assert!(b.off_claude("s-local") && !b.off_claude("s-claude"));
         let (phone, version) = b.phone();
         assert_eq!(version, 1);
         assert_eq!(phone.desks.len(), DESKS_MAX);
@@ -218,7 +231,7 @@ mod tests {
     #[test]
     fn moves_on_only_when_what_a_phone_sees_changed() {
         let b = Board::default();
-        let say = |cards: Vec<WindowCard>| WindowDesk { desks: vec![desk("home", &["s1"])], cards };
+        let say = |cards: Vec<WindowCard>| WindowDesk { desks: vec![desk("home", &["s1"])], cards, off_claude: vec![] };
         b.set(say(vec![card("k1", "home")]));
         b.set(say(vec![card("k1", "home")]));
         assert_eq!(b.version(), 1);

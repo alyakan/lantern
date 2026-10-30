@@ -409,6 +409,38 @@ mod tests {
         }
     }
 
+    /// The Desk's answer to a question about real chats on this Mac: `DESK_QUESTION`, `DESK_TERMS` and `DESK_FOLDER` say which
+    /// (`cargo test real_desk_answer_on_this_mac -- --ignored --nocapture`). Reads transcripts and asks Sonnet, as the Desk does.
+    #[tokio::test]
+    #[ignore]
+    async fn real_desk_answer_on_this_mac() {
+        use std::collections::HashMap;
+        let var = |k: &str| std::env::var(k).unwrap_or_default();
+        let (question, terms, folder) = (var("DESK_QUESTION"), var("DESK_TERMS"), var("DESK_FOLDER"));
+        let root = std::path::PathBuf::from(var("HOME")).join(".claude/projects");
+        let empty = HashMap::new();
+        let scope = crate::history_search::Scope { titles: &empty, renamed: &empty, moved: &empty };
+        let index = std::sync::Mutex::default();
+        let found = crate::history_search::search(&root, &terms, &scope, &crate::history_search::Options::default(), &index, &|| false);
+        let sources: Vec<Source> = found
+            .chats
+            .iter()
+            .filter(|h| h.folder == folder)
+            .take(ANSWER_CHATS)
+            .map(|h| {
+                let text = crate::history::transcript_path_with_aliases(&root, Path::new(&h.folder), &[], &h.id).map(|p| said(&crate::history::replay(&p).events, 20_000)).unwrap_or_default();
+                let title: String = h.title.iter().map(|p| p.text.as_str()).collect();
+                eprintln!("source: {title} ({} chars)", text.len());
+                Source { title, project: h.project.clone(), text }
+            })
+            .collect();
+        assert!(!sources.is_empty(), "no chats found");
+        let claude = std::env::var("LANTERN_CLAUDE").unwrap_or_else(|_| "claude".into());
+        let got = answer(Path::new(&claude), std::env::var("PATH").ok().as_deref(), &question, &sources).await;
+        eprintln!("\n{}", got.as_deref().unwrap_or_else(|e| e));
+        assert!(got.is_ok());
+    }
+
     /// One real call to Sonnet for an answer (needs `claude` signed in): `cargo test real_desk_answer -- --ignored --nocapture`.
     #[tokio::test]
     #[ignore]

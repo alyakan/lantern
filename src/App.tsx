@@ -2426,7 +2426,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [hubKey]);
   // A phone's Desk: what the Desks hold, told when it changes. Nothing said in a chat on another provider is put to Claude.
   const offClaude = (slot: string) => providerLabel(slot) !== null;
-  const phoneDesk = windowDesk(chats, openByProject, desks, offClaude);
+  // Every session known to have run on another provider: an open chat's, and a past one's.
+  const offClaudeSessions = [...new Set([...Object.entries(providerBySession).filter(([, p]) => p !== CLAUDE).map(([id]) => id), ...Object.values(chats.slots).flatMap((s) => (s.sessionId && s.provider && providerIdOf(s.provider) !== CLAUDE ? [s.sessionId] : []))])];
+  const phoneDesk = windowDesk(chats, openByProject, desks, offClaude, offClaudeSessions);
   const phoneDeskKey = JSON.stringify(phoneDesk);
   useEffect(() => {
     void api.remoteWindowDesk(phoneDesk).catch(() => {});
@@ -2559,6 +2561,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           const answering = r.kind === "answer";
           deskEdit(entry.id, (e) => ({ ...e, outcome: answering ? { kind: "answer", terms: r.terms, hits: null, text: null } : { kind: "search", terms: r.terms, hits: null } }));
           // A question about how things stand: the Desk answers it from the chats found (only you are shown it).
+          // Never from a chat that ran on another provider: nothing said there is put to Claude.
+          const onClaude = (hits: ChatHit[]) => hits.filter((h) => !offClaudeSessions.includes(h.id)).slice(0, 5);
           const answer = (hits: ChatHit[]) => {
             const done = (text: string | null, error?: string) => deskEdit(entry.id, (e) => (e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, text, ...(error ? { error } : {}) } } : e));
             if (hits.length === 0) return done("");
@@ -2569,8 +2573,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           };
           // Found once and kept with the message. A newer search cancels this one: it looks again, once.
           const found = (hits: ChatHit[] | "failed") => {
-            deskEdit(entry.id, (e) => (e.outcome.kind === "search" || e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, hits } } : e));
-            if (answering && hits !== "failed") answer(hits);
+            const kept = answering && hits !== "failed" ? onClaude(hits) : hits;
+            deskEdit(entry.id, (e) => (e.outcome.kind === "search" || e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, hits: kept } } : e));
+            if (answering && kept !== "failed") answer(kept);
           };
           const look = (again: boolean): Promise<void> =>
             searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));

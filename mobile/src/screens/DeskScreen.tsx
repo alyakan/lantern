@@ -234,7 +234,9 @@ export function DeskScreen({ top, onOpenChat, renderNeeds }: DeskProps) {
     else if (r.kind === "start") startIn(entry, r.project, r.workflow === "steps" ? "steps" : "chat");
     else if (r.kind === "ask") edit(entry.id, { kind: "ask", slots: r.slots, unsure: r.unsure });
     else if (r.kind === "answer") edit(entry.id, { kind: "answer", terms: r.terms, text: r.text, sources: r.sources, error: r.error });
-    else edit(entry.id, { kind: "search", terms: r.terms, hits: r.hits, failed: r.failed });
+    else if (r.kind === "search") edit(entry.id, { kind: "search", terms: r.terms, hits: r.hits, failed: r.failed });
+    // A newer Mac's kind of answer this app can't show.
+    else edit(entry.id, { kind: "failed", why: "Update Lantern on this phone to see this." });
   };
   const send = () => {
     const said = text.trim();

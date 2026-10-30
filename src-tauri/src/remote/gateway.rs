@@ -354,11 +354,14 @@ impl Gateway {
             }
             Route::Ask { chats: picked, unsure } => R::Ask { slots: picked.into_iter().filter(|id| chats.iter().any(|c| c.id == *id)).collect(), unsure },
             Route::Search { terms } => match self.desk_found(&terms, &routing).await {
-                Ok(found) => R::Search { terms, hits: found.into_iter().map(|(hit, _)| hit).collect(), failed: false },
+                Ok(found) => R::Search { terms, hits: found.into_iter().take(5).map(|(hit, _)| hit).collect(), failed: false },
                 Err(_) => R::Search { terms, hits: vec![], failed: true },
             },
             // Answered here, from the Desk's chats about it, open or past: only the user is shown it.
-            Route::Answer { terms } => match self.desk_found(&terms, &routing).await {
+            // A chat that ran on another provider is never read for it: nothing said there is put to Claude.
+            Route::Answer { terms } => match self.desk_found(&terms, &routing).await.map(|found| {
+                found.into_iter().filter(|(hit, chat)| !self.hub.desk.off_claude(&chat.id) && !hit.slot.as_deref().is_some_and(|s| self.hub.is_off_claude(s))).take(crate::desk::ANSWER_CHATS).collect::<Vec<_>>()
+            }) {
                 Ok(found) if found.is_empty() => R::Answer { terms, text: String::new(), sources: vec![], error: None },
                 Ok(found) => {
                     let (sources, chats): (Vec<_>, Vec<_>) = found.into_iter().unzip();
@@ -382,7 +385,7 @@ impl Gateway {
         Ok(found
             .into_iter()
             .filter(|h| routing.has_folder(&h.folder))
-            .take(crate::desk::ANSWER_CHATS)
+            .take(20)
             .map(|h| {
                 let title: String = h.title.iter().map(|p| p.text.as_str()).collect();
                 let hit = protocol::RemoteDeskHit {
@@ -2941,6 +2944,7 @@ pub(crate) mod tests {
                 WindowDeskInfo { id: "work".into(), name: "Work".into(), projects: vec![WindowProject { folder: "/Users/me/job".into(), label: "job".into() }], chats: vec![chat("w")] },
             ],
             cards: vec![WindowCard { key: "a:t1".into(), desk: "home".into(), slot: "a".into(), title: "A".into(), project: "app".into(), at: Some(5), asked: "Fix it".into(), auto: false, said: "Fixed.".into(), outcome: "done".into() }],
+            off_claude: vec![],
         }
     }
 
@@ -3040,6 +3044,13 @@ pub(crate) mod tests {
         assert_eq!(answered["kind"], "answer");
         assert_eq!(answered["text"], "add a dark mode: from 0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10, old");
         assert_eq!(answered["sources"].as_array().map(Vec::len), Some(2));
+        // A past chat that ran on another provider is listed by a search but never read for an answer.
+        let mut said = desk_said(&["a"]);
+        said.off_claude = vec!["old".into()];
+        r.hub.desk.set(said);
+        let answered = p.ask(route()).await.0.unwrap();
+        assert_eq!(answered["text"], "add a dark mode: from 0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10");
+        assert_eq!(answered["sources"].as_array().map(Vec::len), Some(1));
         *r.host.desk_hits.lock().unwrap() = vec![hit("other", "/Users/me/job")];
         assert_eq!(p.ask(route()).await.0.unwrap(), json!({"kind": "answer", "terms": "pricing", "text": "", "sources": [], "error": null}));
         *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Search { terms: "pricing".into() });

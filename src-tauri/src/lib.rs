@@ -3109,22 +3109,28 @@ async fn desk_route(state: State<'_, AppState>, claude_path: String, text: Strin
     Ok(desk::route(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &chats, &projects).await)
 }
 
-/// The end of what was said in each of `chats` (the first few), read from their transcripts, for the Desk's answer.
+/// The end of what was said in each of `chats` (the first few), read from their transcripts, for the Desk's answer: in their order,
+/// one that can't be read said so in its place (the answer cites them by number, as the user is shown them). Empty when none could.
 async fn desk_sources(state: &AppState, chats: Vec<desk::PastChat>) -> Vec<desk::Source> {
     let Ok(root) = projects_root() else { return Vec::new() };
     let mut out = Vec::new();
+    let mut read_any = false;
     for c in chats.into_iter().take(desk::ANSWER_CHATS) {
-        if !history::valid_id(&c.id) {
-            continue;
-        }
-        let aliases = aliases_for(state, &c.folder);
-        let (root, folder, id) = (root.clone(), c.folder.clone(), c.id.clone());
-        let read = tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).map(|p| desk::said(&history::replay(&p).events, 20_000))).await;
-        if let Ok(Ok(text)) = read {
-            out.push(desk::Source { title: c.title, project: c.project, text });
-        }
+        let text = if history::valid_id(&c.id) {
+            let aliases = aliases_for(state, &c.folder);
+            let (root, folder, id) = (root.clone(), c.folder.clone(), c.id.clone());
+            tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).map(|p| desk::said(&history::replay(&p).events, 20_000))).await.ok().and_then(Result::ok)
+        } else {
+            None
+        };
+        read_any |= text.is_some();
+        out.push(desk::Source { title: c.title, project: c.project, text: text.unwrap_or_else(|| "(This chat couldn't be read.)".into()) });
     }
-    out
+    if read_any {
+        out
+    } else {
+        Vec::new()
+    }
 }
 
 /// The Desk's own answer to a question about how things stand, from the past chats the search found (see desk.rs `answer`). It is

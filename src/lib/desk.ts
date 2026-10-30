@@ -221,13 +221,15 @@ export function readLog(raw: unknown): DeskEntry[] {
 export interface WindowDesk {
   desks: { id: string; name: string; projects: { folder: string; label: string }[]; chats: RouteCandidate[] }[];
   cards: (DeskCard & { desk: string })[];
+  /** The sessions that ran on another provider than Claude: the Desk's answer never reads them. */
+  off_claude: string[];
 }
 
 /**
  * Every Desk: its projects (the ones open on it and the ones given to it), its chats as the router is shown them, and the feed's
  * cards, each with the Desk it is on.
  */
-export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desks: Desks, offClaude: (slot: string) => boolean = () => false): WindowDesk {
+export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desks: Desks, offClaude: (slot: string) => boolean = () => false, offClaudeSessions: string[] = []): WindowDesk {
   const folderOf = new Map(Object.entries(open).flatMap(([folder, p]) => p.items.map((item) => [item.slot, folder] as const)));
   return {
     desks: desks.list.map((d) => {
@@ -237,5 +239,6 @@ export function windowDesk(chats: Chats, open: Record<string, ProjectOpen>, desk
       return { id: d.id, name: d.name, projects: folders.map((folder, i) => ({ folder, label: labels[i] })), chats: routeCandidates(chats, on, offClaude) };
     }),
     cards: deskFeed(chats, open).map((c) => ({ ...c, desk: deskOf(desks, folderOf.get(c.slot) ?? "") })),
+    off_claude: offClaudeSessions,
   };
 }
