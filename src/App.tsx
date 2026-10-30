@@ -88,6 +88,8 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
+import { deskFeed, deskLive } from "./lib/desk";
+import { DeskView } from "./components/DeskView";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -160,7 +162,8 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 // A stable empty list, so a chat with no skills loaded yet doesn't hand the composer a new one each render.
 const NO_SKILLS: SkillEntry[] = [];
 
-export default function App() {
+/** `startOnDesk`: the window opens on the Desk (every chat at once) once a chat is open, rather than on the last chat. */
+export default function App({ startOnDesk = false }: { startOnDesk?: boolean } = {}) {
   // What older Lanterns saved per project (one mode, Step by step's own auto-approve, how a team ran) becomes the two
   // settings below, before anything reads them.
   useState(() => migrateModeSettings(localStorage));
@@ -249,6 +252,8 @@ export default function App() {
   // chat and back finds the agents where they were; its chats are handed to it through a store, so each agent redraws only
   // for its own chat.
   const [view, setView] = useState<"chat" | "canvas">("chat");
+  // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
+  const [desk, setDesk] = useState(startOnDesk);
   const canvasLayout = useRef(newLayout());
   const [chatStore] = useState(createChatStore);
   chatStore.assign(chats.slots);
@@ -542,6 +547,7 @@ export default function App() {
     return left !== "canvas" && chats.slots[left] && teamMain(chats, left) === team ? left : "canvas";
   };
   const switchTo = (slot: string) => {
+    if (chats.slots[slot]) setDesk(false);
     if (slot === active || !chats.slots[slot]) return;
     const left = chats.slots[slot].orchestrator ? viewOf(slot) : null;
     const shown = left && left !== "canvas" ? left : slot;
@@ -2459,6 +2465,8 @@ export default function App() {
     }),
   );
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
+  // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
+  const deskShown = desk && Object.keys(openByProject).length > 0;
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -2485,11 +2493,12 @@ export default function App() {
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
-  const sidebarHandlers = {
+  const sidebarBase = {
     onRename: renameChat,
     onChat: switchTo,
     // Its canvas, unless the team was left with a chat full size, which it comes back to (a click while in it is the way back to the canvas).
     onTeam: (slot: string) => {
+      setDesk(false);
       const here = inTeam(slot);
       if (here) focusAgent(slot);
       else switchTo(slot);
@@ -2497,6 +2506,7 @@ export default function App() {
     },
     // An agent is focused on its team's canvas, leaving the team's Lead where it is.
     onAgent: (slot: string, team: string) => {
+      setDesk(false);
       if (!inTeam(team)) switchTo(team);
       focusAgent(slot);
       setView("canvas");
@@ -2527,6 +2537,21 @@ export default function App() {
   };
   // The inbox's Go: the same place the sidebar's row for it goes to.
   const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
+  // Starting something from the sidebar leaves the Desk for it.
+  const leaveDesk = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
+    setDesk(false);
+    run(...args);
+  };
+  const sidebarHandlers = {
+    ...sidebarBase,
+    onNewChatIn: leaveDesk(sidebarBase.onNewChatIn),
+    onNewTeamIn: leaveDesk(sidebarBase.onNewTeamIn),
+    onNewChat: leaveDesk(sidebarBase.onNewChat),
+    onNewTeam: leaveDesk(sidebarBase.onNewTeam),
+    onNewTeamTemplate: leaveDesk(sidebarBase.onNewTeamTemplate),
+    onReviewPr: leaveDesk(sidebarBase.onReviewPr),
+    onSetup: leaveDesk(sidebarBase.onSetup),
+  };
   // Picking something in the peeked sidebar takes you there and puts it away.
   const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
     sidebarPeek.close();
@@ -2567,6 +2592,7 @@ export default function App() {
     colors: projectColors,
     onColors: setProjectColors,
     noted: notedFolders(notesBy),
+    desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
   };
 
   const restartToUpdate = () => {
@@ -2737,11 +2763,15 @@ export default function App() {
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
-          collapsed={reviewCollapsed || !state.folder}
+          collapsed={reviewCollapsed || !state.folder || deskShown}
           scope={showCanvas ? "canvas" : (state.folder ?? "")}
           onRatio={setSplitRatio}
           left={
-            showCanvas ? (
+            deskShown ? (
+              <ErrorBoundary name="desk">
+                <DeskView cards={deskFeed(chats, openByProject)} live={deskLive(chats, openByProject)} needs={inbox} onOpen={switchTo} onGo={goToInbox} onDecide={answerFromInbox} />
+              </ErrorBoundary>
+            ) : showCanvas ? (
               <ChatStoreContext.Provider value={chatStore}>
                 <NodeActionsContext.Provider value={nodeActions}>
                   <ErrorBoundary name="canvas">

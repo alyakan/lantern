@@ -65,6 +65,15 @@ export const ClockIcon = () => (
   </svg>
 );
 
+// A desk lamp's shade over a desk: the Desk, every chat at once.
+export const DeskIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M1.4 11.6h11.2" />
+    <path d="M3 11.6V8.4h8v3.2" />
+    <path d="M4.6 5.6 7 2.4l2.4 3.2z" />
+  </svg>
+);
+
 export const ArrowUpIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" {...base} strokeWidth={1.6}>
     <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" />
