@@ -878,6 +878,10 @@ impl<'a> Session<'a> {
                 if chat.session_id.is_none() {
                     return Err("This chat has no conversation yet. Send a message first, then name it.".into());
                 }
+                // A team's Lead keeps the team's name, which the window leaves alone: said here, not taken and dropped.
+                if chat.workflow.as_deref() == Some("team") {
+                    return Err("This chat leads a team: name it on your Mac.".into());
+                }
                 if title.chars().any(char::is_control) {
                     return Err("A name is one line of words.".into());
                 }
@@ -1831,12 +1835,16 @@ pub(crate) mod tests {
         r.hub.opened("talked", "/p");
         r.hub.session("talked", "0b1c2d3e-0000-4000-8000-000000000001");
         r.hub.opened("fresh", "/p");
+        r.hub.opened("lead", "/p");
+        r.hub.session("lead", "0b1c2d3e-0000-4000-8000-000000000002");
+        r.hub.flow("lead", "team");
         let (_, mut p) = paired(&r).await;
         let rename = |slot: &str, title: &str| Request::Rename { slot: slot.into(), title: title.into() };
         assert!(p.ask(rename("talked", "  Release 0.1.84  ")).await.1.is_none());
         assert_eq!(*r.host.renamed.lock().unwrap(), vec![("talked".to_string(), "Release 0.1.84".to_string())], "trimmed, like the Mac's own Rename");
         for (request, why) in [
             (rename("fresh", "Name"), "no conversation yet"),
+            (rename("lead", "Name"), "leads a team"),
             (rename("nope", "Name"), "isn't open"),
             (rename("talked", "   "), "needs a name"),
             (rename("talked", "one\ntwo"), "one line"),

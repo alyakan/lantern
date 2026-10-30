@@ -1906,7 +1906,9 @@ export default function App() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const titling = useRef(new Set<string>());
   // Naming a session: the name beats every other title it has, and the open chat of that session takes it too.
-  const renameSession = async (id: string, title: string) => {
+  const renameSession = async (id: string, typed: string) => {
+    // Trimmed as the backend keeps it, so the chat shows what was saved.
+    const title = typed.trim();
     await api.renameSession(id, title);
     setTitles((all) => ({ ...all, [id]: title }));
   };

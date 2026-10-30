@@ -407,7 +407,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           },
         ]
       : []),
-    ...(canRename
+    ...(canRename && chat?.workflow !== "team"
       ? [
           {
             label: "Rename",
