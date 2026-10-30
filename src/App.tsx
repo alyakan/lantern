@@ -15,6 +15,7 @@ import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/rev
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
+import { refreshArtifact } from "./lib/artifacts";
 import { FREE_UP_SPACE_REQUEST, suggestedCount, useStorageView } from "./components/StorageTab";
 import { StoragePanel } from "./components/StoragePanel";
 import { StartScreen } from "./components/StartScreen";
@@ -2796,6 +2797,7 @@ export default function App() {
           right={
             <ErrorBoundary name="review pane">
               <ReviewPanel
+                chat={{ slot: active, session: state.sessionId }}
                 architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox, onUpdate: state.status === "idle" ? () => sendIn(active, UPDATE_MAP) : undefined } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
@@ -2829,6 +2831,8 @@ export default function App() {
                     ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
                     : undefined
                 }
+                // An artifact's Refresh data: asks Claude, when it is free.
+                onRefreshArtifact={state.status === "idle" ? (name) => sendIn(active, refreshArtifact(name)) : undefined}
                 comments={
                   state.folder
                     ? {

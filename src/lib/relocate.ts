@@ -77,7 +77,6 @@ export const NOT_FOLDER_KEYED = [
   "review.canvasPanel",
   "review.ratio",
   "review.scope",
-  "review.tab",
   "review.tabs",
   "review.diffLayout",
   "review.commitsOpen",

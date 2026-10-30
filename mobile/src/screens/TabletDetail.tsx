@@ -16,6 +16,7 @@ import { TodosPane } from "./TodosPane";
 import { ChangesDock, type DockMode } from "./ChangesDock";
 import { ChangesPane } from "./ChangesPane";
 import { PanelMenu, type Panel } from "./PanelMenu";
+import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 
@@ -60,7 +61,13 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   // its project's to-do list, picked from the pane's title or the chat bar's To-dos.
   const canArtifacts = useMacCan("artifacts");
   const canTodos = useMacCan("todos");
-  const [panel, setPanel] = useState<Panel>("changes");
+  // Each chat's own: the one picked in it the last time it was on screen.
+  const [picked, setPicked] = useState<{ slot: string | null; panel: Panel }>(() => ({ slot, panel: panelOf(slot) }));
+  const panel = picked.slot === slot ? picked.panel : panelOf(slot);
+  const setPanel = (p: Panel) => {
+    keepPanel(slot, p);
+    setPicked({ slot, panel: p });
+  };
   const showing: Panel = panel === "artifacts" && canArtifacts ? "artifacts" : panel === "todos" && canTodos ? "todos" : "changes";
   // The pane stays once artifacts or to-dos were picked, even back on Changes with none: the menu is in it.
   const [otherPicked, setOtherPicked] = useState(false);
@@ -68,7 +75,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     if (p !== "changes") setOtherPicked(true);
     setPanel(p);
   };
-  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || otherPicked);
+  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || otherPicked || showing !== "changes");
   const project = (slot && chats.find((c) => c.slot === slot)?.project) || null;
   const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
   // The room this has (the window, less the chats when they are beside it), as laid out.

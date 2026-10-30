@@ -26,6 +26,7 @@ import { changedFiles } from "../view/changes";
 import { ChangesPane } from "./ChangesPane";
 import { ArtifactsPane } from "./ArtifactsPane";
 import { ChangesIcon, PanelMenu, type Panel } from "./PanelMenu";
+import { keepPanel, panelOf } from "../view/panelChoice";
 import { ReviewFilePage } from "./ReviewPage";
 import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
 import type { PageAction } from "../view/pages";
@@ -147,8 +148,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // What the sheet shows: the chat's changes, (a Mac that lists "artifacts") the artifacts of its folder, or (one that lists
   // "todos") its project's to-do list.
   const canArtifacts = useMacCan("artifacts");
-  const [panel, setPanel] = useState<Panel>("changes");
-  // The Changes button opens the sheet on the changes, whatever it showed last.
+  // Each chat's own: the one picked in it the last time, which the Changes button opens on.
+  const [panel, setShownPanel] = useState<Panel>(() => panelOf(slot));
+  const setPanel = (p: Panel) => {
+    keepPanel(slot, p);
+    setShownPanel(p);
+  };
+  // The Done page's Changes opens the sheet on the changes, whatever it showed last.
   const openChanges = () => {
     setPanel("changes");
     setChangesOpen(true);
@@ -582,7 +588,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             </Glass>
           )}
         </ChatSettings>
-        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : openChanges} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
           <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
             <ChangesIcon color={colors.ink} />
           </Glass>

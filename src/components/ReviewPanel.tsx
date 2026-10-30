@@ -29,7 +29,7 @@ import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
-import { DEFAULT_PINNED, TABS, migrateTab, validPinned, type Tab } from "../lib/reviewTabs";
+import { DEFAULT_PINNED, TABS, adoptSession, chatTabOf, keepChatTab, migrateTab, validPinned, type ChatKey, type Tab } from "../lib/reviewTabs";
 import { PaneTabsMenu, type TabBadge } from "./PaneTabsMenu";
 import { commentsMessage, type CommentControls } from "../lib/diffComments";
 import { CommentBar } from "./DiffComments";
@@ -37,6 +37,8 @@ import { CommentBar } from "./DiffComments";
 const FullDiff = lazy(() => import("./FullDiff"));
 
 interface Props {
+  /** The chat on screen: each chat keeps the tab picked in it. */
+  chat?: ChatKey;
   folder: string | null;
   /** The session has started, so the backend knows which folder may be browsed. */
   ready: boolean;
@@ -77,6 +79,8 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null; onUpdate?: () => void };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** An artifact's Refresh data: asks Claude in this chat to gather its data again and rewrite it (absent: no chat to ask). */
+  onRefreshArtifact?: (name: string) => void;
   /** The file the chat's latest edit was to, in which chat (`slot`), and its count of edits: an artifact Claude writes opens in Artifacts. */
   lastEdit?: { slot: string; path: string | null; count: number };
   /** The Todos tab: the chats open now (an item's linked chat), how to start a chat on an item, and how to open a chat. */
@@ -118,7 +122,17 @@ function useRequest(name: string, key: unknown, act: () => void) {
 }
 
 export function ReviewPanel(props: Props) {
-  const [savedTab, setTab] = usePersistentState<string>("review.tab", "changes");
+  // Each chat's own tab: the one picked in it the last time it was on screen. A chat put back after a restart gets its session
+  // a moment after it shows, and only then is its tab known: the session is part of which chat this is.
+  const chatId = `${props.chat?.slot ?? ""}\n${props.chat?.session ?? ""}`;
+  const [shown, setShown] = useState<{ chat: string; tab: Tab }>(() => ({ chat: chatId, tab: chatTabOf(props.chat) }));
+  const tab = shown.chat === chatId ? shown.tab : chatTabOf(props.chat);
+  const setTab = (next: Tab) => {
+    keepChatTab(props.chat, next);
+    setShown({ chat: chatId, tab: next });
+  };
+  // A tab picked in a new chat before its first message is kept under its session once it has one, to outlast a restart.
+  useEffect(() => adoptSession(props.chat), [props.chat?.session]);
   const count = props.files.length;
   const runs = props.testRuns ?? [];
   // The folder's watched requests: the Network tab lists them once there's a watch or a summary, and explains itself until then.
@@ -130,11 +144,6 @@ export function ReviewPanel(props: Props) {
   // The pinned tabs (shared by every chat) are the strip; any other tab is in the ⋯ menu, and shows in the strip only while it is the one open.
   const [savedPinned, setPinned] = usePersistentState<unknown>("review.tabs", DEFAULT_PINNED);
   const pinned = validPinned(savedPinned);
-  // Every tab always exists, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
-  const tab = migrateTab(savedTab);
-  useEffect(() => {
-    if (savedTab !== tab) setTab(tab);
-  }, [savedTab]);
   // With both a map and a plan (a Design chat), Plan shows one at a time: the map first.
   const [planView, setPlanView] = useState<"map" | "plan">("map");
   const [shownRun, setShownRun] = useState<string | null>(null);
@@ -311,7 +320,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "artifacts" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("artifacts")}>
-          {props.folder ? <ArtifactsTab folder={props.folder} refreshKey={props.refreshKey} open={artifactOpen} /> : <TabEmpty title="Artifacts">Open a folder to see its artifacts.</TabEmpty>}
+          {props.folder ? <ArtifactsTab folder={props.folder} refreshKey={props.refreshKey} open={artifactOpen} busy={props.chatBusy} onRefresh={props.onRefreshArtifact} /> : <TabEmpty title="Artifacts">Open a folder to see its artifacts.</TabEmpty>}
         </div>
       )}
       {tab === "todos" && (
