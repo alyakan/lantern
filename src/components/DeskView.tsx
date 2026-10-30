@@ -39,8 +39,6 @@ export interface DeskViewProps {
   onSendTo: (entry: DeskEntry, slot: string) => void;
   /** Starts a chat in a project with an entry's words (the router's question, when it couldn't tell). */
   onStartIn: (entry: DeskEntry, folder: string) => void;
-  /** The past chats of this Desk's projects with these words. */
-  search: (terms: string) => Promise<ChatHit[]>;
   onOpenPast: (hit: ChatHit) => void;
   onOpen: (slot: string) => void;
   onGo: (item: InboxItem) => void;
@@ -56,19 +54,8 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-dig
 const ago = (now: number, at: number) => (now - at < 60_000 ? "just now" : now - at < 60 * 60_000 ? `${elapsed(now - at)} ago` : clock(at));
 const OUTCOME: Record<DeskCard["outcome"], string | null> = { done: null, failed: "Failed", stopped: "Stopped" };
 
-/** The past chats with the words a "which chat…?" message was about: each opens where it is. */
-function SearchHits({ terms, search, onOpenPast }: { terms: string; search: DeskViewProps["search"]; onOpenPast: DeskViewProps["onOpenPast"] }) {
-  const [hits, setHits] = useState<ChatHit[] | null | "failed">(null);
-  useEffect(() => {
-    let live = true;
-    search(terms).then(
-      (h) => live && setHits(h),
-      () => live && setHits("failed"),
-    );
-    return () => {
-      live = false;
-    };
-  }, [terms, search]);
+/** The past chats with the words a "which chat…?" message was about (found once, with the message): each opens where it is. */
+function SearchHits({ terms, hits, onOpenPast }: { terms: string; hits: ChatHit[] | null | "failed"; onOpenPast: DeskViewProps["onOpenPast"] }) {
   if (hits === null) return <div className="desk-note muted">Looking through your chats for “{terms}”…</div>;
   if (hits === "failed") return <div className="desk-note">Couldn't look through your chats just now.</div>;
   if (hits.length === 0) return <div className="desk-note">No chat on this Desk mentions “{terms}”.</div>;
@@ -117,7 +104,7 @@ function SendToo({ entry, targets, onSendTo }: { entry: DeskEntry; targets: Desk
 }
 
 /** A message typed on the Desk: your words, then where they went (or the Desk's question, or what it found). */
-function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<DeskViewProps, "targets" | "onSendTo" | "onStartIn" | "search" | "onOpenPast" | "onOpen">) {
+function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<DeskViewProps, "targets" | "onSendTo" | "onStartIn" | "onOpenPast" | "onOpen">) {
   const o = entry.outcome;
   return (
     <article className="desk-entry" aria-label={`You on the Desk: ${entry.text}`}>
@@ -163,7 +150,7 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
           </div>
         </div>
       )}
-      {o.kind === "search" && <SearchHits terms={o.terms} search={p.search} onOpenPast={p.onOpenPast} />}
+      {o.kind === "search" && <SearchHits terms={o.terms} hits={o.hits} onOpenPast={p.onOpenPast} />}
     </article>
   );
 }
@@ -340,7 +327,7 @@ export function DeskView(props: DeskViewProps) {
         {rows.length === 0 && waiting.length === 0 && <div className="desk-empty muted">Nothing here yet. Type below and it goes to the right chat; when a chat finishes an answer, it shows up here, with which chat it was in.</div>}
         {rows.map((r) =>
           r.kind === "entry" ? (
-            <Entry key={r.entry.id} entry={r.entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} search={props.search} onOpenPast={props.onOpenPast} onOpen={onOpen} />
+            <Entry key={r.entry.id} entry={r.entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} onOpenPast={props.onOpenPast} onOpen={onOpen} />
           ) : (
             <article key={r.card.key} className={`desk-card ${r.card.outcome}`} aria-label={`${r.card.title}: ${r.card.said || r.card.asked}`}>
               <div className="desk-card-head">

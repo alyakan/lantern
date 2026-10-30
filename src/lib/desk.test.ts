@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Chats } from "../sessions";
-import { clip, deskFeed, deskLive, MAX_CARDS, plain, SAID_CHARS } from "./desk";
+import { clip, deskFeed, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS } from "./desk";
 import { openProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
@@ -82,6 +82,14 @@ describe("the Desk's live line", () => {
       ["s2", true, "Needs you"],
       ["s1", false, "Bash: npm test"],
     ]);
+  });
+});
+
+describe("what the router is shown of each chat", () => {
+  it("is its name, project, settings and what it was last asked and answered, never the post-hook's reply", () => {
+    const hook: ChatItem = { type: "hook", id: "h", text: "Update the brain" };
+    const c = chats({ s1: idle({ items: [said("Fix the push sound", 1), answer("Only approvals buzz now."), turn("t1"), hook, answer("Nothing new to save."), turn("t2")] }) });
+    expect(routeCandidates(c, open(c))).toEqual([{ id: "s1", title: "Fix the push sound", project: "lantern", workflow: "chat", status: "idle", last: "Asked: Fix the push sound Answered: Only approvals buzz now." }]);
   });
 });
 

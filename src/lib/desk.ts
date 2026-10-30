@@ -8,6 +8,7 @@ import type { State } from "../store";
 import { chatState, type Chats } from "../sessions";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 import { workflowOf } from "./workflow";
+import type { ChatHit } from "../types";
 
 /** One answer that finished, in some chat. */
 export interface DeskCard {
@@ -163,8 +164,11 @@ export function routeCandidates(chats: Chats, open: Record<string, ProjectOpen>)
       const s = chats.slots[c.slot];
       if (!s || !s.folder) return null;
       const state = chatState(s);
-      const last = [...s.items].reverse().find((it) => it.type === "assistant" && it.text.trim());
-      return { at: s.activityAt ?? 0, c: { id: c.slot, title: c.title, project: c.where.split(" · ")[0], workflow: workflowOf(s), status: state === "waiting" ? "waiting" : state === "running" ? "working" : "idle", last: last?.type === "assistant" ? clip(plain(last.text), 200) : "" } as RouteCandidate };
+      // What it was last asked and answered (its newest card), never the post-hook's reply.
+      const cards = cardsOf(c.slot, c.title, c.where, s);
+      const card = cards[cards.length - 1];
+      const last = card ? clip(`Asked: ${card.asked}${card.said ? ` Answered: ${card.said}` : ""}`, 200) : "";
+      return { at: s.activityAt ?? 0, c: { id: c.slot, title: c.title, project: c.where.split(" · ")[0], workflow: workflowOf(s), status: state === "waiting" ? "waiting" : state === "running" ? "working" : "idle", last } as RouteCandidate };
     })
     .filter((x): x is { at: number; c: RouteCandidate } => x !== null)
     .sort((a, b) => b.at - a.at)
@@ -178,7 +182,8 @@ export type DeskOutcome =
   | { kind: "sent"; slot: string; title: string; started: boolean; queued: boolean }
   /** The router couldn't tell (or couldn't be asked): the user picks a chat, or a project to start one in. */
   | { kind: "ask"; chats: { slot: string; title: string; where: string }[]; projects: { folder: string; label: string }[]; unsure: boolean }
-  | { kind: "search"; terms: string }
+  /** `hits`: null while it looks, "failed" when it couldn't; found once and kept with the message. */
+  | { kind: "search"; terms: string; hits: ChatHit[] | null | "failed" }
   | { kind: "failed"; why: string };
 
 /** A message typed on the Desk, with where it went. `also`: the chats it was sent to as well, by the user, after. */
@@ -200,6 +205,6 @@ export function readLog(raw: unknown): DeskEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((e): e is DeskEntry => !!e && typeof e === "object" && typeof (e as DeskEntry).id === "string" && typeof (e as DeskEntry).text === "string" && typeof (e as DeskEntry).at === "number" && !!(e as DeskEntry).outcome)
-    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome }))
+    .map((e) => ({ ...e, desk: typeof e.desk === "string" ? e.desk : "home", also: Array.isArray(e.also) ? e.also : [], outcome: e.outcome.kind === "routing" ? { kind: "failed" as const, why: "Lantern closed before it was sent anywhere." } : e.outcome.kind === "search" && !Array.isArray(e.outcome.hits) ? { ...e.outcome, hits: "failed" as const } : e.outcome }))
     .slice(-LOG_MAX);
 }

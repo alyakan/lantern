@@ -25,7 +25,7 @@ import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
-import type { Capabilities, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
+import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
@@ -2522,26 +2522,39 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false } }));
   };
   // The router answers after the chats may have changed: what it says is carried out with the newest of these.
-  const deskNow = useRef({ deskSendTo, deskStartIn, deskTargets, deskProjects });
-  deskNow.current = { deskSendTo, deskStartIn, deskTargets, deskProjects };
+  const deskNow = useRef({ deskSendTo, deskStartIn });
+  deskNow.current = { deskSendTo, deskStartIn };
+  const desksNow = useRef(desks);
+  desksNow.current = desks;
   const deskSend = (text: string, picked: string | null) => {
     const entry: DeskEntry = { id: `desk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, desk: desks.on, at: Date.now(), text, outcome: { kind: "routing" }, also: [] };
     setDeskLog((all) => [...all, entry].slice(-LOG_MAX));
     if (picked) return deskSendTo(entry, picked);
-    const labels = deskProjects.map((p) => p.label);
-    api.deskRoute(state.claudePath ?? "", text, deskCandidates, labels).then(
+    // What the router is shown is kept: its answer is matched against this, whatever the Desk shows by the time it comes.
+    const sentTargets = deskTargets;
+    const sentProjects = deskProjects;
+    const deskId = desks.on;
+    const ask = (chats: string[], unsure: boolean) => {
+      const asked = chats.map((slot) => sentTargets.find((t) => t.slot === slot)).filter((t): t is (typeof sentTargets)[number] => !!t);
+      // Unsure, or nothing to pick from: a new chat is offered too.
+      deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
+    };
+    api.deskRoute(state.claudePath ?? "", text, deskCandidates, sentProjects.map((p) => p.label)).then(
       (r) => {
         const now = deskNow.current;
         if (r.kind === "route") now.deskSendTo(entry, r.chat);
         else if (r.kind === "start") {
-          const folder = now.deskProjects.find((p) => p.label === r.project)?.folder;
+          const folder = sentProjects.find((p) => p.label === r.project)?.folder;
           if (folder) now.deskStartIn(entry, folder, r.workflow);
-        } else if (r.kind === "search") deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "search", terms: r.terms } }));
-        else {
-          const asked = r.chats.map((slot) => now.deskTargets.find((t) => t.slot === slot)).filter((t): t is (typeof now.deskTargets)[number] => !!t);
-          // Unsure, or nothing to pick from: a new chat is offered too.
-          deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "ask", chats: asked, projects: r.unsure || asked.length === 0 ? now.deskProjects : [], unsure: r.unsure } }));
-        }
+          else ask([], true);
+        } else if (r.kind === "search") {
+          deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "search", terms: r.terms, hits: null } }));
+          // Found once and kept with the message. A newer search cancels this one: it looks again, once.
+          const found = (hits: ChatHit[] | "failed") => deskEdit(entry.id, (e) => (e.outcome.kind === "search" ? { ...e, outcome: { ...e.outcome, hits } } : e));
+          const look = (again: boolean): Promise<void> =>
+            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));
+          look(true).catch(() => found("failed"));
+        } else ask(r.chats, r.unsure);
       },
       (e) => deskEdit(entry.id, (x) => ({ ...x, outcome: { kind: "failed", why: errText(e) } })),
     );
@@ -2872,7 +2885,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onSend={deskSend}
                   onSendTo={deskSendTo}
                   onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  search={(terms) => searchPast(terms).then((r) => r.chats.filter((c) => deskOf(desks, c.folder) === desks.on))}
                   onOpenPast={(hit) => {
                     setDesk(false);
                     openSession(hit.id, hit.folder);
