@@ -18,6 +18,7 @@ import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
+import { artifactList, type Artifact } from "../view/artifacts";
 import { newShellId } from "../view/shell";
 import type { PickedImage } from "../view/attachments";
 import { initialState, reducer, type Action, type State } from "./reducer";
@@ -320,6 +321,21 @@ export class Sync {
   /** A reviewed file's diff in what the chat reviews (or its own change, when it reviews nothing). Only for a Mac that lists "reviewdiff". */
   reviewDiff(slot: string, path: string) {
     return this.ask<string>({ op: "review_diff", slot, path });
+  }
+
+  /** The artifacts in the chat's folder, newest first (`.lantern/artifacts/` on the Mac). Only for a Mac that lists "artifacts". */
+  async artifacts(slot: string): Promise<Artifact[]> {
+    return artifactList(await this.ask<unknown>({ op: "artifacts", slot }));
+  }
+
+  /**
+   * One artifact's text by the name `artifacts` gave: Markdown and Mermaid as written, HTML and SVG with what makes a page reach
+   * a server on its own taken out by the Mac (the page is drawn with scripts off, see ArtifactPage). Only for a Mac that lists "artifacts".
+   */
+  async artifactRead(slot: string, name: string): Promise<string> {
+    const text = await this.ask<unknown>({ op: "artifact_read", slot, name });
+    if (typeof text !== "string") throw new Error("That artifact didn't come through.");
+    return text;
   }
 
   /**

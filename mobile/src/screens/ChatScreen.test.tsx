@@ -1299,6 +1299,23 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(screen.queryByText("2 files · +5 −1")).toBeNull());
   });
 
+  it("offers the folder's artifacts from the sheet's menu only on a Mac that lists them, and opens on the changes again", async () => {
+    const { controller } = makeController();
+    const features = ["artifacts"];
+    const { lastOf } = attachSession(controller, { artifacts: [{ name: "map.md", kind: "markdown", modified: 5, size: 9 }], artifact_read: "# The map" }, features);
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(features) }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
+    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }, { selected: false }]);
+    await fireEvent.press(screen.getByRole("menuitem", { name: /Artifacts/ }));
+    expect(await screen.findByText("The map")).toBeTruthy();
+    expect(lastOf("artifact_read")).toEqual({ op: "artifact_read", slot: "a", name: "map.md" });
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
+    expect(screen.getByRole("button", { name: "Showing Changes" })).toBeTruthy();
+  });
+
   it("has the Changes icon before anything changed, and says so in it", async () => {
     await withSession(turn.slice(0, 2));
     await fireEvent.press(screen.getByRole("button", { name: "Changes" }));

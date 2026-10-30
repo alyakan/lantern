@@ -22,7 +22,8 @@ import { pageOfKey, stepPagesOf } from "../view/stepPages";
 import { StepNav, StepPager } from "./StepPager";
 import { changedFiles } from "../view/changes";
 import { ChangesPane } from "./ChangesPane";
-import { ChangesIcon, PanelMenu } from "./PanelMenu";
+import { ArtifactsPane } from "./ArtifactsPane";
+import { ChangesIcon, PanelMenu, type Panel } from "./PanelMenu";
 import { ReviewFilePage } from "./ReviewPage";
 import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
 import type { PageAction } from "../view/pages";
@@ -138,6 +139,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
   const changed = useMemo(() => changedFiles(view.items), [view.items]);
   const [changesOpen, setChangesOpen] = useState(false);
+  // What the sheet shows: the chat's changes, or (a Mac that lists "artifacts") the artifacts of its folder.
+  const canArtifacts = useMacCan("artifacts");
+  const [panel, setPanel] = useState<Panel>("changes");
+  // The Changes button opens the sheet on the changes, whatever it showed last.
+  const openChanges = () => {
+    setPanel("changes");
+    setChangesOpen(true);
+  };
   const [banner, setBanner] = useState(false);
   const [waking, setWaking] = useState(false);
   // While a swipe to allow is being dragged the chat holds still: it can't scroll out from under the finger.
@@ -283,7 +292,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
 
   const reply = (id: string, a: PageAction) => {
     // The Done page's own buttons: they open something here and the page can still be answered.
-    if (a.go === "changes") return changesPane ? (changesPane.shown ? undefined : changesPane.onToggle()) : setChangesOpen(true);
+    if (a.go === "changes") return changesPane ? (changesPane.shown ? undefined : changesPane.onToggle()) : openChanges();
     if (a.go === "new") return onStartNew?.(chat?.project ?? null);
     setAnswered((s) => new Set(s).add(id));
     if (a.reply) void sync.send(slot, a.reply);
@@ -510,7 +519,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             </Glass>
           )}
         </ChatSettings>
-        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : openChanges} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
           <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
             <ChangesIcon color={colors.ink} />
           </Glass>
@@ -734,7 +743,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         />
       )}
       <Modal visible={changesOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setChangesOpen(false)}>
-        <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" />} onHide={() => setChangesOpen(false)} />
+        {panel === "artifacts" && canArtifacts ? (
+          <ArtifactsPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="artifacts" artifacts onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
+        ) : (
+          <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" artifacts={canArtifacts} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
+        )}
       </Modal>
       {todosOpen && <TodosSheet projectName={chat?.project ?? null} onClose={() => setTodosOpen(false)} />}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}

@@ -53,6 +53,16 @@ impl Kind {
         }
     }
 
+    /// How a phone is told the kind: the same word the window's list uses.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Html => "html",
+            Kind::Svg => "svg",
+            Kind::Markdown => "markdown",
+            Kind::Mermaid => "mermaid",
+        }
+    }
+
     /// The kinds the scheme serves: the rest are read and drawn by the app.
     fn served(self) -> Option<&'static str> {
         match self {
@@ -359,15 +369,60 @@ pub fn read(folder: &Path, name: &str) -> Result<String, String> {
     if kind.served().is_some() {
         return Err("HTML and SVG artifacts are shown in their frame.".into());
     }
+    read_text(folder, name, MAX_BYTES)
+}
+
+fn read_text(folder: &Path, name: &str, max: u64) -> Result<String, String> {
     if name.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
         return Err("That isn't an artifact.".into());
     }
     let full = inside_artifacts(folder, &folder.join(DIR).join(name)).map_err(|_| "That artifact is gone.".to_string())?;
     let meta = std::fs::metadata(&full).map_err(|e| e.to_string())?;
-    if meta.len() > MAX_BYTES {
+    if meta.len() > max {
         return Err("That artifact is too big to show.".into());
     }
     std::fs::read_to_string(&full).map_err(|_| "That artifact isn't text.".to_string())
+}
+
+/// The most of an artifact's text a phone is sent.
+pub const PHONE_MAX: u64 = 1024 * 1024;
+
+/// An artifact's text for a phone. Any kind: the phone has no frame to serve from, so it draws HTML and SVG itself, in a web
+/// view with scripts off and a policy that blocks every request (see mobile/src/ui/ArtifactPage.tsx and PAGE_POLICY in mobile/src/view/artifacts.ts, which this goes with). The policy
+/// doesn't stop a page's `<link rel=preconnect>` or a link's host being looked up ahead of a tap, which reach a server
+/// without a request the policy sees; so those are taken out here, where they are text, before the phone has the page.
+pub fn read_for_phone(folder: &Path, name: &str) -> Result<String, String> {
+    let kind = Kind::of(name).ok_or("That isn't an artifact.")?;
+    let text = read_text(folder, name, PHONE_MAX)?;
+    Ok(if kind.served().is_some() { defuse(&text) } else { text })
+}
+
+/// `html` with what makes a web view reach a server on its own taken out: every `<link`, `<base` and `<meta` tag (preconnect,
+/// dns-prefetch, prefetch, preload, a stylesheet from elsewhere, a refresh to another page), and every `href`, `src`, `srcset`, `action`, `formaction`,
+/// `poster`, `ping`, `data`, `background`, `manifest`, `profile` and `srcdoc` attribute that doesn't point at the page itself (`#...`)
+/// or carry its data inline (`data:`). Plain text replacement of the exact tokens, not a parse: a parse can disagree with
+/// the web view about where a tag begins (a comment, a quote that never closes), and a token the web view reads is a token
+/// this sees. A page's own words that look like these are changed too, which is the price.
+pub fn defuse(html: &str) -> String {
+    use std::sync::OnceLock;
+    static TAGS: OnceLock<regex::Regex> = OnceLock::new();
+    static ATTRS: OnceLock<regex::Regex> = OnceLock::new();
+    let tags = TAGS.get_or_init(|| regex::Regex::new(r"(?i)<(link|base|meta)\b").unwrap());
+    let attrs = ATTRS.get_or_init(|| {
+        regex::Regex::new(r#"(?i)(^|[^A-Za-z0-9_-])((?:[A-Za-z]+:)?(?:href|src|srcset|action|formaction|poster|ping|data|background|manifest|profile|srcdoc))(\s*=\s*)(["']?)(#|data:)?"#).unwrap()
+    });
+    let html = tags.replace_all(html, "<x-$1");
+    attrs
+        .replace_all(&html, |c: &regex::Captures| {
+            let (lead, name, eq, quote) = (&c[1], &c[2], &c[3], &c[4]);
+            match c.get(5) {
+                // Its own fragment, or data it carries: kept as it was. Not a list of candidates (`srcset`), whose later
+                // entries may name a server after a first that is data.
+                Some(keep) if !name.to_ascii_lowercase().ends_with("srcset") => format!("{lead}{name}{eq}{quote}{}", keep.as_str()),
+                _ => format!("{lead}x-{}{eq}{quote}", name.replace(':', "-")),
+            }
+        })
+        .into_owned()
 }
 
 /// Plain defaults under the theme's variables, so a page that only links `lantern.css` already looks like the app.
@@ -396,6 +451,40 @@ mod tests {
 
     fn header<'a>(r: &'a Response<Vec<u8>>, name: &str) -> &'a str {
         r.headers().get(name).unwrap().to_str().unwrap()
+    }
+
+    #[test]
+    fn a_phone_gets_every_kind_with_the_ways_a_page_reaches_a_server_on_its_own_taken_out() {
+        let dir = folder();
+        let page = r##"<!doctype html><meta http-equiv="refresh" content="0;url=http://evil.test/"><LINK rel=preconnect href="http://evil.test"><base href="http://evil.test/"><a href="https://evil.test/x">x</a><a href='#top'>top</a><img src="data:image/png;base64,AA=="><img src=http://evil.test/p.png><svg><use xlink:href="#a"/><image xlink:href="http://evil.test/i.png"/></svg><form action=http://evil.test><button formaction="http://evil.test">go</button></form><a data-src="x" href = "http://evil.test">y</a><img srcset="data:image/png;base64,AA== 1x, http://evil.test/p.png 2x"><iframe srcdoc="&lt;link rel=preconnect href=http://evil.test&gt;"></iframe><IFRAME SRCDOC='&#60;link rel=preconnect&#62;'></IFRAME>"##;
+        fs::write(dir.path().join(DIR).join("page.html"), page).unwrap();
+        fs::write(dir.path().join(DIR).join("notes.md"), "# notes\n[a link](https://example.com)").unwrap();
+        fs::write(dir.path().join(DIR).join("flow.mmd"), "graph TD; A-->B").unwrap();
+        let html = read_for_phone(dir.path(), "page.html").unwrap();
+        for gone in ["<link", "<LINK", "<base", "<meta", " href=\"http", " href = \"http", " src=http", "xlink:href=\"http", " action=http", " formaction=\"http", " srcdoc=", " SRCDOC=", " srcset="] {
+            assert!(!html.contains(gone), "{gone:?} is still in {html}");
+        }
+        // Its own fragments and its inline data stay, and a word that only looks like an attribute is left alone.
+        assert!(html.contains("href='#top'") && html.contains("xlink:href=\"#a\"") && html.contains("src=\"data:image/png;base64,AA==\"") && html.contains("data-src=\"x\""), "{html}");
+        // Markdown and Mermaid are text the phone draws: not changed.
+        assert_eq!(read_for_phone(dir.path(), "notes.md").unwrap(), "# notes\n[a link](https://example.com)");
+        assert_eq!(read_for_phone(dir.path(), "flow.mmd").unwrap(), "graph TD; A-->B");
+    }
+
+    #[test]
+    fn a_phone_cant_read_outside_the_artifacts_or_a_big_one() {
+        let dir = folder();
+        fs::write(dir.path().join("secret.md"), "secret").unwrap();
+        fs::write(dir.path().join(DIR).join("big.html"), "x".repeat(PHONE_MAX as usize + 1)).unwrap();
+        for name in ["../secret.md", "/etc/passwd", "maps/../../secret.md", "", "maps//x.md", "nothing.md", "notes.txt", "a.json"] {
+            assert!(read_for_phone(dir.path(), name).is_err(), "{name:?}");
+        }
+        assert_eq!(read_for_phone(dir.path(), "big.html").unwrap_err(), "That artifact is too big to show.");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(dir.path().join("secret.md"), dir.path().join(DIR).join("link.md")).unwrap();
+            assert!(read_for_phone(dir.path(), "link.md").is_err(), "a symlink out of the folder");
+        }
     }
 
     #[test]
