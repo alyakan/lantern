@@ -146,6 +146,9 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
+  // How tall the buttons are: they float over the end of the decision, which keeps that much room so its last words can be
+  // scrolled up clear of them.
+  const [footHeight, setFootHeight] = useState(0);
 
   // What was asked is kept as it was first seen: once answered it leaves the list, and the screen still says what it was.
   const live = waiting.find((w) => w.request_id === requestId);
@@ -231,7 +234,9 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           Minimize
         </Txt>
       </PressScale>
-      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
+      {/* The decision runs to the bottom, under its buttons, with nothing laid behind them. */}
+      <View style={{ flex: 1 }}>
+      <ScrollView testID="decide-scroll" style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: footHeight + 16 }}>
         {/* The parts of the decision arrive one after another as the screen rises. */}
         <FadeSlideIn from={10} delay={80} style={{ alignSelf: "flex-start" }}>
           <Tag>{view.tag}</Tag>
@@ -327,6 +332,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         {view.kind === "question" && view.questions.map((q) => <Options key={q.question} q={q} picks={picks[q.question] ?? []} typed={typed[q.question] ?? ""} onPick={(l) => toggle(q, l)} onType={(t) => setTyped((s) => ({ ...s, [q.question]: t }))} />)}
       </ScrollView>
 
+      <View testID="decide-buttons" pointerEvents="box-none" onLayout={(e) => setFootHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
       {outcome.kind === "failed" && (
         <Txt variant="small" tone="white" style={{ backgroundColor: "#d93b3b55", padding: 10, borderRadius: 10, marginBottom: 10 }} accessibilityRole="alert">
           {outcome.why}
@@ -371,6 +377,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       ) : (
         <Button label="Done" kind="night-ghost" onPress={onClose} />
       )}
+      </View>
+      </View>
     </AboveKeyboard>
   );
 }

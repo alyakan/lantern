@@ -454,20 +454,21 @@ describe("a chat", () => {
     await waitFor(() => expect(lastOf("interrupt")).toEqual({ op: "interrupt", slot: "a" }));
   });
 
-  it("shows a chat works by the title bar's glowing edge, not a spinner or words, and says it (and what runs in the background) to a screen reader", async () => {
+  it("shows a chat works by the title bar's and the message box's glowing edges, not a spinner or words, and says it (and what runs in the background) to a screen reader", async () => {
     const quiet = await withSession(turn);
     expect(screen.getByLabelText("lantern")).toBeTruthy();
     expect(screen.queryByTestId("work-glow", { includeHiddenElements: true })).toBeNull();
     await quiet.unmount();
     const working = await withSession([...turn, { kind: "background", tasks: ["npm run dev", "cargo watch"] }], {}, {}, { status: "working" });
-    expect(screen.getByTestId("work-glow", { includeHiddenElements: true })).toBeTruthy();
+    // The title bar and the message box.
+    expect(screen.getAllByTestId("work-glow", { includeHiddenElements: true })).toHaveLength(2);
     expect(screen.getByLabelText("lantern, working, 2 running in the background: npm run dev, cargo watch")).toBeTruthy();
     expect(screen.queryByText(/^working/)).toBeNull();
     expect(screen.queryByTestId("background-busy")).toBeNull();
     await working.unmount();
     // Done with its turn but still running a dev server: the edge keeps glowing.
     await withSession([...turn, { kind: "background", tasks: ["npm run dev"] }]);
-    expect(screen.getByTestId("work-glow", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getAllByTestId("work-glow", { includeHiddenElements: true })).toHaveLength(2);
     expect(screen.getByLabelText("lantern, 1 running in the background: npm run dev")).toBeTruthy();
   });
 
@@ -1333,10 +1334,15 @@ describe("a chat on iOS 26, where its header and message box are glass over the 
     await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", text: "ship it" }));
   });
 
-  it("has a message box with a surface of its own when the chat wakes, and a ground under the sleeping notice", async () => {
+  it("has a message box with a surface of its own when the chat wakes, and the sleeping notice on the same glass, with no ground under it", async () => {
     const { controller } = await withSession(turn, {}, {}, { status: "asleep" });
-    // Over a list that runs under it, the notice and its button would otherwise sit on bare words.
-    expect(StyleSheet.flatten(screen.getByText(/asleep to save memory/).parent!.props.style).backgroundColor).toBe(lightColors.paper);
+    // Over a list that runs under it, the notice and its button would otherwise sit on bare words: they are on the box's glass,
+    // and the bar they float in lays nothing behind it.
+    const notice = screen.getByText(/asleep to save memory/);
+    let surface = notice.parent;
+    while (surface && StyleSheet.flatten(surface.props.style)?.backgroundColor !== `${lightColors.card}${COMPOSER_FILL}`) surface = surface.parent;
+    expect(surface).toBeTruthy();
+    expect(StyleSheet.flatten(surface!.parent!.props.style).backgroundColor).toBe("transparent");
     await fireEvent.press(screen.getByRole("button", { name: "Wake this chat" }));
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "idle" })] } }));
     // The surface is the message box's nearest ancestor with its fill: enough of the card to type on, not the faint tint of the rest.

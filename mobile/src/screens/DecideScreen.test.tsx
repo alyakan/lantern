@@ -37,6 +37,16 @@ describe("deciding", () => {
     expect(screen.getByText(/This runs on/)).toBeTruthy();
   });
 
+  it("floats its buttons over the decision, with nothing laid behind them, and keeps room under the decision's last words", async () => {
+    await decide();
+    const buttons = screen.getByTestId("decide-buttons");
+    const style = StyleSheet.flatten(buttons.props.style);
+    expect(style).toMatchObject({ position: "absolute", bottom: 0 });
+    expect(style.backgroundColor).toBeUndefined();
+    await act(async () => fireEvent(buttons, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 360, height: 120 } } }));
+    expect(StyleSheet.flatten(screen.getByTestId("decide-scroll").props.contentContainerStyle).paddingBottom).toBe(136);
+  });
+
   it("a tap on the swipe does not allow anything", async () => {
     const { asked } = await decide();
     await fireEvent.press(swipe());

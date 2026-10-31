@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
-import { Button, Chip, Tag, Txt } from "../ui/components";
+import { Button, Chip, Tag, Txt, WorkGlow } from "../ui/components";
 import { barRoom } from "../ui/keyboard";
 import { Magnifier, SearchContents, ToolsGlyph, TrayContents, useSearchOpening, type BarSearch, type BarTool } from "./SearchBar";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
@@ -601,7 +601,7 @@ const HANDOFF_MS = 300;
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop }: { /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
@@ -821,6 +821,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
         </Txt>
       )}
+      <View>
       <Glass testID="chat-box" lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: BOX_RADIUS, paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
         {searching.active && search && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 10, minHeight: barButton }}>
@@ -880,7 +881,10 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
         </View>
       </Glass>
-      {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
+      {/* While the chat works, the box's edge glows like the title bar's, in the same colour. */}
+      {glow && <WorkGlow color={glow} radius={BOX_RADIUS} />}
+      </View>
+      {marking &&<MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
           onClose={() => setChoosing(false)}
