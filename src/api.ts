@@ -10,7 +10,7 @@ import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
-import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -254,6 +254,8 @@ export const api = {
   oldLocations: (folder: string) => invoke<OldLocation[]>("old_locations", { folder }),
   /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
   openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
+  /** How the repositories with a chat open stand (branches, pull requests and checks, merges, releases), for the Desk. */
+  deskStatus: () => invoke<RepoStatus[]>("desk_status"),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */

@@ -3,10 +3,13 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { NO_DESKS } from "../lib/desks";
+import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
+const repo = (folder: string, over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: folder, github: `aly/${folder.split("/").pop()}`, folders: [{ folder, branch: "main", changed: 0 }], worktrees: 0, gh: "ready", prs: [], merged: [], release: null, drafts: [], error: null, ...over });
+const pr = (number: number, checks: RepoStatus["prs"][number]["checks"]) => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks, review: null });
 const project = (folder: string, over: Partial<ProjectRow> = {}): ProjectRow => ({ folder, label: folder.split("/").pop()!, chats: 1, working: 0, waiting: 0, asleep: 0, unread: 0, needs: 0, at: null, todos: { open: 0, overdue: 0 }, ...over });
 
 function setup(over: Partial<DeskViewProps> = {}) {
@@ -14,6 +17,7 @@ function setup(over: Partial<DeskViewProps> = {}) {
     chats: [],
     projects: [],
     needs: [],
+    repos: null,
     desks: { value: NO_DESKS, waiting: {}, projects: [], onChange: vi.fn(), onAdd: vi.fn() },
     onOpen: vi.fn(),
     onGo: vi.fn(),
@@ -85,5 +89,53 @@ describe("the Desk", () => {
     expect(within(table).queryByRole("button", { name: "Chat 3" })).toBeNull();
     fireEvent.click(unread);
     expect(props.onOpen).toHaveBeenCalledWith("s1");
+  });
+
+  it("adds each project's branch, pull requests and release, and says why when GitHub can't be asked", () => {
+    const now = Date.now();
+    const repos = [
+      repo("/p/lantern", { folders: [{ folder: "/p/lantern", branch: "feat/desk", changed: 4 }], prs: [pr(7, "fail"), pr(8, "pending"), pr(9, "pass")], release: { tag: "v0.1.93", published_at: new Date(now - 3 * 3_600_000).toISOString() }, drafts: ["v0.1.94"] }),
+      repo("/p/rayak", { gh: "logged_out", error: "gh isn't logged in to GitHub." }),
+    ];
+    const { rerender } = setup({ projects: [project("/p/lantern"), project("/p/rayak"), project("/p/notes")] });
+    // Before the Mac has said: nothing is claimed.
+    const rows = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows()[0]).toHaveTextContent("…");
+    rerender({ repos });
+    const [lantern, rayak, notes] = rows();
+    expect(lantern).toHaveTextContent("feat/desk · 4 changed");
+    expect(lantern).toHaveTextContent("3 open · 1 failing");
+    expect(within(lantern).getByTitle("1 with checks still running")).toBeInTheDocument();
+    expect(lantern).toHaveTextContent("v0.1.93 · 1 draft");
+    expect(within(lantern).getByTitle("Published 3h ago")).toBeInTheDocument();
+    expect(rayak).toHaveTextContent("gh isn't logged in");
+    // Not in a repository: dashes, not dots.
+    expect(notes).not.toHaveTextContent("…");
+  });
+
+  it("lists what happened in the repositories today, what is left hanging first", () => {
+    const now = new Date(2026, 9, 31, 18, 0).getTime();
+    vi.setSystemTime(now);
+    const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
+    setup({
+      repos: [
+        repo("/p/lantern", { prs: [pr(7, "fail"), pr(8, "pass")], merged: [{ number: 6, title: "Merged today", merged_at: at(15) }, { number: 5, title: "Merged yesterday", merged_at: at(15, 30) }], release: { tag: "v0.1.93", published_at: at(17) }, drafts: ["v0.1.94"] }),
+        repo("/p/rayak"),
+      ],
+    });
+    const lines = within(screen.getByRole("region", { name: "Repos today" })).getAllByRole("listitem").map((l) => l.textContent);
+    expect(lines).toEqual([
+      expect.stringMatching(/^✕Checks failing: #7 PR 7lantern$/),
+      expect.stringMatching(/^◷Draft release waiting: v0\.1\.94lantern$/),
+      expect.stringMatching(/^↑Released: v0\.1\.93lantern1h ago$/),
+      expect.stringMatching(/^✓Merged: #6 Merged todaylantern3h ago$/),
+    ]);
+  });
+
+  it("says a quiet day is quiet, and shows nothing before the Mac has said", () => {
+    const { rerender } = setup();
+    expect(screen.queryByRole("region", { name: "Repos today" })).toBeNull();
+    rerender({ repos: [repo("/p/lantern")] });
+    expect(screen.getByRole("region", { name: "Repos today" })).toHaveTextContent("Nothing merged, released or failing today.");
   });
 });

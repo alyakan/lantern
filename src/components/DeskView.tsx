@@ -3,7 +3,9 @@ import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
+import type { RepoStatus } from "../types";
 import { DeskProjects } from "./DeskProjects";
+import { ReposToday } from "./ReposToday";
 import { AllowButton } from "./Inbox";
 
 export interface DeskViewProps {
@@ -13,6 +15,8 @@ export interface DeskViewProps {
   projects: ProjectRow[];
   /** What waits on you on this Desk (the title bar's inbox), one thing at a time. */
   needs: InboxItem[];
+  /** How this Desk's repositories stand (git and GitHub); null until the Mac has said. */
+  repos: RepoStatus[] | null;
   desks: {
     value: Desks;
     /** How many things wait on you on each Desk. */
@@ -160,8 +164,8 @@ function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now:
 
 /**
  * The Desk, as a dashboard: what waits on you, one thing at a time, and a table of the Desk's projects with only what Lantern
- * knows for sure (a row opens to list its chats). What happened, as it happened, is the sidebar's Timeline; asking and telling
- * is the right pane's Ask.
+ * knows for sure (a row opens to list its chats), then what happened in its repositories today. What happened in the chats, as
+ * it happened, is the sidebar's Timeline; asking and telling is the right pane's Ask.
  */
 export function DeskView(props: DeskViewProps) {
   const { needs, onOpen, onGo, onDecide } = props;
@@ -178,7 +182,8 @@ export function DeskView(props: DeskViewProps) {
       </header>
       <div className="desk-main">
         {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
-        <DeskProjects rows={props.projects} chats={props.chats} now={now} onOpen={onOpen} />
+        <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} />
+        <ReposToday repos={props.repos} now={now} />
       </div>
     </section>
   );

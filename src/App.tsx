@@ -97,6 +97,7 @@ import { DeskView } from "./components/DeskView";
 import { DeskAsk } from "./components/DeskAsk";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
+import { useDeskStatus } from "./lib/deskStatus";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2576,6 +2577,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
+  // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
+  const allRepos = useDeskStatus(deskShown);
+  const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
   const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
   const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
@@ -3022,6 +3026,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     }, {}),
                   )}
                   needs={deskNeeds}
+                  repos={deskRepos}
                   desks={{
                     value: desks,
                     waiting: waitingBy(desks, openByProject),

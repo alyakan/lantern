@@ -3785,11 +3785,26 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-table { width: 100%; border-collapse: collapse; font-size: calc(12.5px * var(--font-scale)); }
 .desk-table th, .desk-table td { padding: 7px 10px 7px 0; border-bottom: 0.5px solid var(--line); text-align: left; vertical-align: baseline; white-space: nowrap; }
 .desk-table thead th { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.desk-table tbody th { display: flex; align-items: baseline; gap: 8px; font-weight: 400; }
+.desk-table tbody th { font-weight: 400; }
+.desk-project-name { display: flex; align-items: baseline; gap: 8px; }
+.desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-table tr.on { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .desk-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
 .desk-project:hover { text-decoration: underline; }
 .desk-attn { color: var(--attn-text); font-weight: 650; }
+.desk-changed { white-space: nowrap; }
+.desk-branch { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--mono); }
+
+/* Repos today: a line per merge, release, failing check or waiting draft. */
+.desk-repo-list { margin: 0; padding: 0; list-style: none; }
+.desk-repo-event { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
+.desk-repo-mark { flex: none; width: 14px; text-align: center; font-weight: 700; color: var(--muted-text); }
+.desk-repo-event.merged .desk-repo-mark, .desk-repo-event.released .desk-repo-mark { color: var(--add); }
+.desk-repo-event.failing .desk-repo-mark { color: var(--del); }
+.desk-repo-event.draft .desk-repo-mark { color: var(--attn-text); }
+.desk-repo-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-repo-num { color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.desk-repo-name { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-chat { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: none; color: var(--text); font-size: calc(13px * var(--font-scale)); font-weight: 650; text-align: left; }
 .desk-chat:hover { text-decoration: underline; }
 .desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }

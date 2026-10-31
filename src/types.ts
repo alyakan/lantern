@@ -791,6 +791,25 @@ export interface OpenPr {
   draft: boolean;
 }
 
+/** How a repository with a chat open stands, for the Desk's board (status.rs). */
+export interface RepoStatus {
+  /** Its main checkout. */
+  repo: string;
+  /** "owner/name" on GitHub. */
+  github: string | null;
+  folders: { folder: string; branch: string | null; changed: number | null }[];
+  /** Linked worktrees, besides the main checkout. */
+  worktrees: number;
+  gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
+  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
+  /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
+  merged: { number: number; title: string; merged_at: string }[];
+  release: { tag: string; published_at: string | null } | null;
+  /** Releases waiting as drafts, by tag. */
+  drafts: string[];
+  error: string | null;
+}
+
 /** How a worker's tests went when the user ran them from its merge card. */
 export interface MergeTestsReport {
   command: string[];

@@ -45,6 +45,7 @@ pub mod test_runs;
 pub mod titles;
 pub mod desk;
 pub mod desk_agent;
+pub mod status;
 pub mod trash;
 pub mod revert;
 pub mod checkpoint;
@@ -3010,6 +3011,17 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
     tauri::async_runtime::spawn_blocking(move || pr::open_prs(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+/// How the projects with a chat open stand, for the Desk's board (read-only: see `status.rs`). The folders are the open
+/// chats' own, not ones the window names.
+#[tauri::command]
+async fn desk_status(state: State<'_, AppState>) -> Result<Vec<status::RepoStatus>, String> {
+    let path_env = login_path(&state).await;
+    let mut folders: Vec<String> = state.remote.hub.chats().into_iter().filter_map(|c| c.folder).collect();
+    folders.sort();
+    folders.dedup();
+    tauri::async_runtime::spawn_blocking(move || status::status(&folders, path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
 /// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call
 /// that failed for a reason that may pass; the window keeps what it knew.
 #[tauri::command]
@@ -3945,6 +3957,7 @@ pub fn run() {
             steps_guide,
             list_open_prs,
             pr_watch,
+            desk_status,
             pr_failure_log,
             gh_access,
             set_subagents,

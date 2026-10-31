@@ -69,15 +69,15 @@ pub enum GhAccess {
 }
 
 /// What a finished program printed.
-struct Output {
-    success: bool,
-    stdout: Vec<u8>,
-    stderr: String,
+pub(crate) struct Output {
+    pub(crate) success: bool,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: String,
 }
 
 /// Which end of the output is kept when it is more than `KEEP_BYTES`.
 #[derive(Clone, Copy)]
-enum Keep {
+pub(crate) enum Keep {
     Head,
     Tail,
 }
@@ -117,7 +117,7 @@ const GIT_REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", 
 /// Runs `program` with `args` in `folder`: no shell, no input, no prompts, no colours, stopped after `limit`. The git that
 /// `gh` starts is told (by environment, which beats the repository's own config) to run no filesystem monitor, no hooks and
 /// no pager: a repository's config is the project's, and looking at a pull request must not run a program it names.
-fn run_program(program: &str, folder: &Path, args: &[&str], path_env: Option<&str>, limit: Duration, keep: Keep) -> Result<Output, std::io::Error> {
+pub(crate) fn run_program(program: &str, folder: &Path, args: &[&str], path_env: Option<&str>, limit: Duration, keep: Keep) -> Result<Output, std::io::Error> {
     let mut cmd = Command::new(program);
     cmd.current_dir(folder).args(args);
     for var in GIT_REDIRECTS {
