@@ -4,6 +4,7 @@ import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { elapsed } from "../lib/time";
 import type { Todo } from "../lib/todos";
 import type { RepoStatus, StorageItem } from "../types";
+import { Card } from "./DeskCard";
 import { ExternalLink } from "./ExternalLink";
 
 export interface DeskProjectProps {
@@ -82,20 +83,6 @@ function standingOf(wt: Wt, item: StorageItem | undefined, scanned: boolean, cha
 }
 const ORDER: Record<Standing["kind"], number> = { safe: 0, review: 1, blocked: 2, other: 3 };
 const SHOWN = 8;
-
-/** A section of the page: a card with its title, how many, and at most one action. */
-function Card({ title, count, action, children }: { title: string; count?: number; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="dp-card" aria-label={title}>
-      <header className="dp-card-head">
-        <h3>{title}</h3>
-        {!!count && <span className="dp-count">{count}</span>}
-        {action && <span className="dp-card-act">{action}</span>}
-      </header>
-      {children}
-    </section>
-  );
-}
 
 /** Every row on the page has the same shape: a title with one short thing on its right, and one quiet line under it. */
 function Row({ title, aside, meta }: { title: ReactNode; aside?: ReactNode; meta?: ReactNode }) {

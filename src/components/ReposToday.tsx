@@ -2,6 +2,7 @@ import { useState } from "react";
 import { reposToday, type RepoEventKind } from "../lib/deskStatus";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
+import { Card } from "./DeskCard";
 
 const MARK: Record<RepoEventKind, string> = { failing: "✕", draft: "◷", merged: "✓", released: "↑" };
 /** The lines shown before "Show N more": what is left hanging is always shown. */
@@ -21,10 +22,9 @@ export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: nu
   const more = events.length - shown.length;
   const many = new Set(repos.map((r) => r.repo)).size > 1;
   return (
-    <section className="desk-repos" aria-label="Repos today">
-      <h2 className="desk-h">Repos today</h2>
+    <Card title="Repos today" count={events.length} heading="h2" className="desk-repos">
       {events.length === 0 ? (
-        <p className="muted">Nothing merged, released or failing today.</p>
+        <p className="dp-note">Nothing merged, released or failing today.</p>
       ) : (
         <ul className="desk-repo-list">
           {shown.map((e) => (
@@ -43,10 +43,10 @@ export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: nu
         </ul>
       )}
       {more > 0 && (
-        <button className="desk-more" onClick={() => setAll(true)}>
+        <button className="desk-more dp-foot" onClick={() => setAll(true)}>
           Show {more} more
         </button>
       )}
-    </section>
+    </Card>
   );
 }

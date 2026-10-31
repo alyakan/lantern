@@ -3722,7 +3722,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 980px; margin: 0 auto; padding: 16px 24px 24px; box-sizing: border-box; }
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 980px; margin: 0 auto; padding: 16px 24px 24px; box-sizing: border-box; }
 .desk-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 16px 0 0; }
 .desk-side > .desk-h { padding: 0 16px; }
 .desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 18px; }
@@ -3781,7 +3781,12 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 
 /* The projects: a row each, with only what Lantern knows for sure. A narrow window scrolls the table sideways rather than
    running it past the pane, and a long project name is cut short (its title has the whole folder). */
-.desk-projects { overflow-x: auto; }
+.dp-scroll { overflow-x: auto; }
+/* In its card the table's header is a tinted band, and its rows sit inside the card's edges. */
+.desk-table thead th { background: var(--bg-subtle); }
+.desk-table th:first-child, .desk-table td:first-child { padding-left: 12px; }
+.desk-table th:last-child, .desk-table td:last-child { padding-right: 12px; }
+.desk-table tbody tr:last-child > * { border-bottom: none; }
 .desk-table { width: 100%; border-collapse: collapse; font-size: calc(12.5px * var(--font-scale)); }
 .desk-table th, .desk-table td { padding: 7px 10px 7px 0; border-bottom: 0.5px solid var(--line); text-align: left; vertical-align: baseline; white-space: nowrap; }
 .desk-table thead th { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
@@ -3798,7 +3803,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-page-title { margin: 4px 0 0; font-size: calc(18px * var(--font-scale)); font-weight: 700; }
 .dp-card { border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); overflow: hidden; }
 .dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px; border-bottom: 0.5px solid var(--line); }
-.dp-card-head h3 { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
+.dp-card-head :is(h2, h3) { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .dp-count { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .dp-card-act { margin-left: auto; }
 .dp-card-act .desk-more { margin: 0; padding: 0; }
@@ -3834,7 +3839,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 
 /* Repos today: a line per merge, release, failing check or waiting draft. */
 .desk-repo-list { margin: 0; padding: 0; list-style: none; }
-.desk-repo-event { display: flex; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
+.desk-repo-event:last-child { border-bottom: none; }
+.desk-repo-event { display: flex; align-items: baseline; gap: 8px; padding: 7px 12px; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
 .desk-repo-mark { flex: none; width: 14px; text-align: center; font-weight: 700; color: var(--muted-text); }
 .desk-repo-event.merged .desk-repo-mark, .desk-repo-event.released .desk-repo-mark { color: var(--add); }
 .desk-repo-event.failing .desk-repo-mark { color: var(--del); }
@@ -3862,7 +3868,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-detail { margin: 0 0 6px; max-height: 9em; overflow: auto; padding: 8px 10px; border-radius: var(--radius-inner); background: var(--code-bg, var(--field)); font: calc(12.5px * var(--font-scale)) / 1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .desk-actions .desk-next { margin-left: auto; padding: 0 4px; border: none; background: none; color: var(--muted-text); font-weight: 500; }
 .desk-actions .desk-next:hover { color: var(--text); }
-.desk-clear { padding: 9px 14px; border-radius: var(--radius-chip); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
+.desk-clear { padding: 9px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
 
 /* Just finished: one quiet line each. */
 .desk-finished { display: flex; flex-direction: column; }
