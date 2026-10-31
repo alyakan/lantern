@@ -5,7 +5,8 @@ import Foundation
 
 /// Dictation with iOS 26's SpeechAnalyzer and its SpeechTranscriber: the newer on-device model, much better than the
 /// recognizer behind expo-speech-recognition, and with no time limit, so a long stretch needs no restarts. Before iOS 26,
-/// and for a language it can't do, `supportedLanguage` says null and the app keeps the older recognizer.
+/// for a language it can't do, and while the language's model is not on the phone yet, `supportedLanguage` says null and
+/// the app keeps the older recognizer; in that last case it starts fetching the model, so a later tap gets the newer one.
 ///
 /// Events have the same shape as expo-speech-recognition's, so the hook treats both alike: `result` ({transcript,
 /// isFinal}: a finished phrase, or the one in progress, which the next replaces), `end`, and `error` ({error}, one of
@@ -25,23 +26,20 @@ public class LanternSpeechModule: Module {
 
     AsyncFunction("start") { (lang: String) async in
       guard #available(iOS 26.0, *) else { return self.fail("language-not-supported") }
-      self.lock.lock()
-      let busy = self.run != nil
-      self.lock.unlock()
+      let busy = self.lock.withLock { self.run != nil }
       if busy { return self.fail("busy") }
       do {
-        let run = try await SpeechRun.start(
+        _ = try await SpeechRun.start(
           lang: lang,
+          // Kept before it listens, so an end that comes early finds it.
+          ready: { [weak self] run in self?.keep(run) },
           onResult: { [weak self] text, isFinal in self?.sendEvent("result", ["transcript": text, "isFinal": isFinal]) },
-          onEnd: { [weak self] failure in self?.ended(failure) }
+          onEnd: { [weak self] run, failure in self?.ended(run, failure) }
         )
-        self.lock.lock()
-        self.run = run
-        self.lock.unlock()
-      } catch let failure as SpeechFailure {
-        self.fail(failure.rawValue)
       } catch {
-        self.fail("audio-capture")
+        // It never listened: a run kept on the way is not one.
+        self.lock.withLock { self.run = nil }
+        self.fail((error as? SpeechFailure)?.rawValue ?? "audio-capture")
       }
     }
 
@@ -67,9 +65,15 @@ public class LanternSpeechModule: Module {
     return run as? SpeechRun
   }
 
-  private func ended(_ failure: SpeechFailure?) {
+  private func keep(_ run: AnyObject) {
     lock.lock()
-    run = nil
+    self.run = run
+    lock.unlock()
+  }
+
+  private func ended(_ ended: AnyObject, _ failure: SpeechFailure?) {
+    lock.lock()
+    if run === ended { run = nil }
     lock.unlock()
     if let failure { sendEvent("error", ["error": failure.rawValue]) }
     sendEvent("end", [:])
@@ -95,35 +99,68 @@ final class SpeechRun: @unchecked Sendable {
   private let input: AsyncStream<AnalyzerInput>.Continuation
   private let format: AVAudioFormat
   private let engine = AVAudioEngine()
-  private let onEnd: @Sendable (SpeechFailure?) -> Void
+  private let onEnd: @Sendable (SpeechRun, SpeechFailure?) -> Void
   private let lock = NSLock()
   private var converter: AVAudioConverter?
   private var results: Task<Void, Never>?
   private var over = false
 
-  private init(analyzer: SpeechAnalyzer, input: AsyncStream<AnalyzerInput>.Continuation, format: AVAudioFormat, onEnd: @escaping @Sendable (SpeechFailure?) -> Void) {
+  private init(analyzer: SpeechAnalyzer, input: AsyncStream<AnalyzerInput>.Continuation, format: AVAudioFormat, onEnd: @escaping @Sendable (SpeechRun, SpeechFailure?) -> Void) {
     self.analyzer = analyzer
     self.input = input
     self.format = format
     self.onEnd = onEnd
   }
 
-  /// The transcriber's own locale for `lang` ("en-US", or "en_EG" when that has one of its own), or nil when it has none.
+  private static func transcriber(for locale: Locale) -> SpeechTranscriber {
+    SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
+  }
+
+  private static let fetching = NSLock()
+  nonisolated(unsafe) private static var fetched = Set<String>()
+
+  /// The transcriber's own locale for `lang` ("en-US", or "en-EG" when that has one of its own), or nil when it has none
+  /// or its model isn't on the phone yet. In that last case the model starts downloading, once, without waiting for it:
+  /// waiting would lose what is said meanwhile, and offline it would fail where the older recognizer may still listen.
   static func language(for lang: String) async -> String? {
-    guard SpeechTranscriber.isAvailable else { return nil }
-    let wanted = Locale(identifier: lang.replacingOccurrences(of: "_", with: "-"))
-    return await SpeechTranscriber.supportedLocale(equivalentTo: wanted)?.identifier(.bcp47)
+    guard SpeechTranscriber.isAvailable,
+      let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: lang.replacingOccurrences(of: "_", with: "-")))
+    else { return nil }
+    let transcriber = transcriber(for: locale)
+    switch await AssetInventory.status(forModules: [transcriber]) {
+    case .installed:
+      return locale.identifier(.bcp47)
+    case .supported:
+      fetch(transcriber, for: locale.identifier(.bcp47))
+      return nil
+    default:
+      return nil
+    }
+  }
+
+  private static func fetch(_ transcriber: SpeechTranscriber, for id: String) {
+    let first = fetching.withLock { fetched.insert(id).inserted }
+    guard first else { return }
+    Task.detached {
+      do {
+        try await AssetInventory.assetInstallationRequest(supporting: [transcriber])?.downloadAndInstall()
+      } catch {
+        // Tried again on a later tap.
+        _ = fetching.withLock { fetched.remove(id) }
+      }
+    }
   }
 
   static func start(
     lang: String,
+    ready: @escaping @Sendable (SpeechRun) -> Void,
     onResult: @escaping @Sendable (String, Bool) -> Void,
-    onEnd: @escaping @Sendable (SpeechFailure?) -> Void
+    onEnd: @escaping @Sendable (SpeechRun, SpeechFailure?) -> Void
   ) async throws -> SpeechRun {
     guard SpeechTranscriber.isAvailable,
       let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: lang))
     else { throw SpeechFailure.unsupported }
-    let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
+    let transcriber = transcriber(for: locale)
     // The language's model is fetched once, the first time.
     do {
       if let download = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
@@ -138,6 +175,7 @@ final class SpeechRun: @unchecked Sendable {
     let analyzer = SpeechAnalyzer(modules: [transcriber])
     let (stream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
     let run = SpeechRun(analyzer: analyzer, input: input, format: format, onEnd: onEnd)
+    ready(run)
     run.results = Task {
       do {
         for try await result in transcriber.results {
@@ -232,6 +270,6 @@ final class SpeechRun: @unchecked Sendable {
     lock.unlock()
     guard first else { return }
     closeMicrophone()
-    if !quietly { onEnd(failure) }
+    if !quietly { onEnd(self, failure) }
   }
 }
