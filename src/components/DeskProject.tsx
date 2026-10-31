@@ -147,7 +147,7 @@ function WorktreeRow({ wt, item, standing }: { wt: Wt; item: StorageItem | undef
         aside={action}
         meta={
           <>
-            <span className={`dp-tone ${kind}`}>{failed ? "Not removed" : standing.word}</span>
+            <span className={`dp-tone dp-tone-${kind}`}>{failed ? "Not removed" : standing.word}</span>
             {item && ` · ${GB(item.bytes)}`}
             {` · ${(failed ? state.why : standing.why) ?? name}`}
           </>
@@ -288,7 +288,7 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
                         <span className="desk-repo-num">#{p.number}</span> {p.title}
                       </ExternalLink>
                     }
-                    aside={<span className={`dp-tone ${p.checks === "fail" ? "blocked" : p.checks === "pass" ? "safe" : "other"}`}>{CHECKS[p.checks]}</span>}
+                    aside={<span className={`dp-tone dp-tone-${p.checks === "fail" ? "blocked" : p.checks === "pass" ? "safe" : "other"}`}>{CHECKS[p.checks]}</span>}
                     meta={
                       <>
                         {p.author} · <span className="dp-mono">{p.branch}</span>

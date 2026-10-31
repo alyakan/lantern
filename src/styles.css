@@ -3819,9 +3819,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-meta { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-width: 0; overflow: hidden; overflow-wrap: anywhere; line-height: 1.4; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .dp-mono { font-family: var(--mono); }
 .dp-tone { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.dp-tone.safe { color: var(--add); }
-.dp-tone.review { color: var(--attn-text); }
-.dp-tone.blocked { color: var(--del); }
+.dp-tone-safe { color: var(--add); }
+.dp-tone-review { color: var(--attn-text); }
+.dp-tone-blocked { color: var(--del); }
 .desk-pr-link { color: var(--text); text-decoration: none; }
 .desk-pr-link:hover { text-decoration: underline; }
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
