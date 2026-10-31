@@ -221,7 +221,7 @@ export const api = {
   /** Where a message typed on the Desk goes (see desk.rs): the window then sends the user's own words there. */
   deskRoute: (claudePath: string, text: string, chats: RouteCandidate[], projects: string[]) => invoke<DeskRoute>("desk_route", { claudePath, text, chats, projects }),
   /** The Mac's Desk: what it says back to `text` (Sonnet), and what it does with it, given the last few exchanges. */
-  deskTalk: (claudePath: string, text: string, history: Exchange[], chats: RouteCandidate[], projects: string[]) => invoke<DeskTalk>("desk_talk", { claudePath, text, history, chats, projects }),
+  deskTalk: (claudePath: string, desk: string, text: string, history: Exchange[], chats: RouteCandidate[], projects: string[]) => invoke<DeskTalk>("desk_talk", { claudePath, desk, text, history, chats, projects }),
   /** A short summary (Haiku) of what a chat replied to a message sent from the Desk. */
   deskSummary: (claudePath: string, question: string, reply: string) => invoke<string>("desk_summary", { claudePath, question, reply }),
   /** The Desk's own answer to `question` (Markdown, citing the chats as [1], [2] in order), from the past chats the search found. */
