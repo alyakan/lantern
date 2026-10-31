@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { LanternSpeech } from "../../modules/lantern-speech";
+import { loadVoiceEngine, type VoiceEngine } from "../prefs";
 import { beginDictation, dictate, dictationProblem, needsSettings, pickLanguage, type Dictated } from "../view/dictation";
 
 /** How long it listens to nothing before it stops by itself. */
@@ -43,6 +44,15 @@ async function newerLanguage(lang: string | undefined): Promise<string | null> {
   }
 }
 
+/** The engine chosen in Settings; the phone's model when it can't be read. */
+async function chosenEngine(): Promise<VoiceEngine> {
+  try {
+    return await loadVoiceEngine();
+  } catch {
+    return "model";
+  }
+}
+
 /** Whether this phone has a speech recognizer to ask; no, rather than a crash, when the native side is missing. */
 function recognizerThere(): boolean {
   try {
@@ -57,7 +67,8 @@ function recognizerThere(): boolean {
  * already there) as it is heard; `stop` ends it, keeping the words. On iOS 26 it is SpeechAnalyzer's newer on-device
  * model (modules/lantern-speech), for the languages it has; otherwise the older recognizer, asked to listen on-device;
  * where the phone can't do that for the language, that one uses Apple's speech service instead (it says nothing about
- * it, and the module can't be made to refuse). Nothing is sent to the Mac. It ends by itself after a stretch
+ * it, and the module can't be made to refuse). With "Apple's speech service" chosen in Settings it is always the older
+ * recognizer, let go to Apple's servers. Nothing is sent to the Mac. It ends by itself after a stretch
  * of silence, when the person edits the box by hand (`edited`), and when the box goes away.
  */
 export function useDictation(text: string, setText: (text: string) => void) {
@@ -148,7 +159,8 @@ export function useDictation(text: string, setText: (text: string) => void) {
         if (words) setProblem({ words, settings: false });
         return;
       }
-      const better = await newerLanguage(lang);
+      const server = (await chosenEngine()) === "server";
+      const better = server ? null : await newerLanguage(lang);
       state.current = beginDictation(text);
       setListening(true);
       if (better && LanternSpeech) {
@@ -163,7 +175,7 @@ export function useDictation(text: string, setText: (text: string) => void) {
         if (asked === "stop") return LanternSpeech.stop();
       } else {
         engine.current = older;
-        ExpoSpeechRecognitionModule.start({ lang, interimResults: true, continuous: true, requiresOnDeviceRecognition: true, addsPunctuation: true });
+        ExpoSpeechRecognitionModule.start({ lang, interimResults: true, continuous: true, requiresOnDeviceRecognition: !server, addsPunctuation: true });
       }
       arm();
     } catch {

@@ -29,6 +29,7 @@ import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
+import { SettingsGlyph, SettingsSheet } from "./SettingsSheet";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -335,6 +336,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const chats = single ? allChats.filter((c) => c.project === single.name) : allChats;
   const waiting = single ? allWaiting.filter((w) => chats.some((c) => c.slot === w.slot)) : allWaiting;
   const loading = !chatsLoaded || !waitingLoaded;
@@ -457,6 +459,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             <PinGlyph pinned={pinned} />
           </PressScale>
         )}
+        <PressScale accessibilityRole="button" accessibilityLabel="Settings" onPress={() => setSettingsOpen(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+          <SettingsGlyph color={colors.ink2} />
+        </PressScale>
       </View>
     </View>
   );
@@ -477,6 +482,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           onReview={onReview}
         />
         {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+        {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
       </>
     );
 
@@ -592,6 +598,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
       {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
       {usageOpen && plan && <UsageSheet plan={plan} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet

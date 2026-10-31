@@ -4,6 +4,7 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith } from "../test/render";
 import { resetDrafts } from "../drafts";
+import { resetVoiceChoice, saveVoiceEngine } from "../prefs";
 import { ChatScreen } from "./ChatScreen";
 
 // iOS 26's newer model (modules/lantern-speech), as a fake that can be made to "hear" with emit.
@@ -45,6 +46,7 @@ const tapStop = () => act(async () => void fireEvent.press(screen.getByRole("but
 
 beforeEach(() => {
   resetDrafts();
+  resetVoiceChoice();
   for (const f of [LanternSpeech.supportedLanguage, LanternSpeech.start, LanternSpeech.stop, LanternSpeech.abort, older.start, older.stop, older.abort]) f.mockClear();
   LanternSpeech.supportedLanguage.mockImplementation(async (lang: string) => lang);
   LanternSpeech.start.mockImplementation(async () => {});
@@ -75,6 +77,14 @@ describe("dictating with iOS 26's newer model", () => {
     await tapMic();
     expect(older.start).toHaveBeenCalled();
     expect(LanternSpeech.start).not.toHaveBeenCalled();
+  });
+
+  it("lets the older recognizer use Apple's servers, and leaves the model alone, when Apple's speech service is chosen", async () => {
+    await saveVoiceEngine("server");
+    await chatWithMic();
+    await tapMic();
+    expect(LanternSpeech.start).not.toHaveBeenCalled();
+    expect(older.start).toHaveBeenCalledWith(expect.objectContaining({ requiresOnDeviceRecognition: false }));
   });
 
   it("stops once it has started when stop was tapped while its model was still downloading", async () => {
