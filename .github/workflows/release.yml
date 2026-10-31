@@ -5,29 +5,21 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
-# A tag pushed by someone in CI_RUNNER_USERS builds on CI_RUNNER, that person's own Mac (as CI does, see ci.yml); anyone else's
-# on GitHub's. On that Mac the Developer ID certificate goes into a keychain of tauri's own, made for the build and deleted
-# after it (the login keychain and the default one are left alone), and the notarization key is deleted however the job ends.
+# Two jobs. `build` compiles the app, with no secrets: a tag pushed by someone in CI_RUNNER_USERS compiles on CI_RUNNER, that
+# person's own Mac (as CI does, see ci.yml), anyone else's on GitHub's. `release` always runs on GitHub's Mac, the only place
+# the signing secrets reach: it signs the compiled app, makes the dmg and the self-update, the draft, and notarizes. On the
+# maintainer's Mac, codesign failed with errSecInternalComponent for a reason not found (#356 didn't cure it), and keeping
+# the secrets off a machine that also runs CI is better anyway.
 jobs:
-  macos:
+  build:
     runs-on: ${{ contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"macos-latest"') || 'macos-latest' }}
-    # The Apple signing secrets live in this environment, which only v* tags can use.
-    environment: release
     env:
       # A self-hosted runner's background service sets no locale.
       LANG: en_US.UTF-8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The release notes read the history back to the previous tag.
-          fetch-depth: 0
-
-      # The keychains this user searches, as they are before the build: a build cancelled half-way leaves tauri's own behind
-      # (with the certificate in it), and the last step takes it away again.
-      - name: Note the keychains
-        run: security list-keychains -d user | sed -e 's/^ *"//' -e 's/" *$//' > "$RUNNER_TEMP/keychains-before.txt"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -70,6 +62,56 @@ jobs:
 
       - run: npm ci
 
+      # The frontend is built into the binary, so the binary is all `release` needs.
+      - name: Compile
+        run: npm run tauri build -- --target aarch64-apple-darwin --no-bundle
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lantern-binary
+          path: src-tauri/target/aarch64-apple-darwin/release/lantern
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: macos-latest
+    # The Apple signing secrets live in this environment, which only v* tags can use.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release notes read the history back to the previous tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # tauri reads the project through cargo metadata; nothing is compiled here.
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+
+      - run: npm ci
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lantern-binary
+          path: src-tauri/target/aarch64-apple-darwin/release
+
+      # Only the one arm64 binary may come in, nothing else under target/. The artifact's zip drops the executable bit.
+      - name: Check the compiled binary
+        run: |
+          dir=src-tauri/target/aarch64-apple-darwin/release
+          [ "$(ls -A "$dir")" = lantern ] || { echo "::error::the artifact holds more than lantern: $(ls -A "$dir")"; exit 1; }
+          [ "$(lipo -archs "$dir/lantern")" = arm64 ] || { echo "::error::lantern is not an arm64 Mach-O binary"; exit 1; }
+          chmod +x "$dir/lantern"
+
       # What's new since the previous tag, from the merged PRs, above the install line.
       - name: Write the release notes
         id: notes
@@ -84,19 +126,12 @@ jobs:
             echo 'END_OF_NOTES'
           } >> "$GITHUB_OUTPUT"
 
-      # On that Mac the login keychain holds the same Developer ID identity, and it is locked in the runner's own security
-      # session (SessionCreate). codesign then fails with errSecInternalComponent even with tauri's --keychain, so the
-      # search list is emptied and tauri's keychain is the only one in it. Apple's intermediate is in the system roots, so
-      # the chain still builds; "Put the keychains back" restores the list.
-      - name: Leave the login keychain out while signing
-        if: runner.environment == 'self-hosted'
-        run: security list-keychains -d user -s
-
       # Signs with the Developer ID certificate. The certificate expires on 1 Feb 2027: after that, export a new one into
       # APPLE_CERTIFICATE. Builds signed before then keep working. It doesn't notarize (no APPLE_API_KEY here): the dmg is
       # notarized once below, and Apple's ticket for it covers the app inside, so a second wait on Apple bought nothing.
       # The `app` bundle also makes the self-update: Lantern.app.tar.gz, signed with the updater key (whose loss would
       # strand every install on its version), and latest.json, which installed apps read once the release is published.
+      # tauriScript turns the action's `tauri build` into `tauri bundle`, on the binary the build job compiled.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,6 +141,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          tauriScript: bash .github/tauri-bundle.sh
           tagName: ${{ github.ref_name }}
           releaseName: Lantern ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
@@ -140,20 +176,6 @@ jobs:
           grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/app-assessment.txt"
           gh release upload "$TAG" "$dmg" --clobber
 
-      # A runner that is someone's own Mac keeps its files: the key goes, whatever happened above.
       - name: Remove the notarization key
         if: always()
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
-
-      # Any keychain the build added and left (a cancel kills tauri before it deletes its own) goes, and the list is put back.
-      - name: Put the keychains back
-        if: always()
-        run: |
-          before="$RUNNER_TEMP/keychains-before.txt"
-          [ -s "$before" ] || exit 0
-          security list-keychains -d user | sed -e 's/^ *"//' -e 's/" *$//' | while IFS= read -r k; do
-            if ! grep -qxF "$k" "$before"; then
-              security delete-keychain "$k" || true
-            fi
-          done
-          tr '\n' '\0' < "$before" | xargs -0 security list-keychains -d user -s
