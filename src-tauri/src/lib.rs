@@ -43,6 +43,7 @@ pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
 pub mod desk;
+pub mod desk_agent;
 pub mod trash;
 pub mod revert;
 pub mod checkpoint;
@@ -92,6 +93,8 @@ pub struct AppState {
     chat_search: Arc<history_search::ChatSearch>,
     /// The side chats that are open: quick questions about a chat, in their own read-only claude (see aside.rs).
     asides: aside::Asides,
+    /// The Desks' agents (see desk_agent.rs).
+    desk_agents: Arc<desk_agent::DeskAgents>,
     /// What the user saved for each project: the setup run in a new worktree, and the Run command (the window sends it).
     setups: setup::SetupStore,
     /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
@@ -572,14 +575,12 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn desk_talk(&self, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> remote::gateway::BoxFut<desk::Talk> {
+    fn desk_talk(&self, desk: String, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> remote::gateway::BoxFut<desk::Talk> {
         let app = self.app.clone();
         Box::pin(async move {
-            let state = app.state::<AppState>();
             // Not knowing where Claude is yet is the Desk not answering: the user picks.
-            let claude = state.remote.claude_path().unwrap_or_default();
-            let path_env = login_path(&state).await;
-            desk::talk(std::path::Path::new(&claude), path_env.as_deref(), &text, &history, &chats, &projects).await
+            let claude = app.state::<AppState>().remote.claude_path().unwrap_or_default();
+            desk_agent_talk(&app, &claude, &desk, &text, &history, &chats, &projects).await
         })
     }
 
@@ -3130,12 +3131,43 @@ async fn desk_route(state: State<'_, AppState>, claude_path: String, text: Strin
     Ok(desk::route(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &chats, &projects).await)
 }
 
-/// The Mac's Desk talking (see desk.rs `talk`): what it says back to `text`, and what it does with it, checked as the router's
-/// choice is. `history` is the Desk's last few exchanges, as the window tells them. What it says is only shown to the user.
-#[tauri::command]
-async fn desk_talk(state: State<'_, AppState>, claude_path: String, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> Result<desk::Talk, String> {
+/// What was said in each of `chats`, by id, read from their transcripts for the Desk's agent (the end of it). A chat on another
+/// provider gets a note instead: nothing said there is put to Claude.
+async fn desk_said(state: &AppState, chats: &[desk::Candidate]) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(root) = projects_root() else { return out };
+    for c in chats.iter().take(desk::CHATS_MAX) {
+        if state.remote.hub.is_off_claude(&c.id) {
+            out.insert(c.id.clone(), "(This chat runs on another provider: its words aren't shown to the Desk.)".into());
+            continue;
+        }
+        let Some(info) = state.remote.hub.chat(&c.id) else { continue };
+        let (Some(folder), Some(id)) = (info.folder, info.session_id.filter(|id| history::valid_id(id))) else { continue };
+        let aliases = aliases_for(state, &folder);
+        let root = root.clone();
+        let said = tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).map(|p| desk::said(&history::replay(&p).events, desk_agent::CHAT_CHARS))).await;
+        if let Ok(Ok(text)) = said {
+            out.insert(c.id.clone(), text);
+        }
+    }
+    out
+}
+
+/// Desk `desk` talking, from its agent (see desk_agent.rs): what it says back to `text`, and what it does with it, checked as the
+/// router's choice is. `history` is the Desk's last few exchanges, told to an agent that was just started. What it says is only
+/// shown to the user.
+async fn desk_agent_talk(app: &tauri::AppHandle, claude: &str, desk: &str, text: &str, history: &[desk::Exchange], chats: &[desk::Candidate], projects: &[String]) -> desk::Talk {
+    let state = app.state::<AppState>();
+    let Ok(base) = app.path().app_data_dir().map(|d| d.join("desk")) else { return desk::fallback(chats) };
     let path_env = login_path(&state).await;
-    Ok(desk::talk(std::path::Path::new(&claude_path), path_env.as_deref(), &text, &history, &chats, &projects).await)
+    let said = desk_said(&state, chats).await;
+    let ask = desk_agent::Ask { binary: std::path::Path::new(claude), path_env: path_env.as_deref(), base: &base, desk, text, history, chats, projects, said: &said };
+    state.desk_agents.clone().talk(ask).await
+}
+
+#[tauri::command]
+async fn desk_talk(app: tauri::AppHandle, claude_path: String, desk: String, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> Result<desk::Talk, String> {
+    Ok(desk_agent_talk(&app, &claude_path, &desk, &text, &history, &chats, &projects).await)
 }
 
 /// A short summary of what a chat replied to a message sent from the Desk (see desk.rs `summary`), shown under it there.
@@ -3487,7 +3519,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -3715,6 +3747,7 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.remote.awake.stop();
                     tauri::async_runtime::block_on(state.asides.stop_all());
+                    tauri::async_runtime::block_on(state.desk_agents.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }
                 // An update the user didn't restart for goes in now, for the next launch.

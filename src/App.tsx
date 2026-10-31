@@ -2550,9 +2550,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       // Unsure, or nothing to pick from: a new chat is offered too. Unsure, what the Desk said it would do didn't happen.
       deskEdit(entry.id, (e) => ({ ...e, ...(unsure ? { say: undefined } : {}), outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
     };
-    // The Desk talks (Sonnet): what it says back is shown to you only; what it does is checked as the router's choice is.
+    // The Desk talks (its Sonnet agent, which reads the chats): what it says back is shown to you only; what it does is checked as the router's choice is.
     const history = deskHistory(deskLog, deskId, offClaude);
-    api.deskTalk(state.claudePath ?? "", text, history, deskCandidates, sentProjects.map((p) => p.label)).then(
+    api.deskTalk(state.claudePath ?? "", deskId, text, history, deskCandidates, sentProjects.map((p) => p.label)).then(
       ({ say, route: r }) => {
         const now = deskNow.current;
         if (say) deskEdit(entry.id, (e) => ({ ...e, say }));

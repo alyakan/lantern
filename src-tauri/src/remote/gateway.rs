@@ -146,9 +146,9 @@ pub trait Host: Send + Sync + 'static {
     fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Route> {
         Box::pin(async move { crate::desk::Route::Ask { chats: chats.into_iter().take(3).map(|c| c.id).collect(), unsure: true } })
     }
-    /// The Desk talking (see desk.rs `talk`): what it says back, and what it does, shown `history`, `chats` and `projects` as
+    /// Desk `desk` talking (see desk_agent.rs): what it says back, and what it does, shown `history`, `chats` and `projects` as
     /// data. A host that can't ask says nothing and lets the user pick.
-    fn desk_talk(&self, _text: String, _history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
+    fn desk_talk(&self, _desk: String, _text: String, _history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, _projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
         Box::pin(async move { crate::desk::Talk { say: String::new(), route: Some(crate::desk::Route::Ask { chats: chats.into_iter().take(3).map(|c| c.id).collect(), unsure: true }) } })
     }
     /// A short summary of a chat's reply to what was asked from the Desk (see desk.rs `summary`). A host that can't ask says so.
@@ -407,7 +407,7 @@ impl Gateway {
         use crate::desk::Route;
         let (routing, chats, labels) = self.desk_shown(&desk, &text)?;
         let history: Vec<crate::desk::Exchange> = history.into_iter().rev().take(crate::desk::HISTORY_MAX).rev().map(|h| crate::desk::Exchange { you: h.you, desk: h.desk }).collect();
-        let talk = self.host.clone().desk_talk(text.clone(), history, chats.clone(), labels).await;
+        let talk = self.host.clone().desk_talk(desk.clone(), text.clone(), history, chats.clone(), labels).await;
         let picked_ask = matches!(talk.route, Some(Route::Ask { .. }));
         let route = match talk.route {
             Some(route) => Some(self.desk_act(route, text, &routing, &chats).await),
@@ -1470,7 +1470,7 @@ pub(crate) mod tests {
             let answer = self.desk_answer.lock().unwrap().clone().unwrap_or(crate::desk::Route::Ask { chats: vec![], unsure: true });
             Box::pin(async move { answer })
         }
-        fn desk_talk(&self, _text: String, history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
+        fn desk_talk(&self, _desk: String, _text: String, history: Vec<crate::desk::Exchange>, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Talk> {
             self.desk_shown.lock().unwrap().push((chats, projects));
             self.desk_history.lock().unwrap().push(history);
             let talk = crate::desk::Talk { say: self.desk_say.lock().unwrap().clone(), route: self.desk_answer.lock().unwrap().clone() };
