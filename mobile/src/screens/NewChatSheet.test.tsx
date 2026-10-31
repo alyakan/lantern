@@ -2,6 +2,16 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { connectedWithControls, makeController, renderWith } from "../test/render";
 import { NewChatSheet } from "./NewChatSheet";
+import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
+
+// Ask or Auto as last used: Ask (nothing kept) unless a test says otherwise.
+jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadNewChatPermissions: jest.fn(async () => "ask"), saveNewChatPermissions: jest.fn(async () => {}) }));
+const loadPermissions = loadNewChatPermissions as jest.Mock;
+const savePermissions = saveNewChatPermissions as jest.Mock;
+beforeEach(() => {
+  loadPermissions.mockReset().mockImplementation(async () => "ask");
+  savePermissions.mockReset();
+});
 
 const projects = [
   { id: "/Users/me/lantern", name: "lantern" },
@@ -42,6 +52,15 @@ describe("while the projects are coming", () => {
 });
 
 describe("starting a chat from the phone", () => {
+  it("puts the sheet away first, then opens the chat (iOS's sheet stays up if it is only taken away)", async () => {
+    const { onStarted, onClose } = await open();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s9"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("says it starts on Ask, offers the projects, and starts in the first one by default", async () => {
     const { lastOf, onStarted } = await open();
     expect(screen.getByText(/starts on Ask/)).toBeTruthy();
@@ -205,6 +224,28 @@ describe("choosing what a new chat runs on", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getByText(/Let paired phones use Auto/)).toBeTruthy();
+  });
+
+  it("starts on Ask or Auto as the last chat was started, whatever the project, and remembers what this one starts on", async () => {
+    loadPermissions.mockImplementation(async () => "auto");
+    const { lastOf } = await openWithControls(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Project's own" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("radio", { name: "website" }));
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", permissions: "auto" }));
+    expect(savePermissions).toHaveBeenCalledWith("auto");
+  });
+
+  it("starts a remembered Auto on Ask where the Mac doesn't let phones use Auto, and keeps remembering Auto", async () => {
+    loadPermissions.mockImplementation(async () => "auto");
+    const { lastOf } = await openWithControls(false);
+    await waitFor(() => expect(loadPermissions).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ permissions: "ask" }));
+    expect(savePermissions).not.toHaveBeenCalled();
   });
 
   it("offers nothing to choose from a Mac that can't say, and starts as before", async () => {

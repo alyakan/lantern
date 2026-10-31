@@ -28,7 +28,11 @@ describe("deciding", () => {
     await decide();
     expect(screen.getByText("Run a command")).toBeTruthy();
     expect(screen.getByText("Push the release branch")).toBeTruthy();
-    expect(screen.getByText("Release 0.1.53, in lantern")).toBeTruthy();
+    // Where: the project, the chat, and how long it has waited.
+    expect(screen.getByText("lantern")).toBeTruthy();
+    expect(screen.getByText("Release 0.1.53")).toBeTruthy();
+    expect(screen.getByText(/ ago$|^just now$/)).toBeTruthy();
+    expect(screen.getByText("COMMAND")).toBeTruthy();
     expect(screen.getByText("git push origin release/0.1.53")).toBeTruthy();
     expect(screen.getByText(/This runs on/)).toBeTruthy();
   });
@@ -236,6 +240,35 @@ describe("deciding", () => {
     await act(async () => void activate(screen.getByLabelText("Swipe to approve")));
     await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: true }));
     expect(approvalOf("Bash", {})).toBeNull();
+  });
+
+  it("an approval as the Mac sends it shows all of what Claude says about it, and sends a note with the answer", async () => {
+    const details = "CI is green on both checks.\nSquash merge, then delete the branch.";
+    const approval = waiting({ request_id: "ap", tool_name: "Approval", input: { action: "Merge PR #144", details } });
+    const { lastOf } = await decide(approval);
+    expect(screen.getByText("Approve Merge PR #144?")).toBeTruthy();
+    expect(screen.getByText("WHAT CLAUDE SAYS")).toBeTruthy();
+    expect(screen.getByText(details)).toBeTruthy();
+    expect(screen.queryByText(/This runs on/)).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("A note for Claude"), "  after lunch  ");
+    await act(async () => void activate(screen.getByLabelText("Swipe to approve")));
+    await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: true, message: "after lunch" }));
+  });
+
+  it("an approval with no details says so, and a denial goes without a blank note", async () => {
+    const { lastOf } = await decide(waiting({ request_id: "ap", tool_name: "Approval", input: { action: "Push tag v1" } }));
+    expect(screen.getByText(/Claude gave no details/)).toBeTruthy();
+    await act(async () => void fireEvent.press(screen.getByText("Don't approve")));
+    await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: false, message: null }));
+  });
+
+  it("an MCP tool lists everything it is given, not only its first line", async () => {
+    await decide(waiting({ request_id: "t", tool_name: "mcp__github__create_issue", input: { repo: "alyakan/lantern", title: "Bug", labels: ["mobile"] } }));
+    expect(screen.getByText("WHAT IT IS GIVEN")).toBeTruthy();
+    expect(screen.getByText("alyakan/lantern")).toBeTruthy();
+    expect(screen.getByText("Bug")).toBeTruthy();
+    expect(screen.getByText(/"mobile"/)).toBeTruthy();
+    expect(screen.queryByLabelText("A note for Claude")).toBeNull();
   });
 });
 

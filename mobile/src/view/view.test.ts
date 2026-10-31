@@ -3,7 +3,7 @@ import type { Waiting } from "../protocol/generated/Waiting";
 import { ago, groups, cards, headline, projectColorOf, projectTint, rows } from "./home";
 import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
-import { approvalOf, promptView, questionsOf } from "./prompts";
+import { approvalOf, fieldsOf, promptView, questionsOf } from "./prompts";
 
 describe("what a prompt says", () => {
   it("names a command, with the line to read before allowing it", () => {
@@ -30,6 +30,19 @@ describe("what a prompt says", () => {
     expect(promptView("mcp__lantern__storage_scan", { path: "/tmp" })).toMatchObject({ tag: "Use a tool", title: "Use lantern storage_scan?", detail: "/tmp" });
     expect(approvalOf("mcp__lantern__request_approval", { action: "merge PR 12", reason: "CI is green" })).toEqual({ action: "merge PR 12", why: "CI is green" });
     expect(approvalOf("Bash", {})).toBeNull();
+  });
+
+  it("reads an approval as the Mac sends it: named Approval, with its action and details", () => {
+    expect(approvalOf("Approval", { action: "Merge PR #144", details: "CI is green.\nSquash merge." })).toEqual({ action: "Merge PR #144", why: "CI is green.\nSquash merge." });
+    expect(promptView("Approval", { action: "Merge PR #144", details: "CI is green." })).toMatchObject({ kind: "allow", tag: "Approval", title: "Approve Merge PR #144?", detail: "CI is green." });
+    expect(promptView("Approval", { action: "Push tag v1" }).detail).toBeNull();
+    expect(fieldsOf({ file_path: "/tmp/a", count: 3, deep: { a: 1 }, empty: "  ", gone: null })).toEqual([
+      { label: "file path", value: "/tmp/a" },
+      { label: "count", value: "3" },
+      { label: "deep", value: '{\n  "a": 1\n}' },
+    ]);
+    expect(fieldsOf("garbage")).toEqual([]);
+    expect(promptView("ExitPlanMode", { plan: "1. Do it" })).toMatchObject({ tag: "A plan", title: "Approve Claude's plan?", detail: "1. Do it" });
   });
 });
 
