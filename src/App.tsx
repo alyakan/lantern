@@ -93,6 +93,8 @@ import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/si
 import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
+import { DeskAsk } from "./components/DeskAsk";
+import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
@@ -307,8 +309,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const showCanvas = canvasMain !== null;
   const [canvasPanel, setCanvasPanel] = usePersistentState("review.canvasPanel", false);
   const reviewCollapsed = showCanvas ? !canvasPanel : ((state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault);
-  const setReviewCollapsed = (collapsed: boolean) => (showCanvas ? setCanvasPanel(!collapsed) : state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
+  const setReviewCollapsed = (collapsed: boolean) => {
+    // Opening it shows something of the chat (a file, Changes, a search): the Desk, whose right pane is Ask, steps aside for it.
+    if (!collapsed) setDesk(false);
+    if (showCanvas) setCanvasPanel(!collapsed);
+    else if (state.folder) setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed });
+    else setCollapsedDefault(collapsed);
+  };
   const [splitRatio, setSplitRatio] = usePersistentState("review.ratio", 0.5);
+  // On the Desk the right pane is Ask: open or not, and how wide, its own, not the project's Changes.
+  const [askCollapsed, setAskCollapsed] = usePersistentState("desk.askCollapsed", false);
+  const [askRatio, setAskRatio] = usePersistentState("desk.askRatio", 0.68);
   // The Changes pane's filter: everything this chat changed, or only what the last turn changed.
   const [changeScope, setChangeScope] = usePersistentState<ChangeScope>("review.scope", "session");
   const [turnFiles, setTurnFiles] = useState<ChangedFile[]>([]);
@@ -336,7 +347,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   useAction("find-file", () => openSearch("files"), !!state.folder);
   useAction("search-files", () => openSearch("text"), !!state.folder);
   // ⌘F: find in the file the right pane shows (Monaco's find bar), from anywhere in the window.
-  useAction("find-in-file", () => void openFind(), !reviewCollapsed);
+  useAction("find-in-file", () => void openFind(), !reviewCollapsed && !desk);
   // Per chat: which failed steps the title bar's count was cleared for.
   const [clearedFailures, setClearedFailures] = useState<Record<string, string>>({});
   // A test run the chat asked the right pane to show.
@@ -1741,7 +1752,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     setReviewCollapsed(false);
   };
 
-  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed), !!state.folder);
+  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskCollapsed(!askCollapsed) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
 
   // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
   // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
@@ -1924,14 +1935,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (reviewCollapsed || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
+      if (reviewCollapsed || desk || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
       const next = delta && stepFile(shownFiles, state.selectedFile, delta);
       if (next && next !== state.selectedFile) selectFile(next);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reviewCollapsed, shownFiles, state.selectedFile]);
+  }, [reviewCollapsed, desk, shownFiles, state.selectedFile]);
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
@@ -2789,6 +2800,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     onSingle: setSingleProject,
     noted: notedFolders(notesBy),
     desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
+    timeline: () => timelineEvents(chats, openByProject, inbox),
   };
 
   const restartToUpdate = () => {
@@ -2918,9 +2930,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
-          reviewCollapsed={reviewCollapsed}
+          reviewCollapsed={deskShown ? askCollapsed : reviewCollapsed}
           onOpenFolder={openFolder}
-          onToggleReview={state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
+          onToggleReview={deskShown ? () => setAskCollapsed(!askCollapsed) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
@@ -2958,15 +2970,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} onDismiss={guards.dismiss} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
-          ratio={splitRatio}
-          collapsed={reviewCollapsed || !state.folder || deskShown}
-          scope={showCanvas ? "canvas" : (state.folder ?? "")}
-          onRatio={setSplitRatio}
+          ratio={deskShown ? askRatio : splitRatio}
+          collapsed={deskShown ? askCollapsed : reviewCollapsed || !state.folder}
+          scope={deskShown ? "desk" : showCanvas ? "canvas" : (state.folder ?? "")}
+          onRatio={deskShown ? setAskRatio : setSplitRatio}
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
                 <DeskView
-                  inbox={deskRows}
+                  chats={deskRows}
                   projects={projectRows(
                     deskRows,
                     deskOpen,
@@ -2978,8 +2990,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     }, {}),
                   )}
                   needs={deskNeeds}
-                  entries={deskLog.filter((e) => e.desk === desks.on)}
-                  targets={deskTargets}
                   desks={{
                     value: desks,
                     waiting: waitingBy(desks, openByProject),
@@ -2993,14 +3003,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
                       if (next) setDesks(next);
                     },
-                  }}
-                  canSend={agentReady}
-                  onSend={deskSend}
-                  onSendTo={deskSendTo}
-                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  onOpenPast={(hit) => {
-                    setDesk(false);
-                    openSession(hit.id, hit.folder);
                   }}
                   onOpen={switchTo}
                   onGo={goToInbox}
@@ -3060,6 +3062,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             )
           }
           right={
+            <>
+            {deskShown && (
+              <ErrorBoundary name="desk ask">
+                <DeskAsk
+                  entries={deskLog.filter((e) => e.desk === desks.on)}
+                  targets={deskTargets}
+                  across={deskFolders.length > 1}
+                  canSend={!!state.claudePath}
+                  onSend={deskSend}
+                  onSendTo={deskSendTo}
+                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                  onOpenPast={(hit) => {
+                    setDesk(false);
+                    openSession(hit.id, hit.folder);
+                  }}
+                  onOpen={switchTo}
+                />
+              </ErrorBoundary>
+            )}
+            {/* Kept while the Desk is up (unsaved edits in Files live in it), only not shown. */}
+            <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
               <ReviewPanel
                 chat={{ slot: active, session: state.sessionId }}
@@ -3125,6 +3148,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 onFollow={() => dispatch({ type: "follow_latest" })}
               />
             </ErrorBoundary>
+            </div>
+            </>
           }
         />
         </div>

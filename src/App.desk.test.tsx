@@ -21,6 +21,7 @@ async function launch(startOnDesk: boolean) {
 }
 
 const desk = () => screen.queryByRole("region", { name: "Desk" });
+const ask = () => screen.queryByRole("region", { name: "Ask" });
 const deskButton = () => screen.getByRole("button", { name: /^Desk/ });
 
 beforeEach(() => {
@@ -36,10 +37,15 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     expect(deskButton()).toHaveAttribute("aria-pressed", "true");
-    expect(within(desk()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
-    // The inbox lists the chat that is open, and the table its project.
-    expect(within(screen.getByRole("complementary", { name: "Inbox" })).getByRole("button", { name: "New chat" })).toBeInTheDocument();
-    expect(within(screen.getByRole("table")).getByRole("button", { name: "acme-api" })).toBeInTheDocument();
+    // Ask is the right pane, and its button puts it away and back.
+    expect(within(ask()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    // The table has the chat's project, whose row lists the chat.
+    const table = within(desk()!).getByRole("table");
+    fireEvent.click(within(table).getByRole("button", { name: "acme-api" }));
+    expect(within(table).getByRole("button", { name: "New chat" })).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
     await waitFor(() => expect(desk()).toBeNull());
     expect(deskButton()).toHaveAttribute("aria-pressed", "false");
@@ -99,13 +105,12 @@ describe("the Desk in the app", () => {
     expect(within(back).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 1500));
     expect(summaries).toBe(1);
-    // It finished while the Desk was in front of it: unread in the inbox, until its row opens it.
-    const row = within(screen.getByRole("complementary", { name: "Inbox" })).getByRole("button", { name: /, unread$/ });
-    fireEvent.click(row);
+    // It finished while the Desk was in front of it: unread on the sidebar's timeline, until its entry opens it.
+    fireEvent.click(screen.getByRole("button", { name: "Timeline" }));
+    const timeline = () => screen.getByRole("region", { name: "Timeline" });
+    fireEvent.click(within(timeline()).getByRole("button", { name: /, unread$/ }));
     await waitFor(() => expect(desk()).toBeNull());
-    fireEvent.click(deskButton());
-    await waitFor(() => expect(desk()).toBeInTheDocument());
-    expect(within(screen.getByRole("complementary", { name: "Inbox" })).queryByRole("button", { name: /, unread$/ })).toBeNull();
+    expect(within(timeline()).queryByRole("button", { name: /, unread$/ })).toBeNull();
   });
 
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {
