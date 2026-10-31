@@ -199,3 +199,35 @@ export async function saveNewChatPermissions(p: RemotePermissions): Promise<void
     // Not remembered: the next chat starts on Ask.
   }
 }
+
+const VOICE_KEY = "lantern.voice-engine";
+
+/**
+ * What turns speech into text in the message box: iOS 26's speech model on the phone ("model"), or Apple's speech service
+ * ("server", the older recognizer let go to Apple's servers). The model when nothing was chosen or it can't be read.
+ */
+export type VoiceEngine = "model" | "server";
+
+/** The choice made while the app is open, so it holds even when the store can't keep it. */
+let voiceChosen: VoiceEngine | null = null;
+
+export async function loadVoiceEngine(): Promise<VoiceEngine> {
+  if (voiceChosen) return voiceChosen;
+  try {
+    return (await SecureStore.getItemAsync(VOICE_KEY, OPTIONS)) === "server" ? "server" : "model";
+  } catch {
+    return "model";
+  }
+}
+
+export async function saveVoiceEngine(engine: VoiceEngine): Promise<void> {
+  voiceChosen = engine;
+  try {
+    await SecureStore.setItemAsync(VOICE_KEY, engine, OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
+/** For tests: forgets the choice made while the app is open. */
+export const resetVoiceChoice = () => void (voiceChosen = null);
