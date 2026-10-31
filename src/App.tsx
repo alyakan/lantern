@@ -53,7 +53,7 @@ import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./l
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
-import { parseTodoCommand, todoPrompt, useTodos, type Todo, type TodoReminder } from "./lib/todos";
+import { parseTodoCommand, todoPrompt, useTodoCounts, useTodos, type Todo, type TodoReminder } from "./lib/todos";
 import { TodoDoneBar, type TodoChat } from "./components/TodosTab";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import { useChatHistory } from "./lib/chatHistory";
@@ -90,9 +90,10 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
-import { clip, deskFeed, deskHistory, deskLive, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
+import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
+import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2051,9 +2052,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
   const [unread, setUnread] = useState<Record<string, number>>({});
+  // The chat on screen is read: once it is opened, or once the Desk in front of it is put away.
   useEffect(() => {
-    setUnread(({ [active]: _seen, ...rest }) => rest);
-  }, [active]);
+    if (!desk) setUnread(({ [active]: _seen, ...rest }) => rest);
+  }, [active, desk]);
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) {
       const a = attentionFor(s.items, s.folder, describeInput, agentName(s.provider));
@@ -2068,9 +2070,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       // Settings can have this kind of event off, or paused: then neither a notification nor a toast.
       const wanted = shouldNotify(notifyPrefs, a.kind);
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
+      // A chat finished that isn't on screen (the one last open isn't while the Desk is): unread until it is opened.
+      if ((slot !== chats.active || desk) && (a.kind === "finished" || a.kind === "failed")) setUnread((u) => ({ ...u, [slot]: Date.now() }));
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
-        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: Date.now() }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
         if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
       }
@@ -2536,6 +2539,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
   const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
+  // The board's to-do counts, read only while the Desk is on screen.
+  const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
+  const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
+  const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
   const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
   // A message goes to a chat as if typed there: now when the chat is free, queued behind its turn when it's working.
   const deliver = (slot: string, text: string): { queued: boolean } | string => {
@@ -2959,9 +2966,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             deskShown ? (
               <ErrorBoundary name="desk">
                 <DeskView
-                  cards={deskFeed(chats, deskOpen)}
-                  live={deskLive(chats, deskOpen)}
-                  needs={inbox.filter((it) => onThisDesk(it.slot))}
+                  inbox={deskRows}
+                  projects={projectRows(
+                    deskRows,
+                    deskOpen,
+                    deskFolders,
+                    deskTodos,
+                    deskNeeds.filter((it) => it.needsYou).reduce<Record<string, number>>((n, it) => {
+                      const folder = projectFolderOf(it.slot);
+                      return folder ? { ...n, [folder]: (n[folder] ?? 0) + 1 } : n;
+                    }, {}),
+                  )}
+                  needs={deskNeeds}
                   entries={deskLog.filter((e) => e.desk === desks.on)}
                   targets={deskTargets}
                   desks={{

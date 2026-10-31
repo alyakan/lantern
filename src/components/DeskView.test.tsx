@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
-import type { DeskCard } from "../lib/desk";
+import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { NO_DESKS } from "../lib/desks";
 import { DeskView, type DeskViewProps } from "./DeskView";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
-const card = (n: number, over: Partial<DeskCard> = {}): DeskCard => ({ key: `c${n}`, slot: `s${n}`, title: `Chat ${n}`, where: "lantern", at: n * 1000, asked: `ask ${n}`, auto: false, said: `Did thing ${n}. And more.`, outcome: "done", ...over });
+const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
+const project = (folder: string, over: Partial<ProjectRow> = {}): ProjectRow => ({ folder, label: folder.split("/").pop()!, chats: 1, working: 0, waiting: 0, asleep: 0, unread: 0, needs: 0, at: null, todos: { open: 0, overdue: 0 }, ...over });
 
 function setup(over: Partial<DeskViewProps> = {}) {
   const props: DeskViewProps = {
-    cards: [],
-    live: [],
+    inbox: [],
+    projects: [],
     needs: [],
     entries: [],
     targets: [],
@@ -66,22 +67,48 @@ describe("the Desk", () => {
     expect(props.onDecide).toHaveBeenLastCalledWith(expect.objectContaining({ slot: "b" }), true);
   });
 
-  it("says nothing needs you when nothing does, and lists finished answers newest first, three, then the rest on asking", () => {
-    const { props } = setup({ cards: [1, 2, 3, 4, 5].map((n) => card(n)) });
-    expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
-    const finished = screen.getByRole("region", { name: "Just finished" });
-    const lines = () => within(finished).getAllByRole("button", { name: /^Chat \d/ });
-    expect(lines().map((b) => b.textContent)).toEqual([expect.stringContaining("Chat 5: Did thing 5."), expect.stringContaining("Chat 4"), expect.stringContaining("Chat 3")]);
-    fireEvent.click(within(finished).getByRole("button", { name: "Show 2 more" }));
-    expect(lines()).toHaveLength(5);
-    fireEvent.click(lines()[0]);
-    expect(props.onOpen).toHaveBeenCalledWith("s5");
+  it("lists every chat in the inbox with its last message, the unread ones marked, and opens one on a click", () => {
+    const { props } = setup({ inbox: [row(1, { unread: true }), row(2, { state: "working", line: "Bash: npm test" })] });
+    const inbox = screen.getByRole("complementary", { name: "Inbox" });
+    expect(within(inbox).getByText("1 unread")).toBeInTheDocument();
+    const unread = within(inbox).getByRole("button", { name: "Chat 1, unread" });
+    expect(unread).toHaveClass("unread");
+    expect(unread).toHaveTextContent("Did thing 1.");
+    const working = within(inbox).getByRole("button", { name: "Chat 2" });
+    expect(working).not.toHaveClass("unread");
+    expect(working).toHaveTextContent("working");
+    expect(working).toHaveTextContent("Bash: npm test");
+    fireEvent.click(unread);
+    expect(props.onOpen).toHaveBeenCalledWith("s1");
   });
 
-  it("says why an answer failed when Claude said, in its line", () => {
-    setup({ cards: [card(1, { outcome: "failed", said: "The runner went offline. Retrying won't help." }), card(2, { outcome: "stopped", said: "" })] });
-    const finished = screen.getByRole("region", { name: "Just finished" });
-    expect(within(finished).getByText(/The runner went offline\./)).toBeInTheDocument();
-    expect(within(finished).getByText(/Stopped/)).toBeInTheDocument();
+  it("shows only the unread chats on asking", () => {
+    setup({ inbox: [row(1, { unread: true }), row(2)] });
+    const inbox = screen.getByRole("complementary", { name: "Inbox" });
+    fireEvent.click(within(inbox).getByRole("button", { name: "Unread" }));
+    expect(within(inbox).getByRole("button", { name: "Chat 1, unread" })).toBeInTheDocument();
+    expect(within(inbox).queryByRole("button", { name: "Chat 2" })).toBeNull();
+    fireEvent.click(within(inbox).getByRole("button", { name: "All" }));
+    expect(within(inbox).getByRole("button", { name: "Chat 2" })).toBeInTheDocument();
+  });
+
+  it("lists the projects with what Lantern knows of each, and a project's row lists only its chats", () => {
+    setup({
+      inbox: [row(1), row(2, { folder: "/p/rayak", where: "rayak" })],
+      projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })],
+    });
+    expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
+    const table = screen.getByRole("table");
+    const [lantern, rayak] = within(table).getAllByRole("row").slice(1);
+    expect(lantern).toHaveTextContent("2 working · 1 needs you");
+    expect(lantern).toHaveTextContent("3 · 1 overdue");
+    expect(rayak).toHaveTextContent("none open");
+    fireEvent.click(within(rayak).getByRole("button", { name: "rayak" }));
+    const inbox = screen.getByRole("complementary", { name: "Inbox" });
+    expect(within(inbox).getByRole("heading", { name: "rayak inbox" })).toBeInTheDocument();
+    expect(within(inbox).queryByRole("button", { name: "Chat 1" })).toBeNull();
+    expect(within(inbox).getByRole("button", { name: "Chat 2" })).toBeInTheDocument();
+    fireEvent.click(within(inbox).getByRole("button", { name: "All projects" }));
+    expect(within(inbox).getByRole("button", { name: "Chat 1" })).toBeInTheDocument();
   });
 });

@@ -36,7 +36,10 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     expect(deskButton()).toHaveAttribute("aria-pressed", "true");
-    expect(within(desk()!).getByText(/Nothing here yet/)).toBeInTheDocument();
+    expect(within(desk()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
+    // The inbox lists the chat that is open, and the table its project.
+    expect(within(screen.getByRole("complementary", { name: "Inbox" })).getByRole("button", { name: "New chat" })).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByRole("button", { name: "acme-api" })).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
     await waitFor(() => expect(desk()).toBeNull());
     expect(deskButton()).toHaveAttribute("aria-pressed", "false");
@@ -94,10 +97,15 @@ describe("the Desk in the app", () => {
     const back = within(entry).getByLabelText("What came back");
     expect(within(back).getByRole("button", { name: "Show full answer" })).toBeInTheDocument();
     expect(within(back).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
-    // Shown under the message, it isn't listed again in Just finished.
-    expect(screen.queryByRole("button", { name: /^Add retries to fetchJson: / })).toBeNull();
     await new Promise((r) => setTimeout(r, 1500));
     expect(summaries).toBe(1);
+    // It finished while the Desk was in front of it: unread in the inbox, until its row opens it.
+    const row = within(screen.getByRole("complementary", { name: "Inbox" })).getByRole("button", { name: /, unread$/ });
+    fireEvent.click(row);
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(within(screen.getByRole("complementary", { name: "Inbox" })).queryByRole("button", { name: /, unread$/ })).toBeNull();
   });
 
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {

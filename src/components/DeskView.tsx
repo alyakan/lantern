@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { answerShape, type AnswerPart, type DeskCard, type DeskEntry, type DeskLive, type DeskReply } from "../lib/desk";
+import { answerShape, type AnswerPart, type DeskEntry, type DeskReply } from "../lib/desk";
+import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
 import type { ChatHit } from "../types";
+import { DeskInbox } from "./DeskInbox";
+import { DeskProjects } from "./DeskProjects";
 import { AllowButton } from "./Inbox";
 import { Md } from "./Md";
 
@@ -15,9 +18,11 @@ export interface DeskTarget {
 }
 
 export interface DeskViewProps {
-  cards: DeskCard[];
-  live: DeskLive[];
-  /** What waits on you on this Desk (the title bar's inbox): shown here in full, last, where the eye ends. */
+  /** Every chat on this Desk, as the inbox lists it. */
+  inbox: InboxRow[];
+  /** Every project on this Desk, as the table lists it. */
+  projects: ProjectRow[];
+  /** What waits on you on this Desk (the title bar's inbox), one thing at a time. */
   needs: InboxItem[];
   /** The messages typed on this Desk, with where each went. */
   entries: DeskEntry[];
@@ -53,7 +58,6 @@ const FOLLOW_PX = 80;
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const ago = (now: number, at: number) => (now - at < 60_000 ? "just now" : now - at < 60 * 60_000 ? `${elapsed(now - at)} ago` : clock(at));
-const OUTCOME: Record<DeskCard["outcome"], string | null> = { done: null, failed: "Failed", stopped: "Stopped" };
 
 /** The past chats with the words a "which chat…?" message was about (found once, with the message): each opens where it is. */
 function SearchHits({ terms, hits, onOpenPast }: { terms: string; hits: ChatHit[] | null | "failed"; onOpenPast: DeskViewProps["onOpenPast"] }) {
@@ -380,18 +384,6 @@ function DeskBox({ targets, canSend, onSend }: Pick<DeskViewProps, "targets" | "
   );
 }
 
-/** How many finished answers show before "Show more". */
-const FINISHED_SHOWN = 3;
-const MARK: Record<DeskCard["outcome"], string> = { done: "✓", failed: "✕", stopped: "■" };
-
-/** The first sentence of what Claude said, for a finished answer's one line. */
-const firstSentence = (said: string) => {
-  // A list's items come joined by bullets: the first item is enough.
-  const first = said.replace(/^\s*•\s*/, "").split(" • ")[0];
-  const end = first.search(/[.!?](\s|$)/);
-  return end > 0 && end < first.length - 1 ? first.slice(0, end + 1) : first;
-};
-
 /** What waits on you, one thing at a time: the first, big, with what it asks; the rest a click away. */
 function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now: number } & Pick<DeskViewProps, "onGo" | "onDecide">) {
   const [at, setAt] = useState(0);
@@ -438,52 +430,22 @@ function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now:
   );
 }
 
-/** The answers that finished, one quiet line each, newest first: a few, and the rest when asked. */
-function JustFinished({ cards, now, onOpen }: { cards: DeskCard[]; now: number; onOpen: (slot: string) => void }) {
-  const [all, setAll] = useState(false);
-  if (!cards.length) return null;
-  const newest = [...cards].sort((a, b) => (b.at ?? -1) - (a.at ?? -1));
-  const shown = all ? newest : newest.slice(0, FINISHED_SHOWN);
-  return (
-    <section className="desk-finished" aria-label="Just finished">
-      <h2 className="desk-h">Just finished</h2>
-      {shown.map((c) => {
-        // A failed or stopped answer says why when Claude did, else just that it failed or stopped.
-        const line = c.said ? firstSentence(c.said) : OUTCOME[c.outcome];
-        return (
-          <button key={c.key} className={`desk-line ${c.outcome}`} aria-label={`${c.title}: ${c.said || c.asked}`} title={c.said || c.asked} onClick={() => onOpen(c.slot)}>
-            <span className="desk-mark" aria-hidden>
-              {MARK[c.outcome]}
-            </span>
-            <span className="desk-line-text">
-              <b>{c.title}</b>
-              {line ? <span className={c.outcome === "done" ? undefined : "desk-bad"}>: {line}</span> : null}
-            </span>
-            {c.at !== null && <time className="desk-time">{ago(now, c.at)}</time>}
-          </button>
-        );
-      })}
-      {newest.length > FINISHED_SHOWN && (
-        <button className="desk-more" onClick={() => setAll(!all)}>
-          {all ? "Show fewer" : `Show ${newest.length - FINISHED_SHOWN} more`}
-        </button>
-      )}
-    </section>
-  );
-}
-
 /**
- * The Desk, calm: what waits on you at the top, one thing at a time and always in view; below it, the answers that just
- * finished as one quiet line each, then what you said on the Desk and where it went, with the Desk's own answers. At the
- * bottom, the box: what you type goes to the right chat. The chats themselves are in the sidebar, as always.
+ * The Desk, as a board. On the left, an inbox: every chat on the Desk with its last message, newest first, the unread ones
+ * bold. In the middle, what waits on you, one thing at a time, and a table of the Desk's projects with only what Lantern knows
+ * for sure (a row lists only that project's chats in the inbox). On the right, the box: ask how things stand, or say what to do,
+ * and it goes to the right chat; what you said there and what came back stays under it.
  */
 export function DeskView(props: DeskViewProps) {
-  const { cards, needs, entries, onOpen, onGo, onDecide } = props;
+  const { needs, entries, onOpen, onGo, onDecide } = props;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, []);
+  const [pickedFolder, setPicked] = useState<string | null>(null);
+  // A project that left the Desk (closed, or moved to another) isn't picked any more.
+  const picked = props.projects.find((p) => p.folder === pickedFolder) ?? null;
   // It opens at the end, and stays there as messages come, unless it was scrolled up to read.
   const feed = useRef<HTMLDivElement>(null);
   const atEnd = useRef(true);
@@ -495,41 +457,41 @@ export function DeskView(props: DeskViewProps) {
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [shape]);
   const said = [...entries].sort((a, b) => a.at - b.at);
-  // An answer to a Desk message shows under the message, not again in Just finished.
-  const linked = new Set(entries.flatMap((e) => (e.reply && "key" in e.reply ? [e.reply.key] : [])));
-  const finished = cards.filter((c) => !linked.has(c.key));
-  const empty = !cards.length && !entries.length && !waiting.length;
 
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
-        <div className="desk-col">
-          <DeskTabs desks={props.desks} />
-          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : !empty && <div className="desk-clear">✓ Nothing needs you</div>}
-        </div>
+        <DeskTabs desks={props.desks} />
       </header>
-      <div
-        ref={feed}
-        className="desk-feed"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
-        }}
-      >
-        <div className="desk-col">
-          {empty && <div className="desk-empty muted">Nothing here yet. Tell Lantern what to do below: it goes to the right chat, or starts one.</div>}
-          <JustFinished cards={finished} now={now} onOpen={onOpen} />
-          {said.length > 0 && (
-            <section className="desk-talk" aria-label="You and the Desk">
-              <h2 className="desk-h">You and the Desk</h2>
-              {said.map((entry) => (
-                <Entry key={entry.id} entry={entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} onOpenPast={props.onOpenPast} onOpen={onOpen} />
-              ))}
-            </section>
-          )}
+      <div className="desk-board">
+        <DeskInbox rows={props.inbox} now={now} project={picked} onClearProject={() => setPicked(null)} onOpen={onOpen} />
+        <div className="desk-main">
+          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
+          <DeskProjects rows={props.projects} now={now} picked={picked?.folder ?? null} onPick={setPicked} />
         </div>
+        <section className="desk-side" aria-label="Ask">
+          <h2 className="desk-h">{props.projects.length > 1 ? "Ask across projects" : "Ask"}</h2>
+          <div
+            ref={feed}
+            className="desk-feed"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
+            }}
+          >
+            {said.length === 0 ? (
+              <div className="desk-empty muted">Nothing asked here yet. Ask how something stands, or say what to do: it goes to the right chat, or starts one.</div>
+            ) : (
+              <section className="desk-talk" aria-label="You and the Desk">
+                {said.map((entry) => (
+                  <Entry key={entry.id} entry={entry} now={now} targets={props.targets} onSendTo={props.onSendTo} onStartIn={props.onStartIn} onOpenPast={props.onOpenPast} onOpen={onOpen} />
+                ))}
+              </section>
+            )}
+          </div>
+          <DeskBox targets={props.targets} canSend={props.canSend} onSend={props.onSend} />
+        </section>
       </div>
-      <DeskBox targets={props.targets} canSend={props.canSend} onSend={props.onSend} />
     </section>
   );
 }

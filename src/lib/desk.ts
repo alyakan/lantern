@@ -161,7 +161,7 @@ export function deskFeed(chats: Chats, open: Record<string, ProjectOpen>): DeskC
 }
 
 /** What a working chat is doing: the tool it is running ("Bash: npm test"), or "Working". */
-function doing(s: State): string {
+export function doing(s: State): string {
   for (let i = s.items.length - 1; i >= 0; i--) {
     const it = s.items[i];
     if (it.type === "turn" || it.type === "user") break;
