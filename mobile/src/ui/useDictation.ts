@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { LanternSpeech } from "../../modules/lantern-speech";
 import { loadVoiceEngine, type VoiceEngine } from "../prefs";
+import { buzz } from "./motion";
 import { beginDictation, dictate, dictationProblem, needsSettings, pickLanguage, type Dictated } from "../view/dictation";
 
 /** How long it listens to nothing before it stops by itself. */
@@ -74,6 +75,8 @@ function recognizerThere(): boolean {
 export function useDictation(text: string, setText: (text: string) => void) {
   const available = useRef(recognizerThere()).current;
   const [listening, setListening] = useState(false);
+  /** The microphone is open and words will be heard; until then `listening` is only getting ready. */
+  const [ready, setReady] = useState(false);
   const [problem, setProblem] = useState<DictationProblem | null>(null);
   const state = useRef<Dictated | null>(null);
   const asking = useRef(false);
@@ -91,7 +94,17 @@ export function useDictation(text: string, setText: (text: string) => void) {
     quiet();
     state.current = null;
     setListening(false);
+    isReady.current = false;
+    setReady(false);
   }, []);
+  /** The microphone is open: said with a tap, so it can be felt without looking. */
+  const isReady = useRef(false);
+  const opened = () => {
+    if (!state.current || isReady.current) return;
+    isReady.current = true;
+    setReady(true);
+    buzz("light");
+  };
   /** Drops it at once, without waiting for the recognizer's last words. */
   const cancel = useCallback(() => {
     if (!state.current) return;
@@ -105,6 +118,7 @@ export function useDictation(text: string, setText: (text: string) => void) {
 
   const heard = (transcript: string, isFinal: boolean) => {
     if (!state.current) return;
+    opened();
     state.current = dictate(state.current, transcript, isFinal);
     setText(state.current.shown);
     arm();
@@ -118,6 +132,7 @@ export function useDictation(text: string, setText: (text: string) => void) {
     const best = e.results[0];
     if (best && engine.current === older) heard(best.transcript, e.isFinal);
   });
+  useSpeechRecognitionEvent("start", () => engine.current === older && opened());
   useSpeechRecognitionEvent("end", () => engine.current === older && finish());
   useSpeechRecognitionEvent("error", (e) => engine.current === older && failed(e.error));
   // The newer model's events, while it is the one listening.
@@ -173,6 +188,7 @@ export function useDictation(text: string, setText: (text: string) => void) {
         // Dropped while it was starting (or it failed to): the microphone goes off. Stopped: it finishes now.
         if (!state.current) return LanternSpeech.abort();
         if (asked === "stop") return LanternSpeech.stop();
+        opened();
       } else {
         engine.current = older;
         ExpoSpeechRecognitionModule.start({ lang, interimResults: true, continuous: true, requiresOnDeviceRecognition: !server, addsPunctuation: true });
@@ -194,5 +210,5 @@ export function useDictation(text: string, setText: (text: string) => void) {
     else engine.current.stop();
   };
 
-  return { available, listening, problem, dismiss: () => setProblem(null), start, stop, cancel, /** The person typed in the box: dictation steps aside. */ edited: cancel };
+  return { available, listening, ready, problem, dismiss: () => setProblem(null), start, stop, cancel, /** The person typed in the box: dictation steps aside. */ edited: cancel };
 }

@@ -639,6 +639,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   // Words are being typed in the message box: the search circle beside it makes room.
   const [typing, setTyping] = useState(false);
+  /** How tall the box's words are, measured from a hidden copy: iOS doesn't always grow the box for words it didn't type. */
+  const [wordsHeight, setWordsHeight] = useState<number | null>(null);
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
   const terminal = !!onRun && isTerminal(text);
@@ -831,6 +833,17 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         )}
         {/* The message box stays while searching, out of sight, so what was typed and the keyboard hand-over survive. */}
         <View style={{ display: searching.active ? "none" : "flex" }}>
+        {/* The hidden copy, at the box's width and in its type: dictation writes words in without typing, and the box grows by this. */}
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          pointerEvents="none"
+          onLayout={(e) => setWordsHeight(e.nativeEvent.layout.height)}
+          style={{ position: "absolute", left: 0, right: 0, opacity: 0, fontSize: 15, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+        >
+          {/* A last empty line counts, as it does in the box. */}
+          {text.endsWith("\n") || !text ? `${text} ` : text}
+        </Text>
         <TextInput
           ref={input}
           accessibilityLabel="Message"
@@ -846,11 +859,11 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             setHolder("message");
           }}
           onBlur={() => setTyping(false)}
-          placeholder={dictation.listening ? "Listening…" : placeholder}
+          placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : placeholder}
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+          style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: 15, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
         <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
@@ -870,7 +883,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           ) : (
             <>
               {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
-              {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+              {dictation.available && !disabled && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
               {tools ? <ToolsButton onPress={() => setTray(true)} /> : search && <BoxSearchButton onPress={searching.open} />}
               <View style={{ flex: 1 }} />
               {/* While Claude works Stop is beside Send, and Send queues. */}
@@ -991,11 +1004,13 @@ function SendButton({ ready, queues = false, onPress }: { ready: boolean; /** Cl
  * The microphone button, beside Send: a drawn microphone; while it listens it is red with a stop square and a halo that
  * breathes (not for someone who has asked for less motion).
  */
-function MicButton({ listening, onPress }: { listening: boolean; onPress: () => void }) {
+/** The microphone: a stop square once it is on, grey while it gets ready and red, breathing, once it hears. */
+function MicButton({ listening, ready, onPress }: { listening: boolean; ready: boolean; onPress: () => void }) {
   const colors = useColors();
   const breath = useRef(new Animated.Value(0)).current;
+  const hearing = listening && ready;
   useEffect(() => {
-    if (!listening || skips()) {
+    if (!hearing || skips()) {
       breath.setValue(0);
       return;
     }
@@ -1007,12 +1022,12 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
     );
     loop.start();
     return () => loop.stop();
-  }, [listening, breath]);
+  }, [hearing, breath]);
   const ink = colors.ink2;
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={listening ? "Stop dictating" : "Dictate"} accessibilityState={{ selected: listening }} onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
-      {listening && <Animated.View pointerEvents="none" style={{ position: "absolute", width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: colors.stop, opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.32] }) }} />}
-      <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? colors.stop : "transparent" }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={listening ? "Stop dictating" : "Dictate"} accessibilityHint={listening && !ready ? "Getting ready to listen" : undefined} accessibilityState={{ selected: listening, busy: listening && !ready }} onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+      {hearing && <Animated.View pointerEvents="none" style={{ position: "absolute", width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: colors.stop, opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.32] }) }} />}
+      <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? (ready ? colors.stop : colors.ink3) : "transparent" }}>
         {listening ? (
           <View accessibilityElementsHidden style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: colors.white }} />
         ) : (

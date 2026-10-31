@@ -49,6 +49,9 @@ describe("dictating into the message box", () => {
     expect(module.requestPermissionsAsync).toHaveBeenCalled();
     expect(module.start).toHaveBeenCalledWith(expect.objectContaining({ interimResults: true, continuous: true, requiresOnDeviceRecognition: true }));
     expect(screen.getByRole("button", { name: "Stop dictating" })).toBeTruthy();
+    // Not yet: it says so until the recognizer has started.
+    expect(box().props.placeholder).toBe("Getting ready…");
+    await act(async () => __emit("start", null));
     expect(box().props.placeholder).toBe("Listening…");
     await heard("fix the");
     expect(box().props.value).toBe("fix the");

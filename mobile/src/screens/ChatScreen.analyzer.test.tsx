@@ -71,6 +71,16 @@ describe("dictating with iOS 26's newer model", () => {
     expect(box().props.value).toBe("Fix the login bug. Then ship it.");
   });
 
+  it("says it is getting ready until the model has started, then that it is listening", async () => {
+    let started = () => {};
+    LanternSpeech.start.mockImplementation(() => new Promise<void>((r) => (started = r)));
+    await chatWithMic();
+    await tapMic();
+    expect(box().props.placeholder).toBe("Getting ready…");
+    await act(async () => started());
+    expect(box().props.placeholder).toBe("Listening…");
+  });
+
   it("uses the older recognizer for a language the newer model doesn't have", async () => {
     LanternSpeech.supportedLanguage.mockResolvedValue(null);
     await chatWithMic();
