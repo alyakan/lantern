@@ -136,6 +136,25 @@ export function WorkGlow({ color, radius: corner }: { color: string; radius: num
   );
 }
 
+/**
+ * What a chat runs in the background (commands, agents): a filled orange circle, the desktop's background-work colour, with how
+ * many when there is more than one.
+ */
+export function BackgroundDot({ tasks }: { tasks: string[] }) {
+  const colors = useColors();
+  if (!tasks.length) return null;
+  return (
+    <View testID="background-dot" accessible accessibilityLabel={`${tasks.length} running in the background: ${tasks.join(", ")}`} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.working }} />
+      {tasks.length > 1 && (
+        <Txt variant="tiny" style={{ color: colors.working, fontWeight: "700" }}>
+          {tasks.length}
+        </Txt>
+      )}
+    </View>
+  );
+}
+
 /** A coloured tile with the chat's first letter. */
 export function Tile({ letter, bg, fg }: { letter: string; bg: string; fg: string }) {
   return (
