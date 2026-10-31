@@ -8,7 +8,7 @@ beforeEach(() => resetVoiceChoice());
 describe("Settings", () => {
   it("has the phone's speech model ticked until something else is chosen", async () => {
     await render(<SettingsSheet onClose={jest.fn()} />);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "iOS 26 speech model" }).props.accessibilityState).toMatchObject({ checked: true }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "This phone's recognizer" }).props.accessibilityState).toMatchObject({ checked: true }));
     expect(screen.getByRole("radio", { name: "Apple's speech service" }).props.accessibilityState).toMatchObject({ checked: false });
   });
 

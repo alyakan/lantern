@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LanternSpeech } from "../../modules/lantern-speech";
 import { loadVoiceEngine, saveVoiceEngine, type VoiceEngine } from "../prefs";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -22,8 +23,11 @@ export function SettingsGlyph({ color, size = 18 }: { color: string; size?: numb
   );
 }
 
+/** iOS 26's model where the phone has it (modules/lantern-speech); the older recognizer, on-device where it can, where it hasn't. */
 const ENGINES: { value: VoiceEngine; title: string; detail: string }[] = [
-  { value: "model", title: "iOS 26 speech model", detail: "Listens on the phone. Downloaded the first time you dictate in a language; until then, and before iOS 26, the older recognizer is used." },
+  LanternSpeech
+    ? { value: "model", title: "iOS 26 speech model", detail: "Uses the phone's own speech model where it can. It downloads the first time you dictate in a language; until then, Apple's speech service may stand in." }
+    : { value: "model", title: "This phone's recognizer", detail: "Listens on the phone where it can; for some languages, Apple's speech service stands in." },
   { value: "server", title: "Apple's speech service", detail: "Sends what you say to Apple to be written out. Try it if the model mishears you." },
 ];
 
