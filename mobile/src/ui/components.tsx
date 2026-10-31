@@ -89,13 +89,13 @@ export function Chip({ children, tone = "plain", onPress, chevron, busy = false 
 /**
  * A project's name as a tag in its colour (the one the Mac's sidebar gives it): the colour faintly behind, the colour in the
  * words and in a dot, so which project a chat belongs to reads at a glance. A project the Mac gave no colour is a plain grey tag.
- * `live`: the chat is working, and the colour behind swells and fades (held stronger, still, when motion is reduced).
+ * `live` and `background` are only said, to a screen reader: the chat's title bar glows to show them (`WorkGlow`).
  */
-export function ProjectTag({ name, color, live = false }: { name: string; color: string | null; live?: boolean }) {
+export function ProjectTag({ name, color, live = false, background = [] }: { name: string; color: string | null; live?: boolean; background?: string[] }) {
   const { bg, fg } = projectTint(color, useColors().plainTint);
+  const label = [name, live ? "working" : null, background.length ? `${background.length} running in the background: ${background.join(", ")}` : null].filter(Boolean).join(", ");
   return (
-    <View accessible accessibilityLabel={live ? `${name}, working` : name} style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
-      {live && <Breathe color={fg} />}
+    <View accessible accessibilityLabel={label} style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
       <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
       <Txt variant="tiny" numberOfLines={1} style={{ color: fg, fontWeight: "700", flexShrink: 1 }}>
         {name}
@@ -104,35 +104,36 @@ export function ProjectTag({ name, color, live = false }: { name: string; color:
   );
 }
 
-/** What a chat still runs in the background (a dev server, a subagent): a small spinner and how many. */
-export function BackgroundBadge({ tasks }: { tasks: string[] }) {
-  const colors = useColors();
-  const label = `${tasks.length} running in the background: ${tasks.join(", ")}`;
-  return (
-    <View accessible accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-      <ActivityIndicator testID="background-busy" size="small" color={colors.ink3} style={{ transform: [{ scale: 0.6 }], marginHorizontal: -4, height: 14 }} />
-      <Txt variant="small" tone="ink2" style={{ lineHeight: 16, fontVariant: ["tabular-nums"] }}>
-        {tasks.length}
-      </Txt>
-    </View>
-  );
-}
-
-/** The colour, laid over what is behind it and swelling in and out: something going on. */
-function Breathe({ color }: { color: string }) {
-  const p = useRef(new Animated.Value(skips() ? 0.5 : 0)).current;
+/**
+ * A border in `color` laid over what it sits on (give it the same `radius`), glowing out and fading back: work going on. Held
+ * still and bright when motion is reduced.
+ */
+export function WorkGlow({ color, radius: corner }: { color: string; radius: number }) {
+  const p = useRef(new Animated.Value(skips() ? 0.8 : 0)).current;
   useEffect(() => {
     if (skips()) return;
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(p, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(p, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(p, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(p, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
       ]),
     );
     loop.start();
     return () => loop.stop();
   }, [p]);
-  return <Animated.View accessibilityElementsHidden pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: radius.pill, backgroundColor: color, opacity: p.interpolate({ inputRange: [0, 1], outputRange: [0, 0.3] }) }]} />;
+  return (
+    <Animated.View
+      testID="work-glow"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        // The shadow, in the same colour and with no offset, is the glow around the border (iOS; Android has the border alone).
+        { borderRadius: corner, borderWidth: 1.5, borderColor: color, shadowColor: color, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 }, opacity: p.interpolate({ inputRange: [0, 1], outputRange: [0.25, 1] }) },
+      ]}
+    />
+  );
 }
 
 /** A coloured tile with the chat's first letter. */
