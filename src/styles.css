@@ -3823,10 +3823,14 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 2px 0 0; padding-top: 8px; border-top: 0.5px solid var(--line); }
 .desk-facts dt { color: var(--muted-text); }
 .desk-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.desk-tile-chats { align-self: flex-start; margin: auto 0 0; padding: 0; color: var(--accent); }
-.desk-tile-chats:hover:not(:disabled) { background: none; text-decoration: underline; }
-.desk-tile-chats:disabled { color: var(--muted-text); }
-.desk-tile-list { margin: 0 -12px -10px; border-top: 0.5px solid var(--line); }
+.desk-tile-chats { position: relative; align-self: flex-start; margin-top: auto; }
+.desk-tile-chats > .desk-more { margin: 0; padding: 0; color: var(--accent); }
+.desk-tile-chats > .desk-more:hover:not(:disabled) { background: none; text-decoration: underline; }
+.desk-tile-chats > .desk-more:disabled { color: var(--muted-text); }
+.desk-chats-menu { top: calc(100% + 6px); left: -12px; width: 320px; max-height: 360px; overflow-y: auto; }
+.desk-chat-item { flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 8px; }
+.desk-chat-item:hover { background: var(--bg-hover); }
+.desk-chat-item.unread .dp-title { font-weight: 700; }
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
 .desk-project:hover { text-decoration: underline; }

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
+import { useMenuInside } from "../lib/useMenuInside";
 import { Row } from "./DeskCard";
+import { useMenuKeys } from "./useMenuKeys";
 
 export interface DeskProjectsProps {
   rows: ProjectRow[];
@@ -76,22 +78,77 @@ function Release({ s, now }: { s: ProjectStatus | null | undefined; now: number 
   );
 }
 
+/** A project's chats, in a dropdown under its tile's button, each with its last message: the tiles around it don't move. */
+function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxRow[]; now: number; onOpen: (slot: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open, [chats.length]);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <div className="desk-tile-chats" ref={root}>
+      <button className="desk-more" aria-haspopup="menu" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the chats of ${label}`} disabled={!chats.length} onClick={() => setOpen(!open)}>
+        {chats.length ? `Chats (${chats.length}) ▾` : "No chats"}
+      </button>
+      {open && (
+        <div className="menu desk-chats-menu" ref={inside.ref} style={inside.style} role="menu" aria-label={`Chats of ${label}`} onKeyDown={keys.onKeyDown}>
+          {chats.map((c) => (
+            <button
+              key={c.slot}
+              role="menuitem"
+              className={`menu-row desk-chat-item${c.unread ? " unread" : ""}`}
+              aria-label={`${c.title}${c.unread ? ", unread" : ""}`}
+              onClick={() => {
+                setOpen(false);
+                onOpen(c.slot);
+              }}
+            >
+              <Row
+                title={
+                  <>
+                    {c.unread && <span className="desk-unread-dot" aria-hidden />}
+                    {c.title}
+                  </>
+                }
+                aside={c.at !== null && <time className="desk-time">{last(now, c.at)}</time>}
+                meta={
+                  <>
+                    {STATE[c.state] ? <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span> : c.workflow}
+                    {c.line && ` · ${c.line}`}
+                  </>
+                }
+              />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Every project on the Desk, a tile each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
  * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened, one
- * under the other. A tile's Chats button lists its chats in it, each with its last message; its name opens its own page.
+ * under the other. A tile's Chats button drops its chats down over the Desk, each with its last message; its name opens its own page.
  */
 export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
-  const [opened, setOpened] = useState<Record<string, boolean>>({});
   if (!rows.length) return null;
   return (
     <section className="desk-projects" aria-label="Projects">
         {rows.map((r) => {
-          const open = !!opened[r.folder] && r.chats > 0;
-          const mine = open ? chats.filter((c) => c.folder === r.folder) : [];
           const s = statusFor(r.folder, repos);
           return (
-            <article key={r.folder} className={`desk-tile${open ? " on" : ""}`} aria-label={r.label}>
+            <article key={r.folder} className="desk-tile" aria-label={r.label}>
               <header className="desk-tile-head">
                 <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
                   {r.label}
@@ -110,34 +167,7 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
                 <dt>To-dos</dt>
                 <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
               </dl>
-              <button className="desk-more desk-tile-chats" aria-label={`${open ? "Hide" : "Show"} the chats of ${r.label}`} aria-expanded={open} disabled={!r.chats} onClick={() => setOpened({ ...opened, [r.folder]: !open })}>
-                {open ? "Hide chats" : r.chats ? `Show chats (${r.chats})` : "No chats"}
-              </button>
-              {mine.length > 0 && (
-                <ul className="dp-list desk-tile-list">
-                  {mine.map((c) => (
-                    <li key={c.slot}>
-                      <button className={`dp-row dp-click${c.unread ? " unread" : ""}`} aria-label={`${c.title}${c.unread ? ", unread" : ""}`} onClick={() => onOpen(c.slot)}>
-                        <Row
-                          title={
-                            <>
-                              {c.unread && <span className="desk-unread-dot" aria-hidden />}
-                              {c.title}
-                            </>
-                          }
-                          aside={c.at !== null && <time className="desk-time">{last(now, c.at)}</time>}
-                          meta={
-                            <>
-                              {STATE[c.state] ? <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span> : c.workflow}
-                              {c.line && ` · ${c.line}`}
-                            </>
-                          }
-                        />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
             </article>
           );
         })}

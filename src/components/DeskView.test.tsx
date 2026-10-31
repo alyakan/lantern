@@ -81,21 +81,27 @@ describe("the Desk", () => {
     expect(within(rayak).getByRole("button", { name: "rayak" })).toBeEnabled();
   });
 
-  it("opens a project's tile to list its chats, the unread ones marked, and opens a chat on a click", () => {
+  it("drops a project's chats down from its tile, the unread ones marked, and opens a chat on a click", () => {
     const { props } = setup({
       chats: [row(1, { unread: true }), row(2, { state: "working", line: "Bash: npm test" }), row(3, { folder: "/p/rayak", where: "rayak" })],
       projects: [project("/p/lantern", { chats: 2 }), project("/p/rayak")],
     });
-    const table = screen.getByRole("region", { name: "Projects" });
-    expect(within(table).queryByRole("button", { name: /^Chat 1/ })).toBeNull();
-    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of lantern" }));
-    const unread = within(table).getByRole("button", { name: "Chat 1, unread" });
+    const tiles = screen.getByRole("region", { name: "Projects" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(within(tiles).getByRole("button", { name: "Show the chats of lantern" }));
+    const menu = screen.getByRole("menu", { name: "Chats of lantern" });
+    const unread = within(menu).getByRole("menuitem", { name: "Chat 1, unread" });
     expect(unread).toHaveClass("unread");
     expect(unread).toHaveTextContent("Did thing 1.");
-    expect(within(table).getByRole("button", { name: "Chat 2" })).toHaveTextContent(/working.*Bash: npm test/);
-    expect(within(table).queryByRole("button", { name: "Chat 3" })).toBeNull();
-    fireEvent.click(unread);
+    expect(within(menu).getByRole("menuitem", { name: "Chat 2" })).toHaveTextContent(/working.*Bash: npm test/);
+    expect(within(menu).queryByRole("menuitem", { name: "Chat 3" })).toBeNull();
+    // Escape puts it away; a chat picked from it opens, and puts it away too.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(within(tiles).getByRole("button", { name: "Show the chats of lantern" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Chat 1, unread" }));
     expect(props.onOpen).toHaveBeenCalledWith("s1");
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("adds each project's branch, pull requests and release, and says why when GitHub can't be asked", () => {

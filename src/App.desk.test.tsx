@@ -42,10 +42,11 @@ describe("the Desk in the app", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
-    // The Desk has the chat's project, whose tile lists the chat.
+    // The Desk has the chat's project, whose tile drops the chat down.
     const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
-    expect(within(table).getByRole("button", { name: "New chat" })).toBeInTheDocument();
+    expect(within(screen.getByRole("menu", { name: "Chats of acme-api" })).getByRole("menuitem", { name: "New chat" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
     await waitFor(() => expect(desk()).toBeNull());
     expect(deskButton()).toHaveAttribute("aria-pressed", "false");
@@ -61,7 +62,7 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeInTheDocument());
     const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
-    fireEvent.click(within(table).getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New chat" }));
     await waitFor(() => expect(desk()).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
     await waitFor(() => expect(desk()).toBeInTheDocument());
