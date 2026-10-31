@@ -3809,7 +3809,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
    the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
    project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. */
 .desk-main { container-type: inline-size; }
-.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 10px; }
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
