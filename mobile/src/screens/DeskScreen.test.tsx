@@ -210,3 +210,20 @@ describe("the Desk on the phone", () => {
     });
   });
 });
+
+describe("the Desk with the Mac's One project", () => {
+  it("shows the banner, and only that project's finished answers and what its chats wait on", async () => {
+    const { controller } = makeController();
+    const twoProjects = [chat({ slot: "a", title: "Phone notifications", project: "lantern" }), chat({ slot: "b", title: "Native sheets", project: "lantern", status: "needs_you" }), chat({ slot: "x", title: "Other", project: "nahar" })];
+    const both = { ...desk, desks: [{ ...desk.desks[0], slots: ["a", "b", "x"] }, desk.desks[1]], cards: [...desk.cards, { key: "x:t1", desk: "home", slot: "x", title: "Other", project: "nahar", at: 30, asked: "Week view", auto: false, said: "Drag works.", outcome: "done" }] };
+    attachSession(controller, { desk: both, send: null }, ["desk", "single"]);
+    await renderWith(<HomeScreen {...handlers()} />, { connection: connectedWith(["desk", "single"]), chats: twoProjects, waiting: [waiting({ slot: "b", request_id: "p1" }), waiting({ slot: "x", request_id: "p2", input: { command: "rm -rf build", description: "Clean" } })] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    expect(screen.getByRole("button", { name: "Other: Drag works." })).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "single", single: { project: "/w/lantern", name: "lantern", color: "#5b5bd6" } } }));
+    expect(screen.getByLabelText("Only lantern")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Phone notifications: Only approvals buzz now." })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Other: Drag works." })).toBeNull();
+    expect(screen.queryByText(/rm -rf build/)).toBeNull();
+  });
+});

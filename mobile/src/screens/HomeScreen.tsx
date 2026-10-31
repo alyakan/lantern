@@ -446,8 +446,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </View>
         )}
         {canDesk && !onOpenDesk && <ModeSwitch value={mode} onChange={pickMode} />}
-        {/* Only where the chats are listed: the phone's Desk shows every project, as the Mac's does. */}
-        {canSingle && !single && !(canDesk && mode === "desk" && !onOpenDesk) && (
+        {canSingle && !single && (
           <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
             <FocusGlyph color={colors.ink2} />
           </PressScale>
@@ -463,7 +462,23 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   );
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
-  if (canDesk && mode === "desk" && !onOpenDesk) return <DeskScreen top={top} onOpenChat={onOpenChat} onReview={onReview} />;
+  const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
+  if (canDesk && mode === "desk" && !onOpenDesk)
+    return (
+      <>
+        <DeskScreen
+          top={
+            <>
+              {top}
+              {banner}
+            </>
+          }
+          onOpenChat={onOpenChat}
+          onReview={onReview}
+        />
+        {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+      </>
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -478,7 +493,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
         {top}
-        {single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />}
+        {banner}
         {canDesk && onOpenDesk && (
           <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
