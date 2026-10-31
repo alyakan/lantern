@@ -4,6 +4,7 @@ import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from
 import type { InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
+import { DeskProject } from "./DeskProject";
 import { DeskProjects } from "./DeskProjects";
 import { ReposToday } from "./ReposToday";
 import { AllowButton } from "./Inbox";
@@ -27,6 +28,11 @@ export interface DeskViewProps {
     onAdd: (name: string) => void;
   };
   onOpen: (slot: string) => void;
+  /** The project whose own page is open (a folder), or null for all of them; and the way to open or leave one. */
+  page: string | null;
+  onPage: (folder: string | null) => void;
+  /** Starts a chat in a project (from its page). */
+  onNewChat: (folder: string) => void;
   onGo: (item: InboxItem) => void;
   onDecide: (item: InboxItem, allow: boolean) => void;
 }
@@ -175,6 +181,8 @@ export function DeskView(props: DeskViewProps) {
     return () => clearInterval(timer);
   }, []);
   const waiting = needs.filter((n) => n.needsYou);
+  // A project's page, while that project is still on the Desk.
+  const pageRow = props.page === null ? undefined : props.projects.find((p) => p.folder === props.page);
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
@@ -182,8 +190,22 @@ export function DeskView(props: DeskViewProps) {
       </header>
       <div className="desk-main">
         {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
-        <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} />
-        <ReposToday repos={props.repos} now={now} />
+        {pageRow ? (
+          <DeskProject
+            row={pageRow}
+            chats={props.chats.filter((c) => c.folder === pageRow.folder)}
+            repo={props.repos && (props.repos.find((r) => r.folders.some((f) => f.folder === pageRow.folder)) ?? null)}
+            now={now}
+            onBack={() => props.onPage(null)}
+            onOpen={onOpen}
+            onNewChat={props.onNewChat}
+          />
+        ) : (
+          <>
+            <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} onPage={props.onPage} />
+            <ReposToday repos={props.repos} now={now} />
+          </>
+        )}
       </div>
     </section>
   );

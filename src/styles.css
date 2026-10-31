@@ -3786,7 +3786,31 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-table th, .desk-table td { padding: 7px 10px 7px 0; border-bottom: 0.5px solid var(--line); text-align: left; vertical-align: baseline; white-space: nowrap; }
 .desk-table thead th { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-table tbody th { font-weight: 400; }
-.desk-project-name { display: flex; align-items: baseline; gap: 8px; }
+.desk-project-name { display: flex; align-items: baseline; gap: 4px; }
+.desk-chev-button { padding: 0 2px; border: none; background: none; }
+.desk-chev-button:disabled .desk-chev { opacity: 0.35; }
+
+/* A project's own page on the Desk. */
+.desk-project-page { display: flex; flex-direction: column; gap: 20px; }
+.desk-project-page > section { display: flex; flex-direction: column; gap: 6px; }
+.desk-page-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.desk-back { padding: 0; border: none; background: none; color: var(--accent); font-size: calc(12.5px * var(--font-scale)); }
+.desk-page-title { flex-basis: 100%; margin: 0; font-size: calc(18px * var(--font-scale)); font-weight: 700; }
+.desk-page-list { margin: 0; padding: 0; list-style: none; }
+.desk-page-list > li { border-bottom: 0.5px solid var(--line); }
+.desk-pr, .desk-wt, .desk-todo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0; font-size: calc(12.5px * var(--font-scale)); }
+.desk-pr-what, .desk-wt-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.desk-pr-link { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
+.desk-pr-link:hover { text-decoration: underline; }
+.desk-pr-checks { flex: none; color: var(--muted-text); }
+.desk-pr-checks.fail { color: var(--del); font-weight: 600; }
+.desk-pr-checks.pass { color: var(--add); }
+.desk-wt-path { color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-wt-verdict { flex: 0 1 auto; color: var(--muted-text); }
+.desk-wt-verdict.safe { color: var(--add); }
+.desk-wt-actions { display: flex; align-items: baseline; gap: 8px; }
+.desk-wt-actions button { height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+.desk-todo-title { flex: 1 1 auto; min-width: 0; }
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-table tr.on { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .desk-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }

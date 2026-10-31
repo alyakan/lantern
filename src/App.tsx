@@ -2570,11 +2570,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const folder = projectFolderOf(slot);
     return folder !== null && deskOf(desks, folder) === desks.on;
   };
-  const deskCandidates = routeCandidates(chats, deskOpen);
-  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
-  const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
+  // A project's own page on the Desk (its folder), kept while you are in one of its chats; the Desk's button goes back to all.
+  const [deskPage, setDeskPage] = useState<string | null>(null);
+  const pageOn = deskPage !== null && deskFolders.includes(deskPage) ? deskPage : null;
+  // Ask asks about that project only while its page is open: its chats to route to, and it to start one in. The board itself
+  // (to-dos, status) still covers the whole Desk.
+  const askOpen = pageOn ? (deskOpen[pageOn] ? { [pageOn]: deskOpen[pageOn] } : {}) : deskOpen;
+  const askFolders = pageOn ? [pageOn] : deskFolders;
+  const deskCandidates = routeCandidates(chats, askOpen, offClaude);
+  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
+  const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
@@ -2627,6 +2634,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const sentTargets = deskTargets;
     const sentProjects = deskProjects;
     const deskId = desks.on;
+    const sentScope = pageOn;
     const ask = (chats: string[], unsure: boolean) => {
       const asked = chats.map((slot) => sentTargets.find((t) => t.slot === slot)).filter((t): t is (typeof sentTargets)[number] => !!t);
       // Unsure, or nothing to pick from: a new chat is offered too. Unsure, what the Desk said it would do didn't happen.
@@ -2665,7 +2673,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             if (answering && kept !== "failed") answer(kept);
           };
           const look = (again: boolean): Promise<void> =>
-            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));
+            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId && (sentScope === null || c.folder === sentScope)).slice(0, 5))));
           look(true).catch(() => found("failed"));
         } else ask(r.chats, r.unsure);
       },
@@ -2832,6 +2840,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       needs: needsYou(openByProject),
       onOpen: () => {
         deskByButton.current = true;
+        setDeskPage(null);
         setDesk(!deskShown);
       },
     },
@@ -3027,6 +3036,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   )}
                   needs={deskNeeds}
                   repos={deskRepos}
+                  page={pageOn}
+                  onPage={setDeskPage}
+                  onNewChat={sidebarHandlers.onNewChatIn}
                   desks={{
                     value: desks,
                     waiting: waitingBy(desks, openByProject),
@@ -3105,7 +3117,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 <DeskAsk
                   entries={deskLog.filter((e) => e.desk === desks.on)}
                   targets={deskTargets}
-                  across={deskFolders.length > 1}
+                  across={askFolders.length > 1}
+                  about={pageOn ? deskProjects[0]?.label : undefined}
                   canSend={!!state.claudePath}
                   onSend={deskSend}
                   onSendTo={deskSendTo}

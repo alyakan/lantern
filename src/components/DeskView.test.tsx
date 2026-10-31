@@ -8,7 +8,7 @@ import { DeskView, type DeskViewProps } from "./DeskView";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
-const repo = (folder: string, over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: folder, github: `aly/${folder.split("/").pop()}`, folders: [{ folder, branch: "main", changed: 0 }], worktrees: 0, gh: "ready", prs: [], merged: [], release: null, drafts: [], error: null, ...over });
+const repo = (folder: string, over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: folder, github: `aly/${folder.split("/").pop()}`, folders: [{ folder, branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], error: null, ...over });
 const pr = (number: number, checks: RepoStatus["prs"][number]["checks"]) => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks, review: null });
 const project = (folder: string, over: Partial<ProjectRow> = {}): ProjectRow => ({ folder, label: folder.split("/").pop()!, chats: 1, working: 0, waiting: 0, asleep: 0, unread: 0, needs: 0, at: null, todos: { open: 0, overdue: 0 }, ...over });
 
@@ -18,6 +18,9 @@ function setup(over: Partial<DeskViewProps> = {}) {
     projects: [],
     needs: [],
     repos: null,
+    page: null,
+    onPage: vi.fn(),
+    onNewChat: vi.fn(),
     desks: { value: NO_DESKS, waiting: {}, projects: [], onChange: vi.fn(), onAdd: vi.fn() },
     onOpen: vi.fn(),
     onGo: vi.fn(),
@@ -71,7 +74,9 @@ describe("the Desk", () => {
     expect(lantern).toHaveTextContent("2 working · 1 needs you");
     expect(lantern).toHaveTextContent("3 · 1 overdue");
     expect(rayak).toHaveTextContent("none open");
-    expect(within(rayak).getByRole("button", { name: "rayak" })).toBeDisabled();
+    // A project with no chat has nothing to list under it, but its page still opens.
+    expect(within(rayak).getByRole("button", { name: "Show the chats of rayak" })).toBeDisabled();
+    expect(within(rayak).getByRole("button", { name: "rayak" })).toBeEnabled();
   });
 
   it("opens a project's row to list its chats, the unread ones marked, and opens a chat on a click", () => {
@@ -81,7 +86,7 @@ describe("the Desk", () => {
     });
     const table = screen.getByRole("table");
     expect(within(table).queryByRole("button", { name: /^Chat 1/ })).toBeNull();
-    fireEvent.click(within(table).getByRole("button", { name: /lantern/ }));
+    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of lantern" }));
     const unread = within(table).getByRole("button", { name: "Chat 1, unread" });
     expect(unread).toHaveClass("unread");
     expect(unread).toHaveTextContent("Did thing 1.");

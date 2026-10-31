@@ -798,8 +798,8 @@ export interface RepoStatus {
   /** "owner/name" on GitHub. */
   github: string | null;
   folders: { folder: string; branch: string | null; changed: number | null }[];
-  /** Linked worktrees, besides the main checkout. */
-  worktrees: number;
+  /** Linked worktrees, besides the main checkout, from git's list (`agent`: a worker's or a subagent's, the team's to clean up). */
+  worktrees: { path: string; branch: string | null; locked: boolean; agent: boolean }[];
   gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
   prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
   /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */

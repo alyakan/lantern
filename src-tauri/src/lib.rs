@@ -3028,7 +3028,7 @@ async fn desk_status(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<s
         .collect();
     folders.sort();
     folders.dedup();
-    tauri::async_runtime::spawn_blocking(move || status::status(&folders, path_env.as_deref())).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || status::status(&folders, workers.as_deref(), path_env.as_deref())).await.map_err(|e| e.to_string())
 }
 
 /// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call

@@ -2129,7 +2129,15 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             repo: folder,
             github: `you/${folder.split("/").pop()}`,
             folders: [{ folder, branch: i === 0 ? "feat/retry-fetch" : "main", changed: i === 0 ? 3 : 0 }],
-            worktrees: i === 0 ? 2 : 0,
+            worktrees:
+              i === 0
+                ? [
+                    // The same worktrees the Storage scan lists (mockStorageItems), so the page shows its verdicts.
+                    { path: "/Users/you/acme-api/wt-retry", branch: "lantern/retry", locked: false, agent: false },
+                    { path: "/Users/you/acme-api/wt-login", branch: "fix/login", locked: false, agent: false },
+                    { path: `/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/acme-api/w1`, branch: null, locked: false, agent: true },
+                  ]
+                : [],
             gh: "ready",
             prs:
               i === 0

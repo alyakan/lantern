@@ -33,6 +33,16 @@ pub struct FolderStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct WorktreeRef {
+    pub path: String,
+    /// None: a detached HEAD.
+    pub branch: Option<String>,
+    pub locked: bool,
+    /// An agent's (a Lantern worker's, or Claude Code's for a subagent): the team's to clean up, not the page's.
+    pub agent: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct PrStatus {
     pub number: u32,
     pub title: String,
@@ -81,8 +91,8 @@ pub struct RepoStatus {
     /// "owner/name" on GitHub, when it is there.
     pub github: Option<String>,
     pub folders: Vec<FolderStatus>,
-    /// Linked worktrees, besides the main checkout.
-    pub worktrees: usize,
+    /// Linked worktrees, besides the main checkout, from git's own list (nothing is run in them).
+    pub worktrees: Vec<WorktreeRef>,
     pub gh: Gh,
     pub prs: Vec<PrStatus>,
     /// The latest merged pull requests, newest first.
@@ -218,9 +228,14 @@ pub fn parse_releases(json: &[u8]) -> Result<(Option<Release>, Vec<String>), Str
     Ok((latest, drafts))
 }
 
-/// Linked worktrees in `git worktree list --porcelain`: every `worktree` line but the main checkout's.
-pub fn count_worktrees(porcelain: &str) -> usize {
-    porcelain.lines().filter(|l| l.starts_with("worktree ")).count().saturating_sub(1)
+/// The linked worktrees in `git worktree list --porcelain -z` (the main checkout, listed first, left out), each marked when it
+/// is an agent's (see `agents_worktree`).
+pub fn linked_worktrees(porcelain_z: &str, workers: Option<&Path>) -> Vec<WorktreeRef> {
+    crate::storage::scan::parse_worktrees(porcelain_z)
+        .into_iter()
+        .skip(1)
+        .map(|w| WorktreeRef { agent: agents_worktree(&w.path, workers), path: w.path.to_string_lossy().into_owned(), branch: w.branch, locked: w.locked })
+        .collect()
 }
 
 /// What a failed `gh` said, as a state: not logged in, or a failure that may pass.
@@ -318,11 +333,11 @@ fn main_checkout(common: &Path) -> PathBuf {
     }
 }
 
-fn repo_status(common: &Path, folders: &[String], path_env: Option<&str>) -> RepoStatus {
+fn repo_status(common: &Path, folders: &[String], workers: Option<&Path>, path_env: Option<&str>) -> RepoStatus {
     let main = main_checkout(common);
     let at = Path::new(&folders[0]);
     let github = git::run(at, &["remote", "get-url", "origin"], path_env).ok().and_then(|u| github_of(&u));
-    let worktrees = git::run(at, &["worktree", "list", "--porcelain"], path_env).map(|p| count_worktrees(&p)).unwrap_or(0);
+    let worktrees = git::run_raw(at, &["--no-optional-locks", "worktree", "list", "--porcelain", "-z"], path_env).map(|p| linked_worktrees(&p, workers)).unwrap_or_default();
     let folders = folders
         .iter()
         .map(|f| {
@@ -347,10 +362,10 @@ fn repo_status(common: &Path, folders: &[String], path_env: Option<&str>) -> Rep
 
 /// How the repositories of `folders` (the open chats' folders) stand, each looked at in parallel. Blocking: call it off
 /// the async threads.
-pub fn status(folders: &[String], path_env: Option<&str>) -> Vec<RepoStatus> {
+pub fn status(folders: &[String], workers: Option<&Path>, path_env: Option<&str>) -> Vec<RepoStatus> {
     let groups = by_repo(folders, path_env);
     std::thread::scope(|scope| {
-        let handles: Vec<_> = groups.iter().map(|(common, list)| scope.spawn(move || repo_status(common, list, path_env))).collect();
+        let handles: Vec<_> = groups.iter().map(|(common, list)| scope.spawn(move || repo_status(common, list, workers, path_env))).collect();
         handles.into_iter().filter_map(|h| h.join().ok()).collect()
     })
 }
@@ -411,7 +426,7 @@ mod tests {
     fn real_status() {
         let here = std::env::current_dir().unwrap().parent().unwrap().to_string_lossy().into_owned();
         let path = std::env::var("PATH").ok();
-        for s in status(&[here], path.as_deref()) {
+        for s in status(&[here], None, path.as_deref()) {
             println!("{s:#?}");
             assert_eq!(s.gh, Gh::Ready, "{:?}", s.error);
         }
@@ -428,10 +443,12 @@ mod tests {
     }
 
     #[test]
-    fn counts_linked_worktrees() {
-        let porcelain = "worktree /r\nHEAD abc\nbranch refs/heads/main\n\nworktree /r-wt/a\nHEAD def\nbranch refs/heads/a\n\nworktree /r-wt/b\nHEAD 123\ndetached\n";
-        assert_eq!(count_worktrees(porcelain), 2);
-        assert_eq!(count_worktrees(""), 0);
+    fn lists_the_linked_worktrees_and_marks_the_agents() {
+        let workers = Path::new("/lantern/worktrees");
+        let z = "worktree /r\0HEAD abc\0branch refs/heads/main\0\0worktree /r-wt/a b\0HEAD def\0branch refs/heads/feat/a\0locked\0\0worktree /lantern/worktrees/r/w1\0HEAD 123\0detached\0\0";
+        let list = linked_worktrees(z, Some(workers));
+        assert_eq!(list.iter().map(|w| (w.path.as_str(), w.branch.as_deref(), w.locked, w.agent)).collect::<Vec<_>>(), vec![("/r-wt/a b", Some("feat/a"), true, false), ("/lantern/worktrees/r/w1", None, false, true)]);
+        assert!(linked_worktrees("", None).is_empty());
     }
 
     #[test]
@@ -452,9 +469,10 @@ mod tests {
         let groups = by_repo(&folders, None);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].1.len(), 2);
-        let s = repo_status(&groups[0].0, &groups[0].1, None);
+        let s = repo_status(&groups[0].0, &groups[0].1, None, None);
         assert_eq!(std::fs::canonicalize(&s.repo).unwrap(), std::fs::canonicalize(&repo).unwrap());
-        assert_eq!(s.worktrees, 1);
+        assert_eq!(s.worktrees.len(), 1);
+        assert_eq!(s.worktrees[0].branch.as_deref(), Some("side"));
         assert_eq!(s.gh, Gh::NotGithub);
         assert_eq!(s.folders.iter().map(|f| (f.branch.clone(), f.changed)).collect::<Vec<_>>(), vec![(Some("main".into()), Some(1)), (Some("side".into()), Some(0))]);
         let _ = std::fs::remove_dir_all(&base);

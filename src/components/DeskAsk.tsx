@@ -18,6 +18,8 @@ export interface DeskAskProps {
   targets: DeskTarget[];
   /** The Desk has more than one project: the box asks across them. */
   across: boolean;
+  /** A project's page is open: the box asks about that project only (its name). */
+  about?: string;
   /** The box can send (Claude is located): the router needs it. */
   canSend: boolean;
   /** `to`: a chat picked in the box's menu; none lets the Desk pick. */
@@ -304,7 +306,7 @@ export function DeskAsk(props: DeskAskProps) {
   const said = [...entries].sort((a, b) => a.at - b.at);
   return (
     <section className="desk-side" aria-label="Ask">
-      <h2 className="desk-h">{props.across ? "Ask across projects" : "Ask"}</h2>
+      <h2 className="desk-h">{props.about ? `Ask about ${props.about}` : props.across ? "Ask across projects" : "Ask"}</h2>
       <div
         ref={feed}
         className="desk-feed"

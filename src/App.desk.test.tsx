@@ -44,7 +44,7 @@ describe("the Desk in the app", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
     // The table has the chat's project, whose row lists the chat.
     const table = within(desk()!).getByRole("table");
-    fireEvent.click(within(table).getByRole("button", { name: "acme-api" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
     expect(within(table).getByRole("button", { name: "New chat" })).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
     await waitFor(() => expect(desk()).toBeNull());
@@ -60,7 +60,7 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     const table = within(desk()!).getByRole("table");
-    fireEvent.click(within(table).getByRole("button", { name: "acme-api" }));
+    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
     fireEvent.click(within(table).getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(desk()).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
@@ -68,6 +68,26 @@ describe("the Desk in the app", () => {
     fireEvent.click(deskButton());
     await waitFor(() => expect(desk()).toBeNull());
     expect(screen.queryByRole("button", { name: "Back to the Desk" })).toBeNull();
+  });
+
+  it("opens a project's own page, asks about that project only, and comes back to it from one of its chats", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(within(within(desk()!).getByRole("table")).getByRole("button", { name: "acme-api" }));
+    const page = () => screen.getByRole("region", { name: "Project acme-api" });
+    expect(within(page()).getByRole("heading", { name: "acme-api" })).toBeInTheDocument();
+    expect(within(ask()!).getByRole("heading", { name: "Ask about acme-api" })).toBeInTheDocument();
+    // Its worktrees, with the Storage scan's word on each once it has scanned.
+    const wts = await within(page()).findByRole("region", { name: "Worktrees" });
+    fireEvent.click(await within(wts).findByRole("button", { name: "Scan now" }));
+    await waitFor(() => expect(wts).toHaveTextContent("Safe to remove"));
+    fireEvent.click(within(within(page()).getByRole("region", { name: "Chats" })).getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
+    await waitFor(() => expect(page()).toBeInTheDocument());
+    fireEvent.click(within(page()).getByRole("button", { name: "‹ All projects" }));
+    await waitFor(() => expect(within(desk()!).getByRole("table")).toBeInTheDocument());
+    expect(within(ask()!).getByRole("heading", { name: "Ask" })).toBeInTheDocument();
   });
 
   const type = async (text: string) => {

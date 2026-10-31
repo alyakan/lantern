@@ -12,6 +12,8 @@ export interface DeskProjectsProps {
   repos: RepoStatus[] | null;
   now: number;
   onOpen: (slot: string) => void;
+  /** Opens a project's own page. */
+  onPage: (folder: string) => void;
 }
 
 const last = (now: number, at: number | null) => (at === null ? "—" : now - at < 60_000 ? "just now" : `${elapsed(now - at)} ago`);
@@ -77,9 +79,9 @@ function ReleaseCell({ s, now }: { s: ProjectStatus | null | undefined; now: num
 /**
  * Every project on the Desk, a row each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
  * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened. A project
- * opens to list its chats, each with its last message.
+ * row's chevron lists its chats under it, each with its last message; its name opens its own page.
  */
-export function DeskProjects({ rows, chats, repos, now, onOpen }: DeskProjectsProps) {
+export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   if (!rows.length) return null;
   return (
@@ -106,8 +108,12 @@ export function DeskProjects({ rows, chats, repos, now, onOpen }: DeskProjectsPr
                 <tr className={open ? "on" : undefined}>
                   <th scope="row">
                     <span className="desk-project-name">
-                      <button className="desk-project" title={r.folder} aria-expanded={r.chats > 0 ? open : undefined} disabled={!r.chats} onClick={() => setOpened({ ...opened, [r.folder]: !open })}>
-                        {r.chats > 0 && <span className={`desk-chev${open ? " open" : ""}`} aria-hidden>›</span>}
+                      <button className="desk-chev-button" aria-label={`${open ? "Hide" : "Show"} the chats of ${r.label}`} aria-expanded={open} disabled={!r.chats} onClick={() => setOpened({ ...opened, [r.folder]: !open })}>
+                        <span className={`desk-chev${open ? " open" : ""}`} aria-hidden>
+                          ›
+                        </span>
+                      </button>
+                      <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
                         {r.label}
                       </button>
                       {r.unread > 0 && <span className="desk-unread-count">{r.unread} unread</span>}
