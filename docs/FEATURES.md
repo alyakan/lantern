@@ -348,9 +348,26 @@ People start work and walk away, so two things help while you are gone.
 - A routine runs one chat at a time (a run due while the last is still going is skipped, and the history says so), and at most two routine chats work at once. When your plan is at 95% or more, runs are skipped and the history says so.
 - The prompt is sent to Claude as your text; it is never run as a command. Routines follow a project that you move (see Bring old chats here).
 
+## The Desk
+
+The Desk is every Claude chat across your projects at a glance. The **Desk** button in the sidebar (under One project) puts it in place of the chat; press it again, or open a chat, to leave it. Everything on it comes from Lantern itself, git and GitHub: nothing is a model's guess.
+
+- **Needs you** is at the top: one thing at a time (a permission, a question, an approval), with the whole command, **Allow**, **Deny** and **Open chat**, and "N more waiting" to see the next. When nothing waits on you it says **✓ Nothing needs you**.
+- **Projects** is a table with a row for every project on the Desk: what its chats are doing ("2 working · 1 needs you"), the branch it is on and how many files are changed, its repository's open pull requests and how many have failing checks, its latest release and any draft waiting to be published, its to-dos (and how many are overdue), and when something last happened. Click a project to list its chats under it, each with its last message (never the post-hook's reply), unread ones in bold with a dot; click one to open it. The branch, pull requests and release come from git and the GitHub CLI (`gh`): a project that isn't on GitHub shows a dash, and one where `gh` isn't installed or logged in says so. They are asked for every two minutes while the Desk is on screen.
+- **Repos today** lists what happened in the Desk's repositories today: pull requests whose checks failed and releases left as drafts first, then today's merges and releases, newest first. A busy day shows five lines and **Show N more**.
+- **Ask** is the right pane on the Desk (the title bar's side panel button shows or hides it, with its own width): ask how something stands across your projects ("how are we on the login fix?") and it answers from the chats, with links to them, or say what to do and it goes to the right chat or starts one. It only ever sends your own words to a chat, and never approves anything, answers a card or edits code.
+
+A chat you open from the Desk has **Back to the Desk** at the left of the title bar (⌘[ too). Leaving the Desk with its own button doesn't count.
+
+**The Timeline.** The sidebar has a **Chats | Timeline** switch. The Timeline lists what happened in every open chat, one entry per event, newest first and grouped by day: working and waiting now at the top, then each answer that finished, failed or was stopped. A chat's newest answer is marked unread until you open the chat. Click an entry to open its chat.
+
+**Unread** chats (finished while you weren't looking) stay unread after Lantern quits and opens again, until you open them.
+
+**Several Desks.** **Split into Desks…** makes more than one, for example Work and Side projects. Each project is on one Desk, a Desk shows only its projects, and what you type on it goes only to them. A Desk that isn't on screen shows a badge when something there needs you.
+
 ## The side panel
 
-The side panel (⌘\ shows or hides it) has six tabs: Changes, Files, Plan, Tests, Checks and Network. A tab with nothing to show yet says what will show there. Disk space (Storage) isn't one of them: it is a popover in the top bar.
+The side panel (⌘\ shows or hides it) has nine tabs: Changes, Files, Plan, Tests, Checks, Network, Dashboard, Artifacts and Todos. A tab with nothing to show yet says what will show there. Disk space (Storage) isn't one of them: it is a popover in the top bar. On the Desk the same place holds Ask instead (see The Desk).
 
 **Pinning tabs.** The strip shows only the tabs you pin: Changes, Files and Plan until you change that. The **⋯** after them opens a menu of every tab. Each row has a pin to put it in the strip or take it out, arrows to move a pinned tab up or down (there is always at least one pinned), and its name, which opens the tab even when it isn't pinned. **Reset to default** puts back Changes, Files and Plan. A tab you open without pinning shows at the end of the strip until you go to another. When a tab that isn't pinned needs a look (a failed test run, failed checks, requests in Network), the **⋯** carries a count, red for failures, and the menu shows each tab's count. Which tabs are pinned, and in what order, is kept for every chat.
 
