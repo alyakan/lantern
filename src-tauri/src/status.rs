@@ -234,7 +234,12 @@ pub fn linked_worktrees(porcelain_z: &str, workers: Option<&Path>) -> Vec<Worktr
     crate::storage::scan::parse_worktrees(porcelain_z)
         .into_iter()
         .skip(1)
-        .map(|w| WorktreeRef { agent: agents_worktree(&w.path, workers), path: w.path.to_string_lossy().into_owned(), branch: w.branch, locked: w.locked })
+        .map(|w| {
+            // As a real path, as the Storage scan has it (`/tmp` is `/private/tmp`, a symlinked checkout its target), so the page
+            // can find the scan's word on it. One that is gone keeps git's path.
+            let path = std::fs::canonicalize(&w.path).unwrap_or(w.path);
+            WorktreeRef { agent: agents_worktree(&path, workers), path: path.to_string_lossy().into_owned(), branch: w.branch, locked: w.locked }
+        })
         .collect()
 }
 
@@ -473,6 +478,8 @@ mod tests {
         assert_eq!(std::fs::canonicalize(&s.repo).unwrap(), std::fs::canonicalize(&repo).unwrap());
         assert_eq!(s.worktrees.len(), 1);
         assert_eq!(s.worktrees[0].branch.as_deref(), Some("side"));
+        // A real path, as the Storage scan has it (the temp folder is behind a link on macOS).
+        assert_eq!(Path::new(&s.worktrees[0].path), std::fs::canonicalize(&wt).unwrap());
         assert_eq!(s.gh, Gh::NotGithub);
         assert_eq!(s.folders.iter().map(|f| (f.branch.clone(), f.changed)).collect::<Vec<_>>(), vec![(Some("main".into()), Some(1)), (Some("side".into()), Some(0))]);
         let _ = std::fs::remove_dir_all(&base);
