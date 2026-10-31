@@ -31,6 +31,8 @@ export interface Palette {
   cobalt: string;
   go: string;
   stop: string;
+  /** Claude's orange (the desktop's): something a chat runs in the background. */
+  working: string;
   /** Always white: on the full-screen decision's night, and on go, stop and Ember fills. */
   white: string;
   /** The full-screen decision's own dark. */
@@ -67,6 +69,7 @@ export const lightColors: Palette = {
   cobalt: "#2f5bff",
   go: "#1f9d55",
   stop: "#d93b3b",
+  working: "#d4693f",
   white: "#ffffff",
   night: "#15212e",
   nightText: "#b8c2cf",
@@ -96,6 +99,7 @@ export const darkColors: Palette = {
   cobalt: "#7b97ff",
   go: "#34b56c",
   stop: "#ff7272",
+  working: "#ef8a5c",
   white: "#ffffff",
   night: "#15212e",
   nightText: "#b8c2cf",

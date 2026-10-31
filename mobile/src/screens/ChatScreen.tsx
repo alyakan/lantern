@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
+import { BackgroundDot, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
@@ -293,8 +293,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
 
   const online = connection.kind === "connected";
   const asleep = chat?.status === "asleep";
-  // The title bar glows while the chat works or runs something in the background, in its project's colour.
-  const glowing = working || (!asleep && view.background.length > 0);
+  // The title bar glows while the chat works, in its project's colour. What it runs in the background (a dev server, a watcher)
+  // isn't Claude working: an orange dot beside the title says it, as on the desktop.
+  const glowing = working;
+  const running = asleep ? [] : view.background;
   const accent = useAccent();
   const glowColor = chat?.project && chat.project_color ? projectTint(projectColorOf(chat.project_color), colors.plainTint).fg : accent;
   // The Mac accepting the wake isn't the chat being awake: "Waking…" stays until the chat is no longer asleep, or a while
@@ -577,16 +579,19 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         >
           {(line) => (
             // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass). While the chat
-            // works, or runs something in the background, its edge glows in the project's colour (the accent with no project).
+            // works, its edge glows in the project's colour (the accent with no project).
             <View style={{ flex: 1 }}>
               <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
-                <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
-                  {chat?.title?.trim() || "Chat"}
-                </Txt>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ flexShrink: 1, lineHeight: 21 }}>
+                    {chat?.title?.trim() || "Chat"}
+                  </Txt>
+                  <BackgroundDot tasks={running} />
+                </View>
                 {/* The project in its colour (the desktop sidebar's; "working" in words when there is no project), then whether it
                     sleeps and what it runs on. */}
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} background={asleep ? [] : view.background} />}
+                  {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} />}
                   {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
                     <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
                       {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
