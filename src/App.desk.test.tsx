@@ -56,6 +56,20 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeNull());
   });
 
+  it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const table = within(desk()!).getByRole("table");
+    fireEvent.click(within(table).getByRole("button", { name: "acme-api" }));
+    fireEvent.click(within(table).getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeNull());
+    expect(screen.queryByRole("button", { name: "Back to the Desk" })).toBeNull();
+  });
+
   const type = async (text: string) => {
     const box = await screen.findByRole("textbox", { name: "Tell Lantern" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeDisabled());

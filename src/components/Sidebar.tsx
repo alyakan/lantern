@@ -19,6 +19,8 @@ import { useMenuInside } from "../lib/useMenuInside";
 export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
+/** How wide the collapsed bar is (as styles.css draws it). */
+export const SIDEBAR_BAR = 56;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
 /** How long the pointer rests on the collapsed bar before it opens, so passing over it on the way to the chat doesn't. */

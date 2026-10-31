@@ -88,7 +88,7 @@ import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
-import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
+import { Sidebar, SIDEBAR_BAR, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
 import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
@@ -599,7 +599,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   };
   // Back (the title bar's arrow, ⌘[): the chats shown before this one, newest first, those still open.
   const chatHistory = useChatHistory(active, (slot) => !!chats.slots[slot], (slot) => switchTo(slot));
-  useAction("go-back", chatHistory.goBack, chatHistory.canGoBack);
+  // The chat opened from the Desk (its timeline, a project's row, Needs you, a file): Back takes it back to the Desk. Putting the
+  // Desk away with its own button isn't opening a chat from it.
+  const [deskReturn, setDeskReturn] = useState<string | null>(null);
+  const deskByButton = useRef(false);
+  const wasDesk = useRef(desk);
+  useEffect(() => {
+    if (wasDesk.current && !desk) setDeskReturn(deskByButton.current ? null : active);
+    if (desk) setDeskReturn(null);
+    deskByButton.current = false;
+    wasDesk.current = desk;
+  }, [desk]);
+  const backToDesk = deskReturn !== null && deskReturn === active && !desk;
+  const goBack = backToDesk ? () => setDesk(true) : chatHistory.canGoBack ? chatHistory.goBack : undefined;
+  useAction("go-back", () => goBack?.(), !!goBack);
 
   /**
    * The chat to start something new in: the one on screen if it's still empty, otherwise a new one (and the current
@@ -2799,7 +2812,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     single: singleProject,
     onSingle: setSingleProject,
     noted: notedFolders(notesBy),
-    desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
+    desk: {
+      on: deskShown,
+      needs: needsYou(openByProject),
+      onOpen: () => {
+        deskByButton.current = true;
+        setDesk(!deskShown);
+      },
+    },
     timeline: () => timelineEvents(chats, openByProject, inbox),
   };
 
@@ -2946,7 +2966,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
-          back={chatHistory.canGoBack ? chatHistory.goBack : undefined}
+          back={goBack && { run: goBack, label: backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
+          inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
