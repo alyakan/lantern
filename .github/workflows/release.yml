@@ -10,7 +10,7 @@ permissions:
 # Two jobs. `build` compiles the app, with no secrets: a tag pushed by someone in CI_RUNNER_USERS compiles on CI_RUNNER, that
 # person's own Mac (as CI does, see ci.yml), anyone else's on GitHub's. `release` always runs on GitHub's Mac, the only place
 # the signing secrets reach: it signs the compiled app, makes the dmg and the self-update, the draft, and notarizes. On the
-# maintainer's Mac, codesign failed with errSecInternalComponent (the runner's own security session, see #356), and keeping
+# maintainer's Mac, codesign failed with errSecInternalComponent for a reason not found (#356 didn't cure it), and keeping
 # the secrets off a machine that also runs CI is better anyway.
 jobs:
   build:
@@ -104,8 +104,13 @@ jobs:
           name: lantern-binary
           path: src-tauri/target/aarch64-apple-darwin/release
 
-      # The artifact's zip drops the executable bit.
-      - run: chmod +x src-tauri/target/aarch64-apple-darwin/release/lantern
+      # Only the one arm64 binary may come in, nothing else under target/. The artifact's zip drops the executable bit.
+      - name: Check the compiled binary
+        run: |
+          dir=src-tauri/target/aarch64-apple-darwin/release
+          [ "$(ls -A "$dir")" = lantern ] || { echo "::error::the artifact holds more than lantern: $(ls -A "$dir")"; exit 1; }
+          [ "$(lipo -archs "$dir/lantern")" = arm64 ] || { echo "::error::lantern is not an arm64 Mach-O binary"; exit 1; }
+          chmod +x "$dir/lantern"
 
       # What's new since the previous tag, from the merged PRs, above the install line.
       - name: Write the release notes
