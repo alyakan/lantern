@@ -454,15 +454,21 @@ describe("a chat", () => {
     await waitFor(() => expect(lastOf("interrupt")).toEqual({ op: "interrupt", slot: "a" }));
   });
 
-  it("says a chat works by its project's tag in the title bar, not in words, and counts what runs in the background", async () => {
+  it("shows a chat works by the title bar's glowing edge, not a spinner or words, and says it (and what runs in the background) to a screen reader", async () => {
     const quiet = await withSession(turn);
     expect(screen.getByLabelText("lantern")).toBeTruthy();
-    expect(screen.queryByTestId("background-busy")).toBeNull();
+    expect(screen.queryByTestId("work-glow", { includeHiddenElements: true })).toBeNull();
     await quiet.unmount();
-    await withSession([...turn, { kind: "background", tasks: ["npm run dev", "cargo watch"] }], {}, {}, { status: "working" });
-    expect(screen.getByLabelText("lantern, working")).toBeTruthy();
+    const working = await withSession([...turn, { kind: "background", tasks: ["npm run dev", "cargo watch"] }], {}, {}, { status: "working" });
+    expect(screen.getByTestId("work-glow", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByLabelText("lantern, working, 2 running in the background: npm run dev, cargo watch")).toBeTruthy();
     expect(screen.queryByText(/^working/)).toBeNull();
-    expect(screen.getByLabelText("2 running in the background: npm run dev, cargo watch")).toBeTruthy();
+    expect(screen.queryByTestId("background-busy")).toBeNull();
+    await working.unmount();
+    // Done with its turn but still running a dev server: the edge keeps glowing.
+    await withSession([...turn, { kind: "background", tasks: ["npm run dev"] }]);
+    expect(screen.getByTestId("work-glow", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByLabelText("lantern, 1 running in the background: npm run dev")).toBeTruthy();
   });
 
   it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps Tools", async () => {

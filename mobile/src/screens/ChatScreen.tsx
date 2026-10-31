@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { BackgroundBadge, Button, ProjectTag, Txt } from "../ui/components";
+import { Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
+import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
@@ -15,7 +16,7 @@ import { PageSheet } from "../ui/PageSheet";
 import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
-import { projectColorOf } from "../view/home";
+import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
@@ -292,6 +293,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
 
   const online = connection.kind === "connected";
   const asleep = chat?.status === "asleep";
+  // The title bar glows while the chat works or runs something in the background, in its project's colour.
+  const glowing = working || (!asleep && view.background.length > 0);
+  const accent = useAccent();
+  const glowColor = chat?.project && chat.project_color ? projectTint(projectColorOf(chat.project_color), colors.plainTint).fg : accent;
   // The Mac accepting the wake isn't the chat being awake: "Waking…" stays until the chat is no longer asleep, or a while
   // has passed (it didn't wake: the button comes back to try again).
   useEffect(() => {
@@ -571,23 +576,26 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           onClosed={onBack}
         >
           {(line) => (
-            // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass).
-            <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
-              <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
-                {chat?.title?.trim() || "Chat"}
-              </Txt>
-              {/* The project in its colour (the desktop sidebar's), breathing while the chat works (said in words when there is
-                  no project); what it runs in the background; then whether it sleeps and what it runs on. */}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} />}
-                {view.background.length > 0 && !asleep && <BackgroundBadge tasks={view.background} />}
-                {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
-                  <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
-                    {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
-                  </Txt>
-                )}
-              </View>
-            </Glass>
+            // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass). While the chat
+            // works, or runs something in the background, its edge glows in the project's colour (the accent with no project).
+            <View style={{ flex: 1 }}>
+              <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
+                <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
+                  {chat?.title?.trim() || "Chat"}
+                </Txt>
+                {/* The project in its colour (the desktop sidebar's; "working" in words when there is no project), then whether it
+                    sleeps and what it runs on. */}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} background={asleep ? [] : view.background} />}
+                  {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
+                    <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
+                      {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
+                    </Txt>
+                  )}
+                </View>
+              </Glass>
+              {glowing && <WorkGlow color={glowColor} radius={control / 2} />}
+            </View>
           )}
         </ChatSettings>
         <PressScale accessibilityRole="button" accessibilityLabel="Changes" accessibilityState={changesPane ? { expanded: changesPane.shown } : undefined} accessibilityHint={changed.length ? `${changed.length} ${changed.length === 1 ? "file" : "files"} changed` : "Nothing changed yet"} onPress={changesPane ? changesPane.onToggle : () => setChangesOpen(true)} haptic="select" hitSlop={HEADER_SLOP} scaleTo={0.88}>
