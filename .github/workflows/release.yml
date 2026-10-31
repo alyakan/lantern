@@ -84,6 +84,14 @@ jobs:
             echo 'END_OF_NOTES'
           } >> "$GITHUB_OUTPUT"
 
+      # On that Mac the login keychain holds the same Developer ID identity, and it is locked in the runner's own security
+      # session (SessionCreate). codesign then fails with errSecInternalComponent even with tauri's --keychain, so the
+      # search list is emptied and tauri's keychain is the only one in it. Apple's intermediate is in the system roots, so
+      # the chain still builds; "Put the keychains back" restores the list.
+      - name: Leave the login keychain out while signing
+        if: runner.environment == 'self-hosted'
+        run: security list-keychains -d user -s
+
       # Signs with the Developer ID certificate. The certificate expires on 1 Feb 2027: after that, export a new one into
       # APPLE_CERTIFICATE. Builds signed before then keep working. It doesn't notarize (no APPLE_API_KEY here): the dmg is
       # notarized once below, and Apple's ticket for it covers the app inside, so a second wait on Apple bought nothing.
