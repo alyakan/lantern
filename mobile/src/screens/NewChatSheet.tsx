@@ -78,9 +78,11 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   // A chat started: the sheet slides away first (iOS's own sheet stays up if it is just taken away), then the chat opens.
   const started = useRef<string | null>(null);
   const closeSheet = useRef<(() => void) | null>(null);
+  // Swiped away while the chat was starting: there is no sheet left to wait for, and the chat still opens.
+  const gone = useRef(false);
   const finish = (slot: string) => {
     started.current = slot;
-    if (closeSheet.current) closeSheet.current();
+    if (closeSheet.current && !gone.current) closeSheet.current();
     else onStarted(slot);
   };
   const [preset, setPreset] = useState<string | null>(null);
@@ -158,7 +160,13 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
 
   return (
-    <Sheet onClose={() => (started.current ? onStarted(started.current) : onClose())}>
+    <Sheet
+      onClose={() => {
+        gone.current = true;
+        if (started.current) onStarted(started.current);
+        else onClose();
+      }}
+    >
       {(close, scroll) => {
         closeSheet.current = close;
         return (

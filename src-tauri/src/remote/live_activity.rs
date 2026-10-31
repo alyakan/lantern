@@ -107,7 +107,7 @@ impl Needs {
             "Bash" | "BashOutput" | "KillShell" => Needs::Command,
             "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => Needs::Edit,
             "AskUserQuestion" => Needs::Question,
-            crate::permission::helper::APPROVAL | "mcp__lantern__request_approval" | "ExitPlanMode" => Needs::Approval,
+            "mcp__lantern__request_approval" | "ExitPlanMode" => Needs::Approval,
             _ => Needs::Tool,
         }
     }
@@ -1834,7 +1834,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_prompt_is_one_word_for_what_it_asks() {
-        for (tool, want) in [("Bash", Needs::Command), ("Edit", Needs::Edit), ("Write", Needs::Edit), ("AskUserQuestion", Needs::Question), ("mcp__lantern__request_approval", Needs::Approval), ("Approval", Needs::Approval), ("WebFetch", Needs::Tool), ("", Needs::Tool)] {
+        for (tool, want) in [("Bash", Needs::Command), ("Edit", Needs::Edit), ("Write", Needs::Edit), ("AskUserQuestion", Needs::Question), ("mcp__lantern__request_approval", Needs::Approval), ("WebFetch", Needs::Tool), ("", Needs::Tool)] {
             assert_eq!(Needs::of_tool(tool), want, "{tool}");
         }
     }

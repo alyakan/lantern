@@ -80,20 +80,17 @@ export function promptView(toolName: string, input: unknown): PromptView {
   }
 }
 
-/** How many of a tool's inputs the decision lists. */
-export const FIELDS_SHOWN = 8;
-
 /**
  * What a tool was given, field by field, for a tool with no words of its own to show (an MCP tool): its name made readable,
- * and its value as text (anything that isn't text, as JSON). Empty ones are left out.
+ * and its value as text (anything that isn't text, as JSON). Empty ones are left out; nothing else is, so what is allowed is
+ * all seen.
  */
 export function fieldsOf(input: unknown): { label: string; value: string }[] {
   return Object.entries(rec(input))
     .flatMap(([k, v]) => {
       const value = typeof v === "string" ? v.trim() : v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
       return value ? [{ label: k.replace(/_/g, " "), value }] : [];
-    })
-    .slice(0, FIELDS_SHOWN);
+    });
 }
 
 /**

@@ -282,7 +282,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
                   <Txt variant="tiny" tone="night" style={{ fontWeight: "700" }}>
                     {f.label}
                   </Txt>
-                  <Txt variant="mono" tone="white" selectable numberOfLines={12}>
+                  <Txt variant="mono" tone="white" selectable>
                     {f.value}
                   </Txt>
                 </View>

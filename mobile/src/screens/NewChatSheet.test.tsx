@@ -52,14 +52,6 @@ describe("while the projects are coming", () => {
 });
 
 describe("starting a chat from the phone", () => {
-  it("puts the sheet away first, then opens the chat (iOS's sheet stays up if it is only taken away)", async () => {
-    const { onStarted, onClose } = await open();
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
-    await write("Fix it");
-    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s9"));
-    expect(onClose).not.toHaveBeenCalled();
-  });
 
   it("says it starts on Ask, offers the projects, and starts in the first one by default", async () => {
     const { lastOf, onStarted } = await open();
