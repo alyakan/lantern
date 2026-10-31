@@ -92,6 +92,9 @@ export const NOT_FOLDER_KEYED = [
   "sidebar.width",
   "sidebar.expanded",
   "sidebar.hidden",
+  // The one project the sidebar shows on its own. Not moved with a folder: after a move its banner says nothing is open
+  // there, and its × shows every project again.
+  "sidebar.single",
 ] as const;
 
 /**

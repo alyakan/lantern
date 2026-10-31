@@ -295,11 +295,11 @@ describe("clicking in the open sidebar", () => {
     expect(more).toHaveFocus();
   });
 
-  it("has a ⋯ menu per project: New team, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
+  it("has a ⋯ menu per project: New team, Only this project, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
@@ -588,6 +588,66 @@ describe("New ▾", () => {
   it("is off when nothing can be started (no project open, or its chat is starting)", () => {
     setup({ canNew: false });
     expect(screen.getByRole("button", { name: "New" })).toBeDisabled();
+  });
+});
+
+describe("one project", () => {
+  it("picks a project from the button, lists only it under a banner in its colour, and shows every project again", async () => {
+    setup({ open: ALL_OPEN, colors: { [LANTERN]: 2, [MONITOR]: 1, [IOS]: 0 } });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "network-monitor" }));
+    expect(regions()).toEqual(["network-monitor"]);
+    const banner = screen.getByRole("status", { name: "Only network-monitor" });
+    expect(banner.style.getPropertyValue("--pc")).toBe(PROJECT_COLORS[1]);
+    expect(screen.getByRole("button", { name: "Show all projects", pressed: true })).toBeInTheDocument();
+    fireEvent.click(within(banner).getByRole("button", { name: "Show all projects" }));
+    expect(regions()).toHaveLength(3);
+    expect(screen.queryByRole("status", { name: /^Only/ })).toBeNull();
+  });
+
+  it("is kept across restarts", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toEqual(["lumiform-ios"]));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+  });
+
+  it("starts from a project's ⋯ menu, and the banner's + starts a chat there", async () => {
+    const { h } = setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(within(project("lantern")).getByRole("button", { name: "More for lantern" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Only this project" }));
+    expect(regions()).toEqual(["lantern"]);
+    fireEvent.click(within(screen.getByRole("status", { name: "Only lantern" })).getByRole("button", { name: "New chat in lantern" }));
+    expect(h.onNewChatIn).toHaveBeenCalledWith(LANTERN);
+  });
+
+  it("offers recent projects with nothing open, and picking one leaves only its banner", async () => {
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(regions()).toEqual(["lantern"]));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["lantern", "network-monitor", "lumiform-ios"]));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "lumiform-ios" }));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("keeps the banner when the chosen project has nothing open", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(screen.getByText(/Nothing open in lumiform-ios/)).toBeInTheDocument());
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("shows only that project's squares in the collapsed bar, under a strip of its colour", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(MONITOR));
+    setup({ mode: "collapsed", open: ALL_OPEN });
+    await waitFor(() => expect(screen.getByRole("img", { name: "Only network-monitor" })).toBeInTheDocument());
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-label"))).toEqual(["network-monitor"]);
   });
 });
 

@@ -74,6 +74,14 @@ export const DeskIcon = () => (
   </svg>
 );
 
+// A target: one project at a time.
+export const FocusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="7" cy="7" r="5.6" />
+    <circle cx="7" cy="7" r="2.4" />
+  </svg>
+);
+
 export const ArrowUpIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" {...base} strokeWidth={1.6}>
     <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" />

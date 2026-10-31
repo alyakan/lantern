@@ -5,7 +5,7 @@ import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type CompactChip, type CompactGroup, type ProjectOpen, type SidebarChat, type SidebarItem } from "../lib/sidebar";
 import { lostText } from "../lib/orchestraView";
-import { ChevronIcon, ClockIcon, DeskIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { ChevronIcon, ClockIcon, DeskIcon, FocusIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
@@ -206,6 +206,88 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr, 
           {item("Review a PR…", null, onReviewPr)}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A project the sidebar can show on its own: its folder, its name, and its colour. */
+interface SingleChoice {
+  folder: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * The One project button: off, it opens a list of the projects to pick one from; on, it shows every project again. While it
+ * is on the sidebar lists only that project, under a banner in its colour.
+ */
+function SingleButton({ single, choices, full, closing, onPick }: { single: string | null; choices: SingleChoice[]; full: boolean; closing: boolean; onPick: (folder: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (closing) setOpen(false);
+  }, [closing]);
+  const root = useRef<HTMLDivElement>(null);
+  useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("button"));
+  const { ref: menuRef, style: menuStyle } = useMenuInside(open);
+  useEffect(() => {
+    if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+  const on = single !== null;
+  const label = on ? "Show all projects" : "One project";
+  return (
+    <div className="sb-new" ref={root}>
+      <button
+        className={`icon sb-button single-button${full ? " labelled" : ""}${on ? " on" : ""}`}
+        aria-label={label}
+        aria-pressed={on}
+        aria-haspopup={on ? undefined : "menu"}
+        aria-expanded={on ? undefined : open}
+        title={on ? "Show every project again" : "Show only one project in the sidebar"}
+        disabled={!on && choices.length === 0}
+        onClick={() => (on ? onPick(null) : setOpen(!open))}
+      >
+        <FocusIcon />
+        {full && (
+          <Away across>
+            <span aria-hidden>One project</span>
+          </Away>
+        )}
+      </button>
+      {open && !closing && (
+        <div className="menu sb-menu" role="menu" aria-label="Show only" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+          {choices.map((c) => (
+            <button
+              key={c.folder}
+              role="menuitem"
+              className="menu-row"
+              title={c.folder}
+              onClick={() => {
+                setOpen(false);
+                onPick(c.folder);
+              }}
+            >
+              <span className="sb-single-swatch" style={{ "--pc": c.color } as CSSProperties} aria-hidden />
+              <span className="menu-row-title">{c.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The banner at the top of the list while one project is shown: its name on its colour, a new chat in it, and the way back to every project. */
+function SingleBanner({ choice, full, onNewChat, onShowAll }: { choice: SingleChoice; full: boolean; onNewChat: () => void; onShowAll: () => void }) {
+  if (!full) return <div className="sb-single-strip" role="img" aria-label={`Only ${choice.label}`} title={`Only ${choice.label}`} style={{ "--pc": choice.color } as CSSProperties} />;
+  return (
+    <div className="sb-single" role="status" aria-label={`Only ${choice.label}`} title={choice.folder} style={{ "--pc": choice.color } as CSSProperties}>
+      <span className="sb-single-name">{choice.label}</span>
+      <button className="icon" aria-label={`New chat in ${choice.label}`} title="New chat here" onClick={onNewChat}>
+        <PlusIcon />
+      </button>
+      <button className="icon" aria-label="Show all projects" title="Show every project again" onClick={onShowAll}>
+        ×
+      </button>
     </div>
   );
 }
@@ -445,7 +527,7 @@ interface Moves {
   down: (() => void) | null;
 }
 
-function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: CompactGroup; h: SidebarHandlers; moves: Moves; finished: string[]; onClose: () => void; onClosed: (count: number) => void }) {
+function ProjectMenu({ group, h, moves, finished, onOnly, onClose, onClosed }: { group: CompactGroup; h: SidebarHandlers; moves: Moves; finished: string[]; onOnly?: () => void; onClose: () => void; onClosed: (count: number) => void }) {
   const { ref: root, style } = useMenuInside(true);
   useDismiss(true, root, onClose, () => root.current?.parentElement?.querySelector<HTMLElement>('[aria-haspopup="menu"]'));
   useEffect(() => {
@@ -460,6 +542,11 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onNewTeamIn(group.folder))}>
         <span className="menu-row-title">New team</span>
       </button>
+      {onOnly && (
+        <button role="menuitem" className="menu-row" title="Hide the other projects from the sidebar until you show them again" onClick={pick(onOnly)}>
+          <span className="menu-row-title">Only this project</span>
+        </button>
+      )}
       <button
         role="menuitem"
         className="menu-row"
@@ -562,7 +649,7 @@ function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: str
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, noted, todos, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; todos?: TodoCount; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, todos, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents, onOnly }: { group: CompactGroup; color: string; noted: boolean; todos?: TodoCount; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void; onOnly?: () => void }) {
   const [menu, setMenu] = useState(false);
   // The pane closing takes the menu away at once: it would otherwise shrink with the pane, clipped as it goes.
   const shut = phase === "closing";
@@ -609,7 +696,7 @@ function Project({ group, color, noted, todos, expanded, phase, onToggle, curren
             ⋯
           </button>
         </span>
-        {menu && !shut && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
+        {menu && !shut && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onOnly={onOnly} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
       </div>
       {moved && (
         <Away>
@@ -744,6 +831,16 @@ export function Sidebar(props: Props) {
     down: onOrder && i < listed.length - 1 ? () => moveTo(folder, i + 1) : null,
   });
   const isExpanded = (g: CompactGroup) => by[g.folder] ?? true;
+
+  // One project: the sidebar lists only it, under a banner in its colour, until the user shows every project again. Kept
+  // across restarts; a project that has nothing open stays chosen, with only its banner showing.
+  const [single, setSingle] = usePersistentState<string | null>("sidebar.single", null);
+  const colorOf = (folder: string) => PROJECT_COLORS[colors[folder] ?? 0];
+  const labelOf = (folder: string) => groups.find((g) => g.folder === folder)?.label ?? folder.split("/").filter(Boolean).pop() ?? folder;
+  const choiceOf = (folder: string): SingleChoice => ({ folder, label: labelOf(folder), color: colorOf(folder) });
+  // Any project the sidebar knows can be picked: the open ones in their order, then the one on screen, then the recents.
+  const choices = [...new Set([...listed, ...(currentFolder ? [currentFolder] : []), ...recent.filter((r) => !hidden.includes(r.path)).map((r) => r.path)])].map(choiceOf);
+  const shown = single === null ? groups : groups.filter((g) => g.folder === single);
 
   const movedFor = (folder: string) => moved.find((m) => m.old === folder) ?? null;
   // Starting something in a project shows it there, even in one that was folded up.
@@ -987,6 +1084,7 @@ export function Sidebar(props: Props) {
             </button>
           )}
           {history}
+          <SingleButton single={single} choices={choices} full={full} closing={phase === "closing"} onPick={setSingle} />
           {props.desk && (
             <button className={`icon sb-button desk-button${full ? " labelled" : ""}${props.desk.on ? " on" : ""}`} aria-label={props.desk.needs > 0 ? `Desk, ${props.desk.needs} waiting` : "Desk"} aria-pressed={props.desk.on} title="Desk: every chat at once" onClick={props.desk.onOpen}>
               <DeskIcon />
@@ -1004,9 +1102,10 @@ export function Sidebar(props: Props) {
           )}
         </div>
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
+          {single !== null && <SingleBanner choice={choiceOf(single)} full={full} onNewChat={() => opening(h.onNewChatIn)(single)} onShowAll={() => setSingle(null)} />}
           {full ? (
             <>
-              {groups.map((g, i) => (
+              {shown.map((g, i) => (
                 <Project
                   key={g.folder}
                   group={g}
@@ -1023,17 +1122,19 @@ export function Sidebar(props: Props) {
                   onDismissMoved={onDismissMoved}
                   h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }}
                   closer={closer}
-                  reorder={{ handle: onOrder ? reorder.handle(g.folder) : {}, style: reorder.styleFor(g.folder), lifted: reorder.lifted === g.folder, moves: movesOf(g.folder, i) }}
+                  reorder={single === null ? { handle: onOrder ? reorder.handle(g.folder) : {}, style: reorder.styleFor(g.folder), lifted: reorder.lifted === g.folder, moves: movesOf(g.folder, i) } : { handle: {}, style: undefined, lifted: false, moves: { up: null, down: null } }}
                   notice={notice?.folder === g.folder ? notice.text : null}
                   onNotice={(text) => say(g.folder, text)}
                   agentsOpen={agentsOpen}
                   onAgents={(slot, open) => setAgentsOpen((was) => ({ ...was, [slot]: open }))}
+                  onOnly={single === null ? () => setSingle(g.folder) : undefined}
                 />
               ))}
-              {groups.length === 0 && <div className="sb-note">Nothing open. Start a chat with New, or find an old one in History.</div>}
+              {single === null && groups.length === 0 && <div className="sb-note">Nothing open. Start a chat with New, or find an old one in History.</div>}
+              {single !== null && shown.length === 0 && <div className="sb-note">Nothing open in {labelOf(single)}. Start a chat with + above, or find an old one in History.</div>}
             </>
           ) : (
-            groups.map((group) => (
+            shown.map((group) => (
               <Fragment key={group.folder}>
                 <div className="sb-project" title={group.label} aria-hidden style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
                   <span className="sb-project-initials">{group.initials}</span>
