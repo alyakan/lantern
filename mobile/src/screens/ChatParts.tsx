@@ -6,7 +6,7 @@ import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { barRoom } from "../ui/keyboard";
-import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
+import { Magnifier, SearchContents, ToolsGlyph, TrayContents, useSearchOpening, type BarSearch, type BarTool } from "./SearchBar";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
@@ -601,7 +601,7 @@ const HANDOFF_MS = 300;
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop }: { /** Claude is in the middle of a turn: the circle beside the bar is Stop and Send queues what is typed (with no circle, the bar's button is Stop and a small link above it queues). */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: a circle beside the bar that turns the bar into its field (see SearchBar.tsx). */ search?: BarSearch; /** The bar's tools besides Search: the circle opens a row of them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop }: { /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
@@ -695,8 +695,13 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
   const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
-  // The circle beside the bar is Stop while Claude works (see SearchBar.tsx).
-  const stopInCircle = !!search && !!onStop;
+  const searching = useSearchOpening(search, () => input.current?.focus());
+  const noMatch = !!search && search.query.trim().length >= 2 && search.count === 0;
+  // The row of tools is out, in place of the box's own buttons. Claude starting a turn puts it away: Stop is needed there.
+  const [tray, setTray] = useState(false);
+  useEffect(() => {
+    if (working) setTray(false);
+  }, [working]);
   const problem = dictation.problem ?? attach.problem;
   // Sends what is typed (and the pictures attached), and empties the box.
   const submit = () => {
@@ -811,13 +816,20 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-      {working && ready && !stopInCircle && (
-        <FadeSlideIn from={6} ms={160} style={{ alignItems: "flex-end", marginBottom: 6, marginRight: 8 }}>
-          <QueueLink onPress={submit} />
-        </FadeSlideIn>
+      {searching.active && noMatch && (
+        <Txt variant="tiny" tone="ink2" style={{ marginBottom: 6, marginHorizontal: 8 }}>
+          Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
+        </Txt>
       )}
-      <SearchBar search={search} tools={tools} working={working} onStop={onStop} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} back={() => input.current?.focus()}>
-        {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
+      <Glass testID="chat-box" lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: BOX_RADIUS, paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
+        {searching.active && search && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 10, minHeight: barButton }}>
+            <Magnifier />
+            <SearchContents search={search} input={searching.input} onFocused={searching.onFocused} onCancel={searching.cancel} />
+          </View>
+        )}
+        {/* The message box stays while searching, out of sight, so what was typed and the keyboard hand-over survive. */}
+        <View style={{ display: searching.active ? "none" : "flex" }}>
         <TextInput
           ref={input}
           accessibilityLabel="Message"
@@ -837,12 +849,37 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ flex: 1, maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
+          style={{ maxHeight: 120, minHeight: control - 12, fontSize: 15, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
-        {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-        {/* While Claude works Stop is the circle beside the bar, and Send queues; with no circle, Stop takes Send's place and the link above the bar queues. */}
-        {working && onStop && !stopInCircle ? <StopButton onPress={onStop} /> : <SendButton ready={ready} queues={working} onPress={submit} />}
-      </SearchBar>
+        {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
+        <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
+          {tray && tools ? (
+            <TrayContents
+              tools={tools}
+              onSearch={search ? () => {
+                setTray(false);
+                searching.open();
+              } : undefined}
+              onPick={(t) => {
+                setTray(false);
+                t.onPress();
+              }}
+              onClose={() => setTray(false)}
+            />
+          ) : (
+            <>
+              {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
+              {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+              {tools ? <ToolsButton onPress={() => setTray(true)} /> : search && <BoxSearchButton onPress={searching.open} />}
+              <View style={{ flex: 1 }} />
+              {/* While Claude works Stop is beside Send, and Send queues. */}
+              {working && onStop && <StopButton onPress={onStop} />}
+              <SendButton ready={ready} queues={working} onPress={submit} />
+            </>
+          )}
+        </View>
+        </View>
+      </Glass>
       {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
@@ -860,9 +897,31 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   );
 }
 
+/** The message box's corners: a rectangle with its words on top and its tools in a row under them. */
+const BOX_RADIUS = 18;
+
+/** The box's tools button: four squares; pressed, the row under the words becomes the tools. */
+function ToolsButton({ onPress }: { onPress: () => void }) {
+  const still = useRef(new Animated.Value(0)).current;
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel="Tools" accessibilityHint="Search, compact and more" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+      <ToolsGlyph work={still} />
+    </PressScale>
+  );
+}
+
+/** Search, in the box's row, where there are no other tools. */
+function BoxSearchButton({ onPress }: { onPress: () => void }) {
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+      <Magnifier />
+    </PressScale>
+  );
+}
+
 /**
- * Stop, while Claude works: a square on a dark circle, in the place of Send (a square, no words: the label is for a screen reader).
- * It pops in as it takes Send's place.
+ * Stop, while Claude works: a square on a dark circle, beside Send (a square, no words: the label is for a screen reader).
+ * It pops in.
  */
 function StopButton({ onPress }: { onPress: () => void }) {
   const colors = useColors();
@@ -875,16 +934,6 @@ function StopButton({ onPress }: { onPress: () => void }) {
   );
 }
 
-/** What is typed while Claude works is queued by this small link above the bar, at its right: it goes after the turn, in order. */
-function QueueLink({ onPress }: { onPress: () => void }) {
-  return (
-    <PressScale accessibilityRole="button" accessibilityLabel="Queue message" accessibilityHint="Sends it once Claude has finished" onPress={onPress} hitSlop={10} haptic="light" scaleTo={0.94}>
-      <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
-        Queue message
-      </Txt>
-    </PressScale>
-  );
-}
 
 /**
  * The send button: grey until there is something to send, then it takes its colour with a little spring; pressing it
