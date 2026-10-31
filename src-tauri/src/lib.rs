@@ -572,6 +572,27 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn desk_talk(&self, text: String, history: Vec<desk::Exchange>, chats: Vec<desk::Candidate>, projects: Vec<String>) -> remote::gateway::BoxFut<desk::Talk> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            // Not knowing where Claude is yet is the Desk not answering: the user picks.
+            let claude = state.remote.claude_path().unwrap_or_default();
+            let path_env = login_path(&state).await;
+            desk::talk(std::path::Path::new(&claude), path_env.as_deref(), &text, &history, &chats, &projects).await
+        })
+    }
+
+    fn desk_summary(&self, question: String, reply: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let claude = state.remote.claude_path().ok_or("Lantern doesn't know where Claude is yet. Open a chat in Lantern first.")?;
+            let path_env = login_path(&state).await;
+            desk::summary(std::path::Path::new(&claude), path_env.as_deref(), &question, &reply).await
+        })
+    }
+
     fn desk_search(&self, terms: String) -> remote::gateway::BoxFut<Result<Vec<history_search::ChatHit>, String>> {
         let app = self.app.clone();
         Box::pin(async move {

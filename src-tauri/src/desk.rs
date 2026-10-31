@@ -411,6 +411,43 @@ pub async fn summary(claude: &Path, path_env: Option<&str>, question: &str, repl
     }
 }
 
+/// Whether a turn's opening message is the Desk's message `text`: the whole of it once Lantern's notes are left out, or one whole
+/// part of messages queued together (joined by a blank line). Never a few of its words inside something else.
+pub fn carries(opening: &str, text: &str) -> bool {
+    let own = crate::remote::hub::without_notes(opening).trim();
+    let words = text.trim();
+    !words.is_empty() && (own == words || own.starts_with(&format!("{words}\n\n")) || own.ends_with(&format!("\n\n{words}")) || own.contains(&format!("\n\n{words}\n\n")))
+}
+
+/// How a turn a Desk message started ended, and Claude's last words in it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Replied {
+    pub said: String,
+    pub failed: bool,
+}
+
+/// The reply to a Desk message in a chat's events, once its turn finished: the first message after event `after` that is the
+/// Desk's message, then Claude's last words up to the turn's end (or where the next message, the post-hook's, starts). None while
+/// it runs, or when no message after `after` is it. A helper's words aren't it.
+pub fn reply_in<'a>(events: impl IntoIterator<Item = (u64, &'a crate::ui_event::UiEvent)>, text: &str, after: u64) -> Option<Replied> {
+    use crate::ui_event::UiEvent as U;
+    let mut started = false;
+    let mut said = String::new();
+    for (seq, e) in events {
+        if seq <= after {
+            continue;
+        }
+        match e {
+            U::UserText { text: opening, .. } if !started => started = carries(opening, text),
+            U::UserText { .. } => return Some(Replied { said, failed: false }),
+            U::AssistantText { parent: None, text: t, .. } if started && !t.trim().is_empty() => said = t.clone(),
+            U::TurnDone { is_error, .. } if started => return Some(Replied { said, failed: *is_error }),
+            _ => {}
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +624,39 @@ mod tests {
         let t = talk(Path::new("/nonexistent/claude"), None, "hi", &[], &two(), &projects()).await;
         assert_eq!(t, Talk { say: String::new(), route: Some(Route::Ask { chats: vec!["s1".into(), "s2".into()], unsure: true }) });
         assert!(summary(Path::new("/nonexistent/claude"), None, "q", "r").await.is_err());
+    }
+
+    fn seqd(events: &[crate::ui_event::UiEvent]) -> Vec<(u64, &crate::ui_event::UiEvent)> {
+        events.iter().enumerate().map(|(i, e)| (i as u64 + 1, e)).collect()
+    }
+
+    #[test]
+    fn a_desk_message_is_a_turns_whole_opening_after_lanterns_notes_or_one_whole_queued_part() {
+        assert!(carries("cap the delay", "cap the delay"));
+        assert!(carries("[Lantern: a note]\n\ncap the delay", " cap the delay "));
+        assert!(carries("first\n\ncap the delay", "cap the delay") && carries("cap the delay\n\nthen this", "cap the delay"));
+        assert!(!carries("yes, and also the footer", "yes"));
+        assert!(!carries("anything", "  "));
+    }
+
+    #[test]
+    fn the_reply_is_the_turns_last_words_once_it_ended_after_the_event_the_message_was_sent_at() {
+        use crate::ui_event::UiEvent as U;
+        let user = |t: &str| U::UserText { text: t.into(), at: None, sent_by: None, images: 0 };
+        let claude = |t: &str| U::AssistantText { parent: None, block_id: "b".into(), text: t.into() };
+        let helper = U::AssistantText { parent: Some("t".into()), block_id: "h".into(), text: "a helper's words".into() };
+        let done = |is_error| U::TurnDone { is_error, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        let events = [user("ship it"), claude("Old."), done(false), user("ship it"), claude("Shipping."), helper, claude("Shipped.")];
+        // Still running.
+        assert_eq!(reply_in(seqd(&events), "ship it", 3), None);
+        let mut finished = events.to_vec();
+        finished.push(done(true));
+        assert_eq!(reply_in(seqd(&finished), "ship it", 3), Some(Replied { said: "Shipped.".into(), failed: true }));
+        // Ends where the post-hook's message starts.
+        let hooked = [user("ship it"), claude("Shipped."), user(&crate::hooks::post_message("Update the brain")), claude("Nothing to save.")];
+        assert_eq!(reply_in(seqd(&hooked), "ship it", 0), Some(Replied { said: "Shipped.".into(), failed: false }));
+        // A message only holding its words isn't it.
+        assert_eq!(reply_in(seqd(&[user("ship it and the docs"), claude("x"), done(false)]), "ship it", 0), None);
     }
 
     /// Real calls to Sonnet and Haiku (needs `claude` signed in): `cargo test real_desk_talk -- --ignored --nocapture`.

@@ -19,6 +19,7 @@ import { PanelMenu, type Panel } from "./PanelMenu";
 import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
+import { DeskScreen } from "./DeskScreen";
 
 /** The widest a decision goes: it is a card to read and swipe, not a page. */
 const DECISION_MAX = 560;
@@ -34,6 +35,8 @@ export interface TabletDetailProps {
   chatsOpen: boolean;
   onShowChats: () => void;
   onBack: () => void;
+  /** Opens a chat from the Desk, which is shown where no chat is open (a Mac that has a Desk). */
+  onOpenChat: (slot: string) => void;
   onReview: (slot: string, requestId: string) => void;
   /** The Done page's "Start something new", on the chat's project (its folder's name). */
   onStartNew?: (project: string | null) => void;
@@ -47,7 +50,7 @@ export interface TabletDetailProps {
  * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
  * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onReview, onStartNew }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -61,6 +64,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   // its project's to-do list, picked from the pane's title or the chat bar's To-dos.
   const canArtifacts = useMacCan("artifacts");
   const canTodos = useMacCan("todos");
+  const canDesk = useMacCan("desk");
   // Each chat's own: the one picked in it the last time it was on screen.
   const [picked, setPicked] = useState<{ slot: string | null; panel: Panel }>(() => ({ slot, panel: panelOf(slot) }));
   const panel = picked.slot === slot ? picked.panel : panelOf(slot);
@@ -130,6 +134,18 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
       <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen), onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
+  ) : canDesk ? (
+    <DeskScreen
+      wide
+      onOpenChat={onOpenChat}
+      onReview={onReview}
+      top={
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.xl, minHeight: 32 }}>
+          <Txt variant="title">Desk</Txt>
+          {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
+        </View>
+      }
+    />
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
       <Txt variant="heading">Pick a chat</Txt>

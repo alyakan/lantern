@@ -1,6 +1,6 @@
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import { chat } from "../test/render";
-import { cantSend, deskFeed, deskLive, deskShown, LOG_MAX, readEntries, TEXT_KEPT, toKeep, waitingBy, type DeskEntry } from "./desk";
+import { answerShape, cantSend, deskFeed, deskHistory, deskLive, deskShown, finished, firstSentence, LOG_MAX, readEntries, replyCheck, TEXT_KEPT, toKeep, waitingBy, type DeskEntry } from "./desk";
 
 const desk: RemoteDesk = {
   desks: [
@@ -54,5 +54,65 @@ describe("the phone's Desk", () => {
     ]);
     expect(readEntries(Array.from({ length: LOG_MAX + 4 }, (_, i) => entry(`e${i}`, i)))).toHaveLength(LOG_MAX);
     expect(readEntries("nope")).toEqual([]);
+  });
+});
+
+describe("the Desk that talks, on the phone", () => {
+  const sent = (over: Partial<DeskEntry> = {}): DeskEntry => ({ id: "e", desk: "home", at: 5, text: "Fix it", outcome: { kind: "sent", slot: "a", title: "A", started: false, queued: false }, ...over });
+
+  it("asks the Mac what came back once the chat moved past the message and isn't working, and gives up when its events start over", () => {
+    const waiting = { status: "waiting" as const, after: 10 };
+    expect(replyCheck(waiting, chat({ last_seq: 10, status: "idle" }))).toBe("wait");
+    expect(replyCheck(waiting, chat({ last_seq: 14, status: "working" }))).toBe("wait");
+    expect(replyCheck(waiting, chat({ last_seq: 14, status: "idle" }))).toBe("ask");
+    expect(replyCheck(waiting, chat({ last_seq: 3, status: "idle" }))).toBe("lost");
+    expect(replyCheck(waiting, undefined)).toBe("wait");
+    expect(replyCheck({ status: "off" }, chat({ last_seq: 14 }))).toBe("wait");
+  });
+
+  it("leaves out of Just finished the answer that shows under a message, and lists the rest newest first", () => {
+    const withMine: RemoteDesk = { ...desk, cards: [...desk.cards, { key: "a:t2", desk: "home", slot: "a", title: "A", project: "lantern", at: 30, asked: "[Lantern: a note] Cap the delay", auto: false, said: "Capped.", outcome: "done" }] };
+    const mine = sent({ text: "Cap the delay", at: 25, reply: { status: "waiting", after: 1 } });
+    const keys = (entries: DeskEntry[]) => finished(withMine, "home", entries).map((c) => c.key);
+    expect(keys([mine])).not.toContain("a:t2");
+    expect(keys([])[0]).toBe("a:t2");
+    expect(keys([]).indexOf("a:t2")).toBeLessThan(keys([]).indexOf("a:t1"));
+  });
+
+  it("tells the Desk the last exchanges with what came back, naming nothing of a chat on another provider", () => {
+    const history = deskHistory(
+      [sent({ say: "On it.", reply: { status: "done", failed: false, summary: "Fixed." } }), sent({ id: "g", text: "tidy", outcome: { kind: "sent", slot: "g", title: "Gemini", started: false, queued: false }, reply: { status: "done", failed: false, summary: "secret" } }), sent({ id: "t", text: "hi", say: "Hi!", outcome: { kind: "talk" } })],
+      "home",
+      [chat({ slot: "a" }), chat({ slot: "g", provider: "Gemini" })],
+    );
+    expect(history).toEqual([
+      { you: "Fix it", desk: 'On it. (sent to "A"; it replied: Fixed.)' },
+      { you: "tidy", desk: "(sent to)" },
+      { you: "hi", desk: "Hi!" },
+    ]);
+  });
+
+  it("keeps a reply without Claude's whole words, and reads back what it said and what came back", () => {
+    const kept = toKeep(sent({ say: "On it.", reply: { status: "done", failed: false, summary: "Fixed.", full: "All of it." } }));
+    expect(kept.reply).toEqual({ status: "done", failed: false, summary: "Fixed." });
+    expect(readEntries([kept])[0]).toMatchObject({ say: "On it.", reply: { status: "done", summary: "Fixed." } });
+    expect(readEntries([{ ...kept, reply: { status: "waiting" } }])[0].reply).toBeUndefined();
+  });
+
+  it("reads a finished line's first sentence, and the Mac's answer shape", () => {
+    expect(firstSentence("Fixed it. Then more.")).toBe("Fixed it.");
+    expect(firstSentence("• one • two")).toBe("one");
+    expect(answerShape("Close.\n\n**Open**\n- the footer [1]")).toEqual({ lead: "Close.", parts: [{ part: "open", points: ["the footer [1]"] }] });
+    expect(answerShape("- just a list")).toBeNull();
+  });
+});
+
+describe("a reply waited for across a Mac restart", () => {
+  it("is lost once the Mac runs again (another epoch), as its chats' places may be other chats' now", () => {
+    const waiting = { status: "waiting" as const, after: 10, epoch: 7 };
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), 7)).toBe("ask");
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), 8)).toBe("lost");
+    // Not known yet (connecting): it waits.
+    expect(replyCheck(waiting, chat({ last_seq: 40, status: "idle" }), null)).toBe("ask");
   });
 });

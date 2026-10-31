@@ -25,6 +25,7 @@ import { UsageStrip } from "./ChatExtras";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
+import { Deck } from "./NeedsDeck";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
 
@@ -45,6 +46,10 @@ export interface HomeProps {
   /** On a tablet, whether the chats are pinned beside the chat, and the button that pins or unpins them (none on a phone). */
   pinned?: boolean;
   onTogglePin?: () => void;
+  /** On a tablet, the Desk is in the main area: this opens it there (its button sits at the top of the chats). None on a phone. */
+  onOpenDesk?: () => void;
+  /** On a tablet, the Desk is what the main area shows now. */
+  deskShown?: boolean;
 }
 
 /** The sidebar, drawn: a window with its left third set apart, filled in when the chats are pinned beside the chat. */
@@ -86,47 +91,6 @@ function Working() {
   return (
     <View accessibilityLabel="Working" style={{ width: 54, height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
       <Animated.View style={{ width: "40%", height: "100%", backgroundColor: accent, borderRadius: 2, transform: [{ translateX: Animated.multiply(x, 22) }] }} />
-    </View>
-  );
-}
-
-function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomeProps["onOpenChat"]; onReview: HomeProps["onReview"] }) {
-  const colors = useColors();
-  const front = list[0];
-  const behind = Math.min(2, list.length - 1);
-  // A file change says how big it is before it is opened.
-  const change = diffPreviewOf(front.waiting.tool_name, front.waiting.input);
-  return (
-    <View style={{ marginHorizontal: space.lg, paddingBottom: 14 }}>
-      {behind >= 2 && <View style={{ position: "absolute", left: 14, right: 14, top: 14, bottom: -8, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.6 }} />}
-      {behind >= 1 && <View style={{ position: "absolute", left: 7, right: 7, top: 7, bottom: -2, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.85 }} />}
-      {/* A new card on top (the one before was answered) comes in, instead of the text changing under the eye. */}
-      <FadeSlideIn key={front.waiting.request_id} from={12} style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 18, gap: 4 }, shadow.card]}>
-        <Tag>{front.view.tag}</Tag>
-        <Txt variant="heading" style={{ marginTop: 8 }}>
-          {front.view.title}
-        </Txt>
-        <Txt variant="small" tone="ink2">
-          {front.from}
-        </Txt>
-        {front.view.detail && (
-          <View style={{ backgroundColor: colors.paper, borderRadius: radius.inner, padding: 10, marginTop: 8 }}>
-            <Txt variant="mono" numberOfLines={3}>
-              {front.view.detail}
-            </Txt>
-          </View>
-        )}
-        {!!change && (
-          <Txt variant="small" tone="ink2" testID="deck-change" style={{ marginTop: 6 }}>
-            {change.partial ? "At least " : ""}
-            {countsOf(change)} lines. Review shows the change.
-          </Txt>
-        )}
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-          <Button label="Open chat" kind="ghost" style={{ flex: 1 }} onPress={() => onOpenChat(front.waiting.slot)} />
-          <Button label="Review" style={{ flex: 1 }} onPress={() => onReview(front.waiting.slot, front.waiting.request_id)} />
-        </View>
-      </FadeSlideIn>
     </View>
   );
 }
@@ -363,7 +327,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
   const { chats, workingSince, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
@@ -475,7 +439,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             <Dots />
           </View>
         )}
-        {canDesk && <ModeSwitch value={mode} onChange={pickMode} />}
+        {canDesk && !onOpenDesk && <ModeSwitch value={mode} onChange={pickMode} />}
         {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
         {onTogglePin && (
           <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
@@ -486,23 +450,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     </View>
   );
 
-  if (canDesk && mode === "desk") {
-    // What waits on you in the Desk's chats: Home's own stack, after the feed.
-    const needs = (slots: string[]) => {
-      const mine = stack.filter((c) => slots.includes(c.waiting.slot));
-      return mine.length > 0 ? (
-        <View style={{ marginHorizontal: -space.lg, paddingTop: 4 }}>
-          <Deck list={mine} onOpenChat={onOpenChat} onReview={onReview} />
-          {mine.length > 1 && (
-            <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl }}>
-              {mine.length - 1} more after this one
-            </Txt>
-          )}
-        </View>
-      ) : null;
-    };
-    return <DeskScreen top={top} onOpenChat={onOpenChat} renderNeeds={needs} />;
-  }
+  // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
+  if (canDesk && mode === "desk" && !onOpenDesk) return <DeskScreen top={top} onOpenChat={onOpenChat} onReview={onReview} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -517,6 +466,20 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
         {top}
+        {canDesk && onOpenDesk && (
+          <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
+            <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
+              Desk
+            </Txt>
+            {stack.length > 0 && (
+              <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
+                <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
+                  {stack.length}
+                </Txt>
+              </View>
+            )}
+          </PressScale>
+        )}
         {plan && <UsageStrip plan={plan} onPress={() => setUsageOpen(true)} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
