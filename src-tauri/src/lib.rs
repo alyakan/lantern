@@ -3011,12 +3011,21 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
     tauri::async_runtime::spawn_blocking(move || pr::open_prs(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
 }
 
-/// How the projects with a chat open stand, for the Desk's board (read-only: see `status.rs`). The folders are the open
-/// chats' own, not ones the window names.
+/// How the projects with a chat open stand, for the Desk's board (read-only: see `status.rs`). The folders are the hub's
+/// open chats', less the workers' and other agents' worktrees.
 #[tauri::command]
-async fn desk_status(state: State<'_, AppState>) -> Result<Vec<status::RepoStatus>, String> {
+async fn desk_status(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<status::RepoStatus>, String> {
     let path_env = login_path(&state).await;
-    let mut folders: Vec<String> = state.remote.hub.chats().into_iter().filter_map(|c| c.folder).collect();
+    let workers = app.path().app_local_data_dir().ok().map(|d| d.join("worktrees"));
+    let mut folders: Vec<String> = state
+        .remote
+        .hub
+        .chats()
+        .into_iter()
+        .filter(|c| !state.orchestra.is_worker(&c.slot))
+        .filter_map(|c| c.folder)
+        .filter(|f| !status::agents_worktree(std::path::Path::new(f), workers.as_deref()))
+        .collect();
     folders.sort();
     folders.dedup();
     tauri::async_runtime::spawn_blocking(move || status::status(&folders, path_env.as_deref())).await.map_err(|e| e.to_string())

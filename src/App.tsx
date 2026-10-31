@@ -2578,7 +2578,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
-  const allRepos = useDeskStatus(deskShown);
+  const allRepos = useDeskStatus(deskShown, deskFolders);
   const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
   const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));

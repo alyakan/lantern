@@ -1,9 +1,11 @@
 //! How each project with a chat open stands, for the Desk's board: per folder its branch and how many files are changed,
 //! per repository its worktrees, open pull requests and how their checks stand, what merged lately, and its latest
-//! release. Read-only. The folders are the open chats' own (never ones the window names), and the repositories they are
-//! in are looked at once each, however many worktrees of one have a chat. git runs hardened (`git::run`); `gh` is told
-//! which repository with `--repo` and runs outside it, so nothing in a project's config is read or run by it. What comes
-//! back from GitHub (titles, branch names) is shown, never handed to a model.
+//! release. Read-only. The folders are the hub's open chats', less the agents' worktrees (a worker's `.git` file and
+//! submodules are its own to point anywhere: git runs there only through `git::verify_worktree`, never from here), and the
+//! repositories they are in are looked at once each, however many worktrees of one have a chat. git runs hardened
+//! (`git::run`), takes no optional locks (a chat committing at that moment must not find the index locked) and doesn't go
+//! into submodules; `gh` is told which repository with `--repo` and runs outside it, so nothing in a project's config is
+//! read or run by it. What comes back from GitHub (titles, branch names) is shown, never handed to a model.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -104,6 +106,22 @@ struct FromGh {
 }
 
 static CACHE: Mutex<Option<HashMap<String, (Instant, FromGh)>>> = Mutex::new(None);
+
+/// Whether `folder` is an agent's worktree: a Lantern worker's (under `workers`, Lantern's own worktrees folder) or one
+/// Claude Code made for a subagent (`.claude/worktrees/…`).
+pub fn agents_worktree(folder: &Path, workers: Option<&Path>) -> bool {
+    if workers.is_some_and(|w| folder.starts_with(w)) {
+        return true;
+    }
+    let parts: Vec<_> = folder.components().map(|c| c.as_os_str()).collect();
+    parts.windows(2).any(|w| w[0] == ".claude" && w[1] == "worktrees")
+}
+
+/// Files changed and not committed in `folder`, without taking the index lock and without going into submodules.
+fn changed_files(folder: &Path, path_env: Option<&str>) -> Option<usize> {
+    let out = git::run_raw(folder, &["--no-optional-locks", "status", "--porcelain", "--ignore-submodules=all"], path_env).ok()?;
+    Some(out.lines().filter(|l| !l.is_empty()).count())
+}
 
 /// "owner/name" from a github.com remote URL (https, ssh or scp-style, with or without `.git` and credentials). Anything
 /// else, or a name with characters GitHub doesn't allow, is None.
@@ -309,7 +327,7 @@ fn repo_status(common: &Path, folders: &[String], path_env: Option<&str>) -> Rep
         .iter()
         .map(|f| {
             let path = Path::new(f);
-            FolderStatus { folder: f.clone(), branch: git::current_branch(path), changed: git::dirty(path, path_env).ok().map(|d| d.len()) }
+            FolderStatus { folder: f.clone(), branch: git::current_branch(path), changed: changed_files(path, path_env) }
         })
         .collect();
     let got = from_github(&common.to_string_lossy(), github.as_deref(), path_env);
@@ -397,6 +415,16 @@ mod tests {
             println!("{s:#?}");
             assert_eq!(s.gh, Gh::Ready, "{:?}", s.error);
         }
+    }
+
+    #[test]
+    fn tells_agents_worktrees_apart() {
+        let workers = Path::new("/Users/me/Library/Application Support/lantern/worktrees");
+        assert!(agents_worktree(&workers.join("web/fix-login-w3"), Some(workers)));
+        assert!(agents_worktree(Path::new("/Users/me/p/web/.claude/worktrees/agent-a1"), Some(workers)));
+        assert!(!agents_worktree(Path::new("/Users/me/p/web"), Some(workers)));
+        assert!(!agents_worktree(Path::new("/Users/me/p/lantern-wt/desk"), None));
+        assert!(!agents_worktree(Path::new("/Users/me/worktrees/x"), Some(workers)));
     }
 
     #[test]

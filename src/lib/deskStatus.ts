@@ -91,19 +91,35 @@ export function reposToday(repos: RepoStatus[] | null, now: number): RepoEvent[]
   return [...hanging, ...today];
 }
 
-/** What the Mac says of the repositories with a chat open, asked while `on` (the Desk is on screen); null until it has said. */
-export function useDeskStatus(on: boolean): RepoStatus[] | null {
+/**
+ * What the Mac says of the repositories with a chat open, asked while `on` (the Desk is on screen) and again whenever the Desk's
+ * `folders` change (a project opened between two asks isn't left looking like no repository); null until it has said. A slow
+ * answer (git in a big checkout) isn't asked again before it is in.
+ */
+export function useDeskStatus(on: boolean, folders: string[]): RepoStatus[] | null {
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
+  const key = [...folders].sort().join("\n");
   useEffect(() => {
     if (!on) return;
     let live = true;
-    const load = () => api.deskStatus().then((r) => live && setRepos(r), () => {});
+    let asking = false;
+    const load = () => {
+      if (asking) return;
+      asking = true;
+      api.deskStatus().then(
+        (r) => {
+          asking = false;
+          if (live) setRepos(r);
+        },
+        () => void (asking = false),
+      );
+    };
     load();
     const tick = setInterval(load, POLL_MS);
     return () => {
       live = false;
       clearInterval(tick);
     };
-  }, [on]);
+  }, [on, key]);
   return repos;
 }
