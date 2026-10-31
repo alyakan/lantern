@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { reposToday, type RepoEventKind } from "../lib/deskStatus";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
 
 const MARK: Record<RepoEventKind, string> = { failing: "✕", draft: "◷", merged: "✓", released: "↑" };
+/** The lines shown before "Show N more": what is left hanging is always shown. */
+const SHOWN = 5;
 const WORD: Record<RepoEventKind, string> = { failing: "Checks failing", draft: "Draft release waiting", merged: "Merged", released: "Released" };
 
 /**
@@ -10,8 +13,12 @@ const WORD: Record<RepoEventKind, string> = { failing: "Checks failing", draft: 
  * as drafts first, then today's merges and releases. A quiet day says so; nothing is shown before the Mac has asked.
  */
 export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: number }) {
+  const [all, setAll] = useState(false);
   if (!repos || repos.length === 0) return null;
   const events = reposToday(repos, now);
+  const hanging = events.filter((e) => e.at === null).length;
+  const shown = all ? events : events.slice(0, Math.max(SHOWN, hanging));
+  const more = events.length - shown.length;
   const many = new Set(repos.map((r) => r.repo)).size > 1;
   return (
     <section className="desk-repos" aria-label="Repos today">
@@ -20,7 +27,7 @@ export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: nu
         <p className="muted">Nothing merged, released or failing today.</p>
       ) : (
         <ul className="desk-repo-list">
-          {events.map((e) => (
+          {shown.map((e) => (
             <li key={e.key} className={`desk-repo-event ${e.kind}`}>
               <span className="desk-repo-mark" aria-hidden>
                 {MARK[e.kind]}
@@ -34,6 +41,11 @@ export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: nu
             </li>
           ))}
         </ul>
+      )}
+      {more > 0 && (
+        <button className="desk-more" onClick={() => setAll(true)}>
+          Show {more} more
+        </button>
       )}
     </section>
   );

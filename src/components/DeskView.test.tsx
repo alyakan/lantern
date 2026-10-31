@@ -138,4 +138,15 @@ describe("the Desk", () => {
     rerender({ repos: [repo("/p/lantern")] });
     expect(screen.getByRole("region", { name: "Repos today" })).toHaveTextContent("Nothing merged, released or failing today.");
   });
+
+  it("shows five of a busy day's lines, and the rest on asking", () => {
+    const now = new Date(2026, 9, 31, 18, 0).getTime();
+    vi.setSystemTime(now);
+    const merged = Array.from({ length: 8 }, (_, i) => ({ number: i + 1, title: `PR ${i + 1}`, merged_at: new Date(2026, 9, 31, 9 + i).toISOString() }));
+    setup({ repos: [repo("/p/lantern", { merged })] });
+    const region = screen.getByRole("region", { name: "Repos today" });
+    expect(within(region).getAllByRole("listitem")).toHaveLength(5);
+    fireEvent.click(within(region).getByRole("button", { name: "Show 3 more" }));
+    expect(within(region).getAllByRole("listitem")).toHaveLength(8);
+  });
 });
