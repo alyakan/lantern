@@ -10,6 +10,7 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -89,6 +90,8 @@ export interface State {
   epoch: number | null;
   /** The Desk as the Mac's window has it, once a Mac that has one has said (null: not yet, or a Mac without). */
   desk: RemoteDesk | null;
+  /** The Mac's One project: Home lists only its chats (null: every project, or a Mac that doesn't say). */
+  single: RemoteSingle | null;
 }
 
 /** Keeps when each working chat was first seen working, and forgets the ones that are not working (their next time is a new start). */
@@ -99,7 +102,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null, desk: null };
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null, desk: null, single: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -248,9 +251,10 @@ function settleWaiting(waiting: Waiting[], slot: string, event: RemoteEvent): Wa
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "welcome":
+      // Each connection is told the One project afresh (when the Mac has one): until it is, every project shows.
+      if (state.epoch === action.epoch) return state.single === null ? state : { ...state, single: null };
       // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again.
-      if (state.epoch === action.epoch) return state;
-      return { ...state, epoch: action.epoch, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
+      return { ...state, epoch: action.epoch, single: null, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
     case "waiting":
       return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
     case "desk":
@@ -291,6 +295,8 @@ export function reducer(state: State, action: Action): State {
           return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
         case "desk":
           return { ...state, desk: msg.desk };
+        case "single":
+          return { ...state, single: msg.single };
         case "plan":
           return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.

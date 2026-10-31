@@ -5,6 +5,7 @@
 pub mod answers;
 pub mod bus;
 pub mod desk;
+pub mod single;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
@@ -113,6 +114,13 @@ pub struct CloseRequest {
 pub struct RenameRequest {
     pub slot: String,
     pub title: String,
+}
+
+/// What the window is asked when a phone picks the One project (a folder the gateway checked is one of the Mac's projects), or
+/// shows every project again (None).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SingleRequest {
+    pub folder: Option<String>,
 }
 
 /// What the window is asked when a phone puts a chat on one of the presets.
@@ -454,6 +462,11 @@ impl Remote {
     /// Takes in what the window says its Desks hold (see desk.rs).
     pub fn window_desk(&self, desk: desk::WindowDesk) {
         self.hub.desk.set(desk);
+    }
+
+    /// Takes in the window's One project (see single.rs): None when it shows every project.
+    pub fn window_single(&self, single: Option<single::WindowSingle>) {
+        self.hub.single.set(single);
     }
 
     /// Takes in what the window knows of its open chats: the titles it shows, and which are asleep.

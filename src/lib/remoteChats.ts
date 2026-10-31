@@ -162,6 +162,17 @@ export interface RemoteClose {
   slot: string;
 }
 
+/** What the backend asks of the window when a phone picks the One project, or shows every project (null; see remote::SingleRequest). */
+export interface RemoteSingle {
+  folder: string | null;
+}
+
+/** The sidebar's One project as the backend is told it, for the phones that follow it (see remote::single::WindowSingle). */
+export interface WindowSingle {
+  folder: string;
+  color: string | null;
+}
+
 /** What the backend asks of the window when a phone names a chat (see remote::RenameRequest). */
 export interface RemoteRename {
   slot: string;

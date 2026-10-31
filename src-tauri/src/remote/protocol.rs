@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK, PHONE_SINGLE];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -102,6 +102,8 @@ pub const PHONE_EXTRAS: &str = "extras";
 pub const PHONE_DESK: &str = "desk";
 /// A Mac whose Desk talks back (Request::DeskTalk) and sums up what came back (Request::DeskReply).
 pub const DESK_TALK: &str = "desktalk";
+/// A phone that follows the Mac's One project: it is pushed ServerMessage::Single, and may pick one (Request::SetSingle).
+pub const PHONE_SINGLE: &str = "single";
 
 /// A slash command or skill the chat's claude offers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -603,6 +605,18 @@ impl From<super::hub::ChatInfo> for RemoteChat {
     }
 }
 
+/// The one project the Mac's sidebar shows on its own (its One project): the phone shows only its chats, under a banner in `color`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteSingle {
+    /// The project's folder, as RemoteProject's `id` (what Request::SetSingle names).
+    pub project: String,
+    /// The folder's name: the chats whose `project` is this are the project's.
+    pub name: String,
+    /// The colour the Mac gives it, "#rrggbb" (None from a window that didn't say).
+    pub color: Option<String>,
+}
+
 /// A project a phone may start a chat in: one the user already works in on this Mac (a chat open there, or a recent one).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -946,6 +960,9 @@ pub enum Request {
         #[ts(type = "number")]
         after: u64,
     },
+    /// Shows only `project` (one of Request::Projects' ids) on the Mac's sidebar and on every phone that follows it, or every project
+    /// again (None). The window does it, and says so back as ServerMessage::Single. Only sent to a Mac whose Welcome lists "single".
+    SetSingle { project: Option<String> },
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
@@ -1107,6 +1124,9 @@ pub enum ServerMessage {
     },
     /// The Desk changed (see Request::Desk). Only sent to a phone that said "desk".
     Desk { desk: RemoteDesk },
+    /// The Mac's One project (None: every project), when it first connects once the window has said one, and when it changes.
+    /// Only sent to a phone that said "single".
+    Single { single: Option<RemoteSingle> },
 }
 
 #[cfg(test)]
@@ -1244,6 +1264,8 @@ mod tests {
         assert!(FEATURES.contains(&PHONE_DESK));
         // The Desk that talks: a phone only asks a Mac that lists it (its own tests mock the list, so it is checked here).
         assert!(FEATURES.contains(&DESK_TALK));
+        // One project: a phone follows the Mac's only when the Mac lists it.
+        assert!(FEATURES.contains(&PHONE_SINGLE));
         assert!(phone_shell_id("ph-abcd1234") && phone_shell_id(&format!("ph-{}", "a".repeat(28))));
         assert!(!phone_shell_id(&format!("ph-{}", "a".repeat(29))) && !phone_shell_id("ph-abc") && !phone_shell_id("ph-ab-cd12") && !phone_shell_id(""));
     }

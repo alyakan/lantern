@@ -128,6 +128,9 @@ interface Props extends SidebarHandlers {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
+  /** One project: the folder the sidebar shows on its own (null: every project), kept by the app (a phone can pick it too). */
+  single: string | null;
+  onSingle: (folder: string | null) => void;
   /** The projects that have notes: each is marked on its header. */
   noted?: string[];
   /** The Desk (every chat at once): its button at the top, pressed while it is on screen, with how many things need you. */
@@ -752,7 +755,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], ...handlers } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], single, onSingle: setSingle, ...handlers } = props;
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
@@ -832,9 +835,8 @@ export function Sidebar(props: Props) {
   });
   const isExpanded = (g: CompactGroup) => by[g.folder] ?? true;
 
-  // One project: the sidebar lists only it, under a banner in its colour, until the user shows every project again. Kept
-  // across restarts; a project that has nothing open stays chosen, with only its banner showing.
-  const [single, setSingle] = usePersistentState<string | null>("sidebar.single", null);
+  // One project: the sidebar lists only it, under a banner in its colour, until the user shows every project again. A project
+  // that has nothing open stays chosen, with only its banner showing.
   const colorOf = (folder: string) => PROJECT_COLORS[colors[folder] ?? 0];
   const labelOf = (folder: string) => groups.find((g) => g.folder === folder)?.label ?? folder.split("/").filter(Boolean).pop() ?? folder;
   const choiceOf = (folder: string): SingleChoice => ({ folder, label: labelOf(folder), color: colorOf(folder) });

@@ -151,6 +151,20 @@ export class Sync {
     }
   }
 
+  /** Whether the Mac shares its One project (it pushes it as it changes, and takes one picked here). */
+  followsSingle() {
+    return this.has("single");
+  }
+
+  /**
+   * Shows only `project` (a RemoteProject's id) on the Mac and here, or every project (null). Nothing changes here until the Mac
+   * says back what it shows, so the two never disagree.
+   */
+  setSingle(project: string | null) {
+    if (!this.has("single")) return Promise.reject(new Error("Update Lantern on your Mac to show one project."));
+    return this.ask<null>({ op: "set_single", project });
+  }
+
   /** Asks for the Desk, from a Mac that has one (it pushes it as it changes; this is for the first time). */
   async refreshDesk() {
     if (!this.has("desk")) return;

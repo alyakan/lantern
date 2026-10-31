@@ -48,6 +48,7 @@ import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
 import { NotesApplied } from "./components/NotesApplied";
 import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
 import { readStored, stepFile, usePersistentState } from "./lib/layout";
+import { PROJECT_COLORS } from "./lib/projectColors";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
@@ -2382,6 +2383,19 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
   const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
+  // The sidebar's One project: kept here, not in the sidebar (a peek mounts a new one, and a hidden one isn't there), so a phone
+  // that picks one is heard whatever the sidebar is doing, and the phones that follow it are told each time it changes.
+  const [singleProject, setSingleProject] = usePersistentState<string | null>("sidebar.single", null);
+  const singleColor = singleProject !== null && projectColors[singleProject] !== undefined ? (PROJECT_COLORS[projectColors[singleProject]] ?? null) : null;
+  useEffect(() => {
+    void api.remoteWindowSingle(singleProject !== null ? { folder: singleProject, color: singleColor } : null).catch(() => {});
+  }, [singleProject, singleColor]);
+  useEffect(() => {
+    const off = api.onRemoteSingle((r) => setSingleProject(r.folder)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
+    };
+  }, []);
   // The user's order of the projects (see orderProjects).
   const [projectOrder, setProjectOrder] = usePersistentState<string[]>("sidebar.projectOrder", []);
   // What the sidebar last listed, so showing it again (a peek mounts a new one) starts from that instead of empty.
@@ -2746,6 +2760,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     onDismissMoved: relocateMenu.onDismiss,
     colors: projectColors,
     onColors: setProjectColors,
+    single: singleProject,
+    onSingle: setSingleProject,
     noted: notedFolders(notesBy),
     desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
   };

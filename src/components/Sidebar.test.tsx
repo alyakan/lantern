@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import { PROJECT_COLORS } from "../lib/projectColors";
+import { usePersistentState } from "../lib/layout";
 import type { CloseCheck } from "../types";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
 
@@ -29,7 +30,15 @@ const ALL_OPEN = { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen, [IOS]: iosOpe
 
 const noLoss: CloseCheck = { worktree: true, branch: "lantern/x", uncommitted: 0, unmerged_commits: 0 };
 
-function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
+type Props = Omit<React.ComponentProps<typeof Sidebar>, "single" | "onSingle">;
+
+/** The sidebar with its One project kept as the app keeps it: saved, and handed back down. */
+function Kept(props: Props) {
+  const [single, setSingle] = usePersistentState<string | null>("sidebar.single", null);
+  return <Sidebar {...props} single={single} onSingle={setSingle} />;
+}
+
+function setup(over: Partial<Props> = {}) {
   const h = {
     onChat: vi.fn(),
     onTeam: vi.fn(),
@@ -57,7 +66,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onDismissMoved: vi.fn(),
     onColors: vi.fn(),
   };
-  const props: React.ComponentProps<typeof Sidebar> = {
+  const props: Props = {
     ...h,
     mode: "pinned",
     width: SIDEBAR_DEFAULT,
@@ -71,7 +80,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     colors: {},
     ...over,
   };
-  const view = render(<Sidebar {...props} />);
+  const view = render(<Kept {...props} />);
   return { h, props, ...view };
 }
 
@@ -257,10 +266,10 @@ describe("the open sidebar's projects", () => {
     await waitFor(() => expect(onColors).toHaveBeenCalledWith({ [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 }));
     // Once saved (and after a restart, read back), nothing new is saved and the colours stay.
     const saved = { [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 };
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     onColors.mockClear();
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     expect(color("lantern")).toBe(PROJECT_COLORS[1]);
     expect(onColors).not.toHaveBeenCalled();
@@ -695,7 +704,7 @@ describe("resizing", () => {
     expect(h.onWidth).toHaveBeenLastCalledWith(316);
     fireEvent.keyDown(edge, { key: "ArrowLeft", shiftKey: true });
     expect(h.onWidth).toHaveBeenLastCalledWith(252);
-    rerender(<Sidebar {...props} width={SIDEBAR_MAX} />);
+    rerender(<Kept {...props} width={SIDEBAR_MAX} />);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the sidebar" }), { key: "ArrowRight" });
     expect(h.onWidth).toHaveBeenLastCalledWith(SIDEBAR_MAX);
   });

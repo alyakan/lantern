@@ -57,8 +57,11 @@ export interface HandshakeOptions {
   fixedEphemeral?: Uint8Array;
 }
 
-/** What this app can read beyond protocol 1, said in its hello: a Mac sends it nothing it doesn't list ("extras": commands, plan, usage). */
-export const PHONE_FEATURES = ["extras", "desk"];
+/**
+ * What this app can read beyond protocol 1, said in its hello: a Mac sends it nothing it doesn't list ("extras": commands, plan,
+ * usage; "single": the Mac's One project).
+ */
+export const PHONE_FEATURES = ["extras", "desk", "single"];
 
 /** Runs the handshake over `link` and says hello: the open channel and the Mac's welcome. Throws on any failure. */
 export async function comeIn(link: Link, device: Keypair, macKey: Uint8Array, o: HandshakeOptions): Promise<{ channel: Channel; welcome: Welcome }> {
