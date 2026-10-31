@@ -68,7 +68,7 @@ function useTodos(folder: string) {
 }
 
 /** A worktree's line: its branch and where it is, what Storage says of it, and Remove when Storage found it safe. */
-function Worktree({ wt, item, scanned }: { wt: RepoStatus["worktrees"][number]; item: StorageItem | undefined; scanned: boolean }) {
+function Worktree({ wt, item, scanned, chatOpen }: { wt: RepoStatus["worktrees"][number]; item: StorageItem | undefined; scanned: boolean; /** A chat is open in it now (the scan may be older). */ chatOpen: boolean }) {
   const [asking, setAsking] = useState(false);
   const [state, setState] = useState<{ kind: "removing" } | { kind: "failed"; why: string } | null>(null);
   const name = wt.path.split("/").filter(Boolean).pop() ?? wt.path;
@@ -82,7 +82,9 @@ function Worktree({ wt, item, scanned }: { wt: RepoStatus["worktrees"][number]; 
   };
   const verdict = wt.agent
     ? "An agent's: its team cleans it up"
-    : wt.locked
+    : chatOpen
+      ? "A chat is open in it"
+      : wt.locked
       ? "Locked"
       : !scanned
         ? null
@@ -101,9 +103,9 @@ function Worktree({ wt, item, scanned }: { wt: RepoStatus["worktrees"][number]; 
           {name}
         </span>
       </span>
-      {verdict && <span className={`desk-wt-verdict${wt.agent || wt.locked || !item ? "" : ` ${item.risk}`}`}>{verdict}</span>}
+      {verdict && <span className={`desk-wt-verdict${wt.agent || chatOpen || wt.locked || !item ? "" : ` ${item.risk}`}`}>{verdict}</span>}
       {state?.kind === "failed" && <span className="desk-bad">{state.why}</span>}
-      {item?.risk === "safe" && !wt.agent && !wt.locked && (
+      {item?.risk === "safe" && !wt.agent && !wt.locked && !chatOpen && (
         <span className="desk-wt-actions">
           {asking ? (
             <>
@@ -229,7 +231,7 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
           )}
           <ul className="desk-page-list">
             {worktrees.map((w) => (
-              <Worktree key={w.path} wt={w} item={itemOf(w.path)} scanned={storage.items !== null} />
+              <Worktree key={w.path} wt={w} item={itemOf(w.path)} scanned={storage.items !== null} chatOpen={!!repo?.folders.some((f) => f.folder === w.path)} />
             ))}
           </ul>
         </section>

@@ -105,4 +105,11 @@ describe("a project's page on the Desk", () => {
     expect(screen.getByRole("region", { name: "Pull requests" })).toHaveTextContent("gh isn't logged in to GitHub.");
     expect(screen.queryByRole("region", { name: "Worktrees" })).toBeNull();
   });
+
+  it("offers no Remove for a worktree with a chat open in it, whatever an older scan says", async () => {
+    setup({ repo: { ...repo, folders: [...repo.folders, { folder: "/wt/clean", branch: "b-clean", changed: 0 }] } });
+    const wts = screen.getByRole("region", { name: "Worktrees" });
+    await waitFor(() => expect(wts).toHaveTextContent("A chat is open in it"));
+    expect(within(wts).queryByRole("button", { name: /^Remove/ })).toBeNull();
+  });
 });
