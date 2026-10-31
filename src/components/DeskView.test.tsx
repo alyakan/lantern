@@ -70,7 +70,7 @@ describe("the Desk", () => {
   it("lists the projects with what Lantern knows of each", () => {
     setup({ projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })] });
     expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
-    const [lantern, rayak] = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    const [lantern, rayak] = within(screen.getByRole("region", { name: "Projects" })).getAllByRole("article");
     expect(lantern).toHaveTextContent("2 working · 1 needs you");
     expect(lantern).toHaveTextContent("3 · 1 overdue");
     expect(rayak).toHaveTextContent("none open");
@@ -79,12 +79,12 @@ describe("the Desk", () => {
     expect(within(rayak).getByRole("button", { name: "rayak" })).toBeEnabled();
   });
 
-  it("opens a project's row to list its chats, the unread ones marked, and opens a chat on a click", () => {
+  it("opens a project's tile to list its chats, the unread ones marked, and opens a chat on a click", () => {
     const { props } = setup({
       chats: [row(1, { unread: true }), row(2, { state: "working", line: "Bash: npm test" }), row(3, { folder: "/p/rayak", where: "rayak" })],
       projects: [project("/p/lantern", { chats: 2 }), project("/p/rayak")],
     });
-    const table = screen.getByRole("table");
+    const table = screen.getByRole("region", { name: "Projects" });
     expect(within(table).queryByRole("button", { name: /^Chat 1/ })).toBeNull();
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of lantern" }));
     const unread = within(table).getByRole("button", { name: "Chat 1, unread" });
@@ -104,7 +104,7 @@ describe("the Desk", () => {
     ];
     const { rerender } = setup({ projects: [project("/p/lantern"), project("/p/rayak"), project("/p/notes")] });
     // Before the Mac has said: nothing is claimed.
-    const rows = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    const rows = () => within(screen.getByRole("region", { name: "Projects" })).getAllByRole("article");
     expect(rows()[0]).toHaveTextContent("…");
     rerender({ repos });
     const [lantern, rayak, notes] = rows();

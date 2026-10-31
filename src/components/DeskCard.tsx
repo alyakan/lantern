@@ -13,3 +13,16 @@ export function Card({ title, count, action, heading: H = "h3", className, child
     </section>
   );
 }
+
+/** Every row in a Desk card has the same shape: a title with one short thing on its right, and one quiet line under it. */
+export function Row({ title, aside, meta }: { title: ReactNode; aside?: ReactNode; meta?: ReactNode }) {
+  return (
+    <>
+      <span className="dp-row-top">
+        <span className="dp-title">{title}</span>
+        {aside && <span className="dp-aside">{aside}</span>}
+      </span>
+      {meta && <span className="dp-meta">{meta}</span>}
+    </>
+  );
+}

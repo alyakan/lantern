@@ -42,8 +42,8 @@ describe("the Desk in the app", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
-    // The table has the chat's project, whose row lists the chat.
-    const table = within(desk()!).getByRole("table");
+    // The Desk has the chat's project, whose tile lists the chat.
+    const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
     expect(within(table).getByRole("button", { name: "New chat" })).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
@@ -59,7 +59,7 @@ describe("the Desk in the app", () => {
   it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
-    const table = within(desk()!).getByRole("table");
+    const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
     fireEvent.click(within(table).getByRole("button", { name: "New chat" }));
     await waitFor(() => expect(desk()).toBeNull());
@@ -73,7 +73,7 @@ describe("the Desk in the app", () => {
   it("opens a project's own page, asks about that project only, and comes back to it from one of its chats", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
-    fireEvent.click(within(within(desk()!).getByRole("table")).getByRole("button", { name: "acme-api" }));
+    fireEvent.click(within(within(desk()!).getByRole("region", { name: "Projects" })).getByRole("button", { name: "acme-api" }));
     const page = () => screen.getByRole("region", { name: "Project acme-api" });
     expect(within(page()).getByRole("heading", { name: "acme-api" })).toBeInTheDocument();
     expect(within(ask()!).getByRole("heading", { name: "Ask about acme-api" })).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe("the Desk in the app", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
     await waitFor(() => expect(page()).toBeInTheDocument());
     fireEvent.click(within(page()).getByRole("button", { name: "‹ All projects" }));
-    await waitFor(() => expect(within(desk()!).getByRole("table")).toBeInTheDocument());
+    await waitFor(() => expect(within(desk()!).getByRole("region", { name: "Projects" })).toBeInTheDocument());
     expect(within(ask()!).getByRole("heading", { name: "Ask" })).toBeInTheDocument();
   });
 

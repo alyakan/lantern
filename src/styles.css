@@ -3731,24 +3731,13 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .review-slot { display: contents; }
 .review-slot[hidden] { display: none; }
 
-/* A project's chats, under its row: each with its last message; an unread one bold with a dot. */
+/* A project's chats, in its tile: each with its last message; an unread one bold with a dot. */
 .desk-unread-count { font-size: calc(11.5px * var(--font-scale)); color: var(--accent); font-weight: 600; }
-.desk-chat-row td { padding: 0 0 0 18px; border-bottom: none; white-space: normal; }
-.desk-msg { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 8px 8px; border: none; border-bottom: 0.5px solid var(--line); border-radius: 0; background: none; color: var(--text-2); text-align: left; font-size: calc(12.5px * var(--font-scale)); }
-.desk-msg:hover { background: var(--bg-hover); }
-.desk-msg-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.desk-msg-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-.desk-msg.unread .desk-msg-title { font-weight: 700; }
-.desk-msg.unread .desk-msg-line { color: var(--text); }
 .desk-unread-dot { flex: none; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.desk-msg-meta { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.desk-msg-line { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; }
 .desk-state { padding: 0 6px; border-radius: var(--radius-pill); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; }
 .desk-state.working { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .desk-state.waiting { background: color-mix(in srgb, var(--attn) 18%, transparent); color: var(--attn-text); }
 .desk-state.asleep { background: var(--seg-track); color: var(--muted-text); }
-.desk-chev { display: inline-block; width: 12px; margin-right: 4px; color: var(--muted-text); transition: transform 0.15s; }
-.desk-chev.open { transform: rotate(90deg); }
 
 /* The sidebar's Chats | Timeline switch, and the timeline: a line down the left, a dot per event, by day. */
 .sb-views { display: flex; gap: 2px; margin: 2px 12px 8px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
@@ -3781,19 +3770,6 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 
 /* The projects: a row each, with only what Lantern knows for sure. A narrow window scrolls the table sideways rather than
    running it past the pane, and a long project name is cut short (its title has the whole folder). */
-.dp-scroll { overflow-x: auto; }
-/* In its card the table's header is a tinted band, and its rows sit inside the card's edges. */
-.desk-table thead th { background: var(--bg-subtle); }
-.desk-table th:first-child, .desk-table td:first-child { padding-left: 12px; }
-.desk-table th:last-child, .desk-table td:last-child { padding-right: 12px; }
-.desk-table tbody tr:last-child > * { border-bottom: none; }
-.desk-table { width: 100%; border-collapse: collapse; font-size: calc(12.5px * var(--font-scale)); }
-.desk-table th, .desk-table td { padding: 7px 10px 7px 0; border-bottom: 0.5px solid var(--line); text-align: left; vertical-align: baseline; white-space: nowrap; }
-.desk-table thead th { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.desk-table tbody th { font-weight: 400; }
-.desk-project-name { display: flex; align-items: baseline; gap: 4px; }
-.desk-chev-button { padding: 0 2px; border: none; background: none; }
-.desk-chev-button:disabled .desk-chev { opacity: 0.35; }
 
 /* A project's own page on the Desk: a card per section (its title, a count, one action), and every row in a card the same
    shape: a title with one short thing on its right, and one quiet line under it. Nothing floats or wraps into a column. */
@@ -3817,7 +3793,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-click.unread .dp-title { font-weight: 700; }
 .dp-row-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .dp-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
-.dp-title .desk-unread-dot { margin-right: 6px; }
+.dp-title .desk-unread-dot { display: inline-block; margin-right: 6px; vertical-align: middle; }
 .dp-aside { flex: none; display: flex; align-items: center; gap: 6px; }
 .dp-aside button { height: 22px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
 .dp-aside .desk-time { margin-left: 0; }
@@ -3829,9 +3805,25 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-tone-blocked { color: var(--del); }
 .desk-pr-link { color: var(--text); text-decoration: none; }
 .desk-pr-link:hover { text-decoration: underline; }
+/* The Desk's projects: a tile each, in a grid that fits the pane; in a tile, its name and last activity, its branch, then each
+   fact on a line of its own, its label on the left. The Projects card itself is only a heading over the tiles. */
+.desk-projects.dp-card { border: none; background: none; overflow: visible; }
+.desk-projects > .dp-card-head { padding: 0 0 8px; border-bottom: none; }
+.desk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); }
+.desk-tile-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.desk-tile-head .desk-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13.5px * var(--font-scale)); }
+.desk-tile .desk-branch-line { margin-top: -4px; max-width: none; }
+.desk-tile .desk-branch { max-width: 100%; }
+.desk-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 2px 0 0; padding-top: 8px; border-top: 0.5px solid var(--line); }
+.desk-facts dt { color: var(--muted-text); }
+.desk-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-tile-chats { margin: 0; padding: 0; color: var(--accent); }
+.desk-tile-chats:hover:not(:disabled) { background: none; text-decoration: underline; }
+.desk-tile-chats:disabled { color: var(--muted-text); }
+.desk-tile-list { margin: 0 -12px -10px; border-top: 0.5px solid var(--line); }
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.desk-table tr.on { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.desk-project { max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
+.desk-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
 .desk-project:hover { text-decoration: underline; }
 .desk-attn { color: var(--attn-text); font-weight: 650; }
 .desk-changed { white-space: nowrap; }

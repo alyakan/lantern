@@ -1,9 +1,9 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
-import { Card } from "./DeskCard";
+import { Card, Row } from "./DeskCard";
 
 export interface DeskProjectsProps {
   rows: ProjectRow[];
@@ -50,104 +50,98 @@ function Branch({ s }: { s: ProjectStatus | null | undefined }) {
 }
 
 /** Its repository's open pull requests, and how many have checks failing or still running. */
-function PrCell({ s }: { s: ProjectStatus | null | undefined }) {
-  if (s === undefined) return <td className="muted">…</td>;
-  if (s === null) return <td className="muted">—</td>;
+function Prs({ s }: { s: ProjectStatus | null | undefined }) {
+  if (s === undefined) return <dd className="muted">…</dd>;
+  if (s === null) return <dd className="muted">—</dd>;
   const why = NO_GH[s.gh];
-  if (why) return <td className="muted" title={s.error ?? why}>{why}</td>;
-  if (!s.open) return <td className="muted">—</td>;
+  if (why) return <dd className="muted" title={s.error ?? why}>{why}</dd>;
+  if (!s.open) return <dd className="muted">none open</dd>;
   return (
-    <td title={s.running > 0 ? `${s.running} with checks still running` : undefined}>
+    <dd title={s.running > 0 ? `${s.running} with checks still running` : undefined}>
       {s.open} open
       {s.failing > 0 && <span className="desk-bad"> · {s.failing} failing</span>}
-    </td>
+    </dd>
   );
 }
 
 /** Its latest release, and drafts waiting to be published. */
-function ReleaseCell({ s, now }: { s: ProjectStatus | null | undefined; now: number }) {
-  if (s === undefined) return <td className="muted">…</td>;
-  if (s === null) return <td className="muted">—</td>;
-  if (!s.release && !s.drafts) return <td className="muted">—</td>;
+function Release({ s, now }: { s: ProjectStatus | null | undefined; now: number }) {
+  if (s === undefined) return <dd className="muted">…</dd>;
+  if (s === null || (!s.release && !s.drafts)) return <dd className="muted">—</dd>;
   return (
-    <td title={s.release?.at != null ? `Published ${age(now, s.release.at)}` : undefined}>
+    <dd title={s.release?.at != null ? `Published ${age(now, s.release.at)}` : undefined}>
       {s.release?.tag}
       {s.drafts > 0 && <span className="desk-attn">{s.release ? " · " : ""}{s.drafts} draft{s.drafts > 1 ? "s" : ""}</span>}
-    </td>
+    </dd>
   );
 }
 
 /**
- * Every project on the Desk, a row each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
- * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened. A project
- * row's chevron lists its chats under it, each with its last message; its name opens its own page.
+ * Every project on the Desk, a tile each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
+ * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened, one
+ * under the other. A tile's Chats button lists its chats in it, each with its last message; its name opens its own page.
  */
 export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   if (!rows.length) return null;
   return (
     <Card title="Projects" count={rows.length} heading="h2" className="desk-projects">
-      <div className="dp-scroll">
-      <table className="desk-table">
-        <thead>
-          <tr>
-            <th scope="col">Project</th>
-            <th scope="col">Chats</th>
-            <th scope="col">Pull requests</th>
-            <th scope="col">Release</th>
-            <th scope="col">To-dos</th>
-            <th scope="col">Last active</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const open = !!opened[r.folder] && r.chats > 0;
-            const mine = open ? chats.filter((c) => c.folder === r.folder) : [];
-            const s = statusFor(r.folder, repos);
-            return (
-              <Fragment key={r.folder}>
-                <tr className={open ? "on" : undefined}>
-                  <th scope="row">
-                    <span className="desk-project-name">
-                      <button className="desk-chev-button" aria-label={`${open ? "Hide" : "Show"} the chats of ${r.label}`} aria-expanded={open} disabled={!r.chats} onClick={() => setOpened({ ...opened, [r.folder]: !open })}>
-                        <span className={`desk-chev${open ? " open" : ""}`} aria-hidden>
-                          ›
-                        </span>
+      <div className="desk-tiles">
+        {rows.map((r) => {
+          const open = !!opened[r.folder] && r.chats > 0;
+          const mine = open ? chats.filter((c) => c.folder === r.folder) : [];
+          const s = statusFor(r.folder, repos);
+          return (
+            <article key={r.folder} className={`desk-tile${open ? " on" : ""}`} aria-label={r.label}>
+              <header className="desk-tile-head">
+                <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
+                  {r.label}
+                </button>
+                {r.unread > 0 && <span className="desk-unread-count">{r.unread} unread</span>}
+                {r.at !== null && <time className="desk-time">{last(now, r.at)}</time>}
+              </header>
+              <Branch s={s} />
+              <dl className="desk-facts">
+                <dt>Chats</dt>
+                <dd>{chatsLine(r)}</dd>
+                <dt>Pull requests</dt>
+                <Prs s={s} />
+                <dt>Release</dt>
+                <Release s={s} now={now} />
+                <dt>To-dos</dt>
+                <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
+              </dl>
+              <button className="desk-more desk-tile-chats" aria-label={`${open ? "Hide" : "Show"} the chats of ${r.label}`} aria-expanded={open} disabled={!r.chats} onClick={() => setOpened({ ...opened, [r.folder]: !open })}>
+                {open ? "Hide chats" : r.chats ? `Show chats (${r.chats})` : "No chats"}
+              </button>
+              {mine.length > 0 && (
+                <ul className="dp-list desk-tile-list">
+                  {mine.map((c) => (
+                    <li key={c.slot}>
+                      <button className={`dp-row dp-click${c.unread ? " unread" : ""}`} aria-label={`${c.title}${c.unread ? ", unread" : ""}`} onClick={() => onOpen(c.slot)}>
+                        <Row
+                          title={
+                            <>
+                              {c.unread && <span className="desk-unread-dot" aria-hidden />}
+                              {c.title}
+                            </>
+                          }
+                          aside={c.at !== null && <time className="desk-time">{last(now, c.at)}</time>}
+                          meta={
+                            <>
+                              {STATE[c.state] ? <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span> : c.workflow}
+                              {c.line && ` · ${c.line}`}
+                            </>
+                          }
+                        />
                       </button>
-                      <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
-                        {r.label}
-                      </button>
-                      {r.unread > 0 && <span className="desk-unread-count">{r.unread} unread</span>}
-                    </span>
-                    <Branch s={s} />
-                  </th>
-                  <td>{chatsLine(r)}</td>
-                  <PrCell s={s} />
-                  <ReleaseCell s={s} now={now} />
-                  <td className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</td>
-                  <td className="muted">{last(now, r.at)}</td>
-                </tr>
-                {mine.map((c) => (
-                  <tr key={c.slot} className="desk-chat-row">
-                    <td colSpan={6}>
-                      <button className={`desk-msg${c.unread ? " unread" : ""}`} aria-label={`${c.title}${c.unread ? ", unread" : ""}`} onClick={() => onOpen(c.slot)}>
-                        <span className="desk-msg-top">
-                          {c.unread && <span className="desk-unread-dot" aria-hidden />}
-                          <span className="desk-msg-title">{c.title}</span>
-                          <span className="desk-msg-meta">{c.workflow}</span>
-                          {STATE[c.state] && <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span>}
-                          <time className="desk-time">{last(now, c.at)}</time>
-                        </span>
-                        {c.line && <span className="desk-msg-line">{c.line}</span>}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          );
+        })}
       </div>
     </Card>
   );
