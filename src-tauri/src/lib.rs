@@ -3143,6 +3143,11 @@ async fn desk_said(state: &AppState, chats: &[desk::Candidate]) -> std::collecti
         }
         let Some(info) = state.remote.hub.chat(&c.id) else { continue };
         let (Some(folder), Some(id)) = (info.folder, info.session_id.filter(|id| history::valid_id(id))) else { continue };
+        // A restored chat the window knows ran elsewhere, before its provider is set here.
+        if state.remote.hub.desk.off_claude(&id) {
+            out.insert(c.id.clone(), "(This chat runs on another provider: its words aren't shown to the Desk.)".into());
+            continue;
+        }
         let aliases = aliases_for(state, &folder);
         let root = root.clone();
         let said = tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).map(|p| desk::said(&history::replay(&p).events, desk_agent::CHAT_CHARS))).await;

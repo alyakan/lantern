@@ -14,7 +14,7 @@ use crate::provider::claude_session::ClaudeSession;
 use crate::ui_event::{Sink, UiEvent};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
@@ -25,6 +25,8 @@ pub const TOOLS: &str = "Read,Grep,Glob";
 const MAX_STEPS: usize = 30;
 const TURN_TIME: Duration = Duration::from_secs(150);
 const IDLE: Duration = Duration::from_secs(20 * 60);
+/// Messages one session takes before a new one is started.
+const MAX_MESSAGES: usize = 20;
 /// The most of each chat's words written for it (the end of them).
 pub const CHAT_CHARS: usize = 60_000;
 /// Desks with a session at once.
@@ -96,6 +98,8 @@ struct Agent {
     turn: Arc<Mutex<Turn>>,
     /// Bumped by each message: an idle timer from before it does nothing.
     used: AtomicU64,
+    /// Messages the running session has had.
+    messages: AtomicUsize,
 }
 
 /// The Desks' agents that are running.
@@ -127,11 +131,6 @@ impl DeskAgents {
         if !valid_id(ask.desk) || ask.binary.as_os_str().is_empty() {
             return fallback();
         }
-        let dir: PathBuf = ask.base.join(ask.desk);
-        let written = std::fs::create_dir_all(&dir).and_then(|_| write_chats(&dir, ask.chats, ask.said));
-        if written.is_err() {
-            return fallback();
-        }
         let agent = {
             let mut open = self.open.lock().unwrap();
             match open.get(ask.desk) {
@@ -141,17 +140,32 @@ impl DeskAgents {
             }
         };
         let _busy = agent.busy.lock().await;
+        // Written once the Desk's last message is done with them.
+        let dir: PathBuf = ask.base.join(ask.desk);
+        let written = std::fs::create_dir_all(&dir).and_then(|_| write_chats(&dir, ask.chats, ask.said));
+        if written.is_err() {
+            return fallback();
+        }
         let n = agent.used.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = oneshot::channel();
         {
             let mut session = agent.session.lock().await;
+            // A long-running one starts over, told the last few exchanges: its context stays small, and anything a chat's words
+            // planted in it doesn't stay for good.
+            if agent.messages.load(Ordering::SeqCst) >= MAX_MESSAGES {
+                if let Some(old) = session.take() {
+                    old.stop().await;
+                }
+            }
             let fresh = !session.as_ref().is_some_and(ClaudeSession::is_running);
             if fresh {
                 match start(&agent, &dir, ask.binary, ask.path_env) {
                     Ok(s) => *session = Some(s),
                     Err(_) => return fallback(),
                 }
+                agent.messages.store(0, Ordering::SeqCst);
             }
+            agent.messages.fetch_add(1, Ordering::SeqCst);
             *agent.turn.lock().unwrap() = Turn { said: String::new(), steps: 0, done: Some(tx) };
             let prompt = desk::agent_prompt(ask.text, if fresh { ask.history } else { &[] }, ask.chats, ask.projects);
             if session.as_mut().expect("started above").send(&prompt).await.is_err() {
@@ -169,18 +183,23 @@ impl DeskAgents {
                 fallback()
             }
         };
-        self.stop_when_idle(ask.desk, &agent, n);
+        self.stop_when_idle(&agent, n);
         talk
     }
 
-    /// Stops the Desk's session once it has had no message for IDLE.
-    fn stop_when_idle(self: &Arc<Self>, desk: &str, agent: &Arc<Agent>, n: u64) {
-        let (agents, agent, desk) = (Arc::downgrade(self), Arc::downgrade(agent), desk.to_string());
+    /// Stops the Desk's session once it has had no message for IDLE; the next message starts a new one.
+    fn stop_when_idle(self: &Arc<Self>, agent: &Arc<Agent>, n: u64) {
+        let agent = Arc::downgrade(agent);
         tokio::spawn(async move {
             tokio::time::sleep(IDLE).await;
-            let (Some(agents), Some(agent)) = (agents.upgrade(), agent.upgrade()) else { return };
-            if agent.used.load(Ordering::SeqCst) == n && agent.busy.try_lock().is_ok() {
-                agents.stop(&desk).await;
+            let Some(agent) = agent.upgrade() else { return };
+            // Held while it stops, so a message can't start on the session being stopped.
+            let Ok(_busy) = agent.busy.try_lock() else { return };
+            if agent.used.load(Ordering::SeqCst) == n {
+                let session = agent.session.lock().await.take();
+                if let Some(s) = session {
+                    s.stop().await;
+                }
             }
         });
     }
@@ -231,7 +250,7 @@ fn start(agent: &Arc<Agent>, dir: &Path, binary: &Path, path_env: Option<&str>) 
             UiEvent::ToolStarted { parent: None, .. } => {
                 t.steps += 1;
                 // Looking at too much: the message is given up on (and interrupted by whoever waits).
-                if t.steps > MAX_STEPS {
+                if t.steps == MAX_STEPS + 1 {
                     if let Some(tx) = t.done.take() {
                         let _ = tx.send(None);
                     }
