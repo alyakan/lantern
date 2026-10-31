@@ -3808,6 +3808,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-wt-path { color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-wt-verdict { flex: 0 1 auto; color: var(--muted-text); }
 .desk-wt-verdict.safe { color: var(--add); }
+.desk-wt-verdict.review { color: var(--attn-text); }
+.desk-wt-verdict.blocked { color: var(--del); }
 .desk-wt-actions { display: flex; align-items: baseline; gap: 8px; }
 .desk-wt-actions button { height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
 .desk-todo-title { flex: 1 1 auto; min-width: 0; }

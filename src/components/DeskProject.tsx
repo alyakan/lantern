@@ -101,7 +101,7 @@ function Worktree({ wt, item, scanned }: { wt: RepoStatus["worktrees"][number]; 
           {name}
         </span>
       </span>
-      {verdict && <span className={`desk-wt-verdict${item?.risk === "safe" && !wt.agent ? " safe" : ""}`}>{verdict}</span>}
+      {verdict && <span className={`desk-wt-verdict${wt.agent || wt.locked || !item ? "" : ` ${item.risk}`}`}>{verdict}</span>}
       {state?.kind === "failed" && <span className="desk-bad">{state.why}</span>}
       {item?.risk === "safe" && !wt.agent && !wt.locked && (
         <span className="desk-wt-actions">
