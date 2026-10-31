@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { elapsed } from "../lib/time";
@@ -73,7 +73,6 @@ type Wt = RepoStatus["worktrees"][number];
 type Standing = { kind: "safe" | "review" | "blocked" | "other"; word: string; why: string | null };
 
 function standingOf(wt: Wt, item: StorageItem | undefined, scanned: boolean, chatOpen: boolean): Standing {
-  if (wt.agent) return { kind: "other", word: "Agent's", why: "A team's agent works in it: the team cleans it up." };
   if (chatOpen) return { kind: "other", word: "Chat open", why: "A chat is open in it." };
   if (wt.locked) return { kind: "blocked", word: "Locked", why: "It is locked: `git worktree unlock` it first." };
   if (!scanned) return { kind: "other", word: "Not scanned", why: null };
@@ -82,8 +81,36 @@ function standingOf(wt: Wt, item: StorageItem | undefined, scanned: boolean, cha
   return { kind: item.risk, word: item.risk === "review" ? "Check first" : "Keep", why: item.warning };
 }
 const ORDER: Record<Standing["kind"], number> = { safe: 0, review: 1, blocked: 2, other: 3 };
+const SHOWN = 8;
 
-/** A worktree's row: its branch (and folder), its size, where it stands, and Remove when the scan found it safe. */
+/** A section of the page: a card with its title, how many, and at most one action. */
+function Card({ title, count, action, children }: { title: string; count?: number; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="dp-card" aria-label={title}>
+      <header className="dp-card-head">
+        <h3>{title}</h3>
+        {!!count && <span className="dp-count">{count}</span>}
+        {action && <span className="dp-card-act">{action}</span>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/** Every row on the page has the same shape: a title with one short thing on its right, and one quiet line under it. */
+function Row({ title, aside, meta }: { title: ReactNode; aside?: ReactNode; meta?: ReactNode }) {
+  return (
+    <>
+      <span className="dp-row-top">
+        <span className="dp-title">{title}</span>
+        {aside && <span className="dp-aside">{aside}</span>}
+      </span>
+      {meta && <span className="dp-meta">{meta}</span>}
+    </>
+  );
+}
+
+/** A worktree: its branch, Remove when the scan found it safe, and under it where it stands, its size and why. */
 function WorktreeRow({ wt, item, standing }: { wt: Wt; item: StorageItem | undefined; standing: Standing }) {
   const [asking, setAsking] = useState(false);
   const [state, setState] = useState<{ kind: "removing" } | { kind: "failed"; why: string } | null>(null);
@@ -96,40 +123,46 @@ function WorktreeRow({ wt, item, standing }: { wt: Wt; item: StorageItem | undef
       (err) => setState({ kind: "failed", why: String(err) }),
     );
   };
-  const why = state?.kind === "failed" ? state.why : standing.why;
   const failed = state?.kind === "failed";
+  const kind = failed ? "blocked" : standing.kind;
+  const action =
+    standing.kind === "safe" && item ? (
+      asking ? (
+        <>
+          <button className="danger" aria-label={`Remove the worktree ${name}`} disabled={state?.kind === "removing"} onClick={remove}>
+            {state?.kind === "removing" ? "Removing…" : "Remove"}
+          </button>
+          <button onClick={() => setAsking(false)}>Cancel</button>
+        </>
+      ) : (
+        <button aria-label={`Remove ${name}…`} title="Its branch and commits stay in the repository" onClick={() => setAsking(true)}>
+          Remove…
+        </button>
+      )
+    ) : null;
   return (
-    <li className={`desk-wt-row ${standing.kind}`}>
-      <span className="desk-branch" title={`${wt.branch ?? "detached"}\n${wt.path}`}>
-        {wt.branch ?? "detached"}
-      </span>
-      <span className="desk-wt-size">{item ? GB(item.bytes) : ""}</span>
-      <span className={`desk-wt-badge ${failed ? "blocked" : standing.kind}`}>{failed ? "Not removed" : standing.word}</span>
-      <span className="desk-wt-sub">{why ?? name}</span>
-      <span className="desk-wt-act">
-        {standing.kind === "safe" &&
-          item &&
-          (asking ? (
-            <>
-              <button className="danger" aria-label={`Remove the worktree ${name}`} disabled={state?.kind === "removing"} onClick={remove}>
-                {state?.kind === "removing" ? "Removing…" : "Remove"}
-              </button>
-              <button onClick={() => setAsking(false)}>Cancel</button>
-            </>
-          ) : (
-            <button aria-label={`Remove ${name}…`} title="Its branch and commits stay in the repository" onClick={() => setAsking(true)}>
-              Remove…
-            </button>
-          ))}
-      </span>
+    <li className="dp-row" title={wt.path}>
+      <Row
+        title={<span className="dp-mono">{wt.branch ?? "detached"}</span>}
+        aside={action}
+        meta={
+          <>
+            <span className={`dp-tone ${kind}`}>{failed ? "Not removed" : standing.word}</span>
+            {item && ` · ${GB(item.bytes)}`}
+            {` · ${(failed ? state.why : standing.why) ?? name}`}
+          </>
+        }
+      />
     </li>
   );
 }
 
-/** The repository's worktrees, a row each, the ones safe to remove first, with what removing them all would free. */
+/** The repository's worktrees (not a team agent's: the team cleans those up), the ones safe to remove first. */
 function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: string[]; storage: ReturnType<typeof useStorage> }) {
+  const [all, setAll] = useState(false);
   const scanned = storage.items !== null;
   const rows = worktrees
+    .filter((wt) => !wt.agent)
     .map((wt) => {
       const item = storage.items?.find((i) => i.kind === "worktree" && i.path === wt.path);
       return { wt, item, standing: standingOf(wt, item, scanned, folders.includes(wt.path)) };
@@ -137,38 +170,47 @@ function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: 
     .sort((a, b) => ORDER[a.standing.kind] - ORDER[b.standing.kind]);
   const safe = rows.filter((r) => r.standing.kind === "safe");
   const freed = safe.reduce((n, r) => n + (r.item?.bytes ?? 0), 0);
+  const shown = all ? rows : rows.slice(0, SHOWN);
+  if (!rows.length) return null;
   return (
-    <section aria-label="Worktrees">
-      <h3 className="desk-h">
-        Worktrees <span className="muted">{worktrees.length}</span>
-      </h3>
-      <p className="desk-wt-sum muted">
+    <Card
+      title="Worktrees"
+      count={rows.length}
+      action={
+        !storage.scanning && (
+          <button className="desk-more" onClick={() => void api.storageScan().catch(() => {})}>
+            {scanned ? "Scan again" : "Scan now"}
+          </button>
+        )
+      }
+    >
+      <p className="dp-note">
         {storage.scanning
           ? "Storage is scanning…"
           : !scanned
             ? "Scan to see which are safe to remove."
             : safe.length
-              ? `${safe.length} safe to remove, ${GB(freed)} in all. Removing one keeps its branch and commits.`
-              : "None is safe to remove now."}{" "}
-        {!storage.scanning && (
-          <button className="desk-more" onClick={() => void api.storageScan().catch(() => {})}>
-            {scanned ? "Scan again" : "Scan now"}
-          </button>
-        )}
+              ? `${safe.length} safe to remove, ${GB(freed)} in all.`
+              : "None is safe to remove now."}
       </p>
-      <ul className="desk-wt-list">
-        {rows.map((r) => (
+      <ul className="dp-list">
+        {shown.map((r) => (
           <WorktreeRow key={r.wt.path} {...r} />
         ))}
       </ul>
-    </section>
+      {rows.length > SHOWN && (
+        <button className="desk-more dp-foot" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show ${rows.length - SHOWN} more`}
+        </button>
+      )}
+    </Card>
   );
 }
 
 /**
  * One project on the Desk, on its own: its chats, its open pull requests and their checks, its worktrees (with what the Storage
- * scan says of each, and Remove when that found it safe), and its open to-dos. Everything is what Lantern, git, gh and the
- * Storage scan said; nothing is guessed. The right pane's Ask asks about this project only while it is open.
+ * scan says of each, and Remove when that found it safe), and its open to-dos, each a card. Everything is what Lantern, git, gh
+ * and the Storage scan said; nothing is guessed. The right pane's Ask asks about this project only while it is open.
  */
 export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }: DeskProjectProps) {
   const here = repo?.folders.find((f) => f.folder === row.folder);
@@ -185,95 +227,101 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
           {row.label}
         </h2>
         {here?.branch && (
-          <span className="desk-branch-line">
-            <span className="desk-branch">{here.branch}</span>
-            {!!here.changed && <span className="desk-changed"> · {here.changed} changed</span>}
+          <span className="dp-meta">
+            <span className="dp-mono desk-branch">{here.branch}</span>
+            {!!here.changed && ` · ${here.changed} changed`}
           </span>
         )}
       </header>
 
-      <section aria-label="Chats">
-        <h3 className="desk-h">
-          Chats <span className="muted">{chats.length || ""}</span>
-        </h3>
+      <Card
+        title="Chats"
+        count={chats.length}
+        action={
+          <button className="desk-more" onClick={() => onNewChat(row.folder)}>
+            + New chat here
+          </button>
+        }
+      >
         {chats.length === 0 ? (
-          <p className="muted">No chat open here.</p>
+          <p className="dp-note">No chat open here.</p>
         ) : (
-          <ul className="desk-page-list">
+          <ul className="dp-list">
             {chats.map((c) => (
               <li key={c.slot}>
-                <button className={`desk-msg${c.unread ? " unread" : ""}`} aria-label={`${c.title}${c.unread ? ", unread" : ""}`} onClick={() => onOpen(c.slot)}>
-                  <span className="desk-msg-top">
-                    {c.unread && <span className="desk-unread-dot" aria-hidden />}
-                    <span className="desk-msg-title">{c.title}</span>
-                    <span className="desk-msg-meta">{c.workflow}</span>
-                    {STATE[c.state] && <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span>}
-                    <time className="desk-time">{ago(now, c.at)}</time>
-                  </span>
-                  {c.line && <span className="desk-msg-line">{c.line}</span>}
+                <button className={`dp-row dp-click${c.unread ? " unread" : ""}`} aria-label={`${c.title}${c.unread ? ", unread" : ""}`} onClick={() => onOpen(c.slot)}>
+                  <Row
+                    title={
+                      <>
+                        {c.unread && <span className="desk-unread-dot" aria-hidden />}
+                        {c.title}
+                      </>
+                    }
+                    aside={<time className="desk-time">{ago(now, c.at)}</time>}
+                    meta={
+                      <>
+                        {STATE[c.state] ? <span className={`desk-state ${c.state}`}>{STATE[c.state]}</span> : c.workflow}
+                        {c.line && ` · ${c.line}`}
+                      </>
+                    }
+                  />
                 </button>
               </li>
             ))}
           </ul>
         )}
-        <button className="desk-more" onClick={() => onNewChat(row.folder)}>
-          + New chat here
-        </button>
-      </section>
+      </Card>
 
       {repo && (
-        <section aria-label="Pull requests">
-          <h3 className="desk-h">
-            Pull requests <span className="muted">{repo.prs.length || ""}</span>
-          </h3>
+        <Card title="Pull requests" count={repo.prs.length}>
           {repo.gh !== "ready" ? (
-            <p className="muted">{repo.gh === "not_github" ? "Not a GitHub repository." : repo.gh === "missing" ? "The GitHub CLI (gh) isn't installed." : repo.gh === "logged_out" ? "gh isn't logged in to GitHub." : (repo.error ?? "GitHub didn't answer.")}</p>
+            <p className="dp-note">{repo.gh === "not_github" ? "Not a GitHub repository." : repo.gh === "missing" ? "The GitHub CLI (gh) isn't installed." : repo.gh === "logged_out" ? "gh isn't logged in to GitHub." : (repo.error ?? "GitHub didn't answer.")}</p>
           ) : repo.prs.length === 0 ? (
-            <p className="muted">No open pull requests.</p>
+            <p className="dp-note">No open pull requests.</p>
           ) : (
-            <ul className="desk-page-list">
+            <ul className="dp-list">
               {repo.prs.map((p) => (
-                <li key={p.number} className={`desk-pr ${p.checks}`}>
-                  <span className="desk-pr-what">
-                    <ExternalLink href={repo.github ? `https://github.com/${repo.github}/pull/${p.number}` : undefined} className="desk-pr-link">
-                      <span className="desk-repo-num">#{p.number}</span> {p.title}
-                    </ExternalLink>
-                    <span className="muted">
-                      {p.author} · <span className="desk-branch">{p.branch}</span>
-                      {p.draft && " · draft"}
-                    </span>
-                  </span>
-                  <span className={`desk-pr-checks ${p.checks}`}>{CHECKS[p.checks]}</span>
-                  {p.review && REVIEW[p.review] && <span className="muted">{REVIEW[p.review]}</span>}
+                <li key={p.number} className="dp-row">
+                  <Row
+                    title={
+                      <ExternalLink href={repo.github ? `https://github.com/${repo.github}/pull/${p.number}` : undefined} className="desk-pr-link">
+                        <span className="desk-repo-num">#{p.number}</span> {p.title}
+                      </ExternalLink>
+                    }
+                    aside={<span className={`dp-tone ${p.checks === "fail" ? "blocked" : p.checks === "pass" ? "safe" : "other"}`}>{CHECKS[p.checks]}</span>}
+                    meta={
+                      <>
+                        {p.author} · <span className="dp-mono">{p.branch}</span>
+                        {p.draft && " · draft"}
+                        {p.review && REVIEW[p.review] && ` · ${REVIEW[p.review]}`}
+                      </>
+                    }
+                  />
                 </li>
               ))}
             </ul>
           )}
-        </section>
+        </Card>
       )}
 
-      {worktrees.length > 0 && <Worktrees worktrees={worktrees} folders={repo?.folders.map((f) => f.folder) ?? []} storage={storage} />}
+      <Worktrees worktrees={worktrees} folders={repo?.folders.map((f) => f.folder) ?? []} storage={storage} />
 
-      <section aria-label="To-dos">
-        <h3 className="desk-h">
-          To-dos <span className="muted">{todos?.length || ""}</span>
-        </h3>
+      <Card title="To-dos" count={todos?.length}>
         {todos === null ? (
-          <p className="muted">…</p>
+          <p className="dp-note">…</p>
         ) : todos.length === 0 ? (
-          <p className="muted">Nothing to do here.</p>
+          <p className="dp-note">Nothing to do here.</p>
         ) : (
-          <ul className="desk-page-list">
-            {todos.slice(0, 8).map((t) => (
-              <li key={t.id} className="desk-todo">
-                <span className="desk-todo-title">{t.title}</span>
-                {t.due && <span className="muted">due {t.due.date}{t.due.time ? ` ${t.due.time}` : ""}</span>}
+          <ul className="dp-list">
+            {todos.slice(0, SHOWN).map((t) => (
+              <li key={t.id} className="dp-row">
+                <Row title={t.title} aside={t.due && <span className="desk-time">due {t.due.date}{t.due.time ? ` ${t.due.time}` : ""}</span>} />
               </li>
             ))}
-            {todos.length > 8 && <li className="muted">and {todos.length - 8} more in the Todos tab</li>}
           </ul>
         )}
-      </section>
+        {!!todos && todos.length > SHOWN && <p className="dp-note dp-foot">and {todos.length - SHOWN} more in the Todos tab</p>}
+      </Card>
     </section>
   );
 }

@@ -65,17 +65,18 @@ describe("a project's page on the Desk", () => {
     expect(props.onBack).toHaveBeenCalled();
   });
 
-  it("lists its worktrees, the safe ones first, and removes only a safe one, after asking", async () => {
+  it("lists its worktrees, not an agent's, the safe ones first, and removes only a safe one, after asking", async () => {
     vi.mocked(api.storageDelete).mockResolvedValue([{ id: "i1", name: "/wt/clean", ok: true, freed: 2e9, error: null }]);
     setup();
     const wts = screen.getByRole("region", { name: "Worktrees" });
-    await waitFor(() => expect(wts).toHaveTextContent("1 safe to remove, 2.0 GB in all. Removing one keeps its branch and commits."));
+    await waitFor(() => expect(wts).toHaveTextContent("1 safe to remove, 2.0 GB in all."));
     const rows = within(wts).getAllByRole("listitem");
-    expect(rows.map((r) => r.querySelector(".desk-wt-badge")?.textContent)).toEqual(["Safe to remove", "Keep", "Agent's"]);
+    expect(rows.map((r) => r.querySelector(".dp-tone")?.textContent)).toEqual(["Safe to remove", "Keep"]);
     expect(rows[0]).toHaveTextContent("2.0 GB");
     expect(rows[1]).toHaveTextContent("3 uncommitted changes that exist nowhere else.");
     // Only the safe one can be removed, and only once asked.
     expect(within(wts).getAllByRole("button", { name: /^Remove/ })).toHaveLength(1);
+    expect(wts).not.toHaveTextContent("w1");
     fireEvent.click(within(wts).getByRole("button", { name: "Remove clean…" }));
     expect(api.storageDelete).not.toHaveBeenCalled();
     fireEvent.click(within(wts).getByRole("button", { name: "Remove the worktree clean" }));
