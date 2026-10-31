@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, ScrollView, TextInput, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,7 +10,8 @@ import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { radius, space, useColors } from "../ui/theme";
 import { diffPreviewOf } from "../view/diffPreview";
-import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
+import { approvalOf, fieldsOf, promptView, type PromptView, type Question } from "../view/prompts";
+import { ago, projectColorOf, projectTint } from "../view/home";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 
@@ -118,6 +119,22 @@ function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: stri
   );
 }
 
+/** What the box with a prompt's detail is called, by the prompt's tag. */
+const DETAIL_LABEL: Record<string, string> = { "Run a command": "Command", "Write a file": "File", "Change a file": "File", "Read a file": "File", "Open a web page": "Address", "Search the web": "Search" };
+
+/** One part of the decision, under a small label, on a raised panel. */
+function Section({ label, children }: { label: string; children: ReactNode }) {
+  const colors = useColors();
+  return (
+    <View style={{ gap: 6, marginTop: 4 }}>
+      <Txt variant="tiny" tone="night" style={{ fontWeight: "700", letterSpacing: 0.4 }}>
+        {label.toUpperCase()}
+      </Txt>
+      <View style={{ backgroundColor: colors.nightRaised, borderRadius: radius.inner, padding: 14, gap: 10 }}>{children}</View>
+    </View>
+  );
+}
+
 /** The decision on its own, full screen: what is asked, where it runs, and a swipe to allow or a tap to deny. */
 export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const colors = useColors();
@@ -128,6 +145,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
+  const [note, setNote] = useState("");
 
   // What was asked is kept as it was first seen: once answered it leaves the list, and the screen still says what it was.
   const live = waiting.find((w) => w.request_id === requestId);
@@ -165,9 +183,15 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }
 
   const approval = approvalOf(asked.tool_name, asked.input);
+  const plan = asked.tool_name === "ExitPlanMode";
   const base: PromptView = promptView(asked.tool_name, asked.input);
   // A question's own words are shown once, above its options; the title only says that Claude asks.
-  const view: PromptView = approval ? { ...base, tag: "Approval", title: `Approve ${approval.action}?`, detail: approval.why || null } : base.kind === "question" ? { ...base, title: base.questions.length > 1 ? "Claude has questions" : "Claude has a question" } : base;
+  const view: PromptView = base.kind === "question" ? { ...base, title: base.questions.length > 1 ? "Claude has questions" : "Claude has a question" } : base;
+  // A tool with no words of its own (an MCP tool) shows everything it was given, field by field, rather than its first line.
+  const fields = view.kind === "allow" && view.tag === "Use a tool" ? fieldsOf(asked.input) : [];
+  const project = chat?.project ?? null;
+  const dot = project ? projectTint(projectColorOf(chat?.project_color), colors.plainTint).fg : null;
+  const when = ago(asked.at, Date.now());
   // A file change is shown as the diff it would make, read from the prompt's own input, so what is approved is what is seen.
   const preview = view.kind === "allow" && !approval ? diffPreviewOf(asked.tool_name, asked.input) : null;
   const answers = view.kind === "question" ? answersFrom(view.questions, picks, typed) : null;
@@ -176,7 +200,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const answer = async (allow: boolean, withAnswers: Record<string, string> | null = null) => {
     setOutcome({ kind: "sending" });
     try {
-      await controller.sync.answer(slot, requestId, allow, withAnswers);
+      // An approval's note goes with the answer, either way, as on the Mac's card.
+      await controller.sync.answer(slot, requestId, allow, withAnswers, approval && note.trim() ? note.trim() : null);
       // A reply that comes late, after the Mac stopped listing it, doesn't undo that.
       setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "done", allowed: allow, swiped: allow && !withAnswers }));
       // The swipe buzzes for itself; the rest say what it came to.
@@ -216,19 +241,53 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
             {view.title}
           </Txt>
         </FadeSlideIn>
+        {/* Where it is asked from, and since when: the project (in its sidebar colour), the chat, how long it has waited. */}
         <FadeSlideIn from={12} delay={180}>
-          <Txt variant="body" tone="night">
-            {chat?.title ? `${chat.title}${chat.project ? `, in ${chat.project}` : ""}` : "A chat on your Mac"}
-          </Txt>
+          <View testID="decide-where" style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, backgroundColor: colors.nightRaised, borderRadius: radius.inner, paddingHorizontal: 12, paddingVertical: 10 }}>
+            {dot && <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dot }} />}
+            {project && (
+              <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+                {project}
+              </Txt>
+            )}
+            <Txt variant="small" tone="night" numberOfLines={1} style={{ flexShrink: 1 }}>
+              {chat?.title ?? asked.chat_title ?? "A chat on your Mac"}
+            </Txt>
+            <Txt variant="small" tone="night" style={{ marginLeft: "auto" }}>
+              {when === "now" ? "just now" : `${when} ago`}
+            </Txt>
+          </View>
         </FadeSlideIn>
 
-        {view.kind === "allow" && view.detail && (
+        {view.kind === "allow" && fields.length === 0 && (view.detail || approval) && (
           <FadeSlideIn from={14} delay={240}>
-            <View style={{ backgroundColor: colors.nightRaised, borderRadius: radius.inner, padding: 14, marginTop: 6 }}>
-              <Txt variant="mono" tone="white" selectable>
-                {view.detail}
-              </Txt>
-            </View>
+            <Section label={approval ? "What Claude says" : plan ? "The plan" : DETAIL_LABEL[view.tag] ?? "Details"}>
+              {view.detail ? (
+                <Txt variant={approval || plan ? "body" : "mono"} tone="white" selectable>
+                  {view.detail}
+                </Txt>
+              ) : (
+                <Txt variant="body" tone="night">
+                  Claude gave no details. Ask in the chat if you need to know more first.
+                </Txt>
+              )}
+            </Section>
+          </FadeSlideIn>
+        )}
+        {fields.length > 0 && (
+          <FadeSlideIn from={14} delay={240}>
+            <Section label="What it is given">
+              {fields.map((f) => (
+                <View key={f.label} style={{ gap: 2 }}>
+                  <Txt variant="tiny" tone="night" style={{ fontWeight: "700" }}>
+                    {f.label}
+                  </Txt>
+                  <Txt variant="mono" tone="white" selectable>
+                    {f.value}
+                  </Txt>
+                </View>
+              ))}
+            </Section>
           </FadeSlideIn>
         )}
         {preview && (
@@ -236,10 +295,32 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
             <DiffPreviewCard preview={preview} file={null} />
           </FadeSlideIn>
         )}
+        {approval && outcome.kind !== "done" && (
+          <FadeSlideIn from={10} delay={290}>
+            <TextInput
+              accessibilityLabel="A note for Claude"
+              value={note}
+              onChangeText={setNote}
+              editable={!busy}
+              multiline
+              placeholder="Add a note for Claude (optional)"
+              placeholderTextColor={colors.nightText}
+              style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: note.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, maxHeight: 120, fontSize: 15 }}
+            />
+          </FadeSlideIn>
+        )}
         {view.kind === "allow" && (
           <FadeSlideIn from={10} delay={300}>
             <Txt variant="small" tone="night">
-              This runs on <Txt variant="small" style={{ color: colors.hi, fontWeight: "700" }}>your Mac</Txt>, not this phone.
+              {approval ? (
+                "Claude waits for your answer, and a yes covers this one action, nothing more."
+              ) : plan ? (
+                "Approving lets Claude start on it. Deny and it keeps planning."
+              ) : (
+                <>
+                  This runs on <Txt variant="small" style={{ color: colors.hi, fontWeight: "700" }}>your Mac</Txt>, not this phone.
+                </>
+              )}
             </Txt>
           </FadeSlideIn>
         )}

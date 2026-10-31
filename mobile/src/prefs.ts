@@ -1,5 +1,6 @@
 /** What the phone remembers about how Home looks, on this phone only (the Keychain or Keystore, like everything else it keeps). */
 import * as SecureStore from "expo-secure-store";
+import type { RemotePermissions } from "./protocol/generated/RemotePermissions";
 import type { Grouping } from "./view/home";
 import { NOTES_UNREADABLE } from "./whatsNew";
 
@@ -177,5 +178,24 @@ export async function saveSeen(seen: Record<string, number>): Promise<void> {
     await SecureStore.setItemAsync(SEEN_KEY, JSON.stringify(Object.fromEntries(newest)), OPTIONS);
   } catch {
     // Not remembered: they hold until the app closes.
+  }
+}
+
+const NEW_CHAT_PERMISSIONS_KEY = "lantern.new-chat-permissions";
+
+/** Ask or Auto, as the last chat this phone started was started with (in any project); Ask when none was, or it can't be read. */
+export async function loadNewChatPermissions(): Promise<RemotePermissions> {
+  try {
+    return (await SecureStore.getItemAsync(NEW_CHAT_PERMISSIONS_KEY, OPTIONS)) === "auto" ? "auto" : "ask";
+  } catch {
+    return "ask";
+  }
+}
+
+export async function saveNewChatPermissions(p: RemotePermissions): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(NEW_CHAT_PERMISSIONS_KEY, p, OPTIONS);
+  } catch {
+    // Not remembered: the next chat starts on Ask.
   }
 }

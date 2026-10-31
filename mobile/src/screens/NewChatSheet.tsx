@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
@@ -16,6 +16,7 @@ import { ProjectsSkeleton } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
 import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
+import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -63,7 +64,27 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const [error, setError] = useState<string | null>(null);
   // What it runs on: Ask unless chosen, and the project's own models unless a preset is.
   const { supported, controls } = useControls();
+  // Ask or Auto as the last chat was started with, from this phone (Ask until one was).
   const [permissions, setPermissions] = useState<RemotePermissions>("ask");
+  const picked = useRef(false);
+  useEffect(() => {
+    let live = true;
+    // (A choice made before it is read stands.)
+    void loadNewChatPermissions().then((p) => live && !picked.current && setPermissions(p));
+    return () => {
+      live = false;
+    };
+  }, []);
+  // A chat started: the sheet slides away first (iOS's own sheet stays up if it is just taken away), then the chat opens.
+  const started = useRef<string | null>(null);
+  const closeSheet = useRef<(() => void) | null>(null);
+  // Swiped away while the chat was starting: there is no sheet left to wait for, and the chat still opens.
+  const gone = useRef(false);
+  const finish = (slot: string) => {
+    started.current = slot;
+    if (closeSheet.current && !gone.current) closeSheet.current();
+    else onStarted(slot);
+  };
   const [preset, setPreset] = useState<string | null>(null);
   // Where it runs: the project's own unless chosen. A Mac with only Claude Code to offer (or an older one) offers no choice.
   const providers = providersOf(controls);
@@ -109,15 +130,18 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     if (continueChat) {
       // A send never throws: it shows in the chat at once, and says there if it didn't go.
       void sync.send(continueChat.slot, text.trim());
-      return onStarted(continueChat.slot);
+      return finish(continueChat.slot);
     }
     if (!project) return;
     setBusy(true);
     setError(null);
     try {
       // Only what was chosen is sent, and only to a Mac that can take it.
-      // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was.)
-      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions: chosen && !chosen.auto ? "ask" : permissions, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {}));
+      // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
+      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {});
+      // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
+      if (supported && !note) void saveNewChatPermissions(permissions);
+      finish(slot);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -130,12 +154,22 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const noAuto = chosen && !chosen.auto ? noAutoOn(chosen.name) : null;
   const showPresets = (controls?.presets.length ?? 0) > 0 && (!chosen || chosen.presets);
   // What it will run on, said in a line: the options themselves open from it.
-  const summary = [chosen?.name, canFlow ? workflowName : null, noAuto ? "Ask" : MODES.find((m) => m.value === permissions)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
   const note = noAuto ?? autoNote(controls);
+  // What it starts on: Ask where Auto can't be had (a remembered Auto included).
+  const mode: RemotePermissions = note ? "ask" : permissions;
+  const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
 
   return (
-    <Sheet onClose={onClose}>
-      {(close, scroll) => (
+    <Sheet
+      onClose={() => {
+        gone.current = true;
+        if (started.current) onStarted(started.current);
+        else onClose();
+      }}
+    >
+      {(close, scroll) => {
+        closeSheet.current = close;
+        return (
         <View style={[{ flexShrink: 1 }]}>
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
           <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
@@ -239,11 +273,14 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                           {MODES.map((m) => {
                             const off = m.value === "auto" ? note : null; // (the Mac's setting, or the provider having none)
-                            return <Pill key={m.value} label={m.label} hint={off ?? m.hint} on={m.value === permissions} disabled={!!off} onPress={() => setPermissions(m.value)} />;
+                            return <Pill key={m.value} label={m.label} hint={off ?? m.hint} on={m.value === mode} disabled={!!off} onPress={() => {
+                              picked.current = true;
+                              setPermissions(m.value);
+                            }} />;
                           })}
                         </View>
                         <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                          {note ?? (permissions === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.")}
+                          {note ?? (mode === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.")}
                         </Txt>
                       </View>
                       {showPresets && (
@@ -270,7 +307,8 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
             <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
           </ScrollView>
         </View>
-      )}
+        );
+      }}
     </Sheet>
   );
 }

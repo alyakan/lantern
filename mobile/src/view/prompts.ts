@@ -52,7 +52,11 @@ export function promptView(toolName: string, input: unknown): PromptView {
     return { kind: "question", tag: "A question", title: questions[0]?.question ?? "Claude has a question", detail: null, questions };
   }
   const base = { kind: "allow" as const, questions: [] };
+  const approval = approvalOf(toolName, input);
+  if (approval) return { ...base, tag: "Approval", title: `Approve ${approval.action}?`, detail: approval.why || null };
   switch (toolName) {
+    case "ExitPlanMode":
+      return { ...base, tag: "A plan", title: "Approve Claude's plan?", detail: str(i.plan) };
     case "Bash":
       return { ...base, tag: "Run a command", title: str(i.description) ?? "Run this command?", detail: str(i.command) };
     case "Write":
@@ -76,12 +80,29 @@ export function promptView(toolName: string, input: unknown): PromptView {
   }
 }
 
-/** The text Claude's approval card (request_approval) asks to approve: shown as the detail of its own tag. */
-export const APPROVAL_TOOL = "mcp__lantern__request_approval";
+/**
+ * What a tool was given, field by field, for a tool with no words of its own to show (an MCP tool): its name made readable,
+ * and its value as text (anything that isn't text, as JSON). Empty ones are left out; nothing else is, so what is allowed is
+ * all seen.
+ */
+export function fieldsOf(input: unknown): { label: string; value: string }[] {
+  return Object.entries(rec(input))
+    .flatMap(([k, v]) => {
+      const value = typeof v === "string" ? v.trim() : v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
+      return value ? [{ label: k.replace(/_/g, " "), value }] : [];
+    });
+}
 
-/** Whether a prompt can be answered from the phone: everything can, but an approval says what it approves first. */
+/**
+ * Claude's approval card (request_approval on Lantern's MCP server): the Mac names it "Approval", with the one `action` and
+ * the `details` to read before saying yes. The MCP tool's own name is kept for a Mac that ever sends it as Claude called it.
+ */
+export const APPROVAL_TOOL = "Approval";
+const APPROVAL_TOOL_NAMES = [APPROVAL_TOOL, "mcp__lantern__request_approval"];
+
+/** What an approval asks to approve, and what Claude says about it ("" when nothing); null when it isn't an approval. */
 export function approvalOf(toolName: string, input: unknown): { action: string; why: string } | null {
-  if (toolName !== APPROVAL_TOOL) return null;
+  if (!APPROVAL_TOOL_NAMES.includes(toolName)) return null;
   const i = rec(input);
-  return { action: str(i.action) ?? "an action", why: str(i.reason) ?? "" };
+  return { action: str(i.action) ?? "an action", why: str(i.details) ?? str(i.reason) ?? "" };
 }

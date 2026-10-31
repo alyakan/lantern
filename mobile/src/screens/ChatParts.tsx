@@ -470,7 +470,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
       </View>
       <Txt variant="heading">{view.title}</Txt>
       {view.detail && (
-        <Txt variant="mono" numberOfLines={2}>
+        <Txt variant={approval || item.toolName === "ExitPlanMode" ? "body" : "mono"} numberOfLines={approval ? 3 : 2}>
           {view.detail}
         </Txt>
       )}
@@ -926,7 +926,8 @@ function BoxSearchButton({ onPress }: { onPress: () => void }) {
 function StopButton({ onPress }: { onPress: () => void }) {
   const colors = useColors();
   return (
-    <PopIn>
+    // Room between it and Send, so a thumb going for one doesn't land on the other.
+    <PopIn style={{ marginRight: 10 }}>
       <PressScale accessibilityRole="button" accessibilityLabel="Stop" accessibilityHint="Stops what Claude is doing" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 13, height: 13, borderRadius: 3, backgroundColor: colors.onInk }} />
       </PressScale>

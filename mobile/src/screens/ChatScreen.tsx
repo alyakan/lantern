@@ -697,6 +697,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         renderItem={renderRow}
         keyExtractor={(r) => r.key}
         scrollEnabled={!swiping}
+        // With the keyboard up, a touch reaches what it lands on (a card's swipe to allow, a button) instead of only putting the keyboard away.
+        keyboardShouldPersistTaps="handled"
         getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind)}
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
         ListHeaderComponent={

@@ -425,7 +425,8 @@ mod tests {
     async fn wait_for_file(path: &std::path::Path) -> String {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                // Non-empty, too: the shell creates the file before writing to it.
+                // Non-empty, too: the shell creates the file before writing to it. A script whose file is read while it is
+                // still being written (more than one line) writes it elsewhere and moves it into place, so it is whole once here.
                 if let Some(contents) = std::fs::read_to_string(path).ok().filter(|c| !c.is_empty()) {
                     return contents;
                 }
@@ -710,7 +711,7 @@ done"#,
     async fn resume_id_is_passed_and_kept() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
-        let fake = script(dir.path(), &format!("printf '%s\\n' \"$@\" > {d}/args.txt\ncat > /dev/null"));
+        let fake = script(dir.path(), &format!("printf '%s\\n' \"$@\" > {d}/args.tmp\nmv {d}/args.tmp {d}/args.txt\ncat > /dev/null"));
         let (sink, _rx) = channel_sink();
         let s = Session::spawn(&config(fake, dir.path(), Some("sess-42")), sink, no_edits()).unwrap();
         assert_eq!(s.session_id().as_deref(), Some("sess-42"));
@@ -725,7 +726,7 @@ done"#,
     async fn the_harness_reaches_claude_as_its_advisor_flag_and_subagent_model() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
-        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.txt\ncat > /dev/null"));
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.tmp\nmv {d}/seen.tmp {d}/seen.txt\ncat > /dev/null"));
         let (sink, _rx) = channel_sink();
         let mut cfg = config(fake, dir.path(), None);
         cfg.advisor = Some("opus".into());
@@ -742,7 +743,7 @@ done"#,
     async fn subagents_off_starts_claude_without_the_tool_and_no_subagent_model() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
-        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"${{CLAUDE_CODE_SUBAGENT_MODEL-unset}}\" > {d}/seen.txt\ncat > /dev/null"));
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"${{CLAUDE_CODE_SUBAGENT_MODEL-unset}}\" > {d}/seen.tmp\nmv {d}/seen.tmp {d}/seen.txt\ncat > /dev/null"));
         let (sink, _rx) = channel_sink();
         let mut cfg = config(fake, dir.path(), None);
         cfg.subagent_model = Some(crate::session::SUBAGENTS_OFF.into());
