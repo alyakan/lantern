@@ -11,7 +11,7 @@ import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
-import { Glass, useGlass } from "../ui/Glass";
+import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { PageSheet } from "../ui/PageSheet";
 import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
@@ -646,8 +646,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         />
       )}
       {asleep ? (
-        <View style={{ padding: 16, paddingBottom: barRoom(insets.bottom), gap: 6, backgroundColor: colors.paper }}>
-          <Txt variant="small" tone="ink2">
+        // Like the message box: on iOS 26 the chat runs under it, and the notice and its button are on the box's glass, with
+        // nothing laid behind them.
+        <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: barRoom(insets.bottom), backgroundColor: glass ? "transparent" : colors.paper }}>
+          <Glass lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: 22, padding: 10, gap: 6 }}>
+          <Txt variant="small" tone="ink2" style={{ marginHorizontal: 6 }}>
             This chat is asleep to save memory. It picks up where it left off.
           </Txt>
           {/* The chat can still be searched while it sleeps: the same circle, beside the one button there is. */}
@@ -666,9 +669,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               />
             </View>
           </SearchBar>
+          </Glass>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );
