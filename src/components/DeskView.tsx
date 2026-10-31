@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import type { InboxItem } from "../lib/inbox";
@@ -168,9 +168,35 @@ function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now:
   );
 }
 
+/** The Desk's first tile when nothing waits on you: that nothing does, and the Desk in a few numbers. */
+function Summary({ projects }: { projects: ProjectRow[] }) {
+  const sum = (f: (p: ProjectRow) => number) => projects.reduce((n, p) => n + f(p), 0);
+  const facts: [string, number][] = [
+    ["Projects", projects.length],
+    ["Chats open", sum((p) => p.chats)],
+    ["Working", sum((p) => p.working)],
+    ["Unread", sum((p) => p.unread)],
+    ["To-dos overdue", sum((p) => p.todos?.overdue ?? 0)],
+  ];
+  return (
+    <section className="desk-tile desk-summary" aria-label="Summary">
+      <div className="desk-clear">✓ Nothing needs you</div>
+      <dl className="desk-facts">
+        {facts.map(([label, n]) => (
+          <Fragment key={label}>
+            <dt>{label}</dt>
+            <dd className={label === "To-dos overdue" && n > 0 ? "desk-bad" : n ? undefined : "muted"}>{n}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 /**
- * The Desk, as a dashboard: what waits on you, one thing at a time, and a table of the Desk's projects with only what Lantern
- * knows for sure (a row opens to list its chats), then what happened in its repositories today. What happened in the chats, as
+ * The Desk, as a dashboard of tiles in one grid: what waits on you, one thing at a time (or, when nothing does, the Desk in a few
+ * numbers), a tile per project with only what Lantern knows for sure (a tile opens to list its chats), and what happened in its
+ * repositories today. What happened in the chats, as
  * it happened, is the sidebar's Timeline; asking and telling is the right pane's Ask.
  */
 export function DeskView(props: DeskViewProps) {
@@ -189,8 +215,9 @@ export function DeskView(props: DeskViewProps) {
         <DeskTabs desks={props.desks} />
       </header>
       <div className="desk-main">
-        {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
         {pageRow ? (
+          <>
+          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
           <DeskProject
             row={pageRow}
             chats={props.chats.filter((c) => c.folder === pageRow.folder)}
@@ -200,11 +227,13 @@ export function DeskView(props: DeskViewProps) {
             onOpen={onOpen}
             onNewChat={props.onNewChat}
           />
+          </>
         ) : (
-          <>
+          <div className="desk-bento">
+            {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <Summary projects={props.projects} />}
             <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} onPage={props.onPage} />
             <ReposToday repos={props.repos} now={now} />
-          </>
+          </div>
         )}
       </div>
     </section>

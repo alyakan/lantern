@@ -2146,7 +2146,15 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
                     { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false, checks: "pending", review: null },
                   ]
                 : [],
-            merged: i === 0 ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }] : [],
+            merged:
+              i === 0
+                ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }]
+                : i === 1
+                  ? [
+                      { number: 58, title: "Chart tooltips flip at the right edge", merged_at: today(0) },
+                      { number: 56, title: "Dark mode for the settings page", merged_at: today(0) },
+                    ]
+                  : [],
             release: i === 0 ? { tag: "v2.4.0", published_at: today(0) } : null,
             drafts: i === 0 ? ["v2.4.1"] : [],
             error: null,

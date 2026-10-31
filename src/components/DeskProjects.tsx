@@ -3,7 +3,7 @@ import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
-import { Card, Row } from "./DeskCard";
+import { Row } from "./DeskCard";
 
 export interface DeskProjectsProps {
   rows: ProjectRow[];
@@ -85,8 +85,7 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   if (!rows.length) return null;
   return (
-    <Card title="Projects" count={rows.length} heading="h2" className="desk-projects">
-      <div className="desk-tiles">
+    <section className="desk-projects" aria-label="Projects">
         {rows.map((r) => {
           const open = !!opened[r.folder] && r.chats > 0;
           const mine = open ? chats.filter((c) => c.folder === r.folder) : [];
@@ -142,7 +141,6 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
             </article>
           );
         })}
-      </div>
-    </Card>
+    </section>
   );
 }

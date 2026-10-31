@@ -3784,7 +3784,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-card-act { margin-left: auto; }
 .dp-card-act .desk-more { margin: 0; padding: 0; }
 .dp-note { margin: 0; padding: 8px 12px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted-text); }
-.dp-foot { display: block; padding: 6px 12px 8px; margin: 0; }
+.dp-card .dp-foot { display: block; padding: 6px 12px 8px; margin: 0; }
 .dp-list { margin: 0; padding: 0; list-style: none; }
 .dp-list > li + li, .dp-note + .dp-list { border-top: 0.5px solid var(--line); }
 .dp-row { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; padding: 7px 12px; font-size: calc(12.5px * var(--font-scale)); }
@@ -3805,11 +3805,16 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-tone-blocked { color: var(--del); }
 .desk-pr-link { color: var(--text); text-decoration: none; }
 .desk-pr-link:hover { text-decoration: underline; }
-/* The Desk's projects: a tile each, in a grid that fits the pane; in a tile, its name and last activity, its branch, then each
-   fact on a line of its own, its label on the left. The Projects card itself is only a heading over the tiles. */
-.desk-projects.dp-card { border: none; background: none; overflow: visible; }
-.desk-projects > .dp-card-head { padding: 0 0 8px; border-bottom: none; }
-.desk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+/* The Desk's main page: one grid of tiles that lock together. What waits on you takes a whole row; Repos today two columns when
+   the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
+   project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. */
+.desk-main { container-type: inline-size; }
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.desk-projects { display: contents; }
+.desk-bento > .desk-needs { grid-column: 1 / -1; }
+@container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
+.desk-summary .desk-clear { margin: -2px -4px 2px; }
+.desk-summary .desk-facts { border-top: none; padding-top: 0; }
 .desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); }
 .desk-tile-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .desk-tile-head .desk-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13.5px * var(--font-scale)); }
@@ -3817,8 +3822,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-tile .desk-branch { max-width: 100%; }
 .desk-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 2px 0 0; padding-top: 8px; border-top: 0.5px solid var(--line); }
 .desk-facts dt { color: var(--muted-text); }
-.desk-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desk-tile-chats { margin: 0; padding: 0; color: var(--accent); }
+.desk-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.desk-tile-chats { align-self: flex-start; margin: auto 0 0; padding: 0; color: var(--accent); }
 .desk-tile-chats:hover:not(:disabled) { background: none; text-decoration: underline; }
 .desk-tile-chats:disabled { color: var(--muted-text); }
 .desk-tile-list { margin: 0 -12px -10px; border-top: 0.5px solid var(--line); }

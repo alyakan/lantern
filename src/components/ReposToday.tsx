@@ -22,7 +22,7 @@ export function ReposToday({ repos, now }: { repos: RepoStatus[] | null; now: nu
   const more = events.length - shown.length;
   const many = new Set(repos.map((r) => r.repo)).size > 1;
   return (
-    <Card title="Repos today" count={events.length} heading="h2" className="desk-repos">
+    <Card title="Repos today" count={events.length} heading="h2" className="desk-repos desk-wide">
       {events.length === 0 ? (
         <p className="dp-note">Nothing merged, released or failing today.</p>
       ) : (

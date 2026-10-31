@@ -70,6 +70,8 @@ describe("the Desk", () => {
   it("lists the projects with what Lantern knows of each", () => {
     setup({ projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })] });
     expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
+    // With nothing waiting, the first tile sums the Desk up.
+    expect(screen.getByRole("region", { name: "Summary" })).toHaveTextContent("Projects2Chats open3Working2Unread0To-dos overdue1");
     const [lantern, rayak] = within(screen.getByRole("region", { name: "Projects" })).getAllByRole("article");
     expect(lantern).toHaveTextContent("2 working · 1 needs you");
     expect(lantern).toHaveTextContent("3 · 1 overdue");
