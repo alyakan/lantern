@@ -65,17 +65,18 @@ describe("a project's page on the Desk", () => {
     expect(props.onBack).toHaveBeenCalled();
   });
 
-  it("lists its worktrees with what the Storage scan says, and removes only a safe one, after asking", async () => {
+  it("lists its worktrees, the safe ones first, and removes only a safe one, after asking", async () => {
     vi.mocked(api.storageDelete).mockResolvedValue([{ id: "i1", name: "/wt/clean", ok: true, freed: 2e9, error: null }]);
     setup();
     const wts = screen.getByRole("region", { name: "Worktrees" });
-    await waitFor(() => expect(wts).toHaveTextContent("Safe to remove · 2.0 GB"));
-    expect(wts).toHaveTextContent("3 uncommitted changes that exist nowhere else.");
-    expect(wts).toHaveTextContent("An agent's: its team cleans it up");
+    await waitFor(() => expect(wts).toHaveTextContent("1 safe to remove, 2.0 GB in all. Removing one keeps its branch and commits."));
+    const rows = within(wts).getAllByRole("listitem");
+    expect(rows.map((r) => r.querySelector(".desk-wt-badge")?.textContent)).toEqual(["Safe to remove", "Keep", "Agent's"]);
+    expect(rows[0]).toHaveTextContent("2.0 GB");
+    expect(rows[1]).toHaveTextContent("3 uncommitted changes that exist nowhere else.");
     // Only the safe one can be removed, and only once asked.
     expect(within(wts).getAllByRole("button", { name: /^Remove/ })).toHaveLength(1);
     fireEvent.click(within(wts).getByRole("button", { name: "Remove clean…" }));
-    expect(wts).toHaveTextContent("Remove it? Its branch stays.");
     expect(api.storageDelete).not.toHaveBeenCalled();
     fireEvent.click(within(wts).getByRole("button", { name: "Remove the worktree clean" }));
     expect(api.storageDelete).toHaveBeenCalledWith(["i1"]);
@@ -88,6 +89,7 @@ describe("a project's page on the Desk", () => {
     fireEvent.click(await within(wts).findByRole("button", { name: "Remove clean…" }));
     fireEvent.click(within(wts).getByRole("button", { name: "Remove the worktree clean" }));
     await waitFor(() => expect(wts).toHaveTextContent("It changed since the scan: look again."));
+    expect(wts).toHaveTextContent("Not removed");
   });
 
   it("offers a scan when Storage hasn't scanned, and removes nothing before it has", async () => {
@@ -109,7 +111,8 @@ describe("a project's page on the Desk", () => {
   it("offers no Remove for a worktree with a chat open in it, whatever an older scan says", async () => {
     setup({ repo: { ...repo, folders: [...repo.folders, { folder: "/wt/clean", branch: "b-clean", changed: 0 }] } });
     const wts = screen.getByRole("region", { name: "Worktrees" });
-    await waitFor(() => expect(wts).toHaveTextContent("A chat is open in it"));
+    await waitFor(() => expect(wts).toHaveTextContent("A chat is open in it."));
+    expect(wts).toHaveTextContent("Chat open");
     expect(within(wts).queryByRole("button", { name: /^Remove/ })).toBeNull();
   });
 });

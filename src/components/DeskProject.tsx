@@ -67,8 +67,24 @@ function useTodos(folder: string) {
   return todos && [...todos].sort((a, b) => due(a).localeCompare(due(b)) || b.created_at - a.created_at);
 }
 
-/** A worktree's line: its branch and where it is, what Storage says of it, and Remove when Storage found it safe. */
-function Worktree({ wt, item, scanned, chatOpen }: { wt: RepoStatus["worktrees"][number]; item: StorageItem | undefined; scanned: boolean; /** A chat is open in it now (the scan may be older). */ chatOpen: boolean }) {
+type Wt = RepoStatus["worktrees"][number];
+
+/** Where a worktree stands, in a word or two, and why: what the Storage scan said, or what keeps it off its list. */
+type Standing = { kind: "safe" | "review" | "blocked" | "other"; word: string; why: string | null };
+
+function standingOf(wt: Wt, item: StorageItem | undefined, scanned: boolean, chatOpen: boolean): Standing {
+  if (wt.agent) return { kind: "other", word: "Agent's", why: "A team's agent works in it: the team cleans it up." };
+  if (chatOpen) return { kind: "other", word: "Chat open", why: "A chat is open in it." };
+  if (wt.locked) return { kind: "blocked", word: "Locked", why: "It is locked: `git worktree unlock` it first." };
+  if (!scanned) return { kind: "other", word: "Not scanned", why: null };
+  if (!item) return { kind: "other", word: "Not scanned", why: "It isn't in the last Storage scan." };
+  if (item.risk === "safe") return { kind: "safe", word: "Safe to remove", why: null };
+  return { kind: item.risk, word: item.risk === "review" ? "Check first" : "Keep", why: item.warning };
+}
+const ORDER: Record<Standing["kind"], number> = { safe: 0, review: 1, blocked: 2, other: 3 };
+
+/** A worktree's row: its branch (and folder), its size, where it stands, and Remove when the scan found it safe. */
+function WorktreeRow({ wt, item, standing }: { wt: Wt; item: StorageItem | undefined; standing: Standing }) {
   const [asking, setAsking] = useState(false);
   const [state, setState] = useState<{ kind: "removing" } | { kind: "failed"; why: string } | null>(null);
   const name = wt.path.split("/").filter(Boolean).pop() ?? wt.path;
@@ -80,49 +96,72 @@ function Worktree({ wt, item, scanned, chatOpen }: { wt: RepoStatus["worktrees"]
       (err) => setState({ kind: "failed", why: String(err) }),
     );
   };
-  const verdict = wt.agent
-    ? "An agent's: its team cleans it up"
-    : chatOpen
-      ? "A chat is open in it"
-      : wt.locked
-      ? "Locked"
-      : !scanned
-        ? null
-        : !item
-          ? "Not in the last Storage scan"
-          : item.risk === "safe"
-            ? `Safe to remove · ${GB(item.bytes)}`
-            : (item.warning ?? (item.risk === "review" ? "Needs a look" : "Can't be removed"));
+  const why = state?.kind === "failed" ? state.why : standing.why;
+  const failed = state?.kind === "failed";
   return (
-    <li className="desk-wt">
-      <span className="desk-wt-what">
-        <span className="desk-branch" title={wt.branch ?? "detached"}>
-          {wt.branch ?? "detached"}
-        </span>
-        <span className="desk-wt-path" title={wt.path}>
-          {name}
-        </span>
+    <li className={`desk-wt-row ${standing.kind}`}>
+      <span className="desk-branch" title={`${wt.branch ?? "detached"}\n${wt.path}`}>
+        {wt.branch ?? "detached"}
       </span>
-      {verdict && <span className={`desk-wt-verdict${wt.agent || chatOpen || wt.locked || !item ? "" : ` ${item.risk}`}`}>{verdict}</span>}
-      {state?.kind === "failed" && <span className="desk-bad">{state.why}</span>}
-      {item?.risk === "safe" && !wt.agent && !wt.locked && !chatOpen && (
-        <span className="desk-wt-actions">
-          {asking ? (
+      <span className="desk-wt-size">{item ? GB(item.bytes) : ""}</span>
+      <span className={`desk-wt-badge ${failed ? "blocked" : standing.kind}`}>{failed ? "Not removed" : standing.word}</span>
+      <span className="desk-wt-sub">{why ?? name}</span>
+      <span className="desk-wt-act">
+        {standing.kind === "safe" &&
+          item &&
+          (asking ? (
             <>
-              <span className="muted">Remove it? Its branch stays.</span>
               <button className="danger" aria-label={`Remove the worktree ${name}`} disabled={state?.kind === "removing"} onClick={remove}>
                 {state?.kind === "removing" ? "Removing…" : "Remove"}
               </button>
               <button onClick={() => setAsking(false)}>Cancel</button>
             </>
           ) : (
-            <button aria-label={`Remove ${name}…`} onClick={() => setAsking(true)}>
+            <button aria-label={`Remove ${name}…`} title="Its branch and commits stay in the repository" onClick={() => setAsking(true)}>
               Remove…
             </button>
-          )}
-        </span>
-      )}
+          ))}
+      </span>
     </li>
+  );
+}
+
+/** The repository's worktrees, a row each, the ones safe to remove first, with what removing them all would free. */
+function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: string[]; storage: ReturnType<typeof useStorage> }) {
+  const scanned = storage.items !== null;
+  const rows = worktrees
+    .map((wt) => {
+      const item = storage.items?.find((i) => i.kind === "worktree" && i.path === wt.path);
+      return { wt, item, standing: standingOf(wt, item, scanned, folders.includes(wt.path)) };
+    })
+    .sort((a, b) => ORDER[a.standing.kind] - ORDER[b.standing.kind]);
+  const safe = rows.filter((r) => r.standing.kind === "safe");
+  const freed = safe.reduce((n, r) => n + (r.item?.bytes ?? 0), 0);
+  return (
+    <section aria-label="Worktrees">
+      <h3 className="desk-h">
+        Worktrees <span className="muted">{worktrees.length}</span>
+      </h3>
+      <p className="desk-wt-sum muted">
+        {storage.scanning
+          ? "Storage is scanning…"
+          : !scanned
+            ? "Scan to see which are safe to remove."
+            : safe.length
+              ? `${safe.length} safe to remove, ${GB(freed)} in all. Removing one keeps its branch and commits.`
+              : "None is safe to remove now."}{" "}
+        {!storage.scanning && (
+          <button className="desk-more" onClick={() => void api.storageScan().catch(() => {})}>
+            {scanned ? "Scan again" : "Scan now"}
+          </button>
+        )}
+      </p>
+      <ul className="desk-wt-list">
+        {rows.map((r) => (
+          <WorktreeRow key={r.wt.path} {...r} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -136,7 +175,6 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
   const worktrees = repo?.worktrees ?? [];
   const storage = useStorage(worktrees.some((w) => !w.agent));
   const todos = useTodos(row.folder);
-  const itemOf = (path: string) => storage.items?.find((i) => i.kind === "worktree" && i.path === path);
   return (
     <section className="desk-project-page" aria-label={`Project ${row.label}`}>
       <header className="desk-page-head">
@@ -214,28 +252,7 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
         </section>
       )}
 
-      {worktrees.length > 0 && (
-        <section aria-label="Worktrees">
-          <h3 className="desk-h">
-            Worktrees <span className="muted">{worktrees.length}</span>
-          </h3>
-          {storage.items === null && worktrees.some((w) => !w.agent) && (
-            <p className="muted">
-              {storage.scanning ? "Storage is scanning…" : "Scan in Storage to see which are safe to remove."}{" "}
-              {!storage.scanning && (
-                <button className="desk-more" onClick={() => void api.storageScan().catch(() => {})}>
-                  Scan now
-                </button>
-              )}
-            </p>
-          )}
-          <ul className="desk-page-list">
-            {worktrees.map((w) => (
-              <Worktree key={w.path} wt={w} item={itemOf(w.path)} scanned={storage.items !== null} chatOpen={!!repo?.folders.some((f) => f.folder === w.path)} />
-            ))}
-          </ul>
-        </section>
-      )}
+      {worktrees.length > 0 && <Worktrees worktrees={worktrees} folders={repo?.folders.map((f) => f.folder) ?? []} storage={storage} />}
 
       <section aria-label="To-dos">
         <h3 className="desk-h">

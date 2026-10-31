@@ -3798,20 +3798,31 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-page-title { flex-basis: 100%; margin: 0; font-size: calc(18px * var(--font-scale)); font-weight: 700; }
 .desk-page-list { margin: 0; padding: 0; list-style: none; }
 .desk-page-list > li { border-bottom: 0.5px solid var(--line); }
-.desk-pr, .desk-wt, .desk-todo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0; font-size: calc(12.5px * var(--font-scale)); }
-.desk-pr-what, .desk-wt-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.desk-pr, .desk-todo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0; font-size: calc(12.5px * var(--font-scale)); }
+.desk-pr-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
 .desk-pr-link { color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
 .desk-pr-link:hover { text-decoration: underline; }
 .desk-pr-checks { flex: none; color: var(--muted-text); }
 .desk-pr-checks.fail { color: var(--del); font-weight: 600; }
 .desk-pr-checks.pass { color: var(--add); }
-.desk-wt-path { color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desk-wt-verdict { flex: 0 1 auto; color: var(--muted-text); }
-.desk-wt-verdict.safe { color: var(--add); }
-.desk-wt-verdict.review { color: var(--attn-text); }
-.desk-wt-verdict.blocked { color: var(--del); }
-.desk-wt-actions { display: flex; align-items: baseline; gap: 8px; }
-.desk-wt-actions button { height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+/* The worktrees: a row each, on two lines: the branch, its size and where it stands (a word in a coloured pill); then why, and
+   Remove when it is safe. Laid out by a grid, so a narrow pane keeps the branch readable instead of squeezing columns. */
+.desk-wt-sum { margin: 0; font-size: calc(12.5px * var(--font-scale)); }
+.desk-wt-list { margin: 0; padding: 0; list-style: none; }
+.desk-wt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "branch size badge" "why why act"; align-items: center; gap: 3px 10px; padding: 8px 0; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
+.desk-wt-row .desk-branch { grid-area: branch; max-width: 100%; }
+.desk-wt-size { grid-area: size; font-variant-numeric: tabular-nums; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.desk-wt-badge { grid-area: badge; justify-self: end; padding: 1px 8px; border-radius: var(--radius-pill); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; background: color-mix(in srgb, var(--muted-text) 12%, transparent); color: var(--muted-text); white-space: nowrap; }
+.desk-wt-badge.safe { background: color-mix(in srgb, var(--add) 14%, transparent); color: var(--add); }
+.desk-wt-badge.review { background: color-mix(in srgb, var(--attn-text) 14%, transparent); color: var(--attn-text); }
+.desk-wt-badge.blocked { background: color-mix(in srgb, var(--del) 12%, transparent); color: var(--del); }
+.desk-wt-sub { grid-area: why; min-width: 0; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); overflow-wrap: anywhere; }
+.desk-wt-row.blocked .desk-wt-sub { color: var(--del); }
+.desk-wt-row.review .desk-wt-sub { color: var(--attn-text); }
+.desk-wt-row.other .desk-branch { color: var(--muted-text); }
+.desk-wt-act { grid-area: act; display: flex; justify-content: flex-end; gap: 6px; }
+.desk-wt-act:empty { display: none; }
+.desk-wt-act button { height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
 .desk-todo-title { flex: 1 1 auto; min-width: 0; }
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-table tr.on { background: color-mix(in srgb, var(--accent) 7%, transparent); }
