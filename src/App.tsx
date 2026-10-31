@@ -48,6 +48,7 @@ import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
 import { NotesApplied } from "./components/NotesApplied";
 import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
 import { readStored, stepFile, usePersistentState } from "./lib/layout";
+import { fromKept, markRead, markUnread, toKeep, unreadBySlot, UNREAD_KEY, type Unread } from "./lib/unread";
 import { PROJECT_COLORS } from "./lib/projectColors";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
@@ -2075,11 +2076,21 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
-  const [unread, setUnread] = useState<Record<string, number>>({});
-  // The chat on screen is read: once it is opened, or once the Desk in front of it is put away.
+  // Kept by session across launches (lib/unread.ts); `unread` is the open chats' share of it, by slot.
+  const [unreadBy, setUnreadBy] = useState<Unread>(() => fromKept(readStored(UNREAD_KEY, {})));
   useEffect(() => {
-    if (!desk) setUnread(({ [active]: _seen, ...rest }) => rest);
-  }, [active, desk]);
+    try {
+      localStorage.setItem(UNREAD_KEY, JSON.stringify(toKeep(unreadBy)));
+    } catch {
+      // storage unavailable; unread just won't survive a restart
+    }
+  }, [unreadBy]);
+  const unread = useMemo(() => unreadBySlot(unreadBy, chats.slots), [unreadBy, chats.slots]);
+  // The chat on screen is read: once it is opened (a restored one too, once its session is known), or once the Desk in front of it is put away.
+  const activeSession = chats.slots[active]?.sessionId;
+  useEffect(() => {
+    if (!desk) setUnreadBy((u) => markRead(u, active, chats.slots[active]));
+  }, [active, desk, activeSession]);
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) {
       const a = attentionFor(s.items, s.folder, describeInput, agentName(s.provider));
@@ -2095,7 +2106,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       const wanted = shouldNotify(notifyPrefs, a.kind);
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
       // A chat finished that isn't on screen (the one last open isn't while the Desk is): unread until it is opened.
-      if ((slot !== chats.active || desk) && (a.kind === "finished" || a.kind === "failed")) setUnread((u) => ({ ...u, [slot]: Date.now() }));
+      if ((slot !== chats.active || desk) && (a.kind === "finished" || a.kind === "failed")) setUnreadBy((u) => markUnread(u, slot, s, Date.now()));
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
@@ -2112,7 +2123,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         const key = `${r.builder}:${r.commit}`;
         if (!r.done || reviewSeen.current.has(key)) continue;
         reviewSeen.current.add(key);
-        if (r.builder !== active && chats.slots[r.builder]) setUnread((u) => ({ ...u, [r.builder]: r.at }));
+        if (r.builder !== active && chats.slots[r.builder]) setUnreadBy((u) => markUnread(u, r.builder, chats.slots[r.builder], r.at));
       }
     }
   }, [chats.slots]);

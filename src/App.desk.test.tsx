@@ -122,9 +122,13 @@ describe("the Desk in the app", () => {
     // It finished while the Desk was in front of it: unread on the sidebar's timeline, until its entry opens it.
     fireEvent.click(screen.getByRole("button", { name: "Timeline" }));
     const timeline = () => screen.getByRole("region", { name: "Timeline" });
+    // Written down by its session, for the next launch.
+    const kept = () => Object.keys(JSON.parse(localStorage.getItem("chat.unreadBySession") ?? "{}"));
+    await waitFor(() => expect(kept()).toHaveLength(1));
     fireEvent.click(within(timeline()).getByRole("button", { name: /, unread$/ }));
     await waitFor(() => expect(desk()).toBeNull());
     expect(within(timeline()).queryByRole("button", { name: /, unread$/ })).toBeNull();
+    await waitFor(() => expect(kept()).toEqual([]));
   });
 
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {
