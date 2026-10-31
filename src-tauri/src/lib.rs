@@ -478,6 +478,10 @@ impl remote::gateway::Host for RemoteHost {
         self.app.emit("remote-rename-chat", remote::RenameRequest { slot: slot.to_string(), title }).map_err(|e| e.to_string())
     }
 
+    fn set_single(&self, folder: Option<String>) -> Result<(), String> {
+        self.app.emit("remote-single", remote::SingleRequest { folder }).map_err(|e| e.to_string())
+    }
+
     fn close(&self, slot: &str) -> Result<(), String> {
         self.app.emit("remote-close-chat", remote::CloseRequest { slot: slot.to_string() }).map_err(|e| e.to_string())
     }
@@ -2611,6 +2615,12 @@ fn remote_window_desk(state: State<'_, AppState>, desk: remote::desk::WindowDesk
     state.remote.window_desk(desk);
 }
 
+/// The sidebar's One project (None: every project), for the phones that follow it.
+#[tauri::command]
+fn remote_window_single(state: State<'_, AppState>, single: Option<remote::single::WindowSingle>) {
+    state.remote.window_single(single);
+}
+
 /// Settings › Remote control: whether it is on, and the paired devices.
 #[tauri::command]
 fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
@@ -3584,6 +3594,7 @@ pub fn run() {
             locate_claude,
             remote_window_chats,
             remote_window_desk,
+            remote_window_single,
             remote_window_controls,
             remote_settings,
             remote_set_enabled,

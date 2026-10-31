@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
-import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset, WindowProvider } from "./lib/remoteChats";
+import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, RemoteSingle, WindowChat, WindowPreset, WindowProvider, WindowSingle } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
@@ -411,6 +411,8 @@ export const api = {
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
   /** Tells the backend what the Desks hold, for a phone's Desk (see lib/desk.ts windowDesk). */
   remoteWindowDesk: (desk: WindowDesk) => invoke<void>("remote_window_desk", { desk }),
+  /** The sidebar's One project (null: every project), for the phones that follow it. */
+  remoteWindowSingle: (single: WindowSingle | null) => invoke<void>("remote_window_single", { single }),
   /** A phone connected or went: ask remoteSettings who is connected now. */
   onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
   /** A paired phone asked for an asleep chat: wake it where it is. */
@@ -425,6 +427,8 @@ export const api = {
   onRemoteClose: (cb: (r: RemoteClose) => void): Promise<UnlistenFn> => listen<RemoteClose>("remote-close-chat", (e) => cb(e.payload)),
   /** A paired phone named a chat (the backend checked it has a conversation and the name is one). */
   onRemoteRename: (cb: (r: RemoteRename) => void): Promise<UnlistenFn> => listen<RemoteRename>("remote-rename-chat", (e) => cb(e.payload)),
+  /** A phone picked the One project, or showed every project again. */
+  onRemoteSingle: (cb: (r: RemoteSingle) => void): Promise<UnlistenFn> => listen<RemoteSingle>("remote-single", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on Chat or Step by step. */
   onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */

@@ -288,7 +288,10 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
-  const { chats, desk, waiting, epoch } = useSyncState();
+  const { chats, desk, waiting, epoch, single } = useSyncState();
+  // The Mac's One project: what needs you, what just finished and the Desks' counts are only its chats' (a finished card of a chat
+  // closed since is its project's by name). The conversation is the user's own, and stays.
+  const ofSingle = (slot: string, project?: string) => !single || chats.some((c) => c.slot === slot && c.project === single.name) || project === single.name;
   const [chosen, setChosen] = useState<string | null>(null);
   const [entries, setEntries] = useState<DeskEntry[]>([]);
   const [text, setText] = useState("");
@@ -314,9 +317,9 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
 
   const shown = deskShown(desk, chosen);
   const mine = shown ? entries.filter((e) => e.desk === shown.id).sort((a, b) => a.at - b.at) : [];
-  const done = shown ? finished(desk, shown.id, entries) : [];
-  const needs = shown ? cards(waiting, chats).filter((c) => shown.slots.includes(c.waiting.slot)) : [];
-  const waits = waitingBy(desk, chats);
+  const done = shown ? finished(desk, shown.id, entries).filter((c) => ofSingle(c.slot, c.project)) : [];
+  const needs = shown ? cards(waiting, chats).filter((c) => shown.slots.includes(c.waiting.slot) && ofSingle(c.waiting.slot)) : [];
+  const waits = waitingBy(desk, single ? chats.filter((c) => c.project === single.name) : chats);
 
   const edit = (id: string, change: (e: DeskEntry) => DeskEntry) => setEntries((all) => all.map((e) => (e.id === id ? change(e) : e)));
   const outcome = (id: string, o: DeskOutcome) => edit(id, (e) => ({ ...e, outcome: o }));

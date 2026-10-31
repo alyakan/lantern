@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import { PROJECT_COLORS } from "../lib/projectColors";
+import { usePersistentState } from "../lib/layout";
 import type { CloseCheck } from "../types";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
 
@@ -29,7 +30,15 @@ const ALL_OPEN = { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen, [IOS]: iosOpe
 
 const noLoss: CloseCheck = { worktree: true, branch: "lantern/x", uncommitted: 0, unmerged_commits: 0 };
 
-function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
+type Props = Omit<React.ComponentProps<typeof Sidebar>, "single" | "onSingle">;
+
+/** The sidebar with its One project kept as the app keeps it: saved, and handed back down. */
+function Kept(props: Props) {
+  const [single, setSingle] = usePersistentState<string | null>("sidebar.single", null);
+  return <Sidebar {...props} single={single} onSingle={setSingle} />;
+}
+
+function setup(over: Partial<Props> = {}) {
   const h = {
     onChat: vi.fn(),
     onTeam: vi.fn(),
@@ -57,7 +66,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onDismissMoved: vi.fn(),
     onColors: vi.fn(),
   };
-  const props: React.ComponentProps<typeof Sidebar> = {
+  const props: Props = {
     ...h,
     mode: "pinned",
     width: SIDEBAR_DEFAULT,
@@ -71,7 +80,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     colors: {},
     ...over,
   };
-  const view = render(<Sidebar {...props} />);
+  const view = render(<Kept {...props} />);
   return { h, props, ...view };
 }
 
@@ -257,10 +266,10 @@ describe("the open sidebar's projects", () => {
     await waitFor(() => expect(onColors).toHaveBeenCalledWith({ [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 }));
     // Once saved (and after a restart, read back), nothing new is saved and the colours stay.
     const saved = { [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 };
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     onColors.mockClear();
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     expect(color("lantern")).toBe(PROJECT_COLORS[1]);
     expect(onColors).not.toHaveBeenCalled();
@@ -295,11 +304,11 @@ describe("clicking in the open sidebar", () => {
     expect(more).toHaveFocus();
   });
 
-  it("has a ⋯ menu per project: New team, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
+  it("has a ⋯ menu per project: New team, Only this project, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
@@ -591,6 +600,66 @@ describe("New ▾", () => {
   });
 });
 
+describe("one project", () => {
+  it("picks a project from the button, lists only it under a banner in its colour, and shows every project again", async () => {
+    setup({ open: ALL_OPEN, colors: { [LANTERN]: 2, [MONITOR]: 1, [IOS]: 0 } });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "network-monitor" }));
+    expect(regions()).toEqual(["network-monitor"]);
+    const banner = screen.getByRole("status", { name: "Only network-monitor" });
+    expect(banner.style.getPropertyValue("--pc")).toBe(PROJECT_COLORS[1]);
+    expect(screen.getByRole("button", { name: "Show all projects", pressed: true })).toBeInTheDocument();
+    fireEvent.click(within(banner).getByRole("button", { name: "Show all projects" }));
+    expect(regions()).toHaveLength(3);
+    expect(screen.queryByRole("status", { name: /^Only/ })).toBeNull();
+  });
+
+  it("is kept across restarts", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toEqual(["lumiform-ios"]));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+  });
+
+  it("starts from a project's ⋯ menu, and the banner's + starts a chat there", async () => {
+    const { h } = setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(within(project("lantern")).getByRole("button", { name: "More for lantern" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Only this project" }));
+    expect(regions()).toEqual(["lantern"]);
+    fireEvent.click(within(screen.getByRole("status", { name: "Only lantern" })).getByRole("button", { name: "New chat in lantern" }));
+    expect(h.onNewChatIn).toHaveBeenCalledWith(LANTERN);
+  });
+
+  it("offers recent projects with nothing open, and picking one leaves only its banner", async () => {
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(regions()).toEqual(["lantern"]));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["lantern", "network-monitor", "lumiform-ios"]));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "lumiform-ios" }));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("keeps the banner when the chosen project has nothing open", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(screen.getByText(/Nothing open in lumiform-ios/)).toBeInTheDocument());
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("shows only that project's squares in the collapsed bar, under a strip of its colour", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(MONITOR));
+    setup({ mode: "collapsed", open: ALL_OPEN });
+    await waitFor(() => expect(screen.getByRole("img", { name: "Only network-monitor" })).toBeInTheDocument());
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-label"))).toEqual(["network-monitor"]);
+  });
+});
+
 describe("the Moved? notice", () => {
   it("sits on the header of an open project whose folder moved, and brings its chats or is dismissed", () => {
     const moved = [{ old: LANTERN, suggested: "/projects/lantern" }];
@@ -635,7 +704,7 @@ describe("resizing", () => {
     expect(h.onWidth).toHaveBeenLastCalledWith(316);
     fireEvent.keyDown(edge, { key: "ArrowLeft", shiftKey: true });
     expect(h.onWidth).toHaveBeenLastCalledWith(252);
-    rerender(<Sidebar {...props} width={SIDEBAR_MAX} />);
+    rerender(<Kept {...props} width={SIDEBAR_MAX} />);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the sidebar" }), { key: "ArrowRight" });
     expect(h.onWidth).toHaveBeenLastCalledWith(SIDEBAR_MAX);
   });

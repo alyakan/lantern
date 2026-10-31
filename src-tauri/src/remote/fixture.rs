@@ -215,6 +215,11 @@ impl Host for FixtureHost {
         self.hub.titled(slot, &title);
         Ok(())
     }
+    // No window here: the fixture says it back itself.
+    fn set_single(&self, folder: Option<String>) -> Result<(), String> {
+        self.hub.single.set(folder.map(|folder| super::single::WindowSingle { folder, color: Some("#0f8a7e".into()) }));
+        Ok(())
+    }
 
     /// A scripted terminal: it says it ran the command. One with "password" in it asks for one (a secret prompt) and ends when
     /// answered; one with "sleep" in it keeps running until stopped.

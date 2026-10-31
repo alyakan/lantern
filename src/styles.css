@@ -3460,6 +3460,14 @@ button.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; dis
 button.sb-close:hover { background: var(--bg-active); color: var(--text); }
 .sb-note { padding: 3px 6px 3px 6px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 nav > .sb-note { padding-left: 14px; }
+/* One project: a banner in its colour at the top of the list (a strip of it in the collapsed bar), and its swatch in the picker. */
+.sb-single { flex: none; display: flex; align-items: center; gap: 2px; margin: 0 8px 8px 0; padding: 6px 4px 6px 10px; border-radius: var(--radius-card); background: var(--pc, var(--accent)); color: var(--on-color); }
+.sb-single-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12.5px * var(--font-scale)); font-weight: 650; }
+.sb-single button.icon { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: none; border-radius: var(--radius-chip); background: none; color: inherit; font-size: calc(15px * var(--font-scale)); line-height: 1; opacity: 0.85; }
+.sb-single button.icon:hover { opacity: 1; background: color-mix(in srgb, var(--on-color) 18%, transparent); }
+.sb-single-strip { flex: none; width: 36px; height: 4px; margin: 0 0 8px 6px; border-radius: 2px; background: var(--pc, var(--accent)); }
+.sb-single-swatch { flex: none; width: 10px; height: 10px; margin-right: 8px; border-radius: var(--radius-chip); background: var(--pc, var(--accent)); }
+.sb-head button.single-button.on svg { fill: none; }
 .sb-foot { flex: none; display: flex; align-items: center; gap: 7px; height: 28px; margin: 4px 8px 0 0; padding: 0 8px; border: none; background: none; border-radius: var(--radius-chip); color: var(--muted-text); text-align: left; }
 .sb-foot:hover { background: var(--bg-hover); color: var(--text); }
 .sb-foot span { white-space: nowrap; }

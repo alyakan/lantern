@@ -26,6 +26,7 @@ import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
 import { Deck } from "./NeedsDeck";
+import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
 
@@ -330,7 +331,12 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats, workingSince, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, single } = useSyncState();
+  // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
+  const canSingle = useMacCan("single");
+  const [picking, setPicking] = useState(false);
+  const chats = single ? allChats.filter((c) => c.project === single.name) : allChats;
+  const waiting = single ? allWaiting.filter((w) => chats.some((c) => c.slot === w.slot)) : allWaiting;
   const loading = !chatsLoaded || !waitingLoaded;
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
@@ -440,6 +446,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </View>
         )}
         {canDesk && !onOpenDesk && <ModeSwitch value={mode} onChange={pickMode} />}
+        {canSingle && !single && (
+          <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+            <FocusGlyph color={colors.ink2} />
+          </PressScale>
+        )}
         {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
         {onTogglePin && (
           <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
@@ -451,7 +462,23 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   );
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
-  if (canDesk && mode === "desk" && !onOpenDesk) return <DeskScreen top={top} onOpenChat={onOpenChat} onReview={onReview} />;
+  const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
+  if (canDesk && mode === "desk" && !onOpenDesk)
+    return (
+      <>
+        <DeskScreen
+          top={
+            <>
+              {top}
+              {banner}
+            </>
+          }
+          onOpenChat={onOpenChat}
+          onReview={onReview}
+        />
+        {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+      </>
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -466,6 +493,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
         {top}
+        {banner}
         {canDesk && onOpenDesk && (
           <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
@@ -498,7 +526,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
             {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
             {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
-            {stack.length === 0 && macName && <Suggestions onPick={onNewChat} />}
+            {/* Not with One project: a suggestion can be about any project. */}
+            {stack.length === 0 && macName && !single && <Suggestions onPick={onNewChat} />}
             {stack.length > 1 && (
               <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
                 {stack.length - 1} more after this one
@@ -512,7 +541,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             {asked ? "Results" : "All chats"}
           </Txt>
           {list.length > 1 && <GroupingSwitch value={grouping} onChange={group} />}
-          <PressScale accessibilityRole="button" accessibilityLabel="New chat" onPress={() => onNewChat()} hitSlop={8} scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
+          <PressScale accessibilityRole="button" accessibilityLabel="New chat" onPress={() => (single ? onNewChat({ text: "", project: single.project }) : onNewChat())} hitSlop={8} scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
             <Txt variant="small" style={{ fontWeight: "700" }}>
               + New chat
             </Txt>
@@ -527,7 +556,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
               Quiet in here
             </Txt>
             <Txt variant="body" tone="ink2" style={{ textAlign: "center", marginTop: 6 }}>
-              No chats are open on your Mac. Start one in Lantern and it shows up here.
+              {single ? `Nothing is open in ${single.name}. Start a chat there and it shows up here.` : "No chats are open on your Mac. Start one in Lantern and it shows up here."}
             </Txt>
           </View>
         ) : shown.length === 0 ? (
@@ -562,6 +591,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
       </Animated.ScrollView>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
       {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
+      {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
       {usageOpen && plan && <UsageSheet plan={plan} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet

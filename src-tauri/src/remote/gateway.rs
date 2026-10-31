@@ -121,6 +121,9 @@ pub trait Host: Send + Sync + 'static {
     fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String>;
     /// The projects a chat may be started in from a phone, as (folder, name): those the user already works in.
     fn projects(&self) -> BoxFut<Vec<(String, String)>>;
+    /// Asks the window to show only `folder` on its sidebar (the gateway has checked it is one of `projects`), or every project
+    /// (None). The window says back what it shows (see single.rs).
+    fn set_single(&self, folder: Option<String>) -> Result<(), String>;
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
     /// `permissions` (Auto only when the Mac lets phones use it: the gateway has checked, and the window checks again) and
     /// the `preset` (one of the presets listed), without changing what the window shows; the new chat's slot once it is open.
@@ -631,7 +634,7 @@ impl Gateway {
         let permit = self.handshakes.clone().try_acquire_owned().map_err(|_| Refused::Busy)?;
         let (device, mut channel, features) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
         let said = |name: &str| features.iter().any(|f| f == name);
-        let (extras, desk) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK));
+        let (extras, desk, single) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK), said(protocol::PHONE_SINGLE));
         drop(permit);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
@@ -643,7 +646,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, desk, last_desk: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, desk, last_desk: None, single, last_single: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -749,6 +752,9 @@ struct Session<'a> {
     /// Whether it shows the Desk (protocol::PHONE_DESK), and the Desk's version it was last sent.
     desk: bool,
     last_desk: Option<u64>,
+    /// Whether it follows the Mac's One project (protocol::PHONE_SINGLE), and the version it was last sent.
+    single: bool,
+    last_single: Option<u64>,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
@@ -820,6 +826,7 @@ impl<'a> Session<'a> {
         self.send_chats(link, channel, true)?;
         self.send_plan(link, channel)?;
         self.send_desk(link, channel)?;
+        self.send_single(link, channel)?;
         loop {
             tokio::select! {
                 _ = killed.changed() => return Ok(()),
@@ -863,6 +870,7 @@ impl<'a> Session<'a> {
                     self.send_chats(link, channel, false)?;
                     self.send_plan(link, channel)?;
                     self.send_desk(link, channel)?;
+                    self.send_single(link, channel)?;
                     for slot in self.named_since_reset() {
                         self.reset(link, channel, &slot).await?;
                     }
@@ -906,6 +914,18 @@ impl<'a> Session<'a> {
         let (desk, version) = self.gw.hub.desk.phone();
         send_message(link, channel, &ServerMessage::Desk { desk })?;
         self.last_desk = Some(version);
+        Ok(())
+    }
+
+    /// The One project, to a phone that follows it: once the window has said one, and when it changed since this phone was sent it.
+    fn send_single(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
+        let version = self.gw.hub.single.version();
+        if !self.single || version == 0 || self.last_single == Some(version) {
+            return Ok(());
+        }
+        let (single, version) = self.gw.hub.single.phone();
+        send_message(link, channel, &ServerMessage::Single { single })?;
+        self.last_single = Some(version);
         Ok(())
     }
 
@@ -1071,6 +1091,14 @@ impl<'a> Session<'a> {
                 }
                 let name = crate::titles::name(&title).ok_or("A chat needs a name.")?;
                 host.rename(&slot, name).map(|()| serde_json::Value::Null)
+            }
+            Request::SetSingle { project } => {
+                let Some(folder) = project else { return host.set_single(None).map(|()| serde_json::Value::Null) };
+                // Only a project of the Mac's: the window shows whatever it is told.
+                if !super::single::folder_ok(&folder) || !host.projects().await.iter().any(|(f, _)| *f == folder) {
+                    return Err("That project isn't on your Mac any more.".into());
+                }
+                host.set_single(Some(folder)).map(|()| serde_json::Value::Null)
             }
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
@@ -1340,6 +1368,7 @@ pub(crate) mod tests {
         pub closed: Mutex<Vec<String>>,
         /// The chats it was asked to name, and what with.
         pub renamed: Mutex<Vec<(String, String)>>,
+        pub singled: Mutex<Vec<Option<String>>>,
         /// What it was asked about storage ("scan", or "clear:" and the ids), and the disk it says it has.
         pub storage_asked: Mutex<Vec<String>>,
         pub storage_on: Mutex<bool>,
@@ -1402,6 +1431,10 @@ pub(crate) mod tests {
         }
         fn rename(&self, slot: &str, title: String) -> Result<(), String> {
             self.renamed.lock().unwrap().push((slot.into(), title));
+            Ok(())
+        }
+        fn set_single(&self, folder: Option<String>) -> Result<(), String> {
+            self.singled.lock().unwrap().push(folder);
             Ok(())
         }
         fn storage(&self) -> Result<protocol::RemoteStorage, String> {
@@ -3070,6 +3103,44 @@ pub(crate) mod tests {
         let (ok, _, before) = old.ask(Request::Desk).await;
         assert!(!before.iter().any(|m| matches!(m, ServerMessage::Desk { .. })));
         assert_eq!(ok.unwrap()["desks"][1]["name"], "Work");
+    }
+
+    #[tokio::test]
+    async fn the_one_project_goes_to_a_phone_that_follows_it_and_a_phone_may_pick_only_a_project_of_the_macs() {
+        use crate::remote::single::WindowSingle;
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        r.hub.single.set(Some(WindowSingle { folder: "/Users/me/app".into(), color: Some("#5b5bd6".into()) }));
+        let key = generate_keypair().unwrap();
+        let mut p = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_SINGLE]).await.unwrap();
+        let first = loop {
+            if let Some(ServerMessage::Single { single }) = p.next().await {
+                break single;
+            }
+        };
+        assert_eq!(first, Some(protocol::RemoteSingle { project: "/Users/me/app".into(), name: "app".into(), color: Some("#5b5bd6".into()) }));
+        // Shown every project again on the Mac: the phone is told.
+        r.hub.single.set(None);
+        let again = loop {
+            if let Some(ServerMessage::Single { single }) = p.next().await {
+                break single;
+            }
+        };
+        assert_eq!(again, None);
+        // The phone asks; the window does it (and says so back).
+        let set = |project: Option<&str>| Request::SetSingle { project: project.map(String::from) };
+        assert!(p.ask(set(Some("/Users/me/app"))).await.1.is_none());
+        assert!(p.ask(set(None)).await.1.is_none());
+        for bad in ["/Users/me/elsewhere", "app", "/Users/me/app\n"] {
+            let (ok, err, _) = p.ask(set(Some(bad))).await;
+            assert!(ok.is_none() && err.is_some(), "{bad:?}");
+        }
+        assert_eq!(*r.host.singled.lock().unwrap(), vec![Some("/Users/me/app".to_string()), None], "none of the others reached the app");
+        // A phone that didn't say "single" is never pushed it.
+        let (_, mut old) = paired(&r).await;
+        r.hub.single.set(Some(WindowSingle { folder: "/Users/me/app".into(), color: None }));
+        let (_, _, seen) = old.ask(Request::Projects).await;
+        assert!(!seen.iter().any(|m| matches!(m, ServerMessage::Single { .. })));
     }
 
     #[tokio::test]
