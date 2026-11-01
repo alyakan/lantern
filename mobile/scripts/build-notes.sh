@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What's new in a phone build: every feat: and fix: that touched the app in mobile/ between $1 (the previous build's tag) and $2
+# What's new in a phone build: feat/fix changes and user-facing PRs with a plain title that touched the app in mobile/ between $1 (the previous build's tag) and $2
 # (the commit being built, HEAD when left out), oldest first, as "- " bullets. It is for the person using the app, so what only
 # builds it is left out: a change that only touched mobile/fastlane or mobile/scripts (how a build is made and signed), and a PR
 # whose "## Changelog" says "- none" (an internal change). A PR whose description has a "## Changelog" section adds its bullets;
@@ -16,8 +16,14 @@ cd "$(git rev-parse --show-toplevel)"
 
 notes=""
 while IFS= read -r subject; do
-  [[ "$subject" =~ ^(feat|fix)(\(.*\))?!?:\ (.*)$ ]] || continue
-  title="${BASH_REMATCH[3]}"
+  if [[ "$subject" =~ ^(feat|fix)(\(.*\))?!?:\ (.*)$ ]]; then
+    title="${BASH_REMATCH[3]}"
+  elif [[ "$subject" =~ ^.+\ \(#([0-9]+)\)$ ]] && [[ ! "$subject" =~ ^(chore|docs|ci|build|test|refactor|style)(\(|:) ]]; then
+    # A merged user-facing PR can have a plain title, as #378 does.
+    title="$subject"
+  else
+    continue
+  fi
   changelog=""
   if [[ "$title" =~ ^(.*)\ \(#([0-9]+)\)$ ]]; then
     title="${BASH_REMATCH[1]}"
