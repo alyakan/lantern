@@ -3,8 +3,7 @@
 //! instructions rather than replacing them (that is `baseInstructions`).
 //!
 //! Claude's texts (args.rs) can't be sent as they are: they name the `claude` CLI, its auto mode, advisor and subagents, its
-//! skills, and a `mcp__lantern__reproduce` tool a Codex session doesn't have. The page loop is shared: STEPS_PROMPT with
-//! those few sentences swapped (the test below fails if one of them moves, rather than letting Codex read a stale tool name).
+//! skills. The page loop is shared: STEPS_PROMPT with those few sentences swapped (the test below fails if one moves).
 
 use crate::args::{worker_prompt, Mode, Role, STEPS_PROMPT};
 
@@ -20,15 +19,6 @@ const STEPS_SWAPS: &[(&str, &str)] = &[
     ("follow the user's incremental-pr-review skill exactly (load it with the Skill tool, `incremental-pr-review`): frame the review", "frame the review"),
     ("use the skill's sections exactly", "use these sections exactly"),
     ("answer the skill's commit question", "answer the commit question"),
-    // The Base: line already tells Lantern what to compare; Codex has no review_target tool to say it twice.
-    (
-        " Call mcp__lantern__review_target when the review starts ({\"pr\": N} for a pull request, {\"base\": \"<branch>\"} for a local branch stacked on another, {} for one cut from the default branch) and again whenever what you review changes, such as right after you open a pull request for the branch with gh pr create: the Changes pane shows it at once.",
-        "",
-    ),
-    (
-        "call the mcp__lantern__reproduce tool with exact steps and where the logs will appear: it waits for them and returns their note (often the logs they saw), so don't end your turn to ask.",
-        "end your turn on a page with the exact steps and where the logs will appear, and ask them to reply with what they saw (often the logs).",
-    ),
 ];
 
 fn steps_prompt() -> String {
@@ -45,6 +35,7 @@ Permissions: Ask. Edits inside the workspace apply as you make them; a command o
 Workflow: Chat, where you work as usual, or Step by step, one page per message in a flavour (Build, Review, Debug or Design).
 This chat's Permissions are Ask and its Workflow is {workflow}. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does."
     );
+    text.push_str("\n\nLantern’s tools are available on its MCP server (mcp__lantern__…). Use the available tools for Lantern’s app features. Follow the tools’ instructions.");
     if mode == Mode::Steps {
         text.push_str("\n\n");
         text.push_str(&steps_prompt());
@@ -72,7 +63,7 @@ mod tests {
             assert!(STEPS_PROMPT.contains(from), "STEPS_PROMPT changed; update the swap: {from}");
         }
         let text = steps_prompt();
-        for stale in ["mcp__lantern", "Skill tool", "incremental-dev", "incremental-pr-review", "the skill's"] {
+        for stale in ["Skill tool", "incremental-dev", "incremental-pr-review", "the skill's"] {
             assert!(!text.contains(stale), "{stale} reached Codex");
         }
         assert!(text.contains("# Frame") && text.contains("# Evidence N"));
@@ -98,6 +89,6 @@ mod tests {
         assert!(worker.contains("named \"scout\"") && worker.contains("git worktree"));
         assert!(!instructions(Mode::Ask, &Role::Normal).contains("worker agent"));
         let reader = instructions(Mode::Ask, &Role::Worker { name: "r".into(), read_only: true });
-        assert!(reader.contains("You are read-only") && !reader.contains("mcp__lantern") && !reader.contains("Grep and Glob"));
+        assert!(reader.contains("You are read-only") && !reader.contains("Grep and Glob"));
     }
 }
