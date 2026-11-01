@@ -180,21 +180,25 @@ impl Host for FixtureHost {
         Box::pin(async { Ok(()) })
     }
 
-    fn pending(&self, slot: &str) -> Vec<Pending> {
-        self.pending.lock().unwrap().get(slot).cloned().unwrap_or_default()
+    fn pending(&self, slot: &str) -> BoxFut<Vec<Pending>> {
+        let pending = self.pending.lock().unwrap().get(slot).cloned().unwrap_or_default();
+        Box::pin(async move { pending })
     }
 
-    fn answer(&self, slot: &str, request_id: &str, allow: bool, _message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
-        let mut pending = self.pending.lock().unwrap();
-        let list = pending.get_mut(slot).ok_or("That was answered already.")?;
-        let at = list.iter().position(|p| p.request_id == request_id).ok_or("That was answered already.")?;
-        list.remove(at);
-        drop(pending);
-        self.bus.publish(slot, UiEvent::PermissionResolved { request_id: request_id.into(), allow, by: by.into() });
-        if self.pending(slot).is_empty() {
-            self.reply(slot, in_words(allow, updated_input.as_ref()));
-        }
-        Ok(())
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, _message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> BoxFut<Result<(), String>> {
+        let result = (|| {
+            let mut pending = self.pending.lock().unwrap();
+            let list = pending.get_mut(slot).ok_or("That was answered already.")?;
+            let at = list.iter().position(|p| p.request_id == request_id).ok_or("That was answered already.")?;
+            list.remove(at);
+            drop(pending);
+            self.bus.publish(slot, UiEvent::PermissionResolved { request_id: request_id.into(), allow, by: by.into() });
+            if self.pending.lock().unwrap().get(slot).is_none_or(|p| p.is_empty()) {
+                self.reply(slot, in_words(allow, updated_input.as_ref()));
+            }
+            Ok(())
+        })();
+        Box::pin(async move { result })
     }
 
     fn wake(&self, slot: &str) -> Result<(), String> {

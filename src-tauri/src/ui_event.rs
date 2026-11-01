@@ -1,12 +1,12 @@
 use crate::permission::rules::{Rule, Scope};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
 /// Receives every event destined for the UI.
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlashCommand {
     pub name: String,
     pub description: String,
@@ -14,7 +14,7 @@ pub struct SlashCommand {
 }
 
 /// One line of the plan Claude keeps with TodoWrite. `status`: "pending", "in_progress" or "completed".
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
     pub content: String,
     pub status: String,
@@ -24,7 +24,7 @@ pub struct Todo {
 /// One check (a Reviewer, a QA tester…) in a `ReviewUpdate`. `state`: "waiting" (for a free slot), "running", "done", "failed"
 /// (it stopped before reporting) or "skipped" (the setting was switched off before it started). `findings` and `passed`
 /// come from the report's last line (`RESULT: pass` or `RESULT: issues 3`), and are None when it has none.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReviewCheck {
     pub role: String,
     pub label: String,
@@ -35,7 +35,7 @@ pub struct ReviewCheck {
 }
 
 /// A model claude offers. `value` is what `--model` takes ("default" means no flag).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelOption {
     pub value: String,
     pub display_name: String,
@@ -45,7 +45,7 @@ pub struct ModelOption {
     pub effort_levels: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hunk {
     pub old_start: u64,
     pub old_lines: u64,
@@ -54,7 +54,7 @@ pub struct Hunk {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCost {
     pub model: String,
     pub cost_usd: f64,
@@ -62,7 +62,7 @@ pub struct ModelCost {
     pub output_tokens: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackgroundTask {
     pub id: String,
     /// claude's task type: "local_bash", "local_agent", …
@@ -74,9 +74,10 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
+    ProviderChanged { provider: crate::provider::ProviderInfo, key: String },
     SessionStarted { session_id: String, model: String, cwd: String, permission_mode: String, claude_version: String },
     /// Something the user typed, and when (ms since the epoch). History replay emits these; so does every message sent
     /// live, with `sent_by`: who sent it ("desktop", or a paired phone's id). The window adds its own messages itself, so

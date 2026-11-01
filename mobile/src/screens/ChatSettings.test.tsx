@@ -221,3 +221,30 @@ describe("the workflow", () => {
     expect(screen.queryByText("Workflow")).toBeNull();
   });
 });
+
+const codexConfiguration = {
+  provider: "codex", model: null, effort: "high", models: ["gpt-example"], effort_levels: ["low", "high"],
+  capabilities: { supports_auto_mode: false, supports_advisor: false, supports_effort: true, model_switchable: true, supports_images: true, supports_compact: true, supports_clear: true },
+};
+
+describe("provider-neutral settings", () => {
+  it("offers only the active provider's models and effort levels and sends a model operation", async () => {
+    const { lastOf } = await open({ features: ["controls", "conversation"], chatOver: { provider: "Codex" }, answers: { conversation_settings: codexConfiguration } });
+    await openSheet();
+    const model = await screen.findByRole("radio", { name: "gpt-example" });
+    expect(screen.queryByRole("radio", { name: "medium" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "high" })).toBeTruthy();
+    await fireEvent.press(model);
+    expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" } });
+  });
+
+  it("offers installed providers and switches through the conversation operation", async () => {
+    const { lastOf } = await open({ features: ["controls", "conversation"], answers: {
+      controls: { allow_auto: false, presets, providers: [{ id: "claude", name: "Claude", auto: true, presets: true }, { id: "codex", name: "Codex", auto: false, presets: false }] },
+      conversation_settings: { ...codexConfiguration, provider: "claude" },
+    } });
+    await openSheet();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Codex" }));
+    expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { provider: "codex" } });
+  });
+});

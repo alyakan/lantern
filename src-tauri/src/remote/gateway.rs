@@ -99,11 +99,14 @@ const AUTO_OFF: &str = "Auto from a phone is off. Turn it on in Lantern's Settin
 
 /// What the gateway asks of the app. `by` is who asked: the phone's device id (with its message id for a send).
 pub trait Host: Send + Sync + 'static {
+    fn conversation_settings(&self, _slot: String, _change: Option<serde_json::Value>) -> BoxFut<Result<serde_json::Value, String>> { Box::pin(async { Err("Update Lantern to change providers".into()) }) }
+    fn conversation_action(&self, _slot: String, _action: String) -> BoxFut<Result<(), String>> { Box::pin(async { Err("Update Lantern to use this operation".into()) }) }
+
     /// Says `text` in the chat, with `images` (the gateway has checked them: see protocol::check_images).
     fn send(&self, slot: String, text: String, by: String, images: Vec<protocol::RemoteImage>) -> BoxFut<Result<(), String>>;
     fn interrupt(&self, slot: String) -> BoxFut<Result<(), String>>;
-    fn pending(&self, slot: &str) -> Vec<Pending>;
-    fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String>;
+    fn pending(&self, slot: &str) -> BoxFut<Vec<Pending>>;
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> BoxFut<Result<(), String>>;
     fn wake(&self, slot: &str) -> Result<(), String>;
     /// Asks the window to close a chat for a phone (the gateway has checked it is listed and idle, asleep or stopped; the window
     /// checks again, and refuses a team's Lead or agent).
@@ -357,7 +360,6 @@ impl Gateway {
         let chats: Vec<crate::desk::Candidate> = std::mem::take(&mut routing.chats)
             .into_iter()
             .filter(|c| self.hub.chat(&c.id).is_some())
-            .map(|c| if self.hub.is_off_claude(&c.id) { crate::desk::Candidate { title: String::new(), last: String::new(), ..c } } else { c })
             .collect();
         let labels: Vec<String> = routing.projects.iter().map(|(_, label)| label.clone()).collect();
         Ok((routing, chats, labels))
@@ -388,7 +390,7 @@ impl Gateway {
             // Answered here, from the Desk's chats about it, open or past: only the user is shown it.
             // A chat that ran on another provider is never read for it: nothing said there is put to Claude.
             Route::Answer { terms } => match self.desk_found(&terms, routing).await.map(|found| {
-                found.into_iter().filter(|(hit, chat)| !self.hub.desk.off_claude(&chat.id) && !hit.slot.as_deref().is_some_and(|s| self.hub.is_off_claude(s))).take(crate::desk::ANSWER_CHATS).collect::<Vec<_>>()
+                found.into_iter().take(crate::desk::ANSWER_CHATS).collect::<Vec<_>>()
             }) {
                 Ok(found) if found.is_empty() => R::Answer { terms, text: String::new(), sources: vec![], error: None },
                 Ok(found) => {
@@ -438,9 +440,7 @@ impl Gateway {
         let Some(replied) = crate::desk::reply_in(events.iter().map(|e| (e.seq, &e.event)), &text, after) else {
             return if dropped { gone("It ran long, so the Desk can't sum it up: open the chat to see it.") } else { serde_json::to_value(waiting).map_err(|e| e.to_string()) };
         };
-        let answer = if self.hub.is_off_claude(&slot) {
-            R { done: true, failed: replied.failed, off: true, summary: None, full: String::new(), error: None }
-        } else if replied.said.trim().is_empty() {
+        let answer = if replied.said.trim().is_empty() {
             R { done: true, failed: replied.failed, off: false, summary: Some(if replied.failed { "It failed without saying why.".into() } else { "It finished without saying anything.".into() }), full: String::new(), error: None }
         } else {
             let full: String = replied.said.chars().take(DESK_FULL_MAX).collect();
@@ -1006,7 +1006,7 @@ impl<'a> Session<'a> {
         let json = |v: &dyn erased::Ser| v.to_json();
         match request {
             Request::ListChats => Ok(json(&self.gw.hub.chats().into_iter().map(RemoteChat::from).collect::<Vec<_>>())),
-            Request::ListWaiting => Ok(json(&self.waiting())),
+            Request::ListWaiting => Ok(json(&self.waiting().await)),
             Request::Subscribe { slot, after, epoch } => {
                 self.chat_known(&slot)?;
                 // A number from another run of Lantern, or one it hasn't reached: the phone starts the chat over.
@@ -1053,7 +1053,7 @@ impl<'a> Session<'a> {
             }
             Request::Answer { slot, request_id, allow, message, answers } => {
                 self.chat_known(&slot)?;
-                let asked = host.pending(&slot).into_iter().find(|p| p.request_id == request_id).ok_or("That was answered already, or Claude stopped asking.")?;
+                let asked = host.pending(&slot).await.into_iter().find(|p| p.request_id == request_id).ok_or("That was answered already, or Claude stopped asking.")?;
                 // On deny there is nothing to run, so no answers matter. Otherwise the tool runs with Claude's own input,
                 // a question's with the answers added (see answers.rs).
                 let updated = match answers {
@@ -1061,7 +1061,7 @@ impl<'a> Session<'a> {
                     _ => None,
                 };
                 let message = message.map(|m| m.chars().take(10_000).collect());
-                host.answer(&slot, &request_id, allow, message, updated, &self.device).map(|()| serde_json::Value::Null)
+                host.answer(&slot, &request_id, allow, message, updated, &self.device).await.map(|()| serde_json::Value::Null)
             }
             Request::Wake { slot } => {
                 self.chat_known(&slot)?;
@@ -1117,6 +1117,15 @@ impl<'a> Session<'a> {
                     return Ok(serde_json::Value::Null);
                 }
                 host.set_workflow(&slot, workflow).map(|()| serde_json::Value::Null)
+            }
+            Request::ConversationSettings { slot, change } => {
+                self.chat_known(&slot)?;
+                if change.is_some() { self.gw.switchable(&slot)?; }
+                host.conversation_settings(slot, change).await
+            }
+            Request::ConversationAction { slot, action } => {
+                self.gw.switchable(&slot)?;
+                host.conversation_action(slot, action).await.map(|_| serde_json::Value::Null)
             }
             Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets(), providers: Some(self.gw.hub.providers()) })),
             Request::SetPermissions { slot, permissions } => {
@@ -1273,16 +1282,11 @@ impl<'a> Session<'a> {
     }
 
     /// What waits on the user in every chat, the oldest first.
-    fn waiting(&self) -> Vec<Waiting> {
-        let mut all: Vec<Waiting> = self
-            .gw
-            .hub
-            .chats()
-            .into_iter()
-            .flat_map(|chat| {
-                self.gw.host.pending(&chat.slot).into_iter().map(move |p| Waiting { slot: chat.slot.clone(), chat_title: chat.title.clone(), request_id: p.request_id, tool_name: p.tool_name, input: protocol::trimmed(&p.input), at: p.at })
-            })
-            .collect();
+    async fn waiting(&self) -> Vec<Waiting> {
+        let mut all = Vec::new();
+        for chat in self.gw.hub.chats() {
+            all.extend(self.gw.host.pending(&chat.slot).await.into_iter().map(|p| Waiting { slot: chat.slot.clone(), chat_title: chat.title.clone(), request_id: p.request_id, tool_name: p.tool_name, input: protocol::trimmed(&p.input), at: p.at }));
+        }
         all.sort_by_key(|w| w.at);
         all
     }
@@ -1413,13 +1417,14 @@ pub(crate) mod tests {
         fn interrupt(&self, _: String) -> BoxFut<Result<(), String>> {
             Box::pin(async { Ok(()) })
         }
-        fn pending(&self, _: &str) -> Vec<Pending> {
-            self.pending.lock().unwrap().clone()
+        fn pending(&self, _: &str) -> BoxFut<Vec<Pending>> {
+            let pending = self.pending.lock().unwrap().clone();
+            Box::pin(async move { pending })
         }
-        fn answer(&self, _: &str, request_id: &str, allow: bool, _: Option<String>, updated: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+        fn answer(&self, _: &str, request_id: &str, allow: bool, _: Option<String>, updated: Option<serde_json::Value>, by: &str) -> BoxFut<Result<(), String>> {
             self.answered.lock().unwrap().push((request_id.into(), allow, updated, by.into()));
             self.pending.lock().unwrap().retain(|p| p.request_id != request_id);
-            Ok(())
+            Box::pin(async { Ok(()) })
         }
         fn wake(&self, slot: &str) -> Result<(), String> {
             self.woken.lock().unwrap().push(slot.into());
@@ -3144,7 +3149,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_desks_message_goes_only_to_a_chat_open_on_that_desk_and_a_chat_not_on_claude_is_shown_by_its_id() {
+    async fn a_desks_message_goes_only_to_a_chat_open_on_that_desk_including_other_providers() {
         let r = rig();
         for slot in ["a", "b", "w"] {
             r.hub.opened(slot, "/Users/me/app");
@@ -3158,7 +3163,7 @@ pub(crate) mod tests {
         assert_eq!(p.ask(route("home")).await.0.unwrap(), json!({"kind": "chat", "slot": "a"}));
         let (shown, projects) = r.host.desk_shown.lock().unwrap()[0].clone();
         assert_eq!(shown.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
-        assert_eq!((shown[1].title.as_str(), shown[1].last.as_str()), ("", ""), "nothing said in it is put to Claude");
+        assert_eq!((shown[1].title.as_str(), shown[1].last.as_str()), ("b title", "b said"), "other providers are first-class Desk chats");
         assert_eq!(shown[0].last, "a said");
         assert_eq!(projects, vec!["app"]);
         assert!(r.host.sent.lock().unwrap().is_empty(), "nothing is sent from here: the phone sends it");
@@ -3202,7 +3207,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_phones_desk_message_is_summed_up_once_its_turn_finished_and_never_from_a_chat_off_claude_or_off_the_desk() {
+    async fn a_phones_desk_message_is_summed_up_for_every_provider_but_never_off_the_desk() {
         let r = rig();
         for slot in ["a", "b", "w"] {
             r.hub.opened(slot, "/Users/me/app");
@@ -3222,17 +3227,17 @@ pub(crate) mod tests {
         r.hub.record(&BusEvent { slot: "a".into(), seq: 6, event: claude("Capped it at 8s.") });
         r.hub.record(&BusEvent { slot: "a".into(), seq: 7, event: done.clone() });
         assert_eq!(p.ask(reply("a", 3)).await.0.unwrap(), json!({"done": true, "failed": false, "off": false, "summary": "In short: Capped it at 8s.", "full": "Capped it at 8s.", "error": null}));
-        // A chat on another provider: finished, but nothing said there is summed up.
+        // A chat on another provider participates in the same summary flow.
         for (seq, e) in [user("cap the delay"), claude("Secret."), done.clone()].into_iter().enumerate() {
             r.hub.record(&BusEvent { slot: "b".into(), seq: seq as u64 + 1, event: e });
         }
-        assert_eq!(p.ask(reply("b", 0)).await.0.unwrap(), json!({"done": true, "failed": false, "off": true, "summary": null, "full": "", "error": null}));
-        assert_eq!(*r.host.desk_summed.lock().unwrap(), vec!["Capped it at 8s.".to_string()]);
+        assert_eq!(p.ask(reply("b", 0)).await.0.unwrap(), json!({"done": true, "failed": false, "off": false, "summary": "In short: Secret.", "full": "Secret.", "error": null}));
+        assert_eq!(*r.host.desk_summed.lock().unwrap(), vec!["Capped it at 8s.".to_string(), "Secret.".to_string()]);
         // A chat open on the Mac but not on this Desk is never read for it: a final answer, so the phone stops asking.
         let off_desk = p.ask(reply("w", 0)).await.0.unwrap();
         assert_eq!((off_desk["done"].as_bool(), off_desk["summary"].is_null()), (Some(true), true));
         assert!(off_desk["error"].as_str().is_some_and(|e| e.contains("isn't on this Desk")));
-        assert_eq!(r.host.desk_summed.lock().unwrap().len(), 1);
+        assert_eq!(r.host.desk_summed.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -3274,8 +3279,8 @@ pub(crate) mod tests {
         said.off_claude = vec!["old".into()];
         r.hub.desk.set(said);
         let answered = p.ask(route()).await.0.unwrap();
-        assert_eq!(answered["text"], "add a dark mode: from 0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10");
-        assert_eq!(answered["sources"].as_array().map(Vec::len), Some(1));
+        assert_eq!(answered["text"], "add a dark mode: from 0f5e7f4e-1c55-4f8e-9a3c-6b1f8d2a9e10, old");
+        assert_eq!(answered["sources"].as_array().map(Vec::len), Some(2));
         *r.host.desk_hits.lock().unwrap() = vec![hit("other", "/Users/me/job")];
         assert_eq!(p.ask(route()).await.0.unwrap(), json!({"kind": "answer", "terms": "pricing", "text": "", "sources": [], "error": null}));
         *r.host.desk_answer.lock().unwrap() = Some(crate::desk::Route::Search { terms: "pricing".into() });

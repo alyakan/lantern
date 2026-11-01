@@ -90,7 +90,8 @@ impl CodexMapper {
     pub fn notification(&mut self, method: &str, p: &Value) -> Mapped {
         let mut m = Mapped::default();
         match method {
-            "turn/started" => self.turn = TurnStats::default(),
+            "turn/started" => { self.turn = TurnStats::default(); m.events.push(UiEvent::Thinking { parent: None }); },
+            "thread/compacted" => m.events.push(UiEvent::Compacted),
             "item/started" => self.item_started(&p["item"], &mut m),
             "item/completed" => self.item_completed(&p["item"], &mut m),
             "item/agentMessage/delta" => {
@@ -154,6 +155,8 @@ impl CodexMapper {
     }
 
     fn item_completed(&mut self, item: &Value, m: &mut Mapped) {
+        if item["type"] == "contextCompaction" { m.events.push(UiEvent::Compacted); return; }
+
         let id = str_of(item, "id");
         match item["type"].as_str().unwrap_or("") {
             "agentMessage" => {

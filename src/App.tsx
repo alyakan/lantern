@@ -28,7 +28,7 @@ import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionAct
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
-import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
+import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
@@ -461,26 +461,40 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   useEffect(() => {
     api.listProviders().then(setProviderList, () => setProviderList([]));
   }, []);
-  const providers = useMemo(() => choicesOf(providerList), [providerList]);
+  const providers = useMemo(() => choicesOf(providerList && state.claudePath && !providerList.some((p) => p.id === CLAUDE) ? [{ id: CLAUDE, capabilities: CLAUDE_CAPABILITIES, binary: state.claudePath, models: ["opus", "sonnet", "haiku"] }, ...providerList] : providerList), [providerList, state.claudePath]);
   /** A provider the chat can start on: Claude Code always (the window has found it), another only while its CLI is installed. */
   const listingOf = (id: string) => providers.list.find((p) => p.id === id);
-  const isAvailable = (id: string) => id === CLAUDE || !!listingOf(id);
+  const isAvailable = (id: string) => (id === CLAUDE && !!state.claudePath) || !!listingOf(id);
+  const agentReady = !!state.claudePath || providers.list.some((p) => !!p.binary);
+  useEffect(() => { if (agentReady && state.status === "setup") dispatch({ type: "agent_available" }); }, [agentReady, state.status]);
   /**
    * The program that starts a chat on provider `id`: Claude Code's, which the window found, for Claude and for every endpoint
    * (an endpoint is Claude Code sent elsewhere), but only while the endpoint is still set up: a chat on one that was deleted
    * is never started on Claude instead. Another provider's own program otherwise. None when it can't be started.
    */
-  const binaryOf = (id: string) => (id === CLAUDE ? state.claudePath : isGateway(id) ? (listingOf(id) ? state.claudePath : undefined) : listingOf(id)?.binary);
+  const binaryOf = (id: string) => (id === CLAUDE ? (state.claudePath ?? listingOf(id)?.binary) : isGateway(id) ? (listingOf(id) ? state.claudePath : undefined) : listingOf(id)?.binary);
   /** What a project's new chats run on: its choice, if that provider is still there. */
   const providerFor = (folder: string | null) => {
     const id = folder ? providerByFolder[folder] : undefined;
-    return id && isAvailable(id) ? id : CLAUDE;
+    return id && isAvailable(id) ? id : isAvailable(CLAUDE) ? CLAUDE : providers.list[0]?.id ?? CLAUDE;
   };
   /** The provider a chat is on and what it can do; Claude Code's until told otherwise. */
   const infoOf = (id: string): ProviderInfo | null => {
     const l = listingOf(id);
     return l ? { id: l.id, capabilities: l.capabilities } : null;
   };
+  const configuredRef = useRef<(r: Parameters<Parameters<typeof api.onConversationConfigured>[0]>[0]) => void>(() => {});
+  configuredRef.current = (r) => {
+    to(r.slot)({ type: "provider_set", provider: r.provider });
+    to(r.slot)({ type: "mode_changed", mode: r.mode, autoApprove: r.autoApprove });
+    to(r.slot)({ type: "session_ready" });
+    if (r.provider.id === CLAUDE) { setModel(r.model); setEffort(r.effort); }
+    else setProviderPrefs({ ...providerPrefs, [r.provider.id]: { model: r.model, effort: r.effort } });
+  };
+  useEffect(() => {
+    const off = api.onConversationConfigured((r) => configuredRef.current(r));
+    return () => { off.then((f) => f()); };
+  }, []);
   const capsOf = (slot: string) => capabilitiesOf(chats.slots[slot]?.provider);
   const caps = capabilitiesOf(state.provider);
   const activeProvider = providerIdOf(state.provider);
@@ -591,7 +605,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
   const startFresh = (folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first, undefined, review);
+    if (agentReady) startIn(takeSlot(), folder, quiet, team, first, undefined, review);
   };
 
   // To-dos (see lib/todos.ts). A chat started from an item (its ▶) is linked to it, and asks "Mark done?" when a turn ends;
@@ -599,7 +613,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [todoChats, setTodoChats] = useState<Record<string, { folder: string; id: string; asked: number }>>({});
   const [todosOpenKey, setTodosOpenKey] = useState(0);
   const startTodo = (folder: string, todo: Todo) => {
-    if (!state.claudePath) return;
+    if (!agentReady) return;
     const slot = takeSlot();
     startIn(slot, folder, false, false, todoPrompt(todo));
     setTodoChats((all) => ({ ...all, [slot]: { folder, id: todo.id, asked: -1 } }));
@@ -649,8 +663,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * Code's: it is the one that has Lantern's tools to start agents with).
    */
   const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
-    const { claudePath } = state;
-    if (!claudePath) return;
+    if (!agentReady) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
@@ -706,6 +719,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const chooseProvider = (id: string) => {
     const folder = state.folder;
     if (!folder || id === activeProvider || !isAvailable(id)) return;
+    if (state.items.length > 0) {
+      if (isBusy(state) || state.status !== "idle" || chats.agents[active]) return;
+      if (state.backgroundTasks.length > 0) return dispatch({ type: "failed", text: "Stop this chat's background tasks before switching providers." });
+      {
+        dispatch({ type: "restarting" });
+        api.conversationSettings(active, { provider: id, ...prefsOf(id) }).then((config) => {
+          dispatch({ type: "provider_set", provider: { id: config.provider, capabilities: config.capabilities } });
+          dispatch({ type: "session_ready" });
+          setProviderByFolder({ ...providerByFolder, [folder]: id });
+          if (state.sessionId) setProviderBySession({ ...providerBySession, [state.sessionId!]: id });
+        }).catch((e) => { dispatch({ type: "session_ready" }); dispatch({ type: "failed", text: errText(e) }); });
+      }
+      return;
+    }
     setProviderByFolder({ ...providerByFolder, [folder]: id });
     // A provider that can't lead a team starts it as a plain chat: its Workflow leaves Team.
     startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).can_lead_team, undefined, undefined, undefined, false, id);
@@ -748,7 +775,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [model, state.model, activeProvider]);
   // A session on a provider other than Claude is remembered as such, so reopening it from History starts that provider's CLI.
   useEffect(() => {
-    const news = Object.values(chats.slots).filter((s) => s.sessionId && providerIdOf(s.provider) !== CLAUDE && providerBySession[s.sessionId] !== providerIdOf(s.provider));
+    const news = Object.values(chats.slots).filter((s) => s.sessionId && providerBySession[s.sessionId] !== providerIdOf(s.provider));
     if (news.length) setProviderBySession({ ...providerBySession, ...Object.fromEntries(news.map((s) => [s.sessionId!, providerIdOf(s.provider)])) });
   }, [chats.slots]);
 
@@ -757,7 +784,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // After a restart to update the chats that were open come back by themselves, in place of the last project (which the
   // first of them is, or else the project is reopened as usual). Ahead of that effect, which it then keeps from running.
   useEffect(() => {
-    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked || !markerChecked || waitsForProviders) return;
+    if (!restoringAfterUpdate || !agentReady || !moves || !goneChecked || !markerChecked || waitsForProviders) return;
     clearRestoreAfterUpdate();
     setRestoringAfterUpdate(false);
     // Something was opened meanwhile: nothing is restored over it, and the card is back.
@@ -765,14 +792,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       reopened.current = true;
       restoreAll();
     }
-  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked, markerChecked, waitsForProviders]);
+  }, [restoringAfterUpdate, agentReady, moves, goneChecked, markerChecked, waitsForProviders]);
 
   // Reopen the last project once claude has been found (where it is now, if it moved), unless the chats are coming back instead.
   useEffect(() => {
-    if (!markerChecked || restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves || waitsForProviders) return;
+    if (!markerChecked || restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !agentReady || !moves || waitsForProviders) return;
     reopened.current = true;
     if (lastFolder) startFresh(here(lastFolder), true);
-  }, [markerChecked, restoringAfterUpdate, state.status, state.claudePath, moves, waitsForProviders]);
+  }, [markerChecked, restoringAfterUpdate, state.status, agentReady, moves, waitsForProviders]);
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });
@@ -794,9 +821,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const openSession = (sessionId: string, inFolder: string | null = state.folder) => {
     const already = Object.entries(chats.slots).find(([, s]) => s.sessionId === sessionId);
     if (already) return switchTo(already[0]);
-    const { claudePath } = state;
     const folder = inFolder;
-    if (!claudePath || !folder) return;
+    if (!agentReady || !folder) return;
     // An empty chat is reused; if it was in another project it starts over in this one.
     const empty = state.items.length === 0 && !isBusy(state);
     const reuse = empty && state.folder === folder;
@@ -810,12 +836,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * is reopened as its worker once that main agent has finished opening (`parentReady`; the backend adopts a worker only
    * into a main agent it already knows). Resolves to whether the chat opened.
    */
-  const resumeIn = (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole): Promise<boolean> => {
-    const { claudePath } = state;
-    if (!claudePath) return Promise.resolve(false);
+  const resumeIn = async (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole): Promise<boolean> => {
+    if (!agentReady) return Promise.resolve(false);
     reopened.current = true;
     // The provider it ran on: Claude's unless it was saved as another's (a session from before there was a choice is Claude's).
-    const providerId = providerBySession[sessionId] ?? CLAUDE;
+    const providerId = (await api.conversationMetadata(sessionId).catch(() => null)) ?? providerBySession[sessionId] ?? CLAUDE;
     const info = infoOf(providerId);
     const binary = binaryOf(providerId);
     const can = capabilitiesOf(info);
@@ -861,7 +886,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       .then((as) => open(as).then((opened) => ({ opened, as })))
       .then(({ opened, as }) => {
         if (startGen.current[slot] !== gen) return false;
-        if (opened.provider) to(slot)({ type: "provider_set", provider: { ...opened.provider, id: providerId } });
+        if (opened.provider) to(slot)({ type: "provider_set", provider: { ...opened.provider, id: opened.provider.id === "gateway" ? providerId : opened.provider.id } });
         // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
         if (opened.read_only) {
           to(slot)({ type: "history_loaded", sessionId, events: opened.events, earlier: opened.earlier });
@@ -955,7 +980,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         const openFolders = Object.values(chats.slots).map((s) => s.folder);
         const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text), ctx);
         if (why) return fail(why);
-        if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
+        if (!agentReady) return fail("No agent provider is set up on your Mac yet.");
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
         // Where the phone chose, else the project's own; but a project on a provider whose questions a phone can't answer starts on
@@ -1108,7 +1133,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const c = { ...offered, folder: here(offered.folder) };
     const already = openAlready(c);
     if (already) return switchTo(already);
-    if (!state.claudePath) return;
+    if (!agentReady) return;
     const slot = takeSlot();
     const ready = restoreInto(slot, c);
     if (c.sessionId) {
@@ -1128,7 +1153,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const restoreAll = () => {
     const ordered = screenFirst(toCurrentFolders(offer, moves ?? []));
     const [first] = ordered;
-    if (!first || !state.claudePath) return;
+    if (!first || !agentReady) return;
     const isMain = (c: SavedChat) => c.orchestra?.role === "main";
     const teamOpen = ({ orchestra: o }: SavedChat) => o?.role !== "worker" || ordered.some((m) => isMain(m) && m.sessionId === o.parentSession) || !!openMainOf(o.parentSession);
     // The chat on screen, and the team it is in, start now; every other chat and team is asleep in the sidebar until it is opened
@@ -1315,14 +1340,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // Routines: prompts that go out by themselves while Lantern is open. Each run is a new chat in the project, opened behind the
   // one on screen on the routine's own Permissions and model, and sent the prompt once it is ready.
   const routines = useRoutines({
-    ready: !!state.claudePath,
+    ready: agentReady,
     chats: chats.slots,
     send: sendIn,
     open: async (r) => {
       const folder = here(r.folder);
       const gone = await api.foldersGone([folder]).catch(() => [] as string[]);
       if (gone.length > 0) throw new Error("its project folder isn't there any more");
-      if (!state.claudePath) throw new Error("Claude isn't ready");
+      if (!agentReady) throw new Error("No agent provider is ready");
       const slot = `s${++slotSeq.current}`;
       dispatchChats({ type: "add", slot });
       routineSlots.current[slot] = { name: r.name, model: r.model };
@@ -1376,13 +1401,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   // /clear drops the conversation (the files it changed stay), so it's asked about first.
   const clearChat = async (slot: string) => {
-    const sure = await ask("Claude forgets this conversation. The files it changed stay as they are.", {
+    const sure = await ask("The agent forgets this conversation. The files it changed stay as they are.", {
       title: "Clear this conversation?",
       kind: "warning",
       okLabel: "Clear",
       cancelLabel: "Keep it",
     });
-    if (sure) sendIn(slot, "/clear");
+    if (sure) void api.conversationAction(slot, "clear").catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
   /** A team's Subagents setting for a Lead that has just started: the project's last choice, told to the backend and shown. */
@@ -2439,10 +2464,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     void api.remoteWindowChats(hubList).catch(() => {});
   }, [hubKey]);
   // A phone's Desk: what the Desks hold, told when it changes. Nothing said in a chat on another provider is put to Claude.
-  const offClaude = (slot: string) => providerLabel(slot) !== null;
-  // Every session known to have run on another provider: an open chat's, and a past one's.
-  const offClaudeSessions = [...new Set([...Object.entries(providerBySession).filter(([, p]) => p !== CLAUDE).map(([id]) => id), ...Object.values(chats.slots).flatMap((s) => (s.sessionId && s.provider && providerIdOf(s.provider) !== CLAUDE ? [s.sessionId] : []))])];
-  const phoneDesk = windowDesk(chats, openByProject, desks, offClaude, offClaudeSessions);
+  const phoneDesk = windowDesk(chats, openByProject, desks);
   const phoneDeskKey = JSON.stringify(phoneDesk);
   useEffect(() => {
     void api.remoteWindowDesk(phoneDesk).catch(() => {});
@@ -2509,7 +2531,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const folder = projectFolderOf(slot);
     return folder !== null && deskOf(desks, folder) === desks.on;
   };
-  const deskCandidates = routeCandidates(chats, deskOpen, offClaude);
+  const deskCandidates = routeCandidates(chats, deskOpen);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
@@ -2541,7 +2563,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     deskEdit(entry.id, (e) => (e.outcome.kind === "sent" ? { ...e, also: [...e.also, { slot, title }] } : { ...e, outcome: { kind: "sent", slot, title, started: false, queued: done.queued }, reply: { status: "waiting" } }));
   };
   const deskStartIn = (entry: DeskEntry, folder: string, workflow: "chat" | "steps" = "chat") => {
-    if (!state.claudePath) return deskEdit(entry.id, (e) => ({ ...e, say: undefined, outcome: { kind: "failed", why: "Claude Code isn't found yet." } }));
+    if (!agentReady) return deskEdit(entry.id, (e) => ({ ...e, say: undefined, outcome: { kind: "failed", why: "No agent provider is installed yet." } }));
     const slot = takeSlot();
     startIn(slot, folder, false, false, entry.text, undefined, undefined, workflow === "steps" ? { permissions: permissionsFor(folder), preset: null, workflow } : false);
     deskEdit(entry.id, (e) => ({ ...e, outcome: { kind: "sent", slot, title: clip(entry.text, 60), started: true, queued: false }, reply: { status: "waiting" } }));
@@ -2565,7 +2587,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       deskEdit(entry.id, (e) => ({ ...e, ...(unsure ? { say: undefined } : {}), outcome: { kind: "ask", chats: asked, projects: unsure || asked.length === 0 ? sentProjects : [], unsure } }));
     };
     // The Desk talks (its Sonnet agent, which reads the chats): what it says back is shown to you only; what it does is checked as the router's choice is.
-    const history = deskHistory(deskLog, deskId, offClaude);
+    const history = deskHistory(deskLog, deskId);
     api.deskTalk(state.claudePath ?? "", deskId, text, history, deskCandidates, sentProjects.map((p) => p.label)).then(
       ({ say, route: r }) => {
         const now = deskNow.current;
@@ -2581,7 +2603,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           deskEdit(entry.id, (e) => ({ ...e, outcome: answering ? { kind: "answer", terms: r.terms, hits: null, text: null } : { kind: "search", terms: r.terms, hits: null } }));
           // A question about how things stand: the Desk answers it from the chats found (only you are shown it).
           // Never from a chat that ran on another provider: nothing said there is put to Claude.
-          const onClaude = (hits: ChatHit[]) => hits.filter((h) => !offClaudeSessions.includes(h.id)).slice(0, 5);
+          const onClaude = (hits: ChatHit[]) => hits.slice(0, 5);
           const answer = (hits: ChatHit[]) => {
             const done = (text: string | null, error?: string) => deskEdit(entry.id, (e) => (e.outcome.kind === "answer" ? { ...e, outcome: { ...e.outcome, text, ...(error ? { error } : {}) } } : e));
             if (hits.length === 0) return done("");
@@ -2618,10 +2640,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       const s = chats.slots[slot];
       const found = s ? replyOf(slot, s, e.text, e.at) : null;
       if (!found) continue;
-      if (offClaude(slot)) {
-        deskEdit(e.id, (x) => ({ ...x, reply: { status: "off", key: found.key, outcome: found.outcome } }));
-        continue;
-      }
       const full = found.said.slice(0, FULL_MAX);
       const base = { key: found.key, full, outcome: found.outcome };
       if (!full.trim()) {
@@ -2788,7 +2806,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       status={state.status}
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
-      providers={providers.multi && hero && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
+      providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
       onSend={(text, draft) => {
         if (addTodoFromBox(text)) return;
         // Starting something new instead: the chats from last time aren't offered any more.
@@ -2827,7 +2845,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
-      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => sendIn(active, "/compact"), onClear: () => clearChat(active) } : undefined }}
+      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
@@ -2884,7 +2902,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   };
 
   if (state.status === "locating") return <div className="center muted">Looking for the claude CLI…</div>;
-  if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
+  if (state.status === "setup" && !agentReady && providerList !== null) return <SetupScreen error={state.setupError} onCheck={(path) => { locate(path); api.listProviders().then(setProviderList, () => {}); }} />;
 
   return (
     <ProvidersContext.Provider value={providers}><ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? startTemplate : null}>
@@ -2960,7 +2978,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       if (next) setDesks(next);
                     },
                   }}
-                  canSend={!!state.claudePath}
+                  canSend={agentReady}
                   onSend={deskSend}
                   onSendTo={deskSendTo}
                   onStartIn={(entry, folder) => deskStartIn(entry, folder)}
@@ -2990,13 +3008,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   <div className="center muted">Opening {basename(lastFolder!)}…</div>
                 ) : (
                   <Welcome claudePath={state.claudePath ?? ""} loadRecent={loadRecentFolders} skip={[...hiddenFolders, ...relocateMenu.moved.map((m) => m.old)]} onOpenFolder={openFolder} onPick={(path) => startFresh(path)}>
-                    {offeredTop.length > 0 && state.claudePath && !restoringAfterUpdate && <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />}
+                    {offeredTop.length > 0 && agentReady && !restoringAfterUpdate && <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />}
                   </Welcome>
                 )
               ) : hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
-                    {offeredTop.length > 0 && state.claudePath && !restoringAfterUpdate && (
+                    {offeredTop.length > 0 && agentReady && !restoringAfterUpdate && (
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
                     {chatExtras}
@@ -3054,7 +3072,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 follow={state.follow}
                 refreshKey={state.editCount}
                 lastEdit={{ slot: active, path: state.lastEdited, count: state.claudeEdits }}
-                todos={{ chats: todoChatList, onStart: state.claudePath && state.folder ? (todo) => startTodo(state.folder!, todo) : undefined, onOpenChat: switchTo, openKey: todosOpenKey || undefined }}
+                todos={{ chats: todoChatList, onStart: agentReady && state.folder ? (todo) => startTodo(state.folder!, todo) : undefined, onOpenChat: switchTo, openKey: todosOpenKey || undefined }}
                 onSaved={() => syncChanges(active)}
                 // Sent now when Claude is free, queued behind the turn when it's working.
                 onSummarizeRequest={

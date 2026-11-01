@@ -104,8 +104,8 @@ describe("with an endpoint set up", () => {
     fireEvent.change(box, { target: { value: "retry on 503" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await screen.findByRole("button", { name: "Stop" });
-    // The chip for who it runs on goes once the chat has begun.
-    expect(document.querySelector(".provider-picker")).toBeNull();
+    // Provider changes stay visible, but cannot interrupt a running turn.
+    expect(document.querySelector(".provider-picker button")).toBeDisabled();
     fireEvent.click(await screen.findByRole("button", { name: "Allow" }, { timeout: 10_000 }));
     await screen.findByRole("button", { name: "Send" }, { timeout: 20_000 });
     expect(document.querySelector(".turn-usage")?.textContent).toMatch(/tokens$/);

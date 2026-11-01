@@ -79,7 +79,7 @@ describe("the Desk that talks, on the phone", () => {
     expect(keys([]).indexOf("a:t2")).toBeLessThan(keys([]).indexOf("a:t1"));
   });
 
-  it("tells the Desk the last exchanges with what came back, naming nothing of a chat on another provider", () => {
+  it("tells the Desk the last exchanges with what came back, including chats on another provider", () => {
     const history = deskHistory(
       [sent({ say: "On it.", reply: { status: "done", failed: false, summary: "Fixed." } }), sent({ id: "g", text: "tidy", outcome: { kind: "sent", slot: "g", title: "Gemini", started: false, queued: false }, reply: { status: "done", failed: false, summary: "secret" } }), sent({ id: "t", text: "hi", say: "Hi!", outcome: { kind: "talk" } })],
       "home",
@@ -87,7 +87,7 @@ describe("the Desk that talks, on the phone", () => {
     );
     expect(history).toEqual([
       { you: "Fix it", desk: 'On it. (sent to "A"; it replied: Fixed.)' },
-      { you: "tidy", desk: "(sent to)" },
+      { you: "tidy", desk: '(sent to "Gemini"; it replied: secret)' },
       { you: "hi", desk: "Hi!" },
     ]);
   });

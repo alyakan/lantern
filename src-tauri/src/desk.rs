@@ -160,6 +160,9 @@ pub async fn route(claude: &Path, path_env: Option<&str>, text: &str, chats: &[C
             _ => unsure(chats),
         };
     }
+    if claude.as_os_str().is_empty() {
+        return match crate::provider::inference::codex(SYSTEM, &prompt(text, chats, projects), path_env).await { Ok(reply) => read(&reply, chats, projects), Err(_) => unsure(chats) };
+    }
     let mut cmd = tokio::process::Command::new(claude);
     cmd.args(args(&prompt(text, chats, projects))).current_dir(std::env::temp_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     if let Some(path) = path_env {
@@ -247,6 +250,7 @@ pub fn answer_args(prompt: &str) -> Vec<String> {
 /// user: nothing it says goes into a chat.
 pub async fn answer(claude: &Path, path_env: Option<&str>, question: &str, sources: &[Source]) -> Result<String, String> {
     let sources: Vec<Source> = sources.iter().take(ANSWER_CHATS).map(|s| Source { text: s.text.chars().rev().take(ANSWER_CHARS).collect::<Vec<_>>().into_iter().rev().collect(), ..s.clone() }).collect();
+    if claude.as_os_str().is_empty() { return crate::provider::inference::codex(ANSWER_SYSTEM, &answer_prompt(question, &sources), path_env).await; }
     let mut cmd = tokio::process::Command::new(claude);
     cmd.args(answer_args(&answer_prompt(question, &sources))).current_dir(std::env::temp_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     if let Some(path) = path_env {
@@ -406,6 +410,7 @@ pub fn summary_args(prompt: &str) -> Vec<String> {
 
 /// A short summary of a chat's reply to what the user asked from the Desk. Only ever shown to the user.
 pub async fn summary(claude: &Path, path_env: Option<&str>, question: &str, reply: &str) -> Result<String, String> {
+    if claude.as_os_str().is_empty() { return crate::provider::inference::codex(SUMMARY_SYSTEM, &summary_prompt(question, reply), path_env).await; }
     let mut cmd = tokio::process::Command::new(claude);
     cmd.args(summary_args(&summary_prompt(question, reply))).current_dir(std::env::temp_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     if let Some(path) = path_env {

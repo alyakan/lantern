@@ -6,7 +6,7 @@ use regex::Regex;
 use serde::Serialize;
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaseStatus {
     Passed,
@@ -14,7 +14,7 @@ pub enum CaseStatus {
     Skipped,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct TestCase {
     pub name: String,
     /// The file, class or describe block it belongs to, when the output says.
@@ -28,7 +28,7 @@ pub struct TestCase {
 }
 
 /// How the run went overall. A run can fail with no failed test: a suite that couldn't load, a build error.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Outcome {
     Passed,
@@ -37,7 +37,7 @@ pub enum Outcome {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct TestRun {
     pub framework: String,
     pub outcome: Outcome,

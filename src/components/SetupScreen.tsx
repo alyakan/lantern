@@ -9,18 +9,18 @@ export function SetupScreen({ error, onCheck }: { error: string | null; onCheck:
   const [path, setPath] = useState("");
   return (
     <div className="setup">
-      <h1>Claude CLI not found</h1>
-      <p className="welcome-lead">Lantern runs the Claude Code you already have, and couldn't find it on this Mac.</p>
+      <h1>No coding agent found</h1>
+      <p className="welcome-lead">Install Claude Code or Codex to start chats in Lantern.</p>
       {error && <p className="muted setup-error">{error}</p>}
       <ol>
         <li>
-          Install Claude Code: <ExternalLink href={INSTALL_URL}>how to install it</ExternalLink>.
+          Install Claude Code: <ExternalLink href={INSTALL_URL}>how to install it</ExternalLink>, or <ExternalLink href="https://developers.openai.com/codex/cli">install Codex</ExternalLink>.
         </li>
         <li>
-          Run <code>claude</code> once in a terminal and log in.
+          Run <code>claude</code> or <code>codex login</code> in a terminal to sign in.
         </li>
         <li>
-          Click “Check again”, or enter the full path to <code>claude</code>.
+          Click “Check again” to find installed providers. For a custom Claude installation, enter its full path.
         </li>
       </ol>
       <div className="setup-row">

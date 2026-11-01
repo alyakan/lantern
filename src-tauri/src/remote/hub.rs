@@ -211,7 +211,9 @@ impl Log {
                 }
             }
             UiEvent::BackgroundTasks { tasks } => self.background = tasks.clone(),
+            UiEvent::ProviderChanged { .. } => { self.commands = None; self.context = None; self.window = None; },
             UiEvent::ConversationReset => {
+                self.session_id = None;
                 self.first_prompt = None;
                 (self.todos, self.context, self.review) = (None, None, None);
             }
@@ -486,6 +488,8 @@ impl SessionHub {
         *self.providers.lock().unwrap() = if kept.len() < 2 { Vec::new() } else { kept };
     }
 
+    pub fn has_background(&self, slot: &str) -> bool { self.chats.lock().unwrap().get(slot).is_some_and(|c|!c.background.is_empty()) }
+
     pub fn providers(&self) -> Vec<RemoteProvider> {
         self.providers.lock().unwrap().clone()
     }
@@ -623,6 +627,16 @@ mod tests {
             Since::Events(e) => e.into_iter().map(|e| e.event).collect(),
             Since::TooOld { .. } => panic!("expected events"),
         }
+    }
+
+    #[test]
+    fn clearing_forgets_the_old_native_session_and_switching_drops_cached_commands() {
+        let hub = SessionHub::default();
+        feed(&hub, "a", vec![UiEvent::SessionStarted { session_id: "aaaa".into(), model: "m".into(), cwd: "/p".into(), permission_mode: "ask".into(), claude_version: "".into() }, UiEvent::Commands { commands: vec![crate::ui_event::SlashCommand { name: "compact".into(), description: "".into(), argument_hint: "".into() }] }]);
+        feed(&hub, "a", vec![UiEvent::ProviderChanged { provider: crate::provider::ProviderId::Codex.info(), key: "codex".into() }]);
+        assert!(!hub.extras("a").iter().any(|e| matches!(e, super::super::protocol::RemoteEvent::Commands { commands } if !commands.is_empty())));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.chat("a").unwrap().session_id, None);
     }
 
     #[test]

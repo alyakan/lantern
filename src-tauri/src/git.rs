@@ -536,7 +536,7 @@ pub struct BranchSummary {
     pub files: Vec<FileStat>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FileStat {
     pub path: String,
     pub added: u32,

@@ -22,6 +22,8 @@ pub struct SlotEvent {
 pub type FileIndex = (std::path::PathBuf, std::time::Instant, Arc<Vec<String>>);
 
 pub struct Slot {
+    pub control: tokio::sync::Mutex<()>,
+    pub models: Mutex<Vec<crate::ui_event::ModelOption>>,
     /// Its own lock, so starting or stopping one chat never waits on another.
     pub session: tokio::sync::Mutex<Option<Session>>,
     pub config: Mutex<Option<SessionConfig>>,
@@ -78,7 +80,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
+        let slot = Arc::new(Slot { control: Default::default(), models: Default::default(), session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }

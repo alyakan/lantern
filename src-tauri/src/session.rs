@@ -43,6 +43,14 @@ pub struct SessionConfig {
     pub endpoint: Option<GatewayLaunch>,
 }
 
+/// Image input shared by all clients. Wire encodings belong to each provider adapter.
+#[derive(Debug, Clone)]
+pub struct InputImage { pub media_type: String, pub data: String }
+impl InputImage {
+    fn claude(self) -> serde_json::Value { serde_json::json!({"type":"image","source":{"type":"base64","media_type":self.media_type,"data":self.data}}) }
+    fn codex(self) -> serde_json::Value { serde_json::json!({"type":"image","url":format!("data:{};base64,{}",self.media_type,self.data)}) }
+}
+
 /// One running agent process. An enum rather than a trait object: a session's calls are async, and each provider's has
 /// its own state.
 pub enum Session {
@@ -85,14 +93,16 @@ impl Session {
         }
     }
 
-    /// Says `text` to the agent, with `images` (the provider's own blocks for pictures) before it.
-    pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
+    /// Each adapter encodes the same image input in its own protocol.
+    pub async fn send_with(&mut self, text: &str, images: Vec<InputImage>) -> Result<(), String> {
         match self {
-            Session::Claude(s) => s.send_with(text, images).await,
-            // The blocks are Claude's; Codex takes pictures as files of its own, which nothing here makes yet.
-            Session::Codex(_) if !images.is_empty() => Err("A Codex chat can't take pictures yet. Send the message without them.".into()),
-            Session::Codex(s) => s.send(text).await,
+            Session::Claude(s) => s.send_with(text, images.into_iter().map(InputImage::claude).collect()).await,
+            Session::Codex(s) => s.send_with(text, images.into_iter().map(InputImage::codex).collect()).await,
         }
+    }
+
+    pub async fn compact(&mut self) -> Result<(), String> {
+        match self { Session::Claude(s) => s.send("/compact").await, Session::Codex(s) => s.compact().await }
     }
 
     /// Ends the current turn; the agent keeps running.
@@ -109,6 +119,18 @@ impl Session {
             Session::Claude(s) => s.set_model(model).await,
             Session::Codex(s) => s.set_model(model).await,
         }
+    }
+
+    /// A new provider must finish its handshake before it replaces a working session.
+    pub async fn ready(&mut self) -> Result<(), String> {
+        match self {
+            Session::Claude(s) => { s.initialize().await; Ok(()) },
+            Session::Codex(s) => s.wait_ready().await,
+        }
+    }
+
+    pub fn set_effort(&mut self, effort: Option<&str>) -> bool {
+        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) => false }
     }
 
     /// What the agent is told right after it starts, which the provider's protocol may need before the first message.
@@ -155,6 +177,13 @@ impl Session {
         match self {
             Session::Claude(_) => Err("Claude's conversation is read from its transcript file.".into()),
             Session::Codex(s) => s.transcript().await,
+        }
+    }
+
+    pub fn pending_permissions(&self) -> Vec<crate::permission::bridge::Pending> {
+        match self {
+            Session::Claude(_) => vec![],
+            Session::Codex(s) => s.pending_permissions(),
         }
     }
 
