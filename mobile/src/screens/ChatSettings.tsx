@@ -1,5 +1,5 @@
 import type { ConversationSettings } from "../sync/sync";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
@@ -10,7 +10,7 @@ import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
 import { ContextRow, UsageRow, WeekRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
-import { Button, Txt } from "../ui/components";
+import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
@@ -65,139 +65,90 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
   );
 }
 
+interface SettingsSection {
+  id: string;
+  title: string;
+  value: string;
+  options: Option[];
+  selected: string;
+  onPick: (value: string) => void;
+}
+
+/** A setting's current value, opening its choices inline without changing pages. */
+function SettingsLink({ title, value, expanded, onPress }: { title: string; value: string; expanded: boolean; onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${value}`} accessibilityHint={expanded ? "Collapses choices" : "Expands choices"} accessibilityState={{ expanded }} onPress={onPress} haptic="select" scaleTo={0.98}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: colors.card, borderRadius: radius.inner }}>
+      <Txt variant="body" style={{ flexShrink: 0 }}>{title}</Txt>
+      <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flex: 1, textAlign: "right" }}>{value}</Txt>
+      <Txt variant="body" tone="ink3" accessibilityElementsHidden>{expanded ? "⌃" : "⌄"}</Txt>
+    </PressScale>
+  );
+}
+
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
 function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
-  const colors = useColors();
   const insets = useSafeAreaInsets();
   const next = useRef<(() => void) | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const toggle = (id: string) => setExpanded((current) => current === id ? null : id);
+  const sections: SettingsSection[] = [];
+  if (configuration && onConfigure) {
+    const provider = providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider);
+    if (providers?.length) sections.push({ id: "provider", title: "Provider", value: provider, selected: configuration.provider,
+      options: providers.map((p) => ({ value: p.id, label: p.name, hint: "Continue this conversation with this provider", off })),
+      onPick: (provider) => onConfigure({ provider }) });
+    if (configuration.capabilities.model_switchable) sections.push({ id: "model", title: "Model", value: configuration.model ?? "Provider default", selected: configuration.model ?? "",
+      options: [{ value: "", label: "Provider default", hint: "Used for the next turn", off }, ...configuration.models.map((m) => ({ value: m, label: m, hint: "Used for the next turn", off }))],
+      onPick: (model) => onConfigure({ model: model || null }) });
+    if (configuration.capabilities.supports_effort && configuration.effort_levels.length) sections.push({ id: "effort", title: "Effort", value: configuration.effort ?? "Provider default", selected: configuration.effort ?? "",
+      options: configuration.effort_levels.map((e) => ({ value: e, label: e, hint: "Thinking effort", off })), onPick: (effort) => onConfigure({ effort }) });
+  }
+  if (workflows.length) sections.push({ id: "workflow", title: "Workflow", value: workflowLabel(chat.workflow ?? "chat"), selected: chat.workflow ?? "", options: workflows, onPick: onWorkflow });
+  if (pages) sections.push({ id: "show", title: "Show", value: pages.on ? "Pages" : "One list", selected: pages.on ? "pages" : "list", options: SHOW, onPick: (v) => pages.onChange(v === "pages") });
+  sections.push({ id: "permissions", title: "Permissions", value: modeLabel(chat.permissions ?? "ask"), selected: chat.permissions ?? "", options: modes, onPick: onMode });
+  if (presets.length) sections.push({ id: "presets", title: "Model preset", value: presets.find((p) => p.value === chat.preset)?.label ?? "Standard", selected: chat.preset ?? "", options: presets, onPick: onPreset });
+  const hasUsage = !!context || !!plan;
   return (
-    <Sheet
-      onClose={() => {
-        onClose();
-        next.current?.();
-      }}
-    >
+    <Sheet size="large" onClose={() => { onClose(); next.current?.(); }}>
       {(close, scroll) => (
-        <View style={[{ flexShrink: 1 }]}>
-          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
-            <Txt variant="title" accessibilityRole="header">
-              Chat settings
-            </Txt>
-            <Txt variant="small" tone="ink2">
-              {off ?? "The agent continues the same conversation when you change these."}
-            </Txt>
-            {context && <ContextRow context={context} />}
-            {plan && <UsageRow plan={plan} />}
-            {plan?.week && <WeekRow week={plan.week} />}
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.lg, paddingVertical: 10, gap: 8 }}>
+            <Txt variant="body" accessibilityRole="header" style={{ flex: 1, fontWeight: "700" }}>Chat settings</Txt>
+            <PressScale accessibilityRole="button" accessibilityLabel="Done" onPress={close} hitSlop={8} style={{ minWidth: 60, minHeight: 44, alignItems: "flex-end", justifyContent: "center" }}><Txt variant="body" tone="cobalt" style={{ fontWeight: "700" }}>Done</Txt></PressScale>
+          </View>
+          <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
+            <Txt variant="small" tone="ink2">{off ?? "Changes apply to this conversation."}</Txt>
             {loading ? (
-              <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}>
-                <Dots />
-              </View>
+              <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}><Dots /></View>
             ) : (
               <>
-                {configuration && onConfigure && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }}>Provider</Txt>
-                    {(providers ?? []).map((p) => <OptionRow key={p.id} option={{ value: p.id, label: p.name, hint: "Continue this conversation with this provider", off }} selected={p.id === configuration.provider} onPick={() => { onConfigure({ provider: p.id }); close(); }} />)}
-                    {configuration.capabilities.model_switchable && <>
-                      <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }}>Model</Txt>
-                      {[{ value: "", label: "Provider default" }, ...configuration.models.map((m) => ({ value: m, label: m }))].map((m) => <OptionRow key={m.value} option={{ ...m, hint: "Used for the next turn", off }} selected={m.value === (configuration.model ?? "")} onPick={() => { onConfigure({ model: m.value || null }); close(); }} />)}
-                    </>}
-                    {configuration.capabilities.supports_effort && <>
-                      <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }}>Effort</Txt>
-                      {configuration.effort_levels.map((e) => <OptionRow key={e} option={{ value: e, label: e, hint: "Thinking effort", off }} selected={e === configuration.effort} onPick={() => { onConfigure({ effort: e }); close(); }} />)}
-                    </>}
-                  </>
-                )}
-                {workflows.length > 0 && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                      Workflow
-                    </Txt>
-                    {workflows.map((o) => (
-                      <OptionRow
-                        key={o.value}
-                        option={o}
-                        selected={o.value === chat.workflow}
-                        onPick={() => {
-                          onWorkflow(o.value);
-                          close();
-                        }}
-                      />
-                    ))}
-                  </>
-                )}
-                {pages && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                      Show
-                    </Txt>
-                    {SHOW.map((o) => (
-                      <OptionRow
-                        key={o.value}
-                        option={o}
-                        selected={(o.value === "pages") === pages.on}
-                        onPick={() => {
-                          pages.onChange(o.value === "pages");
-                          close();
-                        }}
-                      />
-                    ))}
-                  </>
-                )}
-                <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                  Permissions
-                </Txt>
-                {modes.map((o) => (
-                  <OptionRow
-                    key={o.value}
-                    option={o}
-                    selected={o.value === chat.permissions}
-                    onPick={() => {
-                      onMode(o.value);
-                      close();
-                    }}
-                  />
+                {sections.map((section) => (
+                  <Fragment key={section.id}>
+                    <SettingsLink title={section.title} value={section.value} expanded={expanded === section.id} onPress={() => toggle(section.id)} />
+                    {expanded === section.id && <View style={{ gap: 6, paddingHorizontal: 6 }}>
+                      {section.options.map((option) => <OptionRow key={option.value} option={option} selected={option.value === section.selected} onPick={() => { section.onPick(option.value); close(); }} />)}
+                    </View>}
+                  </Fragment>
                 ))}
-                {presets.length > 0 && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                      Models
-                    </Txt>
-                    {presets.map((o) => (
-                      <OptionRow
-                        key={o.value}
-                        option={o}
-                        selected={o.value === chat.preset}
-                        onPick={() => {
-                          onPreset(o.value);
-                          close();
-                        }}
-                      />
-                    ))}
-                  </>
+                {hasUsage && <SettingsLink title="Usage & context" value={context ? contextOf(context).label : "View usage"} expanded={expanded === "usage"} onPress={() => toggle("usage")} />}
+                {expanded === "usage" && <>
+                  {context && <ContextRow context={context} />}
+                  {plan && <UsageRow plan={plan} />}
+                  {plan?.week && <WeekRow week={plan.week} />}
+                </>}
+                {onAskClose && (
+                  <PressScale accessibilityRole="button" accessibilityLabel="Close this chat" onPress={() => {
+                    // The question comes once this sheet is away: iOS shows no sheet while another is still going.
+                    next.current = onAskClose;
+                    close();
+                  }} haptic="select" scaleTo={0.98} style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}>
+                    <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>Close this chat</Txt>
+                  </PressScale>
                 )}
               </>
             )}
-            {onAskClose && (
-              <PressScale
-                accessibilityRole="button"
-                accessibilityLabel="Close this chat"
-                onPress={() => {
-                  // The question comes once this sheet is away: iOS shows no sheet while another is still going.
-                  next.current = onAskClose;
-                  close();
-                }}
-                haptic="select"
-                scaleTo={0.98}
-                style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}
-              >
-                <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>
-                  Close this chat
-                </Txt>
-              </PressScale>
-            )}
-            <Button label="Done" kind="ghost" onPress={close} />
           </ScrollView>
         </View>
       )}

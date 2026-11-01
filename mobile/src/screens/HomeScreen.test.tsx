@@ -239,7 +239,7 @@ describe("Home's chats by project", () => {
     expect(screen.getByRole("button", { name: "prayers, 1 chat" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
     // The project is in the heading, not repeated under every chat.
-    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
   });
 
   it("puts each project and its chats in a card of their own, its header tinted in the project's colour", async () => {
@@ -251,10 +251,10 @@ describe("Home's chats by project", () => {
     const prayers = within(screen.getByTestId("project-card-prayers"));
     // Each card holds its project's header and its chats, and nobody else's.
     expect(lantern.getByRole("button", { name: "lantern, 2 chats" })).toBeTruthy();
-    expect(lantern.getByRole("button", { name: "Release" })).toBeTruthy();
-    expect(lantern.getByRole("button", { name: "Fix sync" })).toBeTruthy();
-    expect(lantern.queryByRole("button", { name: "Prayers widget" })).toBeNull();
-    expect(prayers.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Fix sync, Claude" })).toBeTruthy();
+    expect(lantern.queryByRole("button", { name: "Prayers widget, Claude" })).toBeNull();
+    expect(prayers.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
     // The header is a band of the project's colour at about 15%.
     expect(StyleSheet.flatten(lantern.getByRole("button", { name: "lantern, 2 chats" }).props.style).backgroundColor).toBe("#5b5bd626");
     expect(StyleSheet.flatten(prayers.getByRole("button", { name: "prayers, 1 chat" }).props.style).backgroundColor).toBe("#0f8a7e26");
@@ -266,7 +266,7 @@ describe("Home's chats by project", () => {
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
     const lantern = within(screen.getByTestId("project-card-lantern"));
     expect(lantern.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
-    expect(lantern.queryByRole("button", { name: "Release" })).toBeNull();
+    expect(lantern.queryByRole("button", { name: "Release, Claude" })).toBeNull();
   });
 
   it("holds every chat in a card in from the card's edges, with no lines between them", async () => {
@@ -277,7 +277,7 @@ describe("Home's chats by project", () => {
     for (const [slot, title] of [["a", "First"], ["b", "Second"], ["c", "Third"]]) {
       expect(rowStyle(slot).marginHorizontal).toBe(8);
       expect(rowStyle(slot).borderTopWidth).toBeUndefined();
-      expect(StyleSheet.flatten(screen.getByRole("button", { name: title }).props.style).paddingHorizontal).toBe(8);
+      expect(StyleSheet.flatten(screen.getByRole("button", { name: `${title}, Claude` }).props.style).paddingHorizontal).toBe(8);
     }
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
   });
@@ -296,7 +296,7 @@ describe("Home's chats by project", () => {
     expect(style(screen.getByRole("button", { name: /^Second/ })).backgroundColor).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
-    expect(style(screen.getByRole("button", { name: "First" })).backgroundColor).toBeUndefined();
+    expect(style(screen.getByRole("button", { name: "First, Claude" })).backgroundColor).toBeUndefined();
     await view.unmount();
   });
 
@@ -335,17 +335,17 @@ describe("Home's chats by project", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
-    expect(screen.queryByRole("button", { name: "Release" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Release, Claude" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
-    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
   });
 
   it("opens a chat from under its project", async () => {
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Prayers widget" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Prayers widget, Claude" }));
     expect(h.onOpenChat).toHaveBeenCalledWith("b");
   });
 
@@ -403,7 +403,7 @@ describe("closing a chat from Home", () => {
 
   it("is offered when a chat is held down, asks first, and closes it on the Mac", async () => {
     const { lastOf } = await home();
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
     await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
     await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(lastOf("close")).toBeUndefined();
@@ -413,7 +413,7 @@ describe("closing a chat from Home", () => {
 
   it("says Claude is busy for a chat that is working, instead of asking", async () => {
     await home();
-    await fireEvent(screen.getByRole("button", { name: "Widget, lantern, working" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Widget, Claude, lantern, working" }), "longPress");
     await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
     await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(screen.getByText("Claude is busy in this chat. Stop it first, then close it.")).toBeTruthy();
@@ -422,7 +422,7 @@ describe("closing a chat from Home", () => {
 
   it("offers no closing for a Mac that can't close chats (the other actions are still there)", async () => {
     await home(connected);
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
     expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Close chat…" })).toBeNull();
     expect(screen.queryByText("Close this chat?")).toBeNull();
@@ -440,7 +440,7 @@ describe("what holding a chat down offers besides closing it", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     const order = () => screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /^(Release|Widget)/.test(l));
     expect(order()[0]).toMatch(/^Widget/);
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
     await fireEvent.press(await screen.findByRole("button", { name: "Pin to the top" }));
     await waitFor(() => expect(order()[0]).toMatch(/^Release.*pinned/));
     await fireEvent(screen.getByRole("button", { name: /^Release.*pinned/ }), "longPress");
@@ -451,17 +451,17 @@ describe("what holding a chat down offers besides closing it", () => {
   it("marks an idle chat unread, and read again", async () => {
     mockSeen = { a: NOW, b: NOW };
     await renderWith(<HomeScreen {...handlers()} />, { chats });
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
     await fireEvent.press(await screen.findByRole("button", { name: "Mark as unread" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Release, lantern, unread" })).toBeTruthy());
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern, unread" }), "longPress");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, Claude, lantern, unread" })).toBeTruthy());
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern, unread" }), "longPress");
     await fireEvent.press(await screen.findByRole("button", { name: "Mark as read" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Release, lantern" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, Claude, lantern" })).toBeTruthy());
   });
 
   it("does not offer read or unread for a chat that is working", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "w", title: "Busy", status: "working" })] });
-    await fireEvent(screen.getByRole("button", { name: "Busy, lantern, working" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Busy, Claude, lantern, working" }), "longPress");
     expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Mark as/ })).toBeNull();
   });
@@ -486,9 +486,9 @@ describe("project cards that stay folded", () => {
     mockFolded = ["lantern"];
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Release" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Release, Claude" })).toBeNull());
     expect(screen.getByRole("button", { name: "lantern, 1 chat" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
   });
 });
 
@@ -504,10 +504,10 @@ describe("what is unread", () => {
   it("marks a chat that has moved on since it was shown: a dot, a bold title and a stronger time, while a read one is plain", async () => {
     mockSeen = marks;
     await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
-    const news = await screen.findByRole("button", { name: "Has news, lantern, unread" });
+    const news = await screen.findByRole("button", { name: "Has news, Claude, lantern, unread" });
     expect(within(news).getByTestId("unread-dot", HIDDEN)).toBeTruthy();
     expect(StyleSheet.flatten(within(news).getByText("Has news").props.style).fontWeight).toBe("800");
-    const plain = screen.getByRole("button", { name: "Seen already, lantern" });
+    const plain = screen.getByRole("button", { name: "Seen already, Claude, lantern" });
     expect(within(plain).queryByTestId("unread-dot", HIDDEN)).toBeNull();
     expect(StyleSheet.flatten(within(plain).getByText("Seen already").props.style).fontWeight).toBe("400");
   });
@@ -515,7 +515,7 @@ describe("what is unread", () => {
   it("calls nothing unread the first time, when it has no idea what was shown", async () => {
     mockSeen = null;
     await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Has news, lantern" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Has news, Claude, lantern" })).toBeTruthy());
     expect(screen.queryByTestId("unread-dot", HIDDEN)).toBeNull();
     // And from then on, what happens in them does count.
     await waitFor(() => expect(mockSeen).toEqual({ a: NOW - 60_000, b: NOW - 30_000 }), SAVED);
@@ -541,7 +541,7 @@ describe("what is unread", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     const card = await screen.findByRole("button", { name: "lantern, 2 chats, 1 unread" });
     expect(within(card).getByTestId("unread-card-dot", HIDDEN)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Has news, lantern, unread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Has news, Claude, lantern, unread" })).toBeNull();
   });
 });
 

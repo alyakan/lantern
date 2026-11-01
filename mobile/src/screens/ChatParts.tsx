@@ -492,7 +492,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
     </View>
   );
 
-  const status = item.state === "withdrawn" ? "Claude stopped asking" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
+  const status = item.state === "withdrawn" ? "No longer pending" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
   const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} />;
 
   if (item.state === "open" || settling) {

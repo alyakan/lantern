@@ -1,4 +1,5 @@
 import { View } from "react-native";
+import { ProviderBadge } from "../ui/ProviderBadge";
 import { Button, Tag, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
 import { radius, shadow, space, useColors } from "../ui/theme";
@@ -18,7 +19,10 @@ export function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat:
       {behind >= 1 && <View style={{ position: "absolute", left: 7, right: 7, top: 7, bottom: -2, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.85 }} />}
       {/* A new card on top (the one before was answered) comes in, instead of the text changing under the eye. */}
       <FadeSlideIn key={front.waiting.request_id} from={12} style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 18, gap: 4 }, shadow.card]}>
-        <Tag>{front.view.tag}</Tag>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Tag>{front.view.tag}</Tag>
+          {front.chat && <ProviderBadge provider={front.chat.provider} />}
+        </View>
         <Txt variant="heading" style={{ marginTop: 8 }}>
           {front.view.title}
         </Txt>

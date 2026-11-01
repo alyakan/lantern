@@ -246,11 +246,15 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
 }
 
 /// Sends an event of chat `slot` out through the bus: to the window, the hub and any paired phone.
-fn publish(app: &AppHandle, slot: &str, mut event: ui_event::UiEvent) {
+fn publish(app: &AppHandle, slot: &str, event: ui_event::UiEvent) {
     if let Some(state) = app.try_state::<AppState>() {
-        state.conversations.observe(slot, &mut event);
-        state.remote.publish(slot, event);
+        publish_state(&state, slot, event);
     }
+}
+
+fn publish_state(state: &AppState, slot: &str, mut event: ui_event::UiEvent) {
+    state.conversations.observe(slot, &mut event);
+    state.remote.publish(slot, event);
 }
 
 /// Sends a chat's events out (see `publish`), and lets the orchestra see them too (a worker finishing a turn wakes its
@@ -815,7 +819,7 @@ async fn stop_turn(app: &AppHandle, slot: &str) {
         x.interrupt().await;
     }
     for request_id in s.bridge.cancel_all() {
-        state.remote.publish(slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
+        publish_state(&state, slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
     }
 }
 
@@ -2972,7 +2976,7 @@ async fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bo
         }
     }
     if answered {
-        state.remote.publish(slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
+        publish_state(state, slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
         Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())

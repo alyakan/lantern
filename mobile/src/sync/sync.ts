@@ -51,6 +51,7 @@ export class Sync {
   private listeners = new Set<() => void>();
   private queue: Action[] = [];
   private scheduled = false;
+  private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
   private readonly schedule: (fn: () => void) => void;
@@ -100,6 +101,7 @@ export class Sync {
       if (statuses(msg.chats) !== statuses(this.state.chats)) void this.refreshWaiting();
     }
     this.apply({ type: "pushed", msg });
+    if (msg.type === "reset" && msg.done) void this.refreshWaiting();
   };
 
   /** Forgets everything (the phone was unpaired): the next Mac starts from nothing. */
@@ -141,13 +143,17 @@ export class Sync {
   }
 
   async refreshWaiting() {
+    this.flush();
+    const session = this.session;
+    const request = ++this.waitingRequest;
+    const observedPrompts = Object.fromEntries(Object.entries(this.state.views).map(([slot, view]) => [slot, view.items.filter((it) => it.kind === "prompt" && it.state === "open").map((it) => it.id)]));
     try {
       const list = await this.ask<Waiting[]>({ op: "list_waiting" });
-      if (Array.isArray(list)) this.apply({ type: "waiting", list });
+      if (this.session === session && request === this.waitingRequest && Array.isArray(list)) this.apply({ type: "waiting", list, observedPrompts });
     } catch {
       // Not connected: it is asked again when a connection comes up. Connected but it failed: what was known stays, and Home
       // shows that rather than waiting for ever on an answer that isn't coming.
-      if (this.session) this.apply({ type: "waiting", list: this.state.waiting });
+      if (this.session === session && request === this.waitingRequest && this.session) this.apply({ type: "waiting", list: this.state.waiting });
     }
   }
 
@@ -453,6 +459,7 @@ export class Sync {
     if (hidden === 0) return;
     const page = await this.ask<EarlierPage>({ op: "earlier", slot, hidden });
     this.apply({ type: "earlier", slot, events: page.events, hidden: page.hidden });
+    void this.refreshWaiting();
   }
 
   registerPushToken(token: string) {

@@ -7,6 +7,7 @@ import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import { loadDeskLog, saveDeskLog } from "../deskLog";
 import { useController, useSyncState } from "../shell/hooks";
 import { Chip, Txt } from "../ui/components";
+import { ProviderBadge } from "../ui/ProviderBadge";
 import { AboveKeyboard, barRoom } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
@@ -38,6 +39,7 @@ const PANEL_WIDTH = 360;
 /** The answers that finished on this Desk, one quiet line each, newest first: a few, the rest on asking. A line opens its chat. */
 function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen: (slot: string) => void }) {
   const colors = useColors();
+  const { chats } = useSyncState();
   const [all, setAll] = useState(false);
   if (list.length === 0) return null;
   const shown = all ? list : list.slice(0, FINISHED_SHOWN);
@@ -61,6 +63,7 @@ function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen: (slot:
               </Txt>
               {line ? <Txt variant="small" tone={bad ? "stop" : "ink2"}>{`: ${line}`}</Txt> : null}
             </Txt>
+            {chats.some((chat) => chat.slot === c.slot) && <ProviderBadge provider={chats.find((chat) => chat.slot === c.slot)?.provider} />}
             {c.at !== null && (
               <Txt variant="tiny" tone="ink3">
                 {ago(c.at, now)}

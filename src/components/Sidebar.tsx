@@ -405,7 +405,7 @@ function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer:
 /** What a row says to VoiceOver (and shows, once the pane is open): the title, the project and the status. */
 const describe = (chip: CompactChip, project: string, full: boolean) => {
   const extra = full ? `${chip.pinned ? ", pinned" : ""}${chip.background > 0 ? `, ${chip.background} running in the background` : ""}` : "";
-  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
+  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.provider ?? "Claude"}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
 };
 
 /**
@@ -441,6 +441,7 @@ function ChatRow({ chip, project, onClick, target, closer, full }: { chip: Compa
             {full ? (
               <span className="sb-title-line">
                 <span className="sb-title">{title}</span>
+                <span className="sb-provider">{chip.provider ?? "Claude"}</span>
                 {chip.pinned && (
                   <span className="sb-pin">
                     <PinIcon />

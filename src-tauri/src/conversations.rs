@@ -127,7 +127,7 @@ impl Store {
         c.updated_ms = crate::remote::now_ms();
         c.events.push(encode(event));
         if c.id.is_empty() { return; }
-        let flush = matches!(event, UiEvent::SessionStarted { .. } | UiEvent::UserText { .. } | UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } | UiEvent::ConversationReset);
+        let flush = matches!(event, UiEvent::SessionStarted { .. } | UiEvent::UserText { .. } | UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } | UiEvent::ConversationReset | UiEvent::PermissionResolved { .. } | UiEvent::PermissionWithdrawn { .. });
         if flush {
             let c = c.clone();
             d.chats.insert(c.id.clone(), c.clone());
@@ -258,6 +258,20 @@ mod regression_tests {
         store.observe("s1", &mut UiEvent::UserText { text: "Keep my first message".into(), at: None, sent_by: Some("desktop".into()), images: 0 });
         store.observe("s1", &mut UiEvent::SessionStarted { session_id: "aaaa".into(), model: "m".into(), cwd: "/p".into(), permission_mode: "ask".into(), claude_version: "".into() });
         assert!(store.get("aaaa").unwrap().words().contains("Keep my first message"));
+    }
+
+    #[test]
+    fn approval_outcomes_are_durable_before_the_turn_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(Some(dir.path().into()));
+        store.attach("s1", chat("aaaa"));
+        store.observe("s1", &mut UiEvent::PermissionRequested { request_id: "allowed".into(), tool_name: "Bash".into(), input: serde_json::json!({}) });
+        store.observe("s1", &mut UiEvent::PermissionResolved { request_id: "allowed".into(), allow: true, by: "desktop".into() });
+        store.observe("s1", &mut UiEvent::PermissionRequested { request_id: "cancelled".into(), tool_name: "Bash".into(), input: serde_json::json!({}) });
+        store.observe("s1", &mut UiEvent::PermissionWithdrawn { request_id: "cancelled".into() });
+        let replay = Store::load(Some(dir.path().into())).get("aaaa").unwrap().replay();
+        assert!(replay.iter().any(|e| matches!(e, UiEvent::PermissionResolved { request_id, allow: true, .. } if request_id == "allowed")));
+        assert!(replay.iter().any(|e| matches!(e, UiEvent::PermissionWithdrawn { request_id } if request_id == "cancelled")));
     }
 
     #[test]

@@ -109,7 +109,7 @@ export const emptyView: ChatView = { items: [], commands: [], todos: [], context
 export type Action =
   | { type: "welcome"; epoch: number }
   | { type: "pushed"; msg: Pushed }
-  | { type: "waiting"; list: Waiting[] }
+  | { type: "waiting"; list: Waiting[]; /** Prompts visible before this pending-list request began; newer prompts are untouched. */ observedPrompts?: Record<string, string[]> }
   /** The Desk, as the Mac answered when asked (it pushes it too, as it changes). */
   | { type: "desk"; desk: RemoteDesk }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
@@ -201,7 +201,7 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "permission_withdrawn":
       return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: "withdrawn" } : p)) };
     case "permission_resolved":
-      return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: event.allow ? "allowed" : "denied", by: event.by } : p)) };
+      return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" || p.state === "withdrawn" ? { ...p, state: event.allow ? "allowed" : "denied", by: event.by } : p)) };
     case "hook_turn": {
       // Named for the message that began the turn, like its end, so the same hook told twice is one.
       const began = [...items].reverse().find((it) => it.kind === "user");
@@ -255,8 +255,17 @@ export function reducer(state: State, action: Action): State {
       if (state.epoch === action.epoch) return state.single === null ? state : { ...state, single: null };
       // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again.
       return { ...state, epoch: action.epoch, single: null, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
-    case "waiting":
-      return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+    case "waiting": {
+      const views = { ...state.views };
+      for (const [slot, ids] of Object.entries(action.observedPrompts ?? {})) {
+        const view = views[slot];
+        if (!view) continue;
+        const observed = new Set(ids);
+        const pending = new Set(action.list.filter((w) => w.slot === slot).map((w) => w.request_id));
+        views[slot] = { ...view, items: view.items.map((it) => it.kind === "prompt" && it.state === "open" && observed.has(it.id) && !pending.has(it.id) ? { ...it, state: "withdrawn" } : it) };
+      }
+      return { ...state, views, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+    }
     case "desk":
       return { ...state, desk: action.desk };
     case "sending": {
@@ -285,7 +294,11 @@ export function reducer(state: State, action: Action): State {
     }
     case "earlier": {
       const view = state.views[action.slot] ?? emptyView;
-      const earlier = applyAll({ ...emptyView }, action.events).items;
+      const earlier = applyAll({ ...emptyView }, action.events).items.map((it) => {
+        if (it.kind !== "prompt") return it;
+        const current = view.items.find((item) => item.kind === "prompt" && item.id === it.id);
+        return current?.kind === "prompt" && current.state !== "open" ? current : it;
+      });
       return { ...state, views: { ...state.views, [action.slot]: { ...view, hidden: action.hidden, items: [...earlier, ...view.items.filter((it) => !earlier.some((e) => e.kind === it.kind && e.id === it.id))] } } };
     }
     case "pushed": {
