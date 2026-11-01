@@ -1,3 +1,4 @@
+import type { ConversationSettings } from "../sync/sync";
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AppState, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
@@ -109,11 +110,21 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const controller = useController();
   const { sync } = controller;
   const { chats, views, plan, workingSince } = useSyncState();
+  const chat = chats.find((c) => c.slot === slot);
   const canOutput = useMacCan("output");
   // A Mac that can read a reviewed file's diff from the PR or branch under review; an older one only has the chat's own edits.
   const canReviewDiff = useMacCan("reviewdiff");
   const canShell = useMacCan("shell");
-  const canImages = useMacCan("images");
+  const macImages = useMacCan("images");
+  const canConversation = useMacCan("conversation");
+  const [configuration, setConfiguration] = useState<ConversationSettings | null>(null);
+  useEffect(() => {
+    let current = true;
+    setConfiguration(null);
+    if (canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, () => {});
+    return () => { current = false; };
+  }, [slot, chat?.provider, canConversation, sync]);
+  const canImages = macImages && (configuration?.capabilities.supports_images ?? !chat?.provider);
   const canTodos = useMacCan("todos");
   const canRename = useMacCan("rename");
   const lock = useAppLock();
@@ -132,7 +143,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const glass = useGlass();
   const [top, setTop] = useState(0);
   const [bottom, setBottom] = useState(0);
-  const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
   const working = chat?.status === "working";
   const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
@@ -407,21 +417,21 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
   // Step by step, whose pages they would cut across, not during a turn, which the Mac waits for too, and not while the chat sleeps);
   // Clear asks first, as the Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
-  const commandHint = (what: string) => (asleep ? "Wake the chat first" : working ? "Once Claude has finished its turn" : what);
+  const commandHint = (what: string) => (asleep ? "Wake the chat first" : working ? "Once the agent has finished its turn" : what);
   const barTools: BarTool[] = [
-    ...(stepsChat
+    ...(stepsChat || (canConversation ? !configuration : !!chat?.provider)
       ? []
       : [
-          { label: "Compact", icon: "compact" as const, hint: commandHint("Summarises the chat so far to free up context"), disabled: !online || working || asleep, onPress: () => void sync.send(slot, "/compact") },
+          { label: "Compact", icon: "compact" as const, hint: commandHint("Summarises the chat so far to free up context"), disabled: !online || working || asleep || configuration?.capabilities.supports_compact === false, onPress: () => void sync.conversationAction(slot, "compact").catch(fail) },
           {
             label: "Clear",
             icon: "clear" as const,
             hint: commandHint("Starts the conversation afresh"),
-            disabled: !online || working || asleep,
+            disabled: !online || working || asleep || configuration?.capabilities.supports_clear === false,
             onPress: () =>
-              Alert.alert("Clear this conversation?", "Claude forgets this conversation. The files it changed stay as they are.", [
+              Alert.alert("Clear this conversation?", "The agent forgets this conversation. The files it changed stay as they are.", [
                 { text: "Keep it", style: "cancel" },
-                { text: "Clear", style: "destructive", onPress: () => void sync.send(slot, "/clear") },
+                { text: "Clear", style: "destructive", onPress: () => void sync.conversationAction(slot, "clear").catch(fail) },
               ]),
           },
         ]),

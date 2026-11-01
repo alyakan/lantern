@@ -51,6 +51,9 @@ export interface Capabilities {
   can_lead_team: boolean;
   /** A paired phone can see and answer its approval cards (they come through Claude Code's permission bridge); Codex's ask in its own protocol. */
   phone_approvals: boolean;
+  supports_images?: boolean;
+  supports_compact?: boolean;
+  supports_clear?: boolean;
 }
 
 export interface ProviderInfo {
@@ -85,6 +88,7 @@ export interface EndpointStatus extends Endpoint {
 }
 
 export type UiEvent =
+  | { kind: "provider_changed"; provider: ProviderInfo; key: string }
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
   | { kind: "user_text"; text: string; at?: number; sent_by?: string; images?: number }
   | { kind: "thinking"; parent: string | null }

@@ -401,6 +401,7 @@ export function hasPendingPrompt(items: ChatItem[]): boolean {
 
 export type Action =
   | { type: "ui_event"; event: UiEvent }
+  | { type: "agent_available" }
   | { type: "claude_found"; path: string }
   | { type: "claude_missing"; error: string }
   | { type: "folder_opened"; folder: string }
@@ -564,6 +565,8 @@ function lastLine(text: string): string {
 
 function applyEvent(state: State, ev: UiEvent): State {
   switch (ev.kind) {
+    case "provider_changed":
+      return reducer(state, { type: "provider_set", provider: { ...ev.provider, id: ev.key } });
     case "session_started":
       // A claude that has started is awake, whatever said it was asleep before.
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
@@ -842,6 +845,8 @@ export function reducer(state: State, action: Action): State {
       const aside = ev.kind === "agent_setup" || ev.kind === "session_started" || ev.kind === "commands" || ev.kind === "models" || ev.kind === "mcp_tools" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
       return next === state ? state : { ...next, activityAt: aside ? state.activityAt : Date.now() };
     }
+    case "agent_available":
+      return { ...state, status: state.folder ? state.status : "no_folder", setupError: null };
     case "claude_found":
       return { ...state, claudePath: action.path, setupError: null, status: state.folder ? state.status : "no_folder" };
     case "claude_missing":
@@ -886,9 +891,9 @@ export function reducer(state: State, action: Action): State {
     case "provider_set": {
       const next = action.provider;
       // Another provider's models, commands and tools are not this one's: they come again from its own session.
-      const moved = providerIdOf(state.provider) !== next.id ? { models: [], commands: [], mcpTools: [], modelUsage: [], model: null } : {};
+      const moved = providerIdOf(state.provider) !== next.id ? { models: [], commands: [], mcpTools: [], modelUsage: [], model: null, contextUsed: null } : {};
       // Dollars it can't report are taken away, so nothing shown for this chat is a price it never had (a provider told late).
-      const unpriced = reportsUsd(next) ? {} : { costBase: 0, costSeen: 0, sessionCost: null, items: state.items.map((it): ChatItem => (it.type === "turn" && it.cost ? { ...it, cost: null } : it)) };
+      const unpriced = reportsUsd(next) ? {} : { costBase: 0, costSeen: 0, sessionCost: null, items: state.provider ? state.items : state.items.map((it): ChatItem => (it.type === "turn" && it.cost ? { ...it, cost: null } : it)) };
       return { ...state, ...moved, ...unpriced, provider: next };
     }
     case "user_sent": {

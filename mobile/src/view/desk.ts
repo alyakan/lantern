@@ -122,19 +122,17 @@ export const HISTORY_MAX = 8;
 
 /**
  * The Desk's last few exchanges on one Desk, for it to follow the conversation: your words, and what it said and did in a few
- * words (what came back too). A chat on another provider is named by nothing: nothing said there is put to Claude.
+ * words, including what came back from every provider.
  */
-export function deskHistory(entries: DeskEntry[], desk: string, chats: RemoteChat[]): { you: string; desk: string }[] {
-  const off = (slot: string) => !!chats.find((c) => c.slot === slot)?.provider;
+export function deskHistory(entries: DeskEntry[], desk: string, _chats: RemoteChat[]): { you: string; desk: string }[] {
   return entries
     .filter((e) => e.desk === desk && e.outcome.kind !== "routing")
     .slice(-HISTORY_MAX)
     .map((e) => {
       const o = e.outcome;
-      const hidden = o.kind === "sent" && off(o.slot);
       const did =
         o.kind === "sent"
-          ? `(${o.started ? "started a chat" : "sent to"}${hidden ? "" : ` "${o.title}"`}${e.reply?.status === "done" && !hidden ? `; it replied: ${e.reply.summary}` : ""})`
+          ? `(${o.started ? "started a chat" : "sent to"} "${o.title}"${e.reply?.status === "done" ? `; it replied: ${e.reply.summary}` : ""})`
           : o.kind === "ask"
             ? "(asked which chat)"
             : o.kind === "search"

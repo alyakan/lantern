@@ -677,10 +677,10 @@ done"#,
         let (sink, mut rx) = channel_sink();
         let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
         let block = serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
-        s.send_with("what is this?", vec![block.clone()]).await.unwrap();
+        s.send_with("what is this?", vec![crate::session::InputImage { media_type: "image/jpeg".into(), data: "/9j/4AAQ".into() }]).await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
         // A picture alone is a message of one block, with no empty text after it; words alone are as they always were.
-        s.send_with("", vec![block.clone()]).await.unwrap();
+        s.send_with("", vec![crate::session::InputImage { media_type: "image/jpeg".into(), data: "/9j/4AAQ".into() }]).await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
         s.send("just words").await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;

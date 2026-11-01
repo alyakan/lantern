@@ -315,6 +315,16 @@ export class Sync {
     return this.ask<RemoteUserTodos>({ op: "todo_edit", project, edit });
   }
 
+  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null): Promise<ConversationSettings> {
+    if (!this.has("conversation")) return Promise.reject(new Error("Update Lantern on your Mac to change providers."));
+    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change });
+  }
+
+  conversationAction(slot: string, action: "compact" | "clear") {
+    if (!this.has("conversation")) return this.send(slot, `/${action}`);
+    return this.ask({ op: "conversation_action", slot, action });
+  }
+
   /** Whether this Mac says it can do `feature` (Welcome's features); an older Mac ends the connection at a request it doesn't know. */
   has(feature: string): boolean {
     return this.session?.welcome.features?.includes(feature) === true;
@@ -464,3 +474,5 @@ export class Sync {
     return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}), ...(state.start_token ? { start_token: state.start_token } : {}) });
   }
 }
+
+export type ConversationSettings = import("../protocol/generated/ConversationConfiguration").ConversationConfiguration;

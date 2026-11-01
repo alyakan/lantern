@@ -85,6 +85,10 @@ export const api = {
   saveEndpoints: (endpoints: Endpoint[]) => invoke<Endpoint[]>("save_endpoints", { endpoints }),
   /** Asks an endpoint what models it serves; rejects, in words, when it can't say (then they are typed). */
   fetchEndpointModels: (url: string, keyEnv: string | null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv }),
+  conversationMetadata: (sessionId: string) => invoke<string | null>("conversation_metadata", { sessionId }),
+  conversationSettings: (slot: string, change?: { provider?: string; model?: string | null; effort?: string | null }) => invoke<import("../mobile/src/protocol/generated/ConversationConfiguration").ConversationConfiguration>("conversation_settings", { slot, change: change ?? null }),
+  conversationAction: (slot: string, action: "compact" | "clear") => invoke<void>("conversation_action", { slot, action }),
+  onConversationConfigured: (f: (r: { slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }) => void) => listen<{ slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }>("conversation-configured", (e) => f(e.payload)),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
   applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>

@@ -191,7 +191,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               </Txt>
             ) : !(supported && controls) ? (
               <Txt variant="small" tone="ink2">
-                It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.
+                It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.
               </Txt>
             ) : null}
 
@@ -199,7 +199,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               accessibilityLabel="What to start with"
               value={text}
               {...list}
-              placeholder="What should Claude start with?"
+              placeholder={chosen ? `What should ${chosen.name} start with?` : "What should the agent start with?"}
               placeholderTextColor={colors.ink3}
               multiline
               editable={!busy}
@@ -254,7 +254,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                             ))}
                           </ScrollView>
                           <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                            {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac is what this project's chats use there (Claude, if that is Codex: a phone can't answer its questions)."}
+                            {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac uses this project’s selected provider."}
                           </Txt>
                         </View>
                       )}
@@ -280,7 +280,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                           })}
                         </View>
                         <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                          {note ?? (mode === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.")}
+                          {note ?? (mode === "auto" ? "It starts on Auto: a classifier approves most actions, so the agent rarely asks. Its questions come to this phone." : "It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.")}
                         </Txt>
                       </View>
                       {showPresets && (

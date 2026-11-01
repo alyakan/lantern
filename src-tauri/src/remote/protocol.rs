@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK, PHONE_SINGLE];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK, PHONE_SINGLE];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -260,6 +260,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
             let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
             R::Commands { commands: commands.iter().take(COMMANDS_MAX).map(|c| RemoteCommand { name: cut(&c.name, 80), description: cut(&c.description, 200), argument_hint: cut(&c.argument_hint, 80) }).collect() }
         }
+        U::ProviderChanged { .. } => R::Commands { commands: vec![] },
         U::Todos { parent: None, items } => R::Todos { items: items.iter().map(|t| RemoteTodo { content: t.content.clone(), status: t.status.clone(), active_form: t.active_form.clone() }).collect() },
         U::ContextUsed { tokens } => R::Context { tokens: *tokens, window: None },
         U::BackgroundTasks { tasks } => R::Background { tasks: tasks.iter().take(BACKGROUND_MAX).map(|t| t.description.chars().take(200).collect()).collect() },
@@ -867,6 +868,9 @@ pub enum Request {
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
     Controls,
+    /// Provider-neutral settings and operations, only sent when Welcome lists "conversation".
+    ConversationSettings { slot: String, #[ts(type = "{ provider?: string; model?: string | null; effort?: string | null } | null")] change: Option<serde_json::Value> },
+    ConversationAction { slot: String, action: String },
     /// Puts a chat on Ask or Auto (its claude restarts on the same session). Refused for Auto unless the Mac lets phones use
     /// it, and while the chat is working or waiting on someone: the restart would drop what it is doing.
     SetPermissions { slot: String, permissions: RemotePermissions },

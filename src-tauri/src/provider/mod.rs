@@ -13,6 +13,7 @@ pub mod codex_events;
 pub mod codex_prompt;
 pub mod codex_session;
 pub mod gateway;
+pub mod inference;
 
 use crate::session::{EditHook, Session, SessionConfig};
 use crate::ui_event::Sink;
@@ -73,7 +74,8 @@ impl ProviderId {
 
 /// What a provider can do, which the rest of the app asks instead of assuming it is Claude. Claude Code does all of it;
 /// a CLI that lacks one says so here, and what depends on it falls back (see args::worker_mode) or is hidden.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
 pub struct Capabilities {
     /// It has an auto mode where the CLI itself decides what runs. Without one, a chat on it is never freer than Ask.
     pub supports_auto_mode: bool,
@@ -92,14 +94,16 @@ pub struct Capabilities {
     pub supports_lantern_tools: bool,
     /// It can be the Lead of a team (start agents with Lantern's tools). For now only Claude Code can: a team is built on its Lead.
     pub can_lead_team: bool,
-    /// A paired phone can see and answer the approval cards of a chat on it: they come through Claude Code's permission bridge, which
-    /// is what the phone reads. A provider that asks in its own protocol (Codex) isn't offered for a chat started from a phone, which
-    /// would stop at its first card with nobody able to answer it.
+    /// A paired phone can see and answer the provider's approval cards, through the permission bridge or its session protocol.
+    /// Providers without this are left out when a phone starts a chat.
     pub phone_approvals: bool,
+    pub supports_images: bool,
+    pub supports_compact: bool,
+    pub supports_clear: bool,
 }
 
 /// A provider and what it can do, as the window is told.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct ProviderInfo {
     pub id: ProviderId,
     pub capabilities: Capabilities,
@@ -138,7 +142,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false, supports_images: false, supports_compact: false, supports_clear: true }
     }
 
     fn models(&self) -> &'static [&'static str] {

@@ -78,6 +78,7 @@ enum Ready {
 struct Pending {
     /// The JSON-RPC id of the server's request, to answer it by.
     rpc_id: Value,
+    asked: crate::permission::bridge::Pending,
     kind: ApprovalKind,
     /// The request as it came, to raise its card again if what it is about changes (see `patch_updated`).
     method: String,
@@ -97,7 +98,7 @@ struct State {
     busy: bool,
     /// Interrupt was asked before the turn's id was known.
     interrupt_when_started: bool,
-    queued: VecDeque<String>,
+    queued: VecDeque<(String, Vec<Value>)>,
     /// The model the user chose, for the next turn on; None is Codex's own default.
     model: Option<String>,
     /// What Codex uses when none is chosen (from `model/list`): sent when the user goes back to "default", because a model
@@ -123,6 +124,7 @@ struct Ctx {
     /// A read-only agent: Codex's read-only sandbox, whatever it asks.
     read_only: bool,
     instructions: Arc<String>,
+    ephemeral: bool,
 }
 
 impl Ctx {
@@ -162,7 +164,7 @@ impl Ctx {
     }
 
     /// Starts a turn with `text`, on the model, effort, folder and permissions this chat has now.
-    async fn begin_turn(&self, text: &str) -> Result<(), String> {
+    async fn begin_turn(&self, text: &str, images: Vec<Value>) -> Result<(), String> {
         let (thread, model, effort) = {
             let mut s = self.state.lock().unwrap();
             s.busy = true;
@@ -173,9 +175,11 @@ impl Ctx {
             self.state.lock().unwrap().busy = false;
             return Err("The Codex conversation isn't open.".into());
         };
+        let mut input = images;
+        input.push(json!({"type": "text", "text": text, "text_elements": []}));
         let mut params = json!({
             "threadId": thread,
-            "input": [{"type": "text", "text": text, "text_elements": []}],
+            "input": input,
             "cwd": self.cwd,
             "approvalPolicy": approval_policy(self.mode),
             "approvalsReviewer": "user",
@@ -225,8 +229,10 @@ pub struct CodexSession {
 fn command(cfg: &SessionConfig) -> Command {
     let mut cmd = Command::new(&cfg.binary);
     cmd.arg("app-server").current_dir(&cfg.folder);
+    // App-side inference has no MCP tools, including ones from the user's own config.
+    if cfg.helper.socket.is_empty() { cmd.arg("-c").arg("mcp_servers={}"); }
     // Session-local overrides: never write to the user's Codex configuration.
-    for setting in lantern_mcp_settings(cfg) {
+    for setting in if cfg.helper.socket.is_empty() { vec![] } else { lantern_mcp_settings(cfg) } {
         cmd.arg("-c").arg(setting);
     }
     if let Some(p) = &cfg.path_env {
@@ -280,7 +286,7 @@ impl CodexSession {
         let stderr = child.stderr.take().ok_or("codex has no stderr pipe")?;
 
         let state = Arc::new(Mutex::new(State { model: cfg.model.clone(), effort: cfg.effort.clone(), thread_id: None, ..State::default() }));
-        let ctx = Ctx { stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(codex_prompt::instructions(cfg.mode, &cfg.helper.role)) };
+        let ctx = Ctx { ephemeral: cfg.helper.socket.is_empty(), stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(format!("{}{}", codex_prompt::instructions(cfg.mode, &cfg.helper.role), cfg.helper.project_notes.as_ref().map(|n|format!("\n\n{n}")).unwrap_or_default())) };
         let stopping = Arc::new(AtomicBool::new(false));
         let tail = Arc::new(Mutex::new(String::new()));
         let (exit_tx, exited) = watch::channel(false);
@@ -385,7 +391,7 @@ impl CodexSession {
         let _ = self.wait_ready().await;
     }
 
-    async fn wait_ready(&self) -> Result<(), String> {
+    pub(crate) async fn wait_ready(&self) -> Result<(), String> {
         let mut ready = self.ready.clone();
         let outcome = tokio::time::timeout(READY_WAIT, ready.wait_for(|r| *r != Ready::Starting)).await.map(|r| r.map(|state| state.clone()));
         match outcome {
@@ -397,7 +403,19 @@ impl CodexSession {
     }
 
     /// A message from the user: a new turn, or after the running one when there is one (Claude queues the same way).
-    pub async fn send(&mut self, text: &str) -> Result<(), String> {
+    pub async fn send(&mut self, text: &str) -> Result<(), String> { self.send_with(text, vec![]).await }
+
+    pub async fn compact(&mut self) -> Result<(), String> {
+        self.wait_ready().await?;
+        let thread = self.ctx.state.lock().unwrap().thread_id.clone().ok_or("No conversation is open")?;
+        { let mut state = self.ctx.state.lock().unwrap(); if state.busy { return Err("This conversation is already working".into()); } state.busy = true; }
+        match self.ctx.request("thread/compact/start", json!({"threadId": thread}), STEP_WAIT).await {
+            Ok(_) => Ok(()),
+            Err(e) => { self.ctx.state.lock().unwrap().busy = false; Err(e) },
+        }
+    }
+
+    pub async fn send_with(&mut self, text: &str, images: Vec<Value>) -> Result<(), String> {
         self.wait_ready().await?;
         if self.ctx.state.lock().unwrap().signed_out && self.ctx.signed_in().await {
             self.ctx.state.lock().unwrap().signed_out = false;
@@ -410,11 +428,11 @@ impl CodexSession {
         {
             let mut s = self.ctx.state.lock().unwrap();
             if s.busy {
-                s.queued.push_back(text.to_string());
+                s.queued.push_back((text.to_string(), images));
                 return Ok(());
             }
         }
-        self.ctx.begin_turn(text).await
+        self.ctx.begin_turn(text, images).await
     }
 
     /// Ends the running turn (it finishes as interrupted) and answers the cards waiting on it; the process keeps running.
@@ -474,9 +492,15 @@ impl CodexSession {
     }
 
     /// The model from the next turn on; None goes back to Codex's own.
+    pub fn set_effort(&mut self, effort: Option<&str>) { self.ctx.state.lock().unwrap().effort = effort.map(str::to_string); }
+
     pub async fn set_model(&mut self, model: Option<&str>) -> Result<(), String> {
         self.ctx.state.lock().unwrap().model = model.map(String::from);
         Ok(())
+    }
+
+    pub fn pending_permissions(&self) -> Vec<crate::permission::bridge::Pending> {
+        self.ctx.state.lock().unwrap().pending.values().map(|p| p.asked.clone()).collect()
     }
 
     /// The user's answer to a card. False when there is no such card (it was answered, or it isn't Codex's).
@@ -570,6 +594,7 @@ async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>, model: Option<S
         "approvalsReviewer": "user",
         "sandbox": sandbox_mode(ctx.mode, ctx.read_only),
         "developerInstructions": *ctx.instructions,
+        "ephemeral": ctx.ephemeral,
     });
     if let Some(m) = model {
         params["model"] = m.into();
@@ -679,7 +704,11 @@ fn declined_step(sink: &Sink, why: &str) {
 /// Puts a card up for the request, which is answered by the number it came with.
 fn raise(ctx: &Ctx, sink: &Sink, rpc_id: &Value, method: &str, params: &Value, a: Approval) {
     let request_id = format!("codex-{}", CARDS.fetch_add(1, Ordering::SeqCst) + 1);
-    let pending = Pending { rpc_id: rpc_id.clone(), kind: a.kind, method: method.to_string(), params: params.clone(), item: a.item };
+    let asked = crate::permission::bridge::Pending {
+        request_id: request_id.clone(), tool_name: a.tool_name.clone(), input: a.input.clone(),
+        at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
+    };
+    let pending = Pending { rpc_id: rpc_id.clone(), asked, kind: a.kind, method: method.to_string(), params: params.clone(), item: a.item };
     ctx.state.lock().unwrap().pending.insert(request_id.clone(), pending);
     sink(UiEvent::PermissionRequested { request_id, tool_name: a.tool_name, input: a.input });
 }
@@ -774,10 +803,10 @@ fn notification(ctx: &Ctx, sink: &Sink, on_edit: &EditHook, mapper: &mut CodexMa
         on_edit(&path, original);
     }
     // The message sent while that turn ran, after its end has been shown.
-    if let Some(text) = next {
+    if let Some((text, images)) = next {
         let (ctx, sink) = (ctx.clone(), sink.clone());
         tokio::spawn(async move {
-            if let Err(why) = ctx.begin_turn(&text).await {
+            if let Err(why) = ctx.begin_turn(&text, images).await {
                 sink(UiEvent::TurnDone { is_error: true, result: Some(why), cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
             }
         });
@@ -910,6 +939,9 @@ while IFS= read -r line; do
     *'"method":"thread/start"'*) reply "$id" '{{"thread":{{"id":"thr-1"}},"model":"gpt-x","cwd":"{dir}"}}' ;;
     *'"method":"thread/turns/list"'*) {turns} ;;
     *'"method":"thread/read"'*) {read} ;;
+    *'"method":"thread/compact/start"'*) reply "$id" '{{}}'
+{on_turn}
+      ;;
     *'"method":"turn/start"'*) reply "$id" '{{"turn":{{"id":"turn-1","status":"inProgress","items":[]}}}}'
 {on_turn}
       ;;
@@ -999,6 +1031,49 @@ done
         let mut s = Session::spawn(&config(fake.script(dir), dir, resume), sink, no_edits()).unwrap();
         s.initialize().await;
         (s, rx)
+    }
+
+    #[tokio::test]
+    async fn compact_uses_the_protocol_and_effort_changes_apply_to_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}")), dir.path(), None).await;
+        s.set_effort(Some("low"));
+        s.send("first").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert_eq!(requests(dir.path(), "turn/start")[0]["params"]["effort"], "low");
+        s.compact().await.unwrap();
+        assert_eq!(requests(dir.path(), "thread/compact/start")[0]["params"]["threadId"], "thr-1");
+        assert_eq!(requests(dir.path(), "turn/start").len(), 1, "compact must not send a slash command as a prompt");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn pictures_are_sent_to_codex_as_data_urls_before_the_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}"));
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake.script(dir.path()), dir.path(), None), sink, no_edits()).unwrap();
+        s.initialize().await;
+        s.send_with("what is this?", vec![crate::session::InputImage { media_type: "image/png".into(), data: "aGVsbG8=".into() }]).await.unwrap();
+        until_turn_done(&mut rx).await;
+        let turns = requests(dir.path(), "turn/start");
+        assert_eq!(turns[0]["params"]["input"][0], json!({"type":"image","url":"data:image/png;base64,aGVsbG8="}));
+        assert_eq!(turns[0]["params"]["input"][1]["text"], "what is this?");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn project_notes_and_provider_handoff_reach_codex_without_replacing_its_own_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(Fake::new(NOTHING).script(dir.path()), dir.path(), None);
+        cfg.helper.project_notes = Some("Keep the existing API. Earlier user: fix retries.".into());
+        let (sink, _) = channel_sink();
+        let mut s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        s.initialize().await;
+        let start = requests(dir.path(), "thread/start").remove(0);
+        assert!(start["params"]["developerInstructions"].as_str().unwrap().contains("Earlier user: fix retries."));
+        assert!(start["params"].get("baseInstructions").is_none());
+        s.stop().await;
     }
 
     #[tokio::test]
@@ -1152,7 +1227,12 @@ done
             _ => unreachable!(),
         };
         assert_eq!((tool.as_str(), input["command"].as_str(), input["description"].as_str()), ("Bash", Some("npm test"), Some("needs the network")));
+        let waiting = s.pending_permissions();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!((&waiting[0].request_id, &waiting[0].tool_name, &waiting[0].input), (&id, &tool, &input));
+        assert!(waiting[0].at > 0);
         assert!(s.respond_permission(&id, true).await);
+        assert!(s.pending_permissions().iter().all(|p| p.request_id != id));
         assert!(!s.respond_permission(&id, true).await, "a card is answered once");
 
         let (id2, tool2, input2) = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {

@@ -276,7 +276,7 @@ describe("choosing where a new chat runs", () => {
     expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["As on your Mac", "Claude", "Ollama"]));
     // Not the same name as the Models group's own, which a screen reader would read twice.
     expect(screen.getAllByRole("radio", { name: "Project's own" })).toHaveLength(1);
-    expect(screen.getByText(/As on your Mac is what this project's chats use there \(Claude, if that is Codex/)).toBeTruthy();
+    expect(screen.getByText("As on your Mac uses this project’s selected provider.")).toBeTruthy();
     const sent = (await start(lastOf)) as Record<string, unknown>;
     expect("provider" in sent).toBe(false);
   });

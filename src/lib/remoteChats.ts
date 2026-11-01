@@ -59,13 +59,13 @@ export interface WindowProvider {
 
 /**
  * What a phone is offered to start a chat on: only a provider whose approval cards a phone can answer (Claude Code, an endpoint:
- * not Codex, whose cards it can't), and only when there is a choice of more than one (the backend empties a list of one). `nameOf` is
+ * not one whose cards it can't), and only when there is a choice of more than one (the backend empties a list of one). `nameOf` is
  * what the window calls a provider on screen.
  */
 export function windowProviders(listed: ProviderInfo[], nameOf: (id: string) => string): WindowProvider[] {
   const offered = listed.filter((l) => capabilitiesOf(l).phone_approvals);
   // Claude Code is always one of them, whether or not the list has it yet.
-  const all = offered.some((l) => l.id === CLAUDE) ? offered : [{ id: CLAUDE, capabilities: CLAUDE_CAPABILITIES }, ...offered];
+  const all = listed.length ? offered : [{ id: CLAUDE, capabilities: CLAUDE_CAPABILITIES }];
   return all.map((l) => ({ id: l.id, name: nameOf(l.id), auto: capabilitiesOf(l).supports_auto_mode, presets: capabilitiesOf(l).supports_advisor }));
 }
 

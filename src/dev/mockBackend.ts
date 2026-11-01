@@ -1551,7 +1551,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
         case "list_providers":
           return [
-            { ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null },
+            ...(new URLSearchParams(location.search).get("claude") === "missing" ? [] : [{ ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null }]),
             ...(SECOND_PROVIDER ? [{ ...CODEX_INFO, models: CODEX_MODELS, binary: "/Users/you/.local/bin/codex" }] : []),
             ...mockEndpoints.map((e) => ({ ...GATEWAY_INFO, models: e.models, binary: null, endpoint: { id: e.id, name: e.name } })),
           ];
@@ -1600,6 +1600,20 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         }
         case "plugin:opener|reveal_item_in_dir":
           return null;
+        case "conversation_metadata": return null;
+        case "conversation_settings": {
+          const slot = String(a.slot);
+          const change = a.change as { provider?: string; model?: string | null; effort?: string | null } | null;
+          if (change?.provider) slotProvider[slot] = change.provider;
+          const id = slotProvider[slot] ?? "claude";
+          const info = providerInfo(id);
+          if (change) void emit("conversation-configured", { slot, provider: info ?? CLAUDE_INFO, mode: id === "claude" ? slotMode[slot] ?? "ask" : "ask", autoApprove: false, model: change.model ?? null, effort: change.effort ?? null });
+          return { provider: id, capabilities: (info ?? CLAUDE_INFO).capabilities, model: change?.model ?? null, effort: change?.effort ?? null, models: id === "codex" ? CODEX_MODELS : ["opus", "sonnet", "haiku"], effort_levels: ["low", "medium", "high"] };
+        }
+        case "conversation_action": {
+          if (a.action === "clear") void sendTo(String(a.slot))({ kind: "conversation_reset" });
+          return null;
+        }
         case "start_session":
           // A second project opens too, for switching between projects; the rest are gone.
           if (STRESS) {

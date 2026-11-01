@@ -193,6 +193,12 @@ describe("where a phone may start a chat", () => {
     ]);
   });
 
+  it("offers Codex on its own when it can answer phone approvals, without inventing a Claude installation", () => {
+    const ready = { ...codex, capabilities: { ...codex.capabilities, phone_approvals: true } };
+    expect(windowProviders([ready], nameOf)).toEqual([{ id: "codex", name: "Codex", auto: false, presets: false }]);
+    expect(checkRemoteNewChat({ id: "r", folder: "/p", text: "Fix it", permissions: "ask", provider: "codex" }, true, true, { allowAuto: false, presetIds: [], providers: windowProviders([ready], nameOf) })).toBeNull();
+  });
+
   it("always has Claude, even before the providers are listed", () => {
     expect(windowProviders([], nameOf)).toEqual([{ id: "claude", name: "Claude", auto: true, presets: true }]);
   });
