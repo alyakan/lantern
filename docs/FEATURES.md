@@ -34,10 +34,10 @@ The same five are in the **Work** menu of the macOS menu bar (Start a Team is â‡
 
 Every chat has two settings, as chips under the box.
 
-**Permissions** says how much Claude may do without asking:
+**Permissions** says who reviews an agent's requests to act outside its normal limits:
 
-- **Ask**: edits apply as Claude makes them; commands and other actions stop and ask you with Allow or Deny.
-- **Auto**: Claude Code's own classifier approves routine actions and stops risky ones, so you're rarely asked.
+- **Ask**: edits inside the workspace apply as the agent makes them; actions requiring approval stop and ask you with Allow or Deny.
+- **Auto**: On Claude Code, its classifier approves routine actions and stops risky ones. On Codex, a separate auto-review agent reviews sandbox approval requests and gives a reason when it denies one. Codex keeps the same workspace sandbox and `on-request` approval policy in Ask and Auto.
 
 ![The Permissions menu: Ask and Auto](images/permissions-menu.png)
 

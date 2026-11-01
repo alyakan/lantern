@@ -3249,6 +3249,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           permissions={permissionsOf(state)}
           workflow={workflowOf(state)}
           auto={caps.supports_auto_mode}
+          codex={state.provider?.id === "codex"}
           flavour={flavour}
           explain={explain}
           onUse={state.folder && !isBusy(state) ? (key) => {
