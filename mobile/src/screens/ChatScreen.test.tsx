@@ -900,7 +900,7 @@ describe("what waits on you, in a chat", () => {
     try {
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 50, event: { kind: "permission_withdrawn", request_id: "p1" } } }));
       await waitFor(() => expect(screen.queryByLabelText("Swipe to allow")).toBeNull(), { timeout: 3000 });
-      expect(screen.getByText("Claude stopped asking")).toBeTruthy();
+      expect(screen.getByText("No longer pending")).toBeTruthy();
     } finally {
       motion.instant = true;
     }
@@ -934,7 +934,7 @@ describe("what waits on you, in a chat", () => {
   it("says Claude stopped asking when it withdraws", async () => {
     await withSession([asked, { kind: "permission_withdrawn", request_id: "p1" }]);
     expect(screen.getByText("Push the branch")).toBeTruthy();
-    expect(screen.getByText("Claude stopped asking")).toBeTruthy();
+    expect(screen.getByText("No longer pending")).toBeTruthy();
   });
 
   it("says what only the Mac can answer, instead of hiding it", async () => {
@@ -1068,6 +1068,7 @@ describe("Step by step's pages", () => {
       const show = async (label: string) => {
         await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
         await waitFor(() => expect(screen.getByText("Show")).toBeTruthy());
+        await fireEvent.press(screen.getByRole("button", { name: /^Show,/ }));
         await fireEvent.press(screen.getByRole("radio", { name: label }));
       };
       await show("One list");

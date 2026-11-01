@@ -29,15 +29,21 @@ afterEach(() => jest.restoreAllMocks());
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
 
 describe("a chat's row on Home", () => {
+  it("labels Codex chats and preserves a named provider", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "c", title: "Code review", provider: "Codex" }), chat({ slot: "g", title: "Local chat", provider: "my endpoint" })] });
+    expect(screen.getByText("Codex")).toBeTruthy();
+    expect(screen.getByText("my endpoint")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Code review, Codex, lantern" })).toBeTruthy();
+  });
   it("shows the line the Mac sent under the title, and says it to a screen reader", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ title: "Storage audit", preview: "Want me to open a PR?" })] });
     expect(screen.getByText("Want me to open a PR?")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Storage audit, lantern, Want me to open a PR?" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Storage audit, Claude, lantern, Want me to open a PR?" })).toBeTruthy();
   });
 
   it("is as it was for a Mac that sends no line", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ title: "Storage audit" })] });
-    expect(screen.getByRole("button", { name: "Storage audit, lantern" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Storage audit, Claude, lantern" })).toBeTruthy();
   });
 
   it("says how long a working chat has been at it", async () => {

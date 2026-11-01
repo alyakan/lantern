@@ -1,3 +1,4 @@
+import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -165,7 +166,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   const pad = inset > 8 ? inset - 8 : inset;
   const status = row.unread ? ", unread" : row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   const body = (
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}${row.preview ? `, ${row.preview}` : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}, ${row.provider ?? "Claude"}${showProject && row.project ? `, ${row.project}` : ""}${status}${row.pinned ? ", pinned" : ""}${row.preview ? `, ${row.preview}` : ""}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "More actions: pin, mark read, close" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
       {/* The chat you are in: a bar of the accent down the row's left, which travels to the next chat you open. */}
       <OpenBar selected={selected} place={place} color={accent} />
       <View>
@@ -186,11 +187,10 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
             {row.preview}
           </Txt>
         )}
-        {showProject && !!row.project && (
-          <View style={{ marginTop: 3 }}>
-            <ProjectTag name={row.project} color={row.projectColor} />
-          </View>
-        )}
+        <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
+          {showProject && !!row.project && <ProjectTag name={row.project} color={row.projectColor} />}
+          <ProviderBadge provider={row.provider} />
+        </View>
       </View>
       {row.status === "working" ? (
         <View style={{ alignItems: "flex-end", gap: 4 }}>

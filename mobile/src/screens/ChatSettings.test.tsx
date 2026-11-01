@@ -10,14 +10,14 @@ const presets = [
 ];
 const controlsAnswer = (allow_auto: boolean) => ({ controls: { allow_auto, presets } });
 
-async function open(opts: { allowAuto?: boolean; features?: string[]; chatOver?: Parameters<typeof chat>[0]; answers?: Parameters<typeof attachSession>[1]; waitMs?: number } = {}) {
+async function open(opts: { allowAuto?: boolean; features?: string[]; chatOver?: Parameters<typeof chat>[0]; answers?: Parameters<typeof attachSession>[1]; context?: { tokens: number; window: number | null }; waitMs?: number } = {}) {
   const { controller } = makeController();
   const session = attachSession(controller, { ...controlsAnswer(opts.allowAuto ?? false), ...opts.answers }, opts.features ?? ["controls", "close", "workflow"]);
   const onProblem = jest.fn();
   const onClosed = jest.fn();
   const c = chat({ permissions: "ask", preset: "balanced", ...opts.chatOver });
   const view = await renderWith(
-    <ChatSettings slot="a" chat={c} onProblem={onProblem} onClosed={onClosed} waitMs={opts.waitMs}>
+    <ChatSettings slot="a" chat={c} onProblem={onProblem} onClosed={onClosed} waitMs={opts.waitMs} context={opts.context}>
       {(line) => <Text>{`under the title: ${line ?? "nothing"}`}</Text>}
     </ChatSettings>,
     // The Mac the phone is connected to lists what `features` says (an older one, nothing).
@@ -28,9 +28,10 @@ async function open(opts: { allowAuto?: boolean; features?: string[]; chatOver?:
   return { onProblem, onClosed, c, ...view, ...session, controller };
 }
 
-const openSheet = async () => {
+const openSheet = async (section?: string) => {
   await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
   await waitFor(() => expect(screen.getByText("Permissions")).toBeTruthy());
+  if (section) await fireEvent.press(await screen.findByRole("button", { name: new RegExp(`^${section},`) }));
 };
 
 describe("the title bar's settings line", () => {
@@ -55,17 +56,22 @@ describe("the title bar's settings line", () => {
 });
 
 describe("the settings sheet", () => {
-  it("is opened by pressing the title bar, and has the permissions and the models together", async () => {
-    await open({ allowAuto: true });
+  it("shows current values and expands choices inline without leaving the settings", async () => {
+    await open({ allowAuto: true, context: { tokens: 50000, window: 100000 } });
     await openSheet();
-    expect(screen.getByText("Models")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Permissions, Ask" })).toBeTruthy();
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    await fireEvent.press(screen.getByRole("button", { name: "Usage & context, 50% of context" }));
+    expect(screen.getByRole("button", { name: "Permissions, Ask" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Usage & context, 50% of context" }).props.accessibilityState).toMatchObject({ expanded: true });
+    await fireEvent.press(screen.getByRole("button", { name: "Model preset, Balanced" }));
     await waitFor(() => expect(screen.getByRole("radio", { name: "Balanced" })).toBeTruthy());
     expect(screen.getByText("Sonnet · Opus advisor · Haiku subagents")).toBeTruthy();
   });
 
   it("offers Auto off, saying where to turn it on, while the Mac's setting is off", async () => {
     await open({ allowAuto: false });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getAllByText(/Let paired phones use Auto/).length).toBeGreaterThan(0);
@@ -73,9 +79,10 @@ describe("the settings sheet", () => {
 
   it("offers nothing while Claude is busy, and says why", async () => {
     await open({ allowAuto: true, chatOver: { status: "working" } });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
+    await fireEvent.press(screen.getByRole("button", { name: /^Model preset,/ }));
     expect(screen.getByRole("radio", { name: "Balanced" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getAllByText("Claude is busy in this chat. Change it once it has finished.").length).toBeGreaterThan(0);
   });
@@ -95,7 +102,7 @@ describe("a chat that isn't on Claude", () => {
 
   it("is not offered Auto, with why, nor the Mac's presets, which are Claude Code's models", async () => {
     await open({ allowAuto: true, chatOver: { provider: "Ollama", preset: null } });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getAllByText("Ollama has no Auto mode: it asks before it acts.").length).toBeGreaterThan(0);
@@ -106,7 +113,7 @@ describe("a chat that isn't on Claude", () => {
 describe("switching Ask or Auto", () => {
   it("puts the chat on Auto when the Mac lets phones, says Switching… until the chat says so, then shows Auto", async () => {
     const { controller, lastOf, c } = await open({ allowAuto: true });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     await waitFor(() => expect(lastOf("set_permissions")).toEqual({ op: "set_permissions", slot: "a", permissions: "auto" }));
@@ -116,7 +123,7 @@ describe("switching Ask or Auto", () => {
 
   it("says why when the Mac refuses, and stops saying Switching…", async () => {
     const { onProblem } = await open({ allowAuto: true, answers: { set_permissions: new Error("Claude is busy in this chat. Change it once it has finished.") } });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     await waitFor(() => expect(onProblem).toHaveBeenCalledWith("Claude is busy in this chat. Change it once it has finished."));
@@ -125,7 +132,7 @@ describe("switching Ask or Auto", () => {
 
   it("says so when the chat never changes", async () => {
     const { onProblem } = await open({ allowAuto: true, waitMs: 80 });
-    await openSheet();
+    await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     await waitFor(() => expect(onProblem).toHaveBeenCalledWith("It didn't change. Look at Lantern on your Mac."), { timeout: 3000 });
@@ -134,7 +141,7 @@ describe("switching Ask or Auto", () => {
 
   it("does not ask the Mac to switch to what the chat already is", async () => {
     const { asked } = await open({ allowAuto: true });
-    await openSheet();
+    await openSheet("Permissions");
     await fireEvent.press(screen.getByRole("radio", { name: "Ask" }));
     expect(asked.some((r) => r.op === "set_permissions")).toBe(false);
   });
@@ -143,7 +150,7 @@ describe("switching Ask or Auto", () => {
 describe("switching the models", () => {
   it("switches to the preset picked", async () => {
     const { lastOf } = await open({ allowAuto: false, chatOver: { preset: "default" } });
-    await openSheet();
+    await openSheet("Model preset");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Balanced" })).toBeTruthy());
     await fireEvent.press(screen.getByRole("radio", { name: "Balanced" }));
     await waitFor(() => expect(lastOf("set_preset")).toEqual({ op: "set_preset", slot: "a", preset: "balanced" }));
@@ -201,8 +208,8 @@ describe("the workflow", () => {
 
   it("is switched to Step by step from the sheet, with Switching… until the chat says so", async () => {
     const { controller, lastOf, c } = await open({ chatOver: { workflow: "chat" } });
-    await openSheet();
-    expect(screen.getByText("Workflow")).toBeTruthy();
+    await openSheet("Workflow");
+    expect(screen.getByRole("button", { name: /^Workflow,/ }).props.accessibilityState).toMatchObject({ expanded: true });
     await fireEvent.press(screen.getByRole("radio", { name: "Step by step" }));
     await waitFor(() => expect(lastOf("set_workflow")).toEqual({ op: "set_workflow", slot: "a", workflow: "steps" }));
     await waitFor(() => expect(screen.getByText("under the title: Switching… · Ask · Balanced")).toBeTruthy());
@@ -230,11 +237,14 @@ const codexConfiguration = {
 describe("provider-neutral settings", () => {
   it("offers only the active provider's models and effort levels and sends a model operation", async () => {
     const { lastOf } = await open({ features: ["controls", "conversation"], chatOver: { provider: "Codex" }, answers: { conversation_settings: codexConfiguration } });
-    await openSheet();
-    const model = await screen.findByRole("radio", { name: "gpt-example" });
+    await openSheet("Model");
+    await screen.findByRole("radio", { name: "gpt-example" });
     expect(screen.queryByRole("radio", { name: "medium" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "high" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: /^Effort,/ }));
     expect(screen.getByRole("radio", { name: "high" })).toBeTruthy();
-    await fireEvent.press(model);
+    await fireEvent.press(screen.getByRole("button", { name: /^Model,/ }));
+    await fireEvent.press(screen.getByRole("radio", { name: "gpt-example" }));
     expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" } });
   });
 
@@ -243,7 +253,7 @@ describe("provider-neutral settings", () => {
       controls: { allow_auto: false, presets, providers: [{ id: "claude", name: "Claude", auto: true, presets: true }, { id: "codex", name: "Codex", auto: false, presets: false }] },
       conversation_settings: { ...codexConfiguration, provider: "claude" },
     } });
-    await openSheet();
+    await openSheet("Provider");
     await fireEvent.press(await screen.findByRole("radio", { name: "Codex" }));
     expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { provider: "codex" } });
   });

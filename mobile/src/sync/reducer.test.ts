@@ -209,6 +209,30 @@ describe("prompts", () => {
     expect(items(s)[0]).toMatchObject({ state: "allowed", by: "desktop" });
   });
 
+  it("reconciles replayed approvals against the authoritative pending list without guessing their answer", () => {
+    let s = run([reset("a", 12, [asked, { ...asked, request_id: "live" }])]);
+    const pending: Waiting = { slot: "a", chat_title: "A chat", request_id: "live", tool_name: "Bash", input: {}, at: 1 };
+    s = reducer(s, { type: "waiting", list: [pending], observedPrompts: { a: ["p1", "live"] } });
+    expect(items(s)[0]).toMatchObject({ id: "p1", state: "withdrawn", by: null });
+    expect(openPrompts(s.views.a).map((p) => p.id)).toEqual(["live"]);
+    // A delayed real outcome still replaces the neutral status.
+    s = reducer(s, event("a", 13, { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" }));
+    expect(items(s)[0]).toMatchObject({ state: "allowed", by: "desktop" });
+  });
+
+  it("does not dismiss a new live approval using an older pending-list response", () => {
+    const s = run([reset("a", 12, []), event("a", 13, asked)]);
+    const next = reducer(s, { type: "waiting", list: [], observedPrompts: { a: [] } });
+    expect(openPrompts(next.views.a).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("does not reopen an answered approval when loading overlapping earlier history", () => {
+    const s = run([event("a", 1, asked), event("a", 2, { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" })]);
+    const next = reducer(s, { type: "earlier", slot: "a", hidden: 0, events: [asked] });
+    expect(openPrompts(next.views.a)).toHaveLength(0);
+    expect(items(next)[0]).toMatchObject({ state: "allowed", by: "desktop" });
+  });
+
   it("remember what this phone answered a question with, for showing beside it", () => {
     let s = run([event("a", 1, asked), event("a", 2, { kind: "permission_resolved", request_id: "p1", allow: true, by: "phone-1" })]);
     s = reducer(s, { type: "answered_with", slot: "a", requestId: "p1", text: "Stable" });

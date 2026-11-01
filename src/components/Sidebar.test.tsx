@@ -153,7 +153,7 @@ describe("the open sidebar's projects", () => {
 
   it("lists open chats as squares with their state", () => {
     setup();
-    expect(rowOf("Fix restore mode, lantern, Needs you")).toBeInTheDocument();
+    expect(rowOf("Fix restore mode, Claude, lantern, Needs you")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /, lantern, Working$/ }).length).toBeGreaterThanOrEqual(2);
     const row = rowOf(/Network tab polish/);
     expect(row).toHaveAttribute("aria-current", "true");
@@ -162,11 +162,18 @@ describe("the open sidebar's projects", () => {
     expect(row.querySelector(".sb-status")).toHaveTextContent("Working");
   });
 
+  it("shows each chat's provider beside its title", () => {
+    const open = { [LANTERN]: { ...lanternOpen, items: [{ kind: "chat" as const, ...chat("cx", "Code review", { provider: "Codex" }) }] } };
+    setup({ open });
+    const row = rowOf("Code review, Codex, lantern, Done");
+    expect(row.querySelector(".sb-provider")).toHaveTextContent("Codex");
+  });
+
   it("says when a chat is pinned or has tasks in the background", () => {
     const open = { [LANTERN]: { ...lanternOpen, items: [{ kind: "chat" as const, ...chat("s9", "Long task", { pinned: true, background: 2 }) }] } };
     setup({ open });
     const row = rowOf(/Long task/);
-    expect(row).toHaveAccessibleName("Long task, lantern, Done, pinned, 2 running in the background");
+    expect(row).toHaveAccessibleName("Long task, Claude, lantern, Done, pinned, 2 running in the background");
     expect(row.querySelector(".sb-pin")).not.toBeNull();
     expect(row.querySelector(".spinner")).not.toBeNull();
   });
@@ -190,10 +197,10 @@ describe("the open sidebar's projects", () => {
     const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "running" }), agents: [chat("a1", "Reviewer: login form", { state: "running", role: "Reviewer" }), chat("a2", "ui pass")] };
     setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });
     showAgents();
-    const row = screen.getByRole("button", { name: "Reviewer: login form, Reviewer, lantern, Working" });
+    const row = screen.getByRole("button", { name: "Reviewer: login form, Claude, Reviewer, lantern, Working" });
     expect(row).toHaveTextContent("Reviewer · Working");
     // An agent with no role reads as before.
-    expect(screen.getByRole("button", { name: "ui pass, lantern, Done" }).querySelector(".sb-status")?.textContent).toBe("Done");
+    expect(screen.getByRole("button", { name: "ui pass, Claude, lantern, Done" }).querySelector(".sb-status")?.textContent).toBe("Done");
   });
 
   it("says who needs you on the line that folds a team's agents", () => {
@@ -214,7 +221,7 @@ describe("the open sidebar's projects", () => {
     showAgents();
     const agents = screen.getByRole("list", { name: "Agents in audit sweep" });
     expect(within(agents).getAllByRole("button", { name: /, lantern,/ }).map((b) => b.getAttribute("title"))).toEqual(["security pass", "ui pass"]);
-    expect(within(agents).getByRole("button", { name: "ui pass, lantern, Unread" })).toBeInTheDocument();
+    expect(within(agents).getByRole("button", { name: "ui pass, Claude, lantern, Unread" })).toBeInTheDocument();
     const team = rowOf(/^Team: audit sweep/);
     expect(team.querySelector(".sb-chip")).toHaveClass("team");
     expect(team).toHaveTextContent("Team: audit sweep");
@@ -841,7 +848,7 @@ describe("the collapsed sidebar", () => {
     bar();
     await screen.findByRole("list", { name: "lantern" });
     const row = square(/Fix restore mode/);
-    expect(row).toHaveAccessibleName("Fix restore mode, lantern, Needs you");
+    expect(row).toHaveAccessibleName("Fix restore mode, Claude, lantern, Needs you");
     expect(row.querySelector(".sb-title")).toHaveTextContent("Fix restore mode");
     expect(row.querySelector(".sb-status")).toHaveTextContent("Needs you");
     expect(row.querySelector(".sb-status")).toHaveClass("waiting");

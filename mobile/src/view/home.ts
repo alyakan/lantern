@@ -54,6 +54,7 @@ export function projectTint(color: string | null, plain: { bg: string; fg: strin
 export interface Row {
   slot: string;
   title: string;
+  provider?: string;
   project: string;
   /** The colour the Mac's window gives the project ("#rrggbb"), when it said. */
   projectColor: string | null;
@@ -110,7 +111,8 @@ export function rows(chats: RemoteChat[], now: number, seen: Record<string, numb
       const title = c.title?.trim() || "New chat";
       const sortAt = c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at;
       const spent = c.status === "working" ? ago(sortAt, now) : "now";
-      return { preview: c.preview?.trim() || null, elapsed: spent === "now" ? null : spent, rank: RANK[c.status], sortAt, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
+      const provider = c.provider || "Claude";
+      return { provider, preview: c.preview?.trim() || null, elapsed: spent === "now" ? null : spent, rank: RANK[c.status], sortAt, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
     })
     .sort(byOrder);
 }

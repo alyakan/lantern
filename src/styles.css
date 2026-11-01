@@ -3451,6 +3451,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-agents .sb-row { gap: 8px; }
 .sb-title-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sb-title-line .sb-title { min-width: 0; }
+.sb-provider { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; padding: 1px 5px; border: 1px solid var(--line); border-radius: var(--radius-chip); color: var(--muted-text); font-size: calc(10px * var(--font-scale)); line-height: 1.4; }
 .sb-title-line .spinner { flex: none; }
 .sb-pin { flex: none; display: grid; place-items: center; color: var(--muted); }
 /* The × has a place of its own at the row's end: the title truncates before it. */

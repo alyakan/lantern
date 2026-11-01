@@ -29,7 +29,7 @@ export type SheetScroll = RefObject<any>;
  * app switcher's picture as the app leaves: no animation is left running for it to catch). One asked for while the app is
  * covered (a handoff as it locks, a sheet at launch) is never shown: it says it closed.
  */
-export function Sheet({ onClose, children }: { onClose: () => void; children: (close: () => void, scroll: SheetScroll) => ReactNode }) {
+export function Sheet({ onClose, children, size = "content" }: { onClose: () => void; children: (close: () => void, scroll: SheetScroll) => ReactNode; size?: "content" | "large" }) {
   const sheet = useRef<TrueSheet>(null);
   const scroll: SheetScroll = useRef(null);
   const insets = useSafeAreaInsets();
@@ -53,7 +53,7 @@ export function Sheet({ onClose, children }: { onClose: () => void; children: (c
   }, [covered]);
   if (blocked) return null;
   return (
-    <TrueSheet ref={sheet} detents={["auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
+    <TrueSheet ref={sheet} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
       <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
       {covered && (

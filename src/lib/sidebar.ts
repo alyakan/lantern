@@ -4,6 +4,7 @@ import type { RecentFolder } from "../types";
 import { basename } from "./diff";
 import { needingYou, orchestraNodes, teamNodes } from "./orchestraView";
 import { orderProjects } from "./projectOrder";
+import { agentName } from "./provider";
 
 /** How a chat reads in the sidebar. `draft`: text typed in its box but not sent. */
 export type ChatDot = "running" | "waiting" | "draft" | "done";
@@ -11,6 +12,7 @@ export type ChatDot = "running" | "waiting" | "draft" | "done";
 export interface SidebarChat {
   slot: string;
   title: string;
+  provider?: string;
   state: ChatDot;
   /** It finished while you were elsewhere and you haven't opened it since. */
   unread: boolean;
@@ -64,6 +66,7 @@ export interface CompactChip {
   slot: string;
   team: boolean;
   title: string;
+  provider?: string;
   state: ChatDot;
   unread: boolean;
   /** On screen: the chat, or for a team its canvas or an agent focused on it. */
@@ -116,6 +119,7 @@ export function chipOf(item: SidebarChat | SidebarItem): CompactChip {
     slot: item.slot,
     team,
     title: item.title,
+    provider: item.provider,
     state: item.state,
     unread: item.unread,
     active: item.active || (team && "agents" in item && item.agents.some((a) => a.active)),
@@ -196,6 +200,7 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
     return {
       slot,
       title: agent?.name ?? chatTitle(s, opts.titles),
+      provider: agentName(s.provider),
       state,
       unread: !!opts.unread[slot] && state === "done",
       background: s.backgroundTasks.length,

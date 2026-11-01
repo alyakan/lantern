@@ -35,6 +35,16 @@ function rig() {
 const delta = (seq: number, text: string): Pushed => ({ type: "event", slot: "a", seq, event: { kind: "text_delta", block_id: "b", text } });
 
 describe("the phone's sync", () => {
+  it("refreshes pending approvals after replay so already answered requests cannot be answered again", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7, { list_waiting: [] }).session);
+    await settle();
+    sync.onPushed({ type: "reset", slot: "a", seq: 20, page: 0, done: true, hidden: 0, events: [{ kind: "permission_requested", request_id: "old", tool_name: "Bash", input: {} }] });
+    await settle();
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ kind: "prompt", state: "withdrawn" });
+  });
+
   it("applies streamed pieces once a frame, not one render each", () => {
     const { sync, renders, frame } = rig();
     for (let i = 1; i <= 50; i++) sync.onPushed(delta(i, "x"));
