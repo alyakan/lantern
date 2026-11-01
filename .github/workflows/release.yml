@@ -122,7 +122,7 @@ jobs:
           {
             echo 'body<<END_OF_NOTES'
             .github/release-notes.sh "$TAG"
-            echo 'Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in. From 0.1.1 on, Lantern updates itself.'
+            echo 'Download the dmg, open it and drag Lantern to Applications. Requires Claude Code or Codex installed and logged in. From 0.1.1 on, Lantern updates itself.'
             echo 'END_OF_NOTES'
           } >> "$GITHUB_OUTPUT"
 
