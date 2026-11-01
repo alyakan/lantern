@@ -225,10 +225,33 @@ pub struct CodexSession {
 fn command(cfg: &SessionConfig) -> Command {
     let mut cmd = Command::new(&cfg.binary);
     cmd.arg("app-server").current_dir(&cfg.folder);
+    // Session-local overrides: never write to the user's Codex configuration.
+    for setting in lantern_mcp_settings(cfg) {
+        cmd.arg("-c").arg(setting);
+    }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
     }
     cmd
+}
+
+/// Codex's `-c` values are TOML. JSON string literals also quote these paths and
+/// socket values safely as TOML basic strings, including spaces and backslashes.
+fn lantern_mcp_settings(cfg: &SessionConfig) -> Vec<String> {
+    let quote = |s: &str| serde_json::to_string(s).unwrap();
+    let mut env = vec![format!("LANTERN_SOCKET = {}", quote(&cfg.helper.socket))];
+    if matches!(cfg.helper.role, Role::Worker { read_only: true, .. }) {
+        env.push(format!("LANTERN_ROLE = {}", quote(crate::permission::catalogue::READER_ROLE)));
+    }
+    if cfg.mode == Mode::Steps {
+        env.push("LANTERN_STEPS = \"1\"".into());
+    }
+    vec![
+        format!("mcp_servers.lantern.command={}", quote(&cfg.helper.exe)),
+        "mcp_servers.lantern.args=[\"--permission-helper\"]".into(),
+        format!("mcp_servers.lantern.env={{ {} }}", env.join(", ")),
+        "mcp_servers.lantern.enabled=true".into(),
+    ]
 }
 
 impl CodexSession {
@@ -824,6 +847,24 @@ mod fake_server_tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use tokio::sync::mpsc;
+
+    #[test]
+    fn lantern_server_is_scoped_to_the_session_and_reader_role() {
+        let mut cfg = config("/bin/codex".into(), Path::new("/tmp"), None);
+        cfg.helper.exe = "/Applications/Lantern App/lantern".into();
+        cfg.helper.socket = "/tmp/chat socket".into();
+        cfg.mode = Mode::Steps;
+        cfg.helper.role = Role::Worker { name: "reader".into(), read_only: true };
+        let settings = lantern_mcp_settings(&cfg).join("\n");
+        assert!(settings.contains("/Applications/Lantern App/lantern"));
+        assert!(settings.contains("LANTERN_SOCKET = \"/tmp/chat socket\""));
+        assert!(settings.contains("LANTERN_STEPS = \"1\""));
+        assert!(settings.contains(crate::permission::catalogue::READER_ROLE));
+        cfg.mode = Mode::Ask;
+        cfg.helper.role = Role::Normal;
+        let settings = lantern_mcp_settings(&cfg).join("\n");
+        assert!(!settings.contains("LANTERN_ROLE") && !settings.contains("LANTERN_STEPS"));
+    }
 
     /// What the fake does when a turn starts, after it has answered turn/start.
     const NOTHING: &str = ":";
