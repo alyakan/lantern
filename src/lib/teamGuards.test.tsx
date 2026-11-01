@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { CONTINUE_MESSAGE, setPauseAtPercent } from "./planPause";
-import { setPlanUsage } from "./planUsage";
+import { setProviderUsage, setPlanUsage } from "./planUsage";
 import { teamAgentsWorking, useTeamGuards, type GuardActions } from "./teamGuards";
 
 const lead: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p", orchestrator: true, mode: "auto" };
@@ -58,7 +58,7 @@ describe("the pause at the plan's limit", () => {
     expect(act_.stop).toHaveBeenCalledTimes(2);
     expect(act_.stop).toHaveBeenCalledWith("s1");
     expect(act_.stop).toHaveBeenCalledWith("w1");
-    expect(act_.paused).toHaveBeenCalledWith(expect.stringMatching(/^Paused: your plan is 95% used, it resets in /));
+    expect(act_.paused).toHaveBeenCalledWith(expect.stringMatching(/^Paused: Claude is 95% used, it resets in /));
     expect(result.current.pause).toMatchObject({ percent: 95, resetsAt: RESET, slots: ["s1", "w1"] });
     // It resumes nothing by itself.
     expect(act_.send).not.toHaveBeenCalled();
@@ -103,7 +103,7 @@ describe("the pause at the plan's limit", () => {
     reading(90);
     reading(92);
     expect(act_.warn).toHaveBeenCalledTimes(1);
-    expect(act_.warn).toHaveBeenCalledWith("Your plan is 90% used. Lantern will pause the teams' work at 95%.");
+    expect(act_.warn).toHaveBeenCalledWith("Claude: Your plan is 90% used. Lantern will pause the teams' work at 95%.");
     expect(act_.stop).not.toHaveBeenCalled();
     reading(95);
     expect(act_.stop).toHaveBeenCalledTimes(1);
@@ -203,4 +203,32 @@ describe("Resume", () => {
     act(() => result.current.resume());
     expect(act_.send).not.toHaveBeenCalled();
   });
+});
+
+it("pauses only the exhausted provider in a mixed team and resumes it independently", () => {
+  const act_ = actions();
+  const c = withStatus(team(), { s1: "running", w1: "running", w2: "running" });
+  c.slots.w2 = { ...c.slots.w2, provider: { id: "codex", capabilities: {} as NonNullable<State["provider"]>["capabilities"] } };
+  const { result } = renderHook(() => useTeamGuards(c, act_));
+  reading(95);
+  expect(act_.stop).toHaveBeenCalledWith("s1");
+  expect(act_.stop).toHaveBeenCalledWith("w1");
+  expect(act_.stop).not.toHaveBeenCalledWith("w2");
+  expect(result.current.pausedSlots).toEqual(["s1", "w1"]);
+  act(() => setProviderUsage({ provider: "codex", updated_at: Date.now() / 1000, windows: [{ label: "5 hours", used: .96, resets_at: RESET, minutes: 300 }] }));
+  expect(act_.stop).toHaveBeenCalledWith("w2");
+  expect(result.current.pausedSlots).toEqual(["s1", "w1", "w2"]);
+  act(() => result.current.dismiss());
+  expect(result.current.pause?.provider).toBe("codex");
+  expect(result.current.pausedSlots).toEqual(["w2"]);
+});
+
+it("holds queued work on idle chats of the paused provider while letting other providers continue", () => {
+  const c = withStatus(team(), { s1: "running", w1: "idle", w2: "idle" });
+  c.slots.w2 = { ...c.slots.w2, provider: { id: "codex", capabilities: {} as NonNullable<State["provider"]>["capabilities"] } };
+  act(() => setProviderUsage({ provider: "codex", updated_at: 1, windows: [] }));
+  const { result } = renderHook(() => useTeamGuards(c, actions()));
+  reading(95);
+  expect(result.current.heldSlots).toContain("w1");
+  expect(result.current.heldSlots).not.toContain("w2");
 });

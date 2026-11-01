@@ -1,4 +1,4 @@
-import { setPlanUsage } from "./lib/planUsage";
+import { setProviderUsage, setPlanUsage } from "./lib/planUsage";
 import { setWeekUsage } from "./lib/weekUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
@@ -411,7 +411,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     });
     const unlisten = api.onUiEvent((slot, event) => {
       // The plan's usage is the account's, not the chat's: kept once, for the top bar and the canvas.
-      if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
+      if (event.kind === "provider_usage") setProviderUsage(event.usage);
+      else if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
       else if (event.kind === "week_usage") setWeekUsage({ used: event.used, resetsAt: event.resets_at });
       else batch.push({ slot, event });
     });
@@ -1386,7 +1387,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const due = paused ? [] : queuesToSend(prevStatus.current, chats.slots);
+    const held = (slot: string) => guards.heldSlots.includes(slot);
+    const due = queuesToSend(prevStatus.current, chats.slots).filter(({ slot }) => !held(slot));
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
     for (const [slot] of ended) syncChanges(slot);
@@ -1400,11 +1402,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
     // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
     // render still has it idle, and a second message would start a second turn on top of that one.
-    for (const { slot, text } of paused ? [] : wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
+    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot))).filter(({ slot }) => !held(slot))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots, paused]);
+  }, [chats.slots, paused, guards.heldSlots.join(",")]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -2579,7 +2581,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // (to-dos, status) still covers the whole Desk.
   const askOpen = pageOn ? (deskOpen[pageOn] ? { [pageOn]: deskOpen[pageOn] } : {}) : deskOpen;
   const askFolders = pageOn ? [pageOn] : deskFolders;
-  const deskCandidates = routeCandidates(chats, askOpen, offClaude);
+  const deskCandidates = routeCandidates(chats, askOpen);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
   // The board's to-do counts, read only while the Desk is on screen.
@@ -2989,7 +2991,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
-          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
+          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo, switchToCodex: activeProvider === CLAUDE && isAvailable("codex") && state.status === "idle" && !isBusy(state) && !state.orchestrator && !chats.agents[active] && state.backgroundTasks.length === 0 ? () => chooseProvider("codex") : undefined }}
           back={goBack && { run: goBack, label: backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
           inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
@@ -3119,7 +3121,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   targets={deskTargets}
                   across={askFolders.length > 1}
                   about={pageOn ? deskProjects[0]?.label : undefined}
-                  canSend={!!state.claudePath}
+                  canSend={agentReady}
                   onSend={deskSend}
                   onSendTo={deskSendTo}
                   onStartIn={(entry, folder) => deskStartIn(entry, folder)}

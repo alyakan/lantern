@@ -42,7 +42,7 @@ interface Props {
   /** Orchestras: a main agent and the workers it runs. `exists`: there is one, so the canvas can be shown. */
   orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void };
   /** What the plan meter's popover lists: every open chat and team with what it has used (computed when it opens), and opening one. */
-  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void };
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void };
   /** The sidebar, while it is hidden: a button at the left to show it again, badged with how many chats and agents need you. */
   sidebar?: { needs: number; onShow: () => void };
   /** What waits on you in every project and team (see Inbox): a button at the right with a popover. */

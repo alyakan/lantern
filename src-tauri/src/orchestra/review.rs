@@ -563,7 +563,7 @@ impl Orchestra {
                 let mut found = None;
                 'chains: for ci in 0..inner.chains.len() {
                     for k in 0..inner.chains[ci].checks.len() {
-                        if inner.chains[ci].checks[k].state == CheckState::Queued && Self::no_room(inner, &inner.chains[ci].main, limit).is_none() {
+                        if inner.chains[ci].checks[k].state == CheckState::Queued && Self::no_room(inner, &inner.chains[ci].main, limit, self.host.main_provider(&inner.chains[ci].main)).is_none() {
                             found = Some((ci, k));
                             break 'chains;
                         }
@@ -590,7 +590,7 @@ impl Orchestra {
                 if let Err(e) = started {
                     // No room after all (another agent took the place meanwhile): it waits for the next one. Any other
                     // reason is its own, and the Lead is told in the report.
-                    full = Self::no_room(inner, &main, limit).is_some();
+                    full = Self::no_room(inner, &main, limit, self.host.main_provider(&main)).is_some();
                     let check = &mut inner.chains[at].checks[k];
                     check.slot = None;
                     check.state = if full { CheckState::Queued } else { CheckState::Failed(untrusted(&e, 160)) };

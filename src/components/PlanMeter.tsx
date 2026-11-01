@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { planLevel, planLine, planSentence, usePlanUsage } from "../lib/planUsage";
-import { useWeekUsage, WEEK_SECS, weekLevel, weekLine, weekSentence } from "../lib/weekUsage";
-import { DAY_SECS, HOUR_SECS, SESSION_SECS, windowMarks, type Mark, type Marks } from "../lib/usageMarks";
+import { useEffect, useState } from "react";
+import { currentWindow, useProviderUsage } from "../lib/planUsage";
+import { weekSentence } from "../lib/weekUsage";
+import { providerName } from "../lib/provider";
+import { DAY_SECS, HOUR_SECS, windowMarks, type Mark, type Marks } from "../lib/usageMarks";
 import { usageLine } from "../lib/cost";
 import { modelLine, type ModelShare, type UsageRow, type UsageState } from "../lib/usage";
 import { usePopover } from "../lib/usePopover";
@@ -9,92 +10,90 @@ import { ChevronIcon } from "./icons";
 
 interface Props {
   /** What the popover lists (computed when it opens), and opening one of the chats. Left out: the meter is only a reading. */
-  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void };
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void };
 }
 
 const STATE_LABEL: Record<UsageState, string> = { working: "Working", waiting: "Needs you", idle: "Idle", ended: "Stopped" };
 
-/**
- * How full the five-hour session and the week are, once claude has said: the session amber from 80%, red from 95% (no new
- * workers then). Pressed, it shows both as bars marked with an even pace, and where the use went: every open chat and
- * team, biggest first.
- */
+/** Provider account limits, followed by lifetime totals for open chats and teams. */
 export function PlanMeter({ usage }: Props) {
-  const plan = usePlanUsage();
-  const week = useWeekUsage();
+  const providers = useProviderUsage();
   const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(Date.now);
   const { box, button, list, id } = usePopover(open, () => setOpen(false));
-  if (!plan) return null;
-  const level = planLevel(plan);
-  const title = level === "stop" ? "Nearly used up: no new agents start until it resets." : level === "warn" ? "Getting close to the five-hour session limit." : "The five-hour session and the week, for every chat and team. Press to see both and where the use went.";
-  // Each window as a word, its percentage and a thin bar; the week amber when its pace runs it out before the reset.
-  const sessionMini = <MiniMeter label="Session" used={plan.used} level={level} />;
-  const weekMini = week && <MiniMeter label="Week" used={week.used} level={weekLevel(week)} />;
-  if (!usage) {
-    return (
-      <>
-        <span className={`plan-meter ${level}`} role="status" title={title}>
-          {sessionMini}
-        </span>
-        {week && (
-          <span className={`plan-meter ${weekLevel(week)}`} role="status" title={weekSentence(week)}>
-            {weekMini}
-          </span>
-        )}
-      </>
-    );
-  }
-  const now = Date.now();
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const summaries = [...new Set(["claude", "codex", ...Object.keys(providers)])].map(name => {
+    const reading = providers[name];
+    const windows = reading?.windows.filter(w => currentWindow(w, now)) ?? [];
+    const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
+    return { name, reading, windows, used };
+  });
+  const label = summaries.map(p => `${providerName(p.name)}: ${p.used === null ? "usage unavailable" : `${pct(p.used)}% used`}`).join(", ");
   return (
     <div className="plan-meter-box" ref={box}>
       <button
         ref={button}
-        className={`plan-meter ${level}`}
-        aria-label={[planLine(plan), week && weekLine(week)].filter(Boolean).join(", ")}
+        className="plan-meter"
+        title="Usage is separate for each provider. Each number is its fullest reported window."
+        aria-label={`Usage by provider. ${label}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? id : undefined}
-        title={title}
         onClick={() => setOpen(!open)}
       >
-        {sessionMini}
-        {weekMini}
+        {summaries.map(p => (
+          <span key={p.name} className={`mini-meter ${usageLevel(p.used)}`}>
+            <span>{providerName(p.name)} {p.used === null ? "—" : `${pct(p.used)}%`}</span>
+            <span className="mini-meter-track" aria-hidden>
+              {p.used !== null && <span className="mini-meter-fill" style={{ width: `${pct(p.used)}%` }} />}
+            </span>
+          </span>
+        ))}
         <ChevronIcon up={open} />
       </button>
       {open && (
-        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Session and weekly usage">
-          <UsageBar label="Session" used={plan.used} level={level} sentence={planSentence(plan, now)} marks={windowMarks(plan.resetsAt, SESSION_SECS, HOUR_SECS, now)} unit="hour" />
-          {week && <UsageBar label="Week" used={week.used} level={weekLevel(week, now)} sentence={weekSentence(week, now)} marks={windowMarks(week.resetsAt, WEEK_SECS, DAY_SECS, now)} unit="day" />}
-          <p className="usage-heading">Where it went</p>
-          <UsageList
-            rows={usage.rows()}
-            onOpen={(slot) => {
-              setOpen(false);
-              usage.onOpen(slot);
-            }}
-          />
-          <p className="usage-note">Since each chat or team started, not just this window. Closed ones aren't counted, so it won't add up to the plan's percentage. Models are from each one's latest turn.</p>
+        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Usage by provider">
+          {summaries.map(({ name, reading, windows }) => (
+            <section key={name} aria-label={`${providerName(name)} usage`}>
+              <p className="usage-heading">{providerName(name)}</p>
+              {windows.length === 0 ? <p className="usage-empty">Usage unavailable</p> : windows.map(w => (
+                <UsageBar
+                  key={w.label}
+                  label={w.label}
+                  used={w.used}
+                  level={usageLevel(w.used)}
+                  sentence={w.minutes === 10080
+                    ? weekSentence({ used: w.used, resetsAt: w.resets_at }, now)
+                    : `${pct(w.used)}% used${w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}`}
+                  marks={w.minutes
+                    ? windowMarks(w.resets_at, w.minutes * 60, w.minutes === 10080 ? DAY_SECS : HOUR_SECS, now)
+                    : { marks: [], middles: [], pace: null }}
+                  unit={w.minutes === 10080 ? "day" : "hour"}
+                />
+              ))}
+              {name === "claude" && windows.some(w => w.used >= .95) && usage?.switchToCodex && (
+                <button className="soft" onClick={() => { setOpen(false); usage.switchToCodex!(); }}>Switch this chat to Codex</button>
+              )}
+              {reading && <p className="usage-note">Last updated {new Date(reading.updated_at * 1000).toLocaleTimeString()}</p>}
+            </section>
+          ))}
+          {usage && <>
+            <p className="usage-heading">Open chats and teams</p>
+            <UsageList rows={usage.rows()} onOpen={slot => { setOpen(false); usage.onOpen(slot); }} />
+            <p className="usage-note">Totals since each chat started, across providers. These do not add up to a subscription percentage.</p>
+          </>}
         </div>
       )}
     </div>
   );
 }
 
-const pct = (used: number) => Math.round(Math.min(1, Math.max(0, used)) * 100);
+const usageLevel = (used: number | null): "ok" | "warn" | "stop" => used !== null && used >= .95 ? "stop" : used !== null && used >= .8 ? "warn" : "ok";
 
-/** "Session 42%" over a thin bar, for the title bar. */
-function MiniMeter({ label, used, level }: { label: string; used: number; level: "ok" | "warn" | "stop" }) {
-  return (
-    <span className={`mini-meter ${level}`}>
-      <span className="mini-meter-text">
-        {label} {Math.round(used * 100)}%
-      </span>
-      <span className="mini-meter-track" aria-hidden>
-        <span className="mini-meter-fill" style={{ width: `${pct(used)}%` }} />
-      </span>
-    </span>
-  );
-}
+const pct = (used: number) => Math.round(Math.min(1, Math.max(0, used)) * 100);
 
 /**
  * One window as a full bar: what is used, a tick where an even pace would have it at the end of each hour (or day), a

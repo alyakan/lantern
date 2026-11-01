@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "../mobile/src/protocol/generated/ProviderUsage";
 import type { AgentRole } from "./lib/roles";
 import type { ReviewCheck } from "./lib/reviewChain";
 
@@ -148,6 +149,7 @@ export type UiEvent =
   /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why), or
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
   /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "provider_usage"; usage: ProviderUsage }
   | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
   /** The subscription's weekly window, the same way: `used` 0–1, `resets_at` unix seconds. */
   | { kind: "week_usage"; used: number; resets_at: number | null }
