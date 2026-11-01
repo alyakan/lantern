@@ -21,6 +21,12 @@ describe("PermissionsMenu", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Auto/ }));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("describes Codex Auto as a separate sandbox reviewer", () => {
+    render(<PermissionsMenu permissions="ask" onChange={() => {}} agent="Codex" />);
+    fireEvent.click(screen.getByRole("button", { name: /Permissions: Ask/ }));
+    expect(screen.getByRole("menuitemradio", { name: /Auto/ })).toHaveTextContent("A separate reviewer handles sandbox approval requests");
+  });
 });
 
 describe("WorkflowMenu", () => {

@@ -25,15 +25,19 @@ fn steps_prompt() -> String {
     STEPS_SWAPS.iter().fold(STEPS_PROMPT.to_string(), |text, (from, to)| text.replacen(from, to, 1))
 }
 
-/// The instructions for a Codex chat in `mode` as `role`. Lantern's Auto has no Codex equivalent and is never offered for
-/// it, so its Permissions read as Ask here, as it runs.
-pub fn instructions(mode: Mode, role: &Role) -> String {
+/// The instructions for a Codex chat in `mode` as `role`.
+pub fn instructions(mode: Mode, auto_approve: bool, role: &Role) -> String {
     let workflow = if mode == Mode::Steps { "Step by step" } else { "Chat" };
+    let (permissions, permission_detail) = if crate::args::is_auto(mode, auto_approve) {
+        ("Auto", "Edits inside the workspace apply as you make them. When you request an action across the sandbox boundary, Codex's separate reviewer decides whether to approve it and gives a reason. If it denies the action, follow its instructions; do not retry through a workaround. The sandbox and approval policy stay the same.")
+    } else {
+        ("Ask", "Edits inside the workspace apply as you make them; a command outside the sandbox, network access or a file outside the workspace shows the user an Allow/Deny card, and you carry on with their answer.")
+    };
     let mut text = format!(
         "You are running inside Lantern, a macOS desktop app for coding agents (github.com/alyakan/lantern), as Codex. The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read) and Tests. They pick the settings and the model; you can't change them. Every chat has two settings:
-Permissions: Ask. Edits inside the workspace apply as you make them; a command outside the sandbox, network access or a file outside the workspace shows the user an Allow/Deny card, and you carry on with their answer.
+Permissions: Ask or Auto. On Ask, the user reviews sandbox approval requests. On Auto, Codex's separate reviewer handles them.
 Workflow: Chat, where you work as usual, or Step by step, one page per message in a flavour (Build, Review, Debug or Design).
-This chat's Permissions are Ask and its Workflow is {workflow}. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does."
+This chat's Permissions are {permissions} and its Workflow is {workflow}. {permission_detail} A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does."
     );
     text.push_str("\n\nLantern’s tools are available on its MCP server (mcp__lantern__…). Use the available tools for Lantern’s app features. Follow the tools’ instructions.");
     if mode == Mode::Steps {
@@ -71,24 +75,24 @@ mod tests {
 
     #[test]
     fn the_note_names_codex_and_the_modes_it_has_and_never_mentions_claude_only_things() {
-        let ask = instructions(Mode::Ask, &Role::Normal);
+        let ask = instructions(Mode::Ask, false, &Role::Normal);
         assert!(ask.contains("as Codex") && ask.contains("Permissions are Ask and its Workflow is Chat."));
         assert!(!ask.contains("# Frame"), "Ask has no page loop");
         for stale in ["claude", "classifier", "advisor", "subagent"] {
             assert!(!ask.to_lowercase().contains(stale), "{stale}");
         }
-        // Auto can't run on Codex: it reads as Ask.
-        assert!(instructions(Mode::Auto, &Role::Normal).contains("Permissions are Ask and its Workflow is Chat."));
+        assert!(instructions(Mode::Auto, false, &Role::Normal).contains("Permissions are Auto and its Workflow is Chat."));
+        assert!(instructions(Mode::Steps, true, &Role::Normal).contains("Permissions are Auto and its Workflow is Step by step."));
     }
 
     #[test]
     fn step_by_step_adds_the_page_loop_and_a_worker_its_brief() {
-        let steps = instructions(Mode::Steps, &Role::Normal);
+        let steps = instructions(Mode::Steps, false, &Role::Normal);
         assert!(steps.contains("its Workflow is Step by step.") && steps.contains("# Frame"));
-        let worker = instructions(Mode::Ask, &Role::Worker { name: "scout".into(), read_only: false });
+        let worker = instructions(Mode::Ask, false, &Role::Worker { name: "scout".into(), read_only: false });
         assert!(worker.contains("named \"scout\"") && worker.contains("git worktree"));
-        assert!(!instructions(Mode::Ask, &Role::Normal).contains("worker agent"));
-        let reader = instructions(Mode::Ask, &Role::Worker { name: "r".into(), read_only: true });
+        assert!(!instructions(Mode::Ask, false, &Role::Normal).contains("worker agent"));
+        let reader = instructions(Mode::Ask, false, &Role::Worker { name: "r".into(), read_only: true });
         assert!(reader.contains("You are read-only") && !reader.contains("Grep and Glob"));
     }
 }

@@ -1,6 +1,7 @@
 //! A running `codex app-server`: JSON-RPC over stdio, one JSON object per line (Codex leaves out the `"jsonrpc"` field, and
 //! so does this). Requests Lantern makes get their reply by id; the server's notifications become `UiEvent`s (codex_events);
-//! its approval requests become the same Allow/Deny cards Claude's do, answered in the JSON-RPC reply.
+//! in Ask, its approval requests become the same Allow/Deny cards Claude's do, answered in the JSON-RPC reply. In Auto,
+//! Codex's separate reviewer handles boundary-crossing requests before they reach Lantern.
 //!
 //! Signing in is the user's own (`codex login` in a terminal). Lantern asks the app-server only whether it is signed in, never
 //! reads or sends a credential, and refuses the server's request for tokens.
@@ -37,13 +38,17 @@ const TRANSCRIPT_PAGES: usize = 20;
 
 const SIGN_IN: &str = "Codex isn't signed in. Run `codex login` in a terminal, then send your message again.";
 
-/// What Codex asks before it acts, and where it may write, for every mode Lantern has. Lantern has no Auto for Codex (see
-/// Capabilities), so Ask and Step by step are the only ones that arrive, and an Auto that does is Ask: `on-request` with a
+/// What Codex asks before it acts, and where it may write, for every mode Lantern has. `on-request` with a
 /// workspace-write sandbox applies edits inside the folder as they are made and asks for a command outside the sandbox,
 /// network access or a file elsewhere. Nothing here ever maps to `never` or `danger-full-access`, whatever the user's
 /// ~/.codex/config.toml says: it is sent with the thread and again with every turn.
 pub fn approval_policy(_mode: Mode) -> &'static str {
     "on-request"
+}
+
+/// Auto changes who reviews boundary-crossing requests, never the sandbox or approval policy.
+fn approvals_reviewer(mode: Mode, auto_approve: bool) -> &'static str {
+    if crate::args::is_auto(mode, auto_approve) { "auto_review" } else { "user" }
 }
 
 /// The sandbox that goes with `approval_policy`, as thread/start's `sandbox` takes it. A read-only agent (one sharing its
@@ -121,6 +126,7 @@ struct Ctx {
     state: Arc<Mutex<State>>,
     cwd: String,
     mode: Mode,
+    auto_approve: bool,
     /// A read-only agent: Codex's read-only sandbox, whatever it asks.
     read_only: bool,
     instructions: Arc<String>,
@@ -182,7 +188,7 @@ impl Ctx {
             "input": input,
             "cwd": self.cwd,
             "approvalPolicy": approval_policy(self.mode),
-            "approvalsReviewer": "user",
+            "approvalsReviewer": approvals_reviewer(self.mode, self.auto_approve),
             "sandboxPolicy": sandbox_policy(self.read_only),
         });
         if let Some(m) = model {
@@ -286,7 +292,7 @@ impl CodexSession {
         let stderr = child.stderr.take().ok_or("codex has no stderr pipe")?;
 
         let state = Arc::new(Mutex::new(State { model: cfg.model.clone(), effort: cfg.effort.clone(), thread_id: None, ..State::default() }));
-        let ctx = Ctx { ephemeral: cfg.helper.socket.is_empty(), stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(format!("{}{}", codex_prompt::instructions(cfg.mode, &cfg.helper.role), cfg.helper.project_notes.as_ref().map(|n|format!("\n\n{n}")).unwrap_or_default())) };
+        let ctx = Ctx { ephemeral: cfg.helper.socket.is_empty(), stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, auto_approve: cfg.auto_approve, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(format!("{}{}", codex_prompt::instructions(cfg.mode, cfg.auto_approve, &cfg.helper.role), cfg.helper.project_notes.as_ref().map(|n|format!("\n\n{n}")).unwrap_or_default())) };
         let stopping = Arc::new(AtomicBool::new(false));
         let tail = Arc::new(Mutex::new(String::new()));
         let (exit_tx, exited) = watch::channel(false);
@@ -591,7 +597,7 @@ async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>, model: Option<S
     let mut params = json!({
         "cwd": ctx.cwd,
         "approvalPolicy": approval_policy(ctx.mode),
-        "approvalsReviewer": "user",
+        "approvalsReviewer": approvals_reviewer(ctx.mode, ctx.auto_approve),
         "sandbox": sandbox_mode(ctx.mode, ctx.read_only),
         "developerInstructions": *ctx.instructions,
         "ephemeral": ctx.ephemeral,
@@ -852,6 +858,10 @@ mod tests {
         assert_eq!(sandbox_policy(false)["type"], "workspaceWrite");
         assert_eq!(sandbox_policy(true)["type"], "readOnly");
         assert_eq!(sandbox_policy(false)["networkAccess"], false);
+        assert_eq!(approvals_reviewer(Mode::Ask, false), "user");
+        assert_eq!(approvals_reviewer(Mode::Steps, false), "user");
+        assert_eq!(approvals_reviewer(Mode::Auto, false), "auto_review");
+        assert_eq!(approvals_reviewer(Mode::Steps, true), "auto_review");
     }
 
     #[test]
@@ -1104,6 +1114,30 @@ done
         assert!(start["developerInstructions"].as_str().unwrap().contains("running inside Lantern, a macOS desktop app for coding agents"));
         assert!(start.get("threadId").is_none());
         s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn auto_review_is_sent_at_thread_start_and_again_for_each_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}"));
+        let mut cfg = config(fake.script(dir.path()), dir.path(), None);
+        cfg.mode = Mode::Steps;
+        cfg.auto_approve = true;
+        let (sink, mut rx) = channel_sink();
+        let mut session = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        session.initialize().await;
+        let start = requests(dir.path(), "thread/start").remove(0);
+        assert_eq!(start["params"]["approvalsReviewer"], "auto_review");
+        assert_eq!(start["params"]["approvalPolicy"], "on-request");
+        assert_eq!(start["params"]["sandbox"], "workspace-write");
+        assert!(start["params"]["developerInstructions"].as_str().unwrap().contains("Permissions are Auto"));
+        session.send("continue").await.unwrap();
+        until_turn_done(&mut rx).await;
+        let turn = requests(dir.path(), "turn/start").remove(0);
+        assert_eq!(turn["params"]["approvalsReviewer"], "auto_review");
+        assert_eq!(turn["params"]["approvalPolicy"], "on-request");
+        assert_eq!(turn["params"]["sandboxPolicy"]["type"], "workspaceWrite");
+        session.stop().await;
     }
 
     const RECORDED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/codex/handshake.jsonl");

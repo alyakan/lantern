@@ -177,9 +177,11 @@ interface Props {
   onClose: () => void;
   /** The chat's provider has an auto mode; without one its page, and what Step by step says of auto-approve, are left out. */
   auto?: boolean;
+  /** Codex's Auto uses its own reviewer rather than Claude Code's classifier. */
+  codex?: boolean;
 }
 
-export function ModeGuide({ open, permissions, workflow, flavour, explain = false, onUse, onClose, auto = true }: Props) {
+export function ModeGuide({ open, permissions, workflow, flavour, explain = false, onUse, onClose, auto = true, codex = false }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [picked, setShown] = useState<GuideKey>(open ?? permissions);
   // A provider without Auto has no Auto page to show: its Ask page stands in.
@@ -200,7 +202,18 @@ export function ModeGuide({ open, permissions, workflow, flavour, explain = fals
   }, [open]);
 
   const now = (k: GuideKey) => (k === "explain" ? workflow === "steps" && explain : isFlavour(k) ? workflow === "steps" && flavour === k : isPermissions(k) ? permissions === k : workflow === k);
-  const about = GUIDE[shown];
+  const about = codex && shown === "ask" ? {
+    ...GUIDE.ask,
+    summary: "Codex edits files inside the workspace and asks you before crossing the sandbox boundary.",
+    claude: ["Reads, searches and edits files inside the workspace", "Asks before commands or changes that require sandbox escalation"],
+    you: ["Allow or deny each sandbox approval from its card", "Follow edits in Changes as they land"],
+  } : codex && shown === "auto" ? {
+    ...GUIDE.auto,
+    summary: "Codex asks a separate reviewer to decide sandbox approval requests. Its sandbox and approval policy stay the same.",
+    claude: ["Edits files inside the workspace as usual", "Sends boundary-crossing requests to the reviewer, which approves or denies them with a reason", "Stops or asks you when a denied action has no safer path"],
+    you: ["Check the result and review edits in Changes", "Use Ask when you want to answer each sandbox approval yourself"],
+    goodFor: "Work where you want Codex to handle routine approval requests under review.",
+  } : GUIDE[shown];
   // What Step by step says of Auto-approve is about the mode this provider hasn't got.
   const you = auto ? about.you : about.you.filter((line) => !line.startsWith("Auto-approve"));
   return (
@@ -225,7 +238,7 @@ export function ModeGuide({ open, permissions, workflow, flavour, explain = fals
             <div className="mode-guide-eyebrow">{isStepsKey(shown) ? "Step by step" : isPermissions(shown) ? "Permissions" : "Workflow"}</div>
             <h2 className="mode-guide-title">{about.label}</h2>
             <p className="mode-guide-summary">{about.summary}</p>
-            <Section title="What Claude does" items={about.claude} />
+            <Section title={`What ${codex ? "Codex" : "Claude"} does`} items={about.claude} />
             <Section title="What you do" items={you} />
             <h3 className="mode-guide-heading">Good for</h3>
             <p className="mode-guide-text">{about.goodFor}</p>
