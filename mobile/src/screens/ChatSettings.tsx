@@ -41,7 +41,7 @@ interface Option {
 }
 
 /** One choice of a few, as a row: its name and what it does, or why it can't be picked now. */
-function OptionRow({ option, selected, onPick }: { option: Option; selected: boolean; onPick: () => void }) {
+function OptionRow({ option, selected, onPick, notice }: { option: Option; selected: boolean; onPick: () => void; notice?: string | null }) {
   const colors = useColors();
   return (
     <PressScale
@@ -59,7 +59,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
         {selected ? `${option.label} ✓` : option.label}
       </Txt>
       <Txt variant="small" tone="ink2">
-        {option.off ?? option.hint}
+        {option.off && option.off !== notice ? option.off : option.hint}
       </Txt>
     </PressScale>
   );
@@ -90,6 +90,8 @@ function SettingsLink({ title, value, expanded, onPress }: { title: string; valu
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
 function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const [showOlder, setShowOlder] = useState(false);
   const next = useRef<(() => void) | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggle = (id: string) => setExpanded((current) => current === id ? null : id);
@@ -111,15 +113,17 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
   if (presets.length) sections.push({ id: "presets", title: "Model preset", value: presets.find((p) => p.value === chat.preset)?.label ?? "Standard", selected: chat.preset ?? "", options: presets, onPick: onPreset });
   const hasUsage = !!context || !!plan;
   return (
-    <Sheet size="large" onClose={() => { onClose(); next.current?.(); }}>
+    <Sheet onClose={() => { onClose(); next.current?.(); }}>
       {(close, scroll) => (
-        <View style={{ flex: 1 }}>
+        <View style={{ flexShrink: 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.lg, paddingVertical: 10, gap: 8 }}>
             <Txt variant="body" accessibilityRole="header" style={{ flex: 1, fontWeight: "700" }}>Chat settings</Txt>
             <PressScale accessibilityRole="button" accessibilityLabel="Done" onPress={close} hitSlop={8} style={{ minWidth: 60, minHeight: 44, alignItems: "flex-end", justifyContent: "center" }}><Txt variant="body" tone="cobalt" style={{ fontWeight: "700" }}>Done</Txt></PressScale>
           </View>
-          <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
-            <Txt variant="small" tone="ink2">{off ?? "Changes apply to this conversation."}</Txt>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
+            <View style={off ? { backgroundColor: colors.hiSoft, borderRadius: radius.inner, padding: 12 } : undefined}>
+              <Txt variant="small" tone={off ? "cobalt" : "ink2"}>{off ?? "Changes apply to this conversation."}</Txt>
+            </View>
             {loading ? (
               <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}><Dots /></View>
             ) : (
@@ -128,7 +132,10 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
                   <Fragment key={section.id}>
                     <SettingsLink title={section.title} value={section.value} expanded={expanded === section.id} onPress={() => toggle(section.id)} />
                     {expanded === section.id && <View style={{ gap: 6, paddingHorizontal: 6 }}>
-                      {section.options.map((option) => <OptionRow key={option.value} option={option} selected={option.value === section.selected} onPick={() => { section.onPick(option.value); close(); }} />)}
+                      {section.options.filter((option, index) => section.id !== "model" || showOlder || index <= 5 || option.value === section.selected).map((option) => <OptionRow key={option.value} notice={off} option={option} selected={option.value === section.selected} onPick={() => { section.onPick(option.value); close(); }} />)}
+                      {section.id === "model" && section.options.length > 6 && <PressScale accessibilityRole="button" accessibilityLabel={showOlder ? "Hide older models" : "Show older models"} onPress={() => setShowOlder((shown) => !shown)} style={{ padding: 12, minHeight: 44 }}>
+                        <Txt variant="small" tone="cobalt">{showOlder ? "Hide older models" : "Show older models"}</Txt>
+                      </PressScale>}
                     </View>}
                   </Fragment>
                 ))}
@@ -254,7 +261,7 @@ export function ChatSettings({ slot, chat, plan, context, pages, onProblem, onCl
       {closing && (
         <CloseChatSheet
           title={chat.title?.trim() || "this chat"}
-          why={chat.status === "working" || chat.status === "needs_you" ? "Claude is busy in this chat. Stop it first, then close it." : null}
+          why={chat.status === "working" || chat.status === "needs_you" ? "The agent is busy in this chat. Stop it first, then close it." : null}
           onConfirm={() => sync.close(slot).then(() => onClosed?.())}
           onClose={() => setClosing(false)}
         />

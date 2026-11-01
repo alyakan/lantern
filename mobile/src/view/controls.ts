@@ -45,7 +45,7 @@ export function whyNotNow(chat: RemoteChat | undefined): string | null {
       return null;
     case "working":
     case "needs_you":
-      return "Claude is busy in this chat. Change it once it has finished.";
+      return "The agent is busy in this chat. Change it once it has finished.";
     case "asleep":
       return "This chat is asleep. Wake it first.";
     case "ended":

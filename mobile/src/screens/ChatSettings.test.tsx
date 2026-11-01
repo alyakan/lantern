@@ -84,7 +84,7 @@ describe("the settings sheet", () => {
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(screen.getByRole("button", { name: /^Model preset,/ }));
     expect(screen.getByRole("radio", { name: "Balanced" }).props.accessibilityState).toMatchObject({ disabled: true });
-    expect(screen.getAllByText("Claude is busy in this chat. Change it once it has finished.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("The agent is busy in this chat. Change it once it has finished.")).toHaveLength(1);
   });
 });
 
@@ -122,11 +122,11 @@ describe("switching Ask or Auto", () => {
   });
 
   it("says why when the Mac refuses, and stops saying Switching…", async () => {
-    const { onProblem } = await open({ allowAuto: true, answers: { set_permissions: new Error("Claude is busy in this chat. Change it once it has finished.") } });
+    const { onProblem } = await open({ allowAuto: true, answers: { set_permissions: new Error("The agent is busy in this chat. Change it once it has finished.") } });
     await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
-    await waitFor(() => expect(onProblem).toHaveBeenCalledWith("Claude is busy in this chat. Change it once it has finished."));
+    await waitFor(() => expect(onProblem).toHaveBeenCalledWith("The agent is busy in this chat. Change it once it has finished."));
     expect(screen.queryByText(/Switching…/)).toBeNull();
   });
 
@@ -195,7 +195,7 @@ describe("closing the chat from its settings", () => {
     await openSheet();
     await fireEvent.press(screen.getByRole("button", { name: "Close this chat" }));
     await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
-    expect(screen.getAllByText("Claude is busy in this chat. Stop it first, then close it.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("The agent is busy in this chat. Stop it first, then close it.").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Close chat" })).toBeNull();
   });
 });
@@ -235,6 +235,19 @@ const codexConfiguration = {
 };
 
 describe("provider-neutral settings", () => {
+  it("starts with the provider’s first five models and reveals older choices on request", async () => {
+    const models = ["recent-1", "recent-2", "recent-3", "recent-4", "recent-5", "older-1", "older-2"];
+    await open({ features: ["controls", "conversation"], answers: { conversation_settings: { ...codexConfiguration, models, model: "older-2" } } });
+    await openSheet("Model");
+    expect(screen.getByRole("radio", { name: "recent-5" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "older-2" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "older-1" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Show older models" }));
+    expect(screen.getByRole("radio", { name: "older-1" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Hide older models" }));
+    expect(screen.queryByRole("radio", { name: "older-1" })).toBeNull();
+  });
+
   it("offers only the active provider's models and effort levels and sends a model operation", async () => {
     const { lastOf } = await open({ features: ["controls", "conversation"], chatOver: { provider: "Codex" }, answers: { conversation_settings: codexConfiguration } });
     await openSheet("Model");
