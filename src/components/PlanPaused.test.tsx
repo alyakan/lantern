@@ -10,7 +10,7 @@ describe("PlanPaused", () => {
     render(<PlanPaused pause={pause(["s1", "w1", "w2"])} onResume={() => {}} />);
     const card = screen.getByRole("status");
     expect(card).toHaveTextContent("Paused: your plan is 95% used, it resets in 1h 12m.");
-    expect(card).toHaveTextContent("3 agents were stopped, none ended. Nothing starts again until you press Resume.");
+    expect(card).toHaveTextContent("3 agents were stopped, none ended. These agents stay paused until you press Resume.");
   });
 
   it("says it in the singular for one agent", () => {

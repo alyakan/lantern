@@ -1,3 +1,4 @@
+import { setProviderUsage } from "./planUsage";
 import { useEffect, useState } from "react";
 
 /**
@@ -20,6 +21,7 @@ let latest: WeekUsage | null = null;
 
 export function setWeekUsage(w: WeekUsage): void {
   latest = w;
+  setProviderUsage({ provider: "claude", windows: [{ label: "Week", used: w.used, resets_at: w.resetsAt, minutes: 10080 }], updated_at: Math.floor(Date.now() / 1000) });
   window.dispatchEvent(new Event(CHANGED));
 }
 

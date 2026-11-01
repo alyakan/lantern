@@ -330,6 +330,8 @@ pub fn without_notes(text: &str) -> &str {
 #[derive(Default)]
 struct PlanSeen {
     five: Option<UiEvent>,
+    updated_at: Option<u64>,
+    providers: std::collections::BTreeMap<String, crate::ui_event::ProviderUsage>,
     /// How much of the weekly window, and when it resets.
     week: Option<(f64, Option<u64>)>,
 }
@@ -368,8 +370,9 @@ impl SessionHub {
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
     pub fn record(&self, ev: &BusEvent) {
         match &ev.event {
-            UiEvent::PlanUsage { .. } => self.plan.lock().unwrap().five = Some(ev.event.clone()),
-            UiEvent::WeekUsage { used, resets_at } => self.plan.lock().unwrap().week = Some((*used, *resets_at)),
+            UiEvent::ProviderUsage { usage } => { self.plan.lock().unwrap().providers.insert(usage.provider.clone(), usage.clone()); },
+            UiEvent::PlanUsage { .. } => { let mut plan = self.plan.lock().unwrap(); plan.five = Some(ev.event.clone()); plan.updated_at = Some((self.now)() / 1000); },
+            UiEvent::WeekUsage { used, resets_at } => { let mut plan = self.plan.lock().unwrap(); plan.week = Some((*used, *resets_at)); plan.updated_at = Some((self.now)() / 1000); },
             _ => {}
         }
         let mut chats = self.chats.lock().unwrap();
@@ -554,6 +557,10 @@ impl SessionHub {
     }
 
     /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
+    pub fn plan_updated_at(&self) -> Option<u64> { self.plan.lock().unwrap().updated_at }
+
+    pub fn provider_usage(&self) -> Vec<crate::ui_event::ProviderUsage> { self.plan.lock().unwrap().providers.values().cloned().collect() }
+
     pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
         match self.plan.lock().unwrap().five.as_ref()? {
             UiEvent::PlanUsage { used, resets_at, status } => Some((*used, *resets_at, status.clone())),
@@ -700,6 +707,16 @@ mod tests {
         hub.titled("a", "Release 0.1.63");
         assert_eq!(hub.real_title("a").as_deref(), Some("Release 0.1.63"));
         assert_eq!((hub.steps("nope"), hub.real_title("nope")), (None, None));
+    }
+
+    #[test]
+    fn provider_usage_does_not_replace_claudes_subscription() {
+        let hub = hub();
+        feed(&hub, "a", vec![UiEvent::PlanUsage { used: 1.0, resets_at: None, status: "rejected".into() }]);
+        let usage = crate::ui_event::ProviderUsage { provider: "codex".into(), updated_at: 10, windows: vec![crate::ui_event::UsageWindow { label: "5 hours".into(), used: 0.2, resets_at: None, minutes: Some(300) }] };
+        feed(&hub, "b", vec![UiEvent::ProviderUsage { usage: usage.clone() }]);
+        assert_eq!(hub.plan().unwrap().0, 1.0);
+        assert_eq!(hub.provider_usage(), vec![usage]);
     }
 
     #[test]

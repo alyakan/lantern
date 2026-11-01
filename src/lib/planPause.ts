@@ -49,6 +49,7 @@ const FIVE_HOURS = 5 * 3600_000;
 
 /** A team's work that was paused: when, how full the plan was, when it resets, and the agents that were interrupted. */
 export interface PlanPause {
+  provider?: string;
   percent: number;
   resetsAt: number | null;
   since: number;
@@ -56,7 +57,8 @@ export interface PlanPause {
 }
 
 /** When a pause is over by itself: the plan's window resets (when claude didn't say, at the end of the clock's five-hour block it began in). */
-export function pauseEndsAt(p: Pick<PlanPause, "resetsAt" | "since">): number {
+export function pauseEndsAt(p: Pick<PlanPause, "resetsAt" | "since" | "provider">): number | null {
+  if (p.provider && p.provider !== "claude" && p.resetsAt === null) return null;
   return p.resetsAt !== null ? p.resetsAt * 1000 : (Math.floor(p.since / FIVE_HOURS) + 1) * FIVE_HOURS;
 }
 
@@ -72,18 +74,18 @@ export function windowKey(plan: PlanUsage, now = Date.now()): string {
   return plan.resetsAt !== null ? String(plan.resetsAt) : `block-${Math.floor(now / FIVE_HOURS)}`;
 }
 
-export function loadPauseMemory(): PauseMemory {
+export function loadPauseMemory(provider = "claude"): PauseMemory {
   try {
-    const raw = JSON.parse(localStorage.getItem(MEMORY) ?? "null") as Partial<PauseMemory> | null;
+    const raw = JSON.parse(localStorage.getItem(provider === "claude" ? MEMORY : `${MEMORY}.${provider}`) ?? "null") as Partial<PauseMemory> | null;
     return { paused: typeof raw?.paused === "string" ? raw.paused : null, warned: typeof raw?.warned === "string" ? raw.warned : null };
   } catch {
     return { paused: null, warned: null };
   }
 }
 
-export function savePauseMemory(m: PauseMemory): void {
+export function savePauseMemory(m: PauseMemory, provider = "claude"): void {
   try {
-    localStorage.setItem(MEMORY, JSON.stringify(m));
+    localStorage.setItem(provider === "claude" ? MEMORY : `${MEMORY}.${provider}`, JSON.stringify(m));
   } catch {
     // storage unavailable: it lasts until Lantern quits
   }
@@ -106,8 +108,8 @@ export function pauseStep(plan: PlanUsage, atPercent: number, working: boolean, 
 }
 
 /** "Paused: your plan is 95% used, it resets in 1h 12m". */
-export function pausedLine(p: Pick<PlanPause, "percent" | "resetsAt">, now = Date.now()): string {
-  const used = `Paused: your plan is ${p.percent}% used`;
+export function pausedLine(p: Pick<PlanPause, "percent" | "resetsAt" | "provider">, now = Date.now()): string {
+  const used = `Paused: ${p.provider ? `${p.provider === "claude" ? "Claude" : "Codex"} is` : "your plan is"} ${p.percent}% used`;
   if (p.resetsAt === null) return used;
   const left = p.resetsAt * 1000 - now;
   return left > 0 ? `${used}, it resets in ${elapsed(left)}` : `${used}, it is resetting now`;

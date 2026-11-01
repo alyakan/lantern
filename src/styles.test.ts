@@ -616,4 +616,9 @@ describe("themes", () => {
     const fixed = [...css.matchAll(/border-radius:([^;}]*)/g)].flatMap((m) => [...m[1].matchAll(/([\d.]+)px/g)].map((n) => parseFloat(n[1])));
     expect(fixed.filter((px) => px > 2)).toEqual([]);
   });
+
+  it("colours a Desk project page's status words by their own classes, not a bare .review the Review pane already styles", () => {
+    expect(css).toMatch(/^\.dp-tone-review \{/m);
+    expect(css).not.toMatch(/\.dp-tone\.(safe|review|blocked)/);
+  });
 });

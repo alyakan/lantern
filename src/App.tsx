@@ -1,4 +1,4 @@
-import { setPlanUsage } from "./lib/planUsage";
+import { setProviderUsage, setPlanUsage } from "./lib/planUsage";
 import { setWeekUsage } from "./lib/weekUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
@@ -48,12 +48,13 @@ import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
 import { NotesApplied } from "./components/NotesApplied";
 import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
 import { readStored, stepFile, usePersistentState } from "./lib/layout";
+import { fromKept, markRead, markUnread, toKeep, unreadBySlot, UNREAD_KEY, type Unread } from "./lib/unread";
 import { PROJECT_COLORS } from "./lib/projectColors";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
-import { parseTodoCommand, todoPrompt, useTodos, type Todo, type TodoReminder } from "./lib/todos";
+import { parseTodoCommand, todoPrompt, useTodoCounts, useTodos, type Todo, type TodoReminder } from "./lib/todos";
 import { TodoDoneBar, type TodoChat } from "./components/TodosTab";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import { useChatHistory } from "./lib/chatHistory";
@@ -88,11 +89,15 @@ import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
-import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
+import { Sidebar, SIDEBAR_BAR, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
-import { clip, deskFeed, deskHistory, deskLive, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
+import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
 import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
+import { DeskAsk } from "./components/DeskAsk";
+import { timelineEvents } from "./lib/timeline";
+import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
+import { useDeskStatus } from "./lib/deskStatus";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -306,8 +311,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const showCanvas = canvasMain !== null;
   const [canvasPanel, setCanvasPanel] = usePersistentState("review.canvasPanel", false);
   const reviewCollapsed = showCanvas ? !canvasPanel : ((state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault);
-  const setReviewCollapsed = (collapsed: boolean) => (showCanvas ? setCanvasPanel(!collapsed) : state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
+  const setReviewCollapsed = (collapsed: boolean) => {
+    // Opening it shows something of the chat (a file, Changes, a search): the Desk, whose right pane is Ask, steps aside for it.
+    if (!collapsed) setDesk(false);
+    if (showCanvas) setCanvasPanel(!collapsed);
+    else if (state.folder) setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed });
+    else setCollapsedDefault(collapsed);
+  };
   const [splitRatio, setSplitRatio] = usePersistentState("review.ratio", 0.5);
+  // On the Desk the right pane is Ask: open or not, and how wide, its own, not the project's Changes.
+  const [askCollapsed, setAskCollapsed] = usePersistentState("desk.askCollapsed", false);
+  const [askRatio, setAskRatio] = usePersistentState("desk.askRatio", 0.68);
   // The Changes pane's filter: everything this chat changed, or only what the last turn changed.
   const [changeScope, setChangeScope] = usePersistentState<ChangeScope>("review.scope", "session");
   const [turnFiles, setTurnFiles] = useState<ChangedFile[]>([]);
@@ -335,7 +349,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   useAction("find-file", () => openSearch("files"), !!state.folder);
   useAction("search-files", () => openSearch("text"), !!state.folder);
   // ⌘F: find in the file the right pane shows (Monaco's find bar), from anywhere in the window.
-  useAction("find-in-file", () => void openFind(), !reviewCollapsed);
+  useAction("find-in-file", () => void openFind(), !reviewCollapsed && !desk);
   // Per chat: which failed steps the title bar's count was cleared for.
   const [clearedFailures, setClearedFailures] = useState<Record<string, string>>({});
   // A test run the chat asked the right pane to show.
@@ -397,7 +411,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     });
     const unlisten = api.onUiEvent((slot, event) => {
       // The plan's usage is the account's, not the chat's: kept once, for the top bar and the canvas.
-      if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
+      if (event.kind === "provider_usage") setProviderUsage(event.usage);
+      else if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
       else if (event.kind === "week_usage") setWeekUsage({ used: event.used, resetsAt: event.resets_at });
       else batch.push({ slot, event });
     });
@@ -587,7 +602,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   };
   // Back (the title bar's arrow, ⌘[): the chats shown before this one, newest first, those still open.
   const chatHistory = useChatHistory(active, (slot) => !!chats.slots[slot], (slot) => switchTo(slot));
-  useAction("go-back", chatHistory.goBack, chatHistory.canGoBack);
+  // The chat opened from the Desk (its timeline, a project's row, Needs you, a file): Back takes it back to the Desk. Putting the
+  // Desk away with its own button isn't opening a chat from it.
+  const [deskReturn, setDeskReturn] = useState<string | null>(null);
+  const deskByButton = useRef(false);
+  const wasDesk = useRef(desk);
+  useEffect(() => {
+    if (wasDesk.current && !desk) setDeskReturn(deskByButton.current ? null : active);
+    if (desk) setDeskReturn(null);
+    deskByButton.current = false;
+    wasDesk.current = desk;
+  }, [desk]);
+  const backToDesk = deskReturn !== null && deskReturn === active && !desk;
+  const goBack = backToDesk ? () => setDesk(true) : chatHistory.canGoBack ? chatHistory.goBack : undefined;
+  useAction("go-back", () => goBack?.(), !!goBack);
 
   /**
    * The chat to start something new in: the one on screen if it's still empty, otherwise a new one (and the current
@@ -1359,7 +1387,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const due = paused ? [] : queuesToSend(prevStatus.current, chats.slots);
+    const held = (slot: string) => guards.heldSlots.includes(slot);
+    const due = queuesToSend(prevStatus.current, chats.slots).filter(({ slot }) => !held(slot));
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
     for (const [slot] of ended) syncChanges(slot);
@@ -1373,11 +1402,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
     // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
     // render still has it idle, and a second message would start a second turn on top of that one.
-    for (const { slot, text } of paused ? [] : wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
+    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot))).filter(({ slot }) => !held(slot))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots, paused]);
+  }, [chats.slots, paused, guards.heldSlots.join(",")]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -1740,7 +1769,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     setReviewCollapsed(false);
   };
 
-  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed), !!state.folder);
+  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskCollapsed(!askCollapsed) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
 
   // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
   // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
@@ -1923,14 +1952,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (reviewCollapsed || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
+      if (reviewCollapsed || desk || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
       const next = delta && stepFile(shownFiles, state.selectedFile, delta);
       if (next && next !== state.selectedFile) selectFile(next);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reviewCollapsed, shownFiles, state.selectedFile]);
+  }, [reviewCollapsed, desk, shownFiles, state.selectedFile]);
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
@@ -2050,10 +2079,21 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
-  const [unread, setUnread] = useState<Record<string, number>>({});
+  // Kept by session across launches (lib/unread.ts); `unread` is the open chats' share of it, by slot.
+  const [unreadBy, setUnreadBy] = useState<Unread>(() => fromKept(readStored(UNREAD_KEY, {})));
   useEffect(() => {
-    setUnread(({ [active]: _seen, ...rest }) => rest);
-  }, [active]);
+    try {
+      localStorage.setItem(UNREAD_KEY, JSON.stringify(toKeep(unreadBy)));
+    } catch {
+      // storage unavailable; unread just won't survive a restart
+    }
+  }, [unreadBy]);
+  const unread = useMemo(() => unreadBySlot(unreadBy, chats.slots), [unreadBy, chats.slots]);
+  // The chat on screen is read: once it is opened (a restored one too, once its session is known), or once the Desk in front of it is put away.
+  const activeSession = chats.slots[active]?.sessionId;
+  useEffect(() => {
+    if (!desk) setUnreadBy((u) => markRead(u, active, chats.slots[active]));
+  }, [active, desk, activeSession]);
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) {
       const a = attentionFor(s.items, s.folder, describeInput, agentName(s.provider));
@@ -2068,9 +2108,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       // Settings can have this kind of event off, or paused: then neither a notification nor a toast.
       const wanted = shouldNotify(notifyPrefs, a.kind);
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
+      // A chat finished that isn't on screen (the one last open isn't while the Desk is): unread until it is opened.
+      if ((slot !== chats.active || desk) && (a.kind === "finished" || a.kind === "failed")) setUnreadBy((u) => markUnread(u, slot, s, Date.now()));
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
-        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: Date.now() }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
         if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
       }
@@ -2085,7 +2126,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         const key = `${r.builder}:${r.commit}`;
         if (!r.done || reviewSeen.current.has(key)) continue;
         reviewSeen.current.add(key);
-        if (r.builder !== active && chats.slots[r.builder]) setUnread((u) => ({ ...u, [r.builder]: r.at }));
+        if (r.builder !== active && chats.slots[r.builder]) setUnreadBy((u) => markUnread(u, r.builder, chats.slots[r.builder], r.at));
       }
     }
   }, [chats.slots]);
@@ -2531,11 +2572,25 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const folder = projectFolderOf(slot);
     return folder !== null && deskOf(desks, folder) === desks.on;
   };
-  const deskCandidates = routeCandidates(chats, deskOpen);
-  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
-  const deskProjects = deskFolders.map((folder, i) => ({ folder, label: projectLabels(deskFolders)[i] }));
+  // A project's own page on the Desk (its folder), kept while you are in one of its chats; the Desk's button goes back to all.
+  const [deskPage, setDeskPage] = useState<string | null>(null);
+  const pageOn = deskPage !== null && deskFolders.includes(deskPage) ? deskPage : null;
+  // Ask asks about that project only while its page is open: its chats to route to, and it to start one in. The board itself
+  // (to-dos, status) still covers the whole Desk.
+  const askOpen = pageOn ? (deskOpen[pageOn] ? { [pageOn]: deskOpen[pageOn] } : {}) : deskOpen;
+  const askFolders = pageOn ? [pageOn] : deskFolders;
+  const deskCandidates = routeCandidates(chats, askOpen);
+  const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
+  const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
+  // The board's to-do counts, read only while the Desk is on screen.
+  const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
+  // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
+  const allRepos = useDeskStatus(deskShown, deskFolders);
+  const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
+  const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
+  const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
   const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
   // A message goes to a chat as if typed there: now when the chat is free, queued behind its turn when it's working.
   const deliver = (slot: string, text: string): { queued: boolean } | string => {
@@ -2581,6 +2636,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const sentTargets = deskTargets;
     const sentProjects = deskProjects;
     const deskId = desks.on;
+    const sentScope = pageOn;
     const ask = (chats: string[], unsure: boolean) => {
       const asked = chats.map((slot) => sentTargets.find((t) => t.slot === slot)).filter((t): t is (typeof sentTargets)[number] => !!t);
       // Unsure, or nothing to pick from: a new chat is offered too. Unsure, what the Desk said it would do didn't happen.
@@ -2619,7 +2675,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             if (answering && kept !== "failed") answer(kept);
           };
           const look = (again: boolean): Promise<void> =>
-            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId).slice(0, 5))));
+            searchPast(r.terms).then((res) => (res.cancelled ? (again ? look(false) : found("failed")) : found(res.chats.filter((c) => deskOf(desksNow.current, c.folder) === deskId && (sentScope === null || c.folder === sentScope)).slice(0, 5))));
           look(true).catch(() => found("failed"));
         } else ask(r.chats, r.unsure);
       },
@@ -2781,7 +2837,16 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     single: singleProject,
     onSingle: setSingleProject,
     noted: notedFolders(notesBy),
-    desk: { on: deskShown, needs: needsYou(openByProject), onOpen: () => setDesk(!deskShown) },
+    desk: {
+      on: deskShown,
+      needs: needsYou(openByProject),
+      onOpen: () => {
+        deskByButton.current = true;
+        setDeskPage(null);
+        setDesk(!deskShown);
+      },
+    },
+    timeline: () => timelineEvents(chats, openByProject, inbox),
   };
 
   const restartToUpdate = () => {
@@ -2911,9 +2976,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
-          reviewCollapsed={reviewCollapsed}
+          reviewCollapsed={deskShown ? askCollapsed : reviewCollapsed}
           onOpenFolder={openFolder}
-          onToggleReview={state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
+          onToggleReview={deskShown ? () => setAskCollapsed(!askCollapsed) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
@@ -2926,8 +2991,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
-          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
-          back={chatHistory.canGoBack ? chatHistory.goBack : undefined}
+          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo, switchToCodex: activeProvider === CLAUDE && isAvailable("codex") && state.status === "idle" && !isBusy(state) && !state.orchestrator && !chats.agents[active] && state.backgroundTasks.length === 0 ? () => chooseProvider("codex") : undefined }}
+          back={goBack && { run: goBack, label: backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
+          inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
@@ -2951,19 +3017,30 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} onDismiss={guards.dismiss} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
-          ratio={splitRatio}
-          collapsed={reviewCollapsed || !state.folder || deskShown}
-          scope={showCanvas ? "canvas" : (state.folder ?? "")}
-          onRatio={setSplitRatio}
+          ratio={deskShown ? askRatio : splitRatio}
+          collapsed={deskShown ? askCollapsed : reviewCollapsed || !state.folder}
+          scope={deskShown ? "desk" : showCanvas ? "canvas" : (state.folder ?? "")}
+          onRatio={deskShown ? setAskRatio : setSplitRatio}
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
                 <DeskView
-                  cards={deskFeed(chats, deskOpen)}
-                  live={deskLive(chats, deskOpen)}
-                  needs={inbox.filter((it) => onThisDesk(it.slot))}
-                  entries={deskLog.filter((e) => e.desk === desks.on)}
-                  targets={deskTargets}
+                  chats={deskRows}
+                  projects={projectRows(
+                    deskRows,
+                    deskOpen,
+                    deskFolders,
+                    deskTodos,
+                    deskNeeds.filter((it) => it.needsYou).reduce<Record<string, number>>((n, it) => {
+                      const folder = projectFolderOf(it.slot);
+                      return folder ? { ...n, [folder]: (n[folder] ?? 0) + 1 } : n;
+                    }, {}),
+                  )}
+                  needs={deskNeeds}
+                  repos={deskRepos}
+                  page={pageOn}
+                  onPage={setDeskPage}
+                  onNewChat={sidebarHandlers.onNewChatIn}
                   desks={{
                     value: desks,
                     waiting: waitingBy(desks, openByProject),
@@ -2977,14 +3054,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
                       if (next) setDesks(next);
                     },
-                  }}
-                  canSend={agentReady}
-                  onSend={deskSend}
-                  onSendTo={deskSendTo}
-                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  onOpenPast={(hit) => {
-                    setDesk(false);
-                    openSession(hit.id, hit.folder);
                   }}
                   onOpen={switchTo}
                   onGo={goToInbox}
@@ -3044,6 +3113,28 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             )
           }
           right={
+            <>
+            {deskShown && (
+              <ErrorBoundary name="desk ask">
+                <DeskAsk
+                  entries={deskLog.filter((e) => e.desk === desks.on)}
+                  targets={deskTargets}
+                  across={askFolders.length > 1}
+                  about={pageOn ? deskProjects[0]?.label : undefined}
+                  canSend={agentReady}
+                  onSend={deskSend}
+                  onSendTo={deskSendTo}
+                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                  onOpenPast={(hit) => {
+                    setDesk(false);
+                    openSession(hit.id, hit.folder);
+                  }}
+                  onOpen={switchTo}
+                />
+              </ErrorBoundary>
+            )}
+            {/* Kept while the Desk is up (unsaved edits in Files live in it), only not shown. */}
+            <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
               <ReviewPanel
                 chat={{ slot: active, session: state.sessionId }}
@@ -3109,6 +3200,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 onFollow={() => dispatch({ type: "follow_latest" })}
               />
             </ErrorBoundary>
+            </div>
+            </>
           }
         />
         </div>

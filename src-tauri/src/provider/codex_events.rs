@@ -90,6 +90,11 @@ impl CodexMapper {
     pub fn notification(&mut self, method: &str, p: &Value) -> Mapped {
         let mut m = Mapped::default();
         match method {
+            "account/rateLimits/updated" => {
+                if let Some(usage) = rate_limits(&p["rateLimits"]) {
+                    m.events.push(UiEvent::ProviderUsage { usage });
+                }
+            },
             "turn/started" => { self.turn = TurnStats::default(); m.events.push(UiEvent::Thinking { parent: None }); },
             "thread/compacted" => m.events.push(UiEvent::Compacted),
             "item/started" => self.item_started(&p["item"], &mut m),
@@ -817,6 +822,23 @@ pub fn reverse_apply(now: &str, hunks: &[Hunk]) -> Option<String> {
     Some(out)
 }
 
+/// Codex uses percentages and reports each window's own duration.
+pub fn rate_limits(value: &Value) -> Option<crate::ui_event::ProviderUsage> {
+    use crate::ui_event::{ProviderUsage, UsageWindow};
+    // Other buckets (for example an individual model) must not replace the account's Codex reading.
+    if value["limitId"].as_str().is_some_and(|id| id != "codex") { return None; }
+    let windows: Vec<_> = [("primary", "Primary limit"), ("secondary", "Secondary limit")].into_iter().filter_map(|(key, fallback)| {
+        let w = &value[key];
+        let used = w["usedPercent"].as_f64()?;
+        if !used.is_finite() { return None; }
+        let minutes = w["windowDurationMins"].as_u64().and_then(|n| u32::try_from(n).ok());
+        let label = match minutes { Some(10080) => "Week".into(), Some(n) if n % 60 == 0 => format!("{} hours", n / 60), Some(n) => format!("{n} minutes"), None => fallback.into() };
+        Some(UsageWindow { label, used: (used / 100.0).clamp(0.0, 1.0), resets_at: w["resetsAt"].as_u64(), minutes })
+    }).collect();
+    if windows.is_empty() && !(value.get("primary").is_some_and(Value::is_null) || value.get("secondary").is_some_and(Value::is_null)) { return None; }
+    Some(ProviderUsage { provider: "codex".into(), windows, updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1310,5 +1332,25 @@ mod tests {
         assert_eq!(options.len(), 1);
         assert_eq!((options[0].value.as_str(), options[0].display_name.as_str()), ("gpt-6.1-sol", "GPT-6.1-Sol"));
         assert_eq!(options[0].effort_levels, ["low", "high"]);
+    }
+}
+
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+    #[test]
+    fn codex_limits_keep_durations_and_do_not_make_missing_windows_zero() {
+        let mut mapper = CodexMapper::new(Path::new("/tmp"));
+        let event = mapper.notification("account/rateLimits/updated", &json!({"rateLimits": {"limitId": "codex", "primary": {"usedPercent": 20, "windowDurationMins": 300, "resetsAt": 2000000000}, "secondary": {"usedPercent": 45, "windowDurationMins": 10080}}}));
+        let [UiEvent::ProviderUsage { usage }] = event.events.as_slice() else { panic!("{event:?}") };
+        assert_eq!(usage.provider, "codex");
+        assert_eq!(usage.windows[0].used, 0.2);
+        assert_eq!(usage.windows[0].minutes, Some(300));
+        assert_eq!(usage.windows[1].label, "Week");
+        assert_eq!(usage.windows[1].resets_at, None);
+        assert!(rate_limits(&json!({})).is_none());
+        assert!(rate_limits(&json!({"primary": {"usedPercent": "unknown"}})).is_none());
+        assert!(rate_limits(&json!({"limitId": "another-bucket", "primary": {"usedPercent": 100}})).is_none());
     }
 }

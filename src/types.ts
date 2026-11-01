@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "../mobile/src/protocol/generated/ProviderUsage";
 import type { AgentRole } from "./lib/roles";
 import type { ReviewCheck } from "./lib/reviewChain";
 
@@ -148,6 +149,7 @@ export type UiEvent =
   /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why), or
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
   /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "provider_usage"; usage: ProviderUsage }
   | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
   /** The subscription's weekly window, the same way: `used` 0–1, `resets_at` unix seconds. */
   | { kind: "week_usage"; used: number; resets_at: number | null }
@@ -789,6 +791,25 @@ export interface OpenPr {
   author: string;
   branch: string;
   draft: boolean;
+}
+
+/** How a repository with a chat open stands, for the Desk's board (status.rs). */
+export interface RepoStatus {
+  /** Its main checkout. */
+  repo: string;
+  /** "owner/name" on GitHub. */
+  github: string | null;
+  folders: { folder: string; branch: string | null; changed: number | null }[];
+  /** Linked worktrees, besides the main checkout, from git's list (`agent`: a worker's or a subagent's, the team's to clean up). */
+  worktrees: { path: string; branch: string | null; locked: boolean; agent: boolean }[];
+  gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
+  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
+  /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
+  merged: { number: number; title: string; merged_at: string }[];
+  release: { tag: string; published_at: string | null } | null;
+  /** Releases waiting as drafts, by tag. */
+  drafts: string[];
+  error: string | null;
 }
 
 /** How a worker's tests went when the user ran them from its merge card. */

@@ -21,6 +21,7 @@ async function launch(startOnDesk: boolean) {
 }
 
 const desk = () => screen.queryByRole("region", { name: "Desk" });
+const ask = () => screen.queryByRole("region", { name: "Ask" });
 const deskButton = () => screen.getByRole("button", { name: /^Desk/ });
 
 beforeEach(() => {
@@ -36,7 +37,16 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     expect(deskButton()).toHaveAttribute("aria-pressed", "true");
-    expect(within(desk()!).getByText(/Nothing here yet/)).toBeInTheDocument();
+    // Ask is the right pane, and its button puts it away and back.
+    expect(within(ask()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    // The Desk has the chat's project, whose tile drops the chat down.
+    const table = within(desk()!).getByRole("region", { name: "Projects" });
+    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
+    expect(within(screen.getByRole("menu", { name: "Chats of acme-api" })).getByRole("menuitem", { name: "New chat" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(within(await screen.findByRole("region", { name: "acme-api" })).getByTitle("New chat"));
     await waitFor(() => expect(desk()).toBeNull());
     expect(deskButton()).toHaveAttribute("aria-pressed", "false");
@@ -45,6 +55,40 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeInTheDocument());
     fireEvent.click(deskButton());
     await waitFor(() => expect(desk()).toBeNull());
+  });
+
+  it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const table = within(desk()!).getByRole("region", { name: "Projects" });
+    fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New chat" }));
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeNull());
+    expect(screen.queryByRole("button", { name: "Back to the Desk" })).toBeNull();
+  });
+
+  it("opens a project's own page, asks about that project only, and comes back to it from one of its chats", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(within(within(desk()!).getByRole("region", { name: "Projects" })).getByRole("button", { name: "acme-api" }));
+    const page = () => screen.getByRole("region", { name: "Project acme-api" });
+    expect(within(page()).getByRole("heading", { name: "acme-api" })).toBeInTheDocument();
+    expect(within(ask()!).getByRole("heading", { name: "Ask about acme-api" })).toBeInTheDocument();
+    // Its worktrees, with the Storage scan's word on each once it has scanned.
+    const wts = await within(page()).findByRole("region", { name: "Worktrees" });
+    fireEvent.click(await within(wts).findByRole("button", { name: "Scan now" }));
+    await waitFor(() => expect(wts).toHaveTextContent("Safe to remove"));
+    fireEvent.click(within(within(page()).getByRole("region", { name: "Chats" })).getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Back to the Desk" }));
+    await waitFor(() => expect(page()).toBeInTheDocument());
+    fireEvent.click(within(page()).getByRole("button", { name: "‹ All projects" }));
+    await waitFor(() => expect(within(desk()!).getByRole("region", { name: "Projects" })).toBeInTheDocument());
+    expect(within(ask()!).getByRole("heading", { name: "Ask" })).toBeInTheDocument();
   });
 
   const type = async (text: string) => {
@@ -94,10 +138,18 @@ describe("the Desk in the app", () => {
     const back = within(entry).getByLabelText("What came back");
     expect(within(back).getByRole("button", { name: "Show full answer" })).toBeInTheDocument();
     expect(within(back).getByRole("button", { name: "Open chat" })).toBeInTheDocument();
-    // Shown under the message, it isn't listed again in Just finished.
-    expect(screen.queryByRole("button", { name: /^Add retries to fetchJson: / })).toBeNull();
     await new Promise((r) => setTimeout(r, 1500));
     expect(summaries).toBe(1);
+    // It finished while the Desk was in front of it: unread on the sidebar's timeline, until its entry opens it.
+    fireEvent.click(screen.getByRole("button", { name: "Timeline" }));
+    const timeline = () => screen.getByRole("region", { name: "Timeline" });
+    // Written down by its session, for the next launch.
+    const kept = () => Object.keys(JSON.parse(localStorage.getItem("chat.unreadBySession") ?? "{}"));
+    await waitFor(() => expect(kept()).toHaveLength(1));
+    fireEvent.click(within(timeline()).getByRole("button", { name: /, unread$/ }));
+    await waitFor(() => expect(desk()).toBeNull());
+    expect(within(timeline()).queryByRole("button", { name: /, unread$/ })).toBeNull();
+    await waitFor(() => expect(kept()).toEqual([]));
   });
 
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {

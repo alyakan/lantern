@@ -350,7 +350,7 @@ fn commit_all(at: At, message: &str, path_env: Option<&str>) -> Result<bool, Str
 }
 
 /// The repository's own git directory (the one its linked worktrees share), as a real path.
-fn common_dir(repo: &Path, path_env: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn common_dir(repo: &Path, path_env: Option<&str>) -> Option<PathBuf> {
     let out = run(repo, &["rev-parse", "--git-common-dir"], path_env).ok().filter(|p| !p.is_empty())?;
     // Relative to the folder it was asked in, unless git says it whole.
     std::fs::canonicalize(repo.join(out)).ok()

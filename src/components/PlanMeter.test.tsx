@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { planLevel, planLine, planSentence, setPlanUsage } from "../lib/planUsage";
+import { planLevel, planLine, planSentence, setProviderUsage, setPlanUsage } from "../lib/planUsage";
 import type { UsageRow } from "../lib/usage";
 import { setWeekUsage } from "../lib/weekUsage";
 import { DAY_SECS, HOUR_SECS, SESSION_SECS, windowMarks } from "../lib/usageMarks";
@@ -24,13 +24,37 @@ describe("the plan meter", () => {
     expect(planSentence({ used: 0.99, resetsAt: (now - 1000) / 1000 }, now)).toBe("Session: 99% of the 5-hour window, resetting now");
   });
 
-  it("shows nothing until claude has said, then the latest any chat reported", () => {
-    const { container } = render(<PlanMeter />);
-    expect(container.textContent).toBe("");
-    act(() => setPlanUsage({ used: 0.85, resetsAt: null }));
-    expect(screen.getByRole("status").textContent).toBe("Session 85%");
-    expect(screen.getByRole("status").className).toContain("warn");
+  it("names both providers and reports missing usage honestly", () => {
+    act(() => setPlanUsage({ used: .85, resetsAt: null }));
+    render(<PlanMeter />);
+    const button = screen.getByRole("button", { name: /^Usage by provider/ });
+    expect(button).toHaveTextContent("Claude 85%");
+    expect(button).toHaveTextContent("Codex —");
+    fireEvent.click(button);
+    expect(screen.getByText("Usage unavailable")).toBeInTheDocument();
   });
+
+  it("keeps provider readings separate and offers an explicit switch", () => {
+    act(() => {
+      setPlanUsage({ used: 1, resetsAt: null });
+      setProviderUsage({ provider: "codex", updated_at: Date.now() / 1000, windows: [{ label: "5 hours", used: .2, resets_at: null, minutes: 300 }] });
+    });
+    const switchToCodex = vi.fn();
+    render(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn(), switchToCodex }} />);
+    const button = screen.getByRole("button", { name: /^Usage by provider/ });
+    expect(button).toHaveTextContent("Claude 100%");
+    expect(button).toHaveTextContent("Codex 20%");
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Switch this chat to Codex" }));
+    expect(switchToCodex).toHaveBeenCalledOnce();
+  });
+
+  it("does not reuse expired percentages", () => {
+    act(() => setProviderUsage({ provider: "codex", updated_at: 1, windows: [{ label: "Session", used: 1, resets_at: 1, minutes: 300 }] }));
+    render(<PlanMeter />);
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).toHaveTextContent("Codex —");
+  });
+
 });
 
 describe("where the usage went", () => {
@@ -40,17 +64,17 @@ describe("where the usage went", () => {
   it("opens from the meter with the plan's line, every chat and team and what each used, and a line on what the numbers are", () => {
     act(() => setPlanUsage({ used: 0.62, resetsAt: Date.now() / 1000 + 100 * 60 }));
     render(<PlanMeter usage={{ rows: () => rows, onOpen: vi.fn() }} />);
-    const meter = screen.getByRole("button", { name: /Session 62%/ });
+    const meter = screen.getByRole("button", { name: /^Usage by provider/ });
     expect(meter.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(meter);
-    const pop = screen.getByRole("dialog", { name: "Session and weekly usage" });
-    expect(within(pop).getByText(/^Session: 62% of the 5-hour window, resets in 1h (39|40)m$/)).toBeInTheDocument();
+    const pop = screen.getByRole("dialog", { name: /^Usage by provider/ });
+    expect(within(pop).getByText(/^62% used · resets/)).toBeInTheDocument();
     const top = within(pop).getAllByRole("listitem")[0];
     expect(top.textContent).toContain("Team · acme-api");
     expect(top.textContent).toContain("Working");
     expect(top.textContent).toContain("$1.50 · 300k tokens");
     expect(top.textContent).toContain("Sonnet 62%, Opus 38%");
-    expect(within(pop).getByText(/not just this window/)).toBeInTheDocument();
+    expect(within(pop).getByText(/do not add up to a subscription percentage/)).toBeInTheDocument();
     // A team's agents are listed when it is opened.
     expect(within(pop).queryByText("Login form")).toBeNull();
     fireEvent.click(within(pop).getByRole("button", { name: "Show Team · acme-api's agents" }));
@@ -62,7 +86,7 @@ describe("where the usage went", () => {
     act(() => setPlanUsage({ used: 0.3, resetsAt: null }));
     const onOpen = vi.fn();
     render(<PlanMeter usage={{ rows: () => rows, onOpen }} />);
-    const meter = screen.getByRole("button", { name: /Session 30%/ });
+    const meter = screen.getByRole("button", { name: /^Usage by provider/ });
     fireEvent.click(meter);
     fireEvent.click(screen.getByRole("button", { name: "Fix the login" }));
     expect(onOpen).toHaveBeenCalledWith("s1");
@@ -76,7 +100,7 @@ describe("where the usage went", () => {
   it("says so when nothing open has used anything", () => {
     act(() => setPlanUsage({ used: 0.1, resetsAt: null }));
     render(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn() }} />);
-    fireEvent.click(screen.getByRole("button", { name: /Session 10%/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Usage by provider/ }));
     expect(screen.getByText("Nothing open has used any of it yet.")).toBeInTheDocument();
   });
 });
@@ -87,9 +111,9 @@ describe("the session and week bars", () => {
     act(() => setPlanUsage({ used: 0.42, resetsAt: now / 1000 + 2 * 3600 }));
     act(() => setWeekUsage({ used: 0.3, resetsAt: now / 1000 + 3.5 * 86_400 }));
     const { container } = render(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn() }} />);
-    const meter = screen.getByRole("button", { name: /Session 42%.*Week 30%/ });
+    const meter = screen.getByRole("button", { name: /^Usage by provider/ });
     fireEvent.click(meter);
-    const pop = screen.getByRole("dialog", { name: "Session and weekly usage" });
+    const pop = screen.getByRole("dialog", { name: /^Usage by provider/ });
     expect(within(pop).getByRole("meter", { name: "Session used" }).getAttribute("aria-valuenow")).toBe("42");
     expect(within(pop).getByRole("meter", { name: "Week used" }).getAttribute("aria-valuenow")).toBe("30");
     const [session, week] = Array.from(container.querySelectorAll(".usage-bar"));

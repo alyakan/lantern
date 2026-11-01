@@ -154,6 +154,8 @@ async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: 
 
 // Each chat's permission mode, as the backend would run it.
 const slotMode: Record<string, string> = {};
+/** The folder each chat was started in, for the Desk's status of its repositories. */
+const slotFolder: Record<string, string> = {};
 
 /** Step by step's Debug: hypotheses, a round of evidence with the reproduce card, the fix, then done; Next moves on. */
 async function playDebug(slot: string, text: string) {
@@ -1623,6 +1625,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             stressStarted.push({ slot: String(a.slot), folder: String(a.folder), team });
           } else if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
           slotMode[String(a.slot)] = String((a.settings as { mode?: string } | undefined)?.mode ?? "ask");
+          slotFolder[String(a.slot)] = String(a.folder);
           slotProvider[String(a.slot)] = (a.settings as { provider?: string } | undefined)?.provider ?? "claude";
           if ((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator) mockMain = String(a.slot);
           setTimeout(() => {
@@ -2118,6 +2121,45 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             { old: "/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/web-dashboard/fix-login-w3", suggested: null },
             { old: "/Users/you/projects/web-dashboard/.claude/worktrees/agent-a1b2c3", suggested: null },
           ].filter((m) => !/\/(io\.github\.alyakan\.lantern|\.claude)\/worktrees\//.test(m.old));
+        case "desk_status": {
+          // The open chats' folders, each its own repository on GitHub, as status.rs would find them.
+          const today = (h: number) => new Date(new Date().setHours(h, 0, 0, 0)).toISOString();
+          const folders = [...new Set(Object.values(slotFolder))];
+          return folders.map((folder, i) => ({
+            repo: folder,
+            github: `you/${folder.split("/").pop()}`,
+            folders: [{ folder, branch: i === 0 ? "feat/retry-fetch" : "main", changed: i === 0 ? 3 : 0 }],
+            worktrees:
+              i === 0
+                ? [
+                    // The same worktrees the Storage scan lists (mockStorageItems), so the page shows its verdicts.
+                    { path: "/Users/you/acme-api/wt-retry", branch: "lantern/retry", locked: false, agent: false },
+                    { path: "/Users/you/acme-api/wt-login", branch: "fix/login", locked: false, agent: false },
+                    { path: `/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/acme-api/w1`, branch: null, locked: false, agent: true },
+                  ]
+                : [],
+            gh: "ready",
+            prs:
+              i === 0
+                ? [
+                    { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false, checks: "fail", review: "REVIEW_REQUIRED" },
+                    { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false, checks: "pending", review: null },
+                  ]
+                : [],
+            merged:
+              i === 0
+                ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }]
+                : i === 1
+                  ? [
+                      { number: 58, title: "Chart tooltips flip at the right edge", merged_at: today(0) },
+                      { number: 56, title: "Dark mode for the settings page", merged_at: today(0) },
+                    ]
+                  : [],
+            release: i === 0 ? { tag: "v2.4.0", published_at: today(0) } : null,
+            drafts: i === 0 ? ["v2.4.1"] : [],
+            error: null,
+          }));
+        }
         case "list_open_prs":
           // ?prs=missing shows what the picker says when gh isn't installed.
           if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");

@@ -50,6 +50,10 @@ export const NOT_FOLDER_KEYED = [
   // The Desks, each a list of its projects' folders. Not moved with a folder: a moved project goes back to the first
   // Desk, and is put on its Desk again in Edit Desks.
   "desk.desks",
+  // The Desk's Ask pane: shown or not, and how wide. The sidebar's list: Chats or Timeline.
+  "desk.askCollapsed",
+  "desk.askRatio",
+  "sidebar.view",
   "settings.modeBySession",
   "settings.harnessBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.
