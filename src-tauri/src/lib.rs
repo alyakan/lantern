@@ -4322,23 +4322,28 @@ mod tests {
     }
 
     /// A provider with no auto mode never runs Auto, whoever asks: an endpoint's model would approve its own commands. A chat
-    /// that is no worker is capped too, and Claude's own is left as asked.
+    /// that is no worker is capped too; Claude and Codex retain their respective Auto reviewers.
     #[test]
     fn a_chat_on_a_provider_with_no_auto_mode_is_never_left_on_auto() {
-        for provider in [ProviderId::Gateway, ProviderId::Codex] {
-            let mut auto = SessionConfig { provider, ..config(Mode::Auto, false) };
-            assert!(cap_mode(&mut auto, None), "{provider:?}");
-            assert_eq!((auto.mode, auto.auto_approve), (Mode::Ask, false), "{provider:?}");
-            let mut steps = SessionConfig { provider, ..config(Mode::Steps, true) };
-            assert!(cap_mode(&mut steps, None), "{provider:?}");
-            assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, false), "{provider:?}: Step by step stays, without its auto-approve");
-            // What it was on already isn't "lowered", and asking again changes nothing.
-            let mut ask = SessionConfig { provider, ..config(Mode::Ask, false) };
-            assert!(!cap_mode(&mut ask, None) && ask.mode == Mode::Ask, "{provider:?}");
-        }
+        let provider = ProviderId::Gateway;
+        let mut auto = SessionConfig { provider, ..config(Mode::Auto, false) };
+        assert!(cap_mode(&mut auto, None), "{provider:?}");
+        assert_eq!((auto.mode, auto.auto_approve), (Mode::Ask, false), "{provider:?}");
+        let mut steps = SessionConfig { provider, ..config(Mode::Steps, true) };
+        assert!(cap_mode(&mut steps, None), "{provider:?}");
+        assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, false), "{provider:?}: Step by step stays, without its auto-approve");
+        // What it was on already isn't "lowered", and asking again changes nothing.
+        let mut ask = SessionConfig { provider, ..config(Mode::Ask, false) };
+        assert!(!cap_mode(&mut ask, None) && ask.mode == Mode::Ask, "{provider:?}");
         let mut claude = SessionConfig { provider: ProviderId::Claude, ..config(Mode::Auto, true) };
         assert!(!cap_mode(&mut claude, None));
         assert_eq!((claude.mode, claude.auto_approve), (Mode::Auto, true));
+        let mut codex = SessionConfig { provider: ProviderId::Codex, ..config(Mode::Auto, false) };
+        assert!(!cap_mode(&mut codex, None));
+        assert_eq!((codex.mode, codex.auto_approve), (Mode::Auto, false));
+        let mut codex_steps = SessionConfig { provider: ProviderId::Codex, ..config(Mode::Steps, true) };
+        assert!(!cap_mode(&mut codex_steps, None));
+        assert_eq!((codex_steps.mode, codex_steps.auto_approve), (Mode::Steps, true));
     }
 
     /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat
