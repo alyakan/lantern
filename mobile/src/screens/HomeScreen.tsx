@@ -510,7 +510,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, paddingHorizontal: space.xl, paddingTop: 10 }}>
+        {/* A provider a line, the whole width: two side by side were too narrow for a limit and its reset. */}
+        <View style={{ gap: 10, paddingHorizontal: space.xl, paddingTop: 10 }}>
           {["claude", "codex"].map(id => <ProviderStrip key={id} name={id === "claude" ? "Claude" : "Codex"} windows={currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now)} onPress={() => setUsageOpen(true)} />)}
         </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
