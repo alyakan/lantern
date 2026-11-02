@@ -3817,9 +3817,11 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-pr-link:hover { text-decoration: underline; }
 /* The Desk's main page: one grid of tiles that lock together. What waits on you and Your work take a whole row each; a wide tile
    two columns when the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
-   project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. */
+   project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. Tiles on
+   one row are as tall as the tallest, their Chats button at the bottom; nothing opens inside a tile (its chats drop down over
+   the Desk), so a row never grows for one tile. */
 .desk-main { container-type: inline-size; }
-.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 10px; }
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; gap: 10px; }
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
