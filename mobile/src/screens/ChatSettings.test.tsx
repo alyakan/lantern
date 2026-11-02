@@ -84,7 +84,7 @@ describe("the settings sheet", () => {
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(screen.getByRole("button", { name: /^Model preset,/ }));
     expect(screen.getByRole("radio", { name: "Balanced" }).props.accessibilityState).toMatchObject({ disabled: true });
-    expect(screen.getAllByText("Claude is busy in this chat. Change it once it has finished.")).toHaveLength(1);
+    expect(screen.getAllByText("The agent is busy in this chat. Change it once it has finished.")).toHaveLength(1);
   });
 });
 
@@ -122,11 +122,11 @@ describe("switching Ask or Auto", () => {
   });
 
   it("says why when the Mac refuses, and stops saying Switching…", async () => {
-    const { onProblem } = await open({ allowAuto: true, answers: { set_permissions: new Error("Claude is busy in this chat. Change it once it has finished.") } });
+    const { onProblem } = await open({ allowAuto: true, answers: { set_permissions: new Error("The agent is busy in this chat. Change it once it has finished.") } });
     await openSheet("Permissions");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
-    await waitFor(() => expect(onProblem).toHaveBeenCalledWith("Claude is busy in this chat. Change it once it has finished."));
+    await waitFor(() => expect(onProblem).toHaveBeenCalledWith("The agent is busy in this chat. Change it once it has finished."));
     expect(screen.queryByText(/Switching…/)).toBeNull();
   });
 

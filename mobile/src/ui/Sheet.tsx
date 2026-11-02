@@ -53,7 +53,7 @@ export function Sheet({ onClose, children, size = "content" }: { onClose: () => 
   }, [covered]);
   if (blocked) return null;
   return (
-    <TrueSheet ref={sheet} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
+    <TrueSheet ref={sheet} style={size === "large" ? { flex: 1 } : undefined} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
       <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
       {covered && (
