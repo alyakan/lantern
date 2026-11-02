@@ -189,13 +189,23 @@ export function checkItems(list: FailedChecks[]): InboxItem[] {
   }));
 }
 
+/** The marks that reorder or hide text, and control characters other than a newline or tab, written out as `\u{202e}`: an
+ * approval never shows text that looks other than what it is. */
+const SHOWN_HIDING = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+const visible = (s: string) => s.replace(SHOWN_HIDING, (c) => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, "0")}}`);
+
 const lined = (mark: string, s: string) => s.split("\n").map((l) => `${mark} ${l}`).join("\n");
 
 /**
  * All of a plain permission request, for the Desk to show before it can be allowed there: an edit as the lines it takes out and
- * puts in, a write as what it writes, anything else as every field it carries. Nothing is cut.
+ * puts in, a write as what it writes, anything else as every field it carries. Nothing is cut, and nothing is hidden: a mark
+ * that would reorder or hide text is written out.
  */
 export function requestText(toolName: string, input: unknown): string {
+  return visible(rawRequestText(toolName, input));
+}
+
+function rawRequestText(toolName: string, input: unknown): string {
   const o = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
   if (!o) return JSON.stringify(input, null, 2) ?? "";
   const str = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : "");

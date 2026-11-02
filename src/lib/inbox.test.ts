@@ -230,4 +230,10 @@ describe("a request in full, for the Desk", () => {
     expect(requestText("Write", { file_path: "/p/new.ts", content: "export {}" })).toBe("/p/new.ts\n\nexport {}");
     expect(requestText("mcp__x__deploy", { env: "prod", force: true })).toBe('{\n  "env": "prod",\n  "force": true\n}');
   });
+
+  it("writes out the marks that would reorder or hide what it approves", () => {
+    const shown = requestText("Edit", { file_path: "/p/a.ts", old_string: "ok", new_string: "rm -rf ~ \u202e# safe\u200b\ttab" });
+    expect(shown).toContain("\\u{202e}# safe\\u{200b}\ttab");
+    expect(shown).not.toMatch(/[\u202e\u200b]/);
+  });
 });
