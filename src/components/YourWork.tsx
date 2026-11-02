@@ -1,16 +1,17 @@
 import { useState } from "react";
 import type { InboxRow } from "../lib/deskBoard";
-import { nextSteps, STAGES, targetFor, TONE_WORD, whereThingsStand, yourWork, type Target, type WorkItem } from "../lib/yourWork";
+import { nextSteps, STAGES, targetFor, TONE_WORD, unknownViewer, whereThingsStand, yourWork, type Target, type WorkItem } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
 import { Card, Row } from "./DeskCard";
+import { ExternalLink } from "./ExternalLink";
 
 export interface YourWorkProps {
   repos: RepoStatus[] | null;
   /** Every chat on the Desk: a step goes to the one on its branch. */
   chats: InboxRow[];
   now: number;
-  /** Sends a step: to a chat, or to a new chat in a folder. */
-  onStep: (item: WorkItem, target: Target) => void;
+  /** Sends a step: to a chat, or to a new chat in a folder; false when it couldn't (no agent CLI ready). */
+  onStep: (item: WorkItem, target: Target) => boolean;
   /** Asks git and GitHub again now. */
   onRefresh: () => void;
 }
@@ -42,9 +43,9 @@ function Num({ item }: { item: WorkItem }) {
   if (item.number === null) return null;
   const n = <span className="yw-num">#{item.number}</span>;
   return item.github ? (
-    <a className="desk-pr-link" href={`https://github.com/${item.github}/pull/${item.number}`} target="_blank" rel="noreferrer">
+    <ExternalLink className="desk-pr-link" href={`https://github.com/${item.github}/pull/${item.number}`}>
       {n}
-    </a>
+    </ExternalLink>
   ) : (
     n
   );
@@ -76,7 +77,7 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
       title={step.yours ? `Asks ${to} to get it ready; it asks you on an approval card before anything happens` : `Sends this to ${to}`}
       aria-label={`${step.what} ${item.number !== null ? `#${item.number}` : item.title}`}
       onClick={() => {
-        onStep(item, target);
+        if (!onStep(item, target)) return;
         sent.set(item.key, { sig: item.sig, to: target.kind === "chat" ? `"${target.title}"` : "a new chat" });
         redraw((n) => n + 1);
       }}
@@ -99,6 +100,7 @@ export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps
   const stand = whereThingsStand(items);
   const shown = all ? stand : stand.slice(0, SHOWN);
   const more = stand.length - shown.length;
+  const blind = unknownViewer(repos);
   return (
     <Card
       title="Your work"
@@ -111,6 +113,11 @@ export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps
         </button>
       }
     >
+      {blind.length > 0 && (
+        <p className="dp-note">
+          Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="dp-note">Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed.</p>
       ) : (

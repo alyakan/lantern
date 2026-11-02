@@ -38,7 +38,7 @@ export interface DeskViewProps {
   onGo: (item: InboxItem) => void;
   onDecide: (item: InboxItem, allow: boolean) => void;
   /** Sends one of Your work's next steps: to its chat, or to a new chat in its project. */
-  onStep: (item: WorkItem, target: Target) => void;
+  onStep: (item: WorkItem, target: Target) => boolean;
   /** Asks git and GitHub again now (Your work's Refresh). */
   onRefreshRepos: () => void;
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */

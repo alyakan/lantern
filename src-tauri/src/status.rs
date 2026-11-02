@@ -361,9 +361,10 @@ pub fn forget_github() {
     }
 }
 
-/// The never-pushed branches in `for-each-ref`'s lines (`name<TAB>upstream:track<TAB>committerdate:unix`): less `base`, a
-/// branch origin has (`pushed`), one whose upstream is `[gone]`, an agent's (`skip`) and a Lantern worker's; with each one's
-/// commits not on base from `ahead` (None: git couldn't say, and 0: nothing new, are both left out).
+/// The never-pushed branches in `for-each-ref`'s lines (`name<TAB>upstream:track<TAB>committerdate:unix<TAB>upstream:remotename`):
+/// less `base`, a branch origin has (`pushed`), one whose upstream is `[gone]`, one tracking a remote other than origin (a fork's
+/// pull request checked out: not yours to push), an agent's (`skip`) and a Lantern worker's; with each one's commits not on base
+/// from `ahead` (None: git couldn't say, and 0: nothing new, are both left out).
 pub fn local_branches(lines: &str, base: &str, pushed: &[&str], skip: &[&str], ahead: impl Fn(&str) -> Option<u32>) -> Vec<LocalBranch> {
     lines
         .lines()
@@ -372,7 +373,9 @@ pub fn local_branches(lines: &str, base: &str, pushed: &[&str], skip: &[&str], a
             let name = parts.next()?.trim();
             let track = parts.next().unwrap_or("");
             let committed = parts.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
-            if name.is_empty() || name == base || track.contains("gone") || pushed.contains(&name) || skip.contains(&name) || git::is_workers_branch(name) {
+            let remote = parts.next().unwrap_or("").trim();
+            let elsewhere = !remote.is_empty() && remote != "origin";
+            if name.is_empty() || name == base || track.contains("gone") || elsewhere || pushed.contains(&name) || skip.contains(&name) || git::is_workers_branch(name) {
                 return None;
             }
             let ahead = ahead(name).filter(|n| *n > 0)?;
@@ -393,7 +396,7 @@ fn branches_in(at: &Path, skip: &[&str], path_env: Option<&str>) -> Vec<LocalBra
     let pushed = raw(&["for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"]).unwrap_or_default();
     let pushed: Vec<&str> = pushed.lines().map(str::trim).collect();
     let count = format!("--count={BRANCHES_MAX}");
-    let Some(lines) = raw(&["for-each-ref", "--sort=-committerdate", &count, "--format=%(refname:short)%09%(upstream:track)%09%(committerdate:unix)", "refs/heads"]) else {
+    let Some(lines) = raw(&["for-each-ref", "--sort=-committerdate", &count, "--format=%(refname:short)%09%(upstream:track)%09%(committerdate:unix)%09%(upstream:remotename)", "refs/heads"]) else {
         return Vec::new();
     };
     local_branches(&lines, &base_name, &pushed, skip, |name| {
@@ -545,7 +548,7 @@ mod tests {
 
     #[test]
     fn keeps_only_branches_never_pushed_with_commits_of_their_own() {
-        let lines = "feat/new\t\t1700000300\nmain\t[ahead 1]\t1700000200\nfeat/merged\t[gone]\t1700000100\nfeat/pushed\t\t1700000050\nlantern/w-123\t\t1700000040\nagent-branch\t\t1700000030\nfeat/empty\t\t1700000020\n";
+        let lines = "feat/new\t\t1700000300\t\nmain\t[ahead 1]\t1700000200\torigin\nfeat/merged\t[gone]\t1700000100\torigin\nfeat/pushed\t\t1700000050\t\nlantern/w-123\t\t1700000040\t\nagent-branch\t\t1700000030\t\nfeat/empty\t\t1700000020\t\nfork-fix\t\t1700000010\tsara\n";
         let asked = std::cell::RefCell::new(Vec::new());
         let list = local_branches(lines, "main", &["main", "feat/pushed"], &["agent-branch"], |name| {
             asked.borrow_mut().push(name.to_string());

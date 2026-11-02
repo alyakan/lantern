@@ -2,7 +2,7 @@
  * How the Desk's projects stand on git and GitHub (status.rs): a project row's branch, pull requests and release (Your work, in
  * yourWork.ts, reads the same). Every figure is what git and gh said; nothing here is guessed.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { RepoStatus } from "../types";
 
@@ -53,6 +53,8 @@ export function statusFor(folder: string, repos: RepoStatus[] | null): ProjectSt
 export function useDeskStatus(on: boolean, folders: string[]): { repos: RepoStatus[] | null; refresh: () => void } {
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
   const [fresh, setFresh] = useState(0);
+  // Only the ask a Refresh makes goes to GitHub again; the Desk opening later uses what the Mac keeps.
+  const again = useRef(false);
   const key = [...folders].sort().join("\n");
   useEffect(() => {
     if (!on) return;
@@ -69,12 +71,17 @@ export function useDeskStatus(on: boolean, folders: string[]): { repos: RepoStat
         () => void (asking = false),
       );
     };
-    load(fresh > 0);
+    load(again.current);
+    again.current = false;
     const tick = setInterval(() => load(false), POLL_MS);
     return () => {
       live = false;
       clearInterval(tick);
     };
   }, [on, key, fresh]);
-  return { repos, refresh: useCallback(() => setFresh((n) => n + 1), []) };
+  const refresh = useCallback(() => {
+    again.current = true;
+    setFresh((n) => n + 1);
+  }, []);
+  return { repos, refresh };
 }

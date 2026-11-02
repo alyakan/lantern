@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { RepoStatus } from "../types";
-import { nextSteps, safeRef, stepMessage, targetFor, toneCounts, whereThingsStand, yourWork, type WorkItem } from "./yourWork";
+import { nextSteps, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, yourWork, type WorkItem } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
@@ -34,8 +34,10 @@ describe("Your work", () => {
       [1, "Ready to merge"],
       [3, "Your review is asked"],
     ]);
-    // Not knowing who you are, every pull request counts as yours.
-    expect(yourWork([repo({ viewer: null, prs: [pr(2, { author: "sara" })] })], NOW)).toHaveLength(1);
+    // Not knowing who you are, none counts as yours: a stranger's is never offered to fix or merge. Branches still show.
+    const blind = [repo({ viewer: null, prs: [pr(1), pr(2, { author: "sara" })], branches: [{ name: "feat/x", ahead: 1, committed: Math.floor(NOW / 1000) }] })];
+    expect(yourWork(blind, NOW).map((i) => i.title)).toEqual(["feat/x"]);
+    expect(unknownViewer(blind)).toEqual(["lantern"]);
   });
 
   it("waits for a release with what merged since the last one, or for the draft to be published", () => {

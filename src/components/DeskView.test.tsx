@@ -26,7 +26,7 @@ function setup(over: Partial<DeskViewProps> = {}) {
     onOpen: vi.fn(),
     onGo: vi.fn(),
     onDecide: vi.fn(),
-    onStep: vi.fn(),
+    onStep: vi.fn(() => true),
     onRefreshRepos: vi.fn(),
     ...over,
   };
@@ -181,7 +181,7 @@ describe("the Desk", () => {
   });
 
   it("sends a step to the chat on its branch once, and to a new chat when none is on it", () => {
-    const onStep = vi.fn();
+    const onStep = vi.fn(() => true);
     const repos = [repo("/p/lantern", { folders: [{ folder: "/p/lantern", branch: "b7", changed: 0 }], prs: [pr(7, "fail"), pr(8, "fail")] })];
     setup({ repos, chats: [row(1, { folder: "/p/lantern" })], onStep });
     const next = within(screen.getByRole("region", { name: "Next" }));
@@ -195,7 +195,7 @@ describe("the Desk", () => {
   });
 
   it("doesn't send to a chat on the branch that is busy", () => {
-    const onStep = vi.fn();
+    const onStep = vi.fn(() => true);
     const repos = [repo("/p/x", { folders: [{ folder: "/p/x", branch: "b3", changed: 0 }], prs: [pr(3, "fail")] })];
     setup({ repos, chats: [row(1, { folder: "/p/x", state: "working" })], onStep });
     const next = within(screen.getByRole("region", { name: "Next" }));

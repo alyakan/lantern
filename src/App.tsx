@@ -3067,9 +3067,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onAnswer={answerOnDesk}
                   onStep={(item, target) => {
                     const text = stepMessage(item, target);
-                    // Sent by Lantern from a click, not typed: never the typed go-ahead a merge, push or publish needs.
+                    // Sent by Lantern from a click, not typed: never the typed go-ahead a merge, push or publish needs (each
+                    // step asks for it with request_approval).
                     if (target.kind === "chat") sendIn(target.slot, text, undefined, true);
-                    else if (target.kind === "new") startFresh(target.folder, false, false, text);
+                    else if (target.kind === "new" && agentReady) startFresh(target.folder, false, false, text);
+                    else return false;
+                    return true;
                   }}
                   onRefreshRepos={refreshRepos}
                 />

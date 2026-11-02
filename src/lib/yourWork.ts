@@ -122,8 +122,8 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
     const name = short(r);
     const base = { repo: r.repo, name, github: r.github };
     const viewer = r.viewer;
-    // Without knowing who you are, every open pull request counts as yours rather than none.
-    const mine = (author: string) => !viewer || author.toLowerCase() === viewer.toLowerCase();
+    // Without knowing who you are, no pull request counts as yours: a stranger's must never be offered to fix or merge.
+    const mine = (author: string) => !!viewer && author.toLowerCase() === viewer.toLowerCase();
     for (const p of r.prs) {
       if (mine(p.author)) {
         const s = openStage(r, p);
@@ -140,7 +140,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
           word: "Your review is asked",
           meta: `${name} · by @${p.author}`,
           at: null,
-          next: { kind: "review", what: "Review", yours: false, button: "Do it", onBranch: false, text: `I've been asked to review ${prRef(r, p.number)}. Read it with gh pr view and gh pr diff, and tell me what you find. Don't post anything on GitHub.` },
+          next: { kind: "review", what: "Review", yours: false, button: "Do it", onBranch: false, text: `I've been asked to review ${prRef(r, p.number)}. Read it with gh pr view and gh pr diff, and tell me what you find. It is someone else's code: only read it. Don't check out its branch, build it or run anything from it, and don't post anything on GitHub.` },
           sig: "review",
         });
       }
@@ -232,6 +232,11 @@ function ago(now: number, at: number | null): string {
 }
 
 const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, wait: 3, done: 4 };
+
+/** The repositories GitHub answered for without saying who you are: their pull requests can't be told apart, so none are shown. */
+export function unknownViewer(repos: RepoStatus[] | null): string[] {
+  return (repos ?? []).filter((r) => r.gh === "ready" && !r.viewer).map(short);
+}
 
 /** What to do next, yours to decide first, then what is blocked, then branches to push. */
 export function nextSteps(items: WorkItem[]): WorkItem[] {
