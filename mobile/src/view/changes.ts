@@ -1,4 +1,6 @@
 /** The files a chat has changed, for a tablet's Changes pane: what its steps edited, one row per file, as the chat's own steps said. */
+import type { RemoteChangedFile } from "../protocol/generated/RemoteChangedFile";
+import type { RemoteChangeScope } from "../protocol/generated/RemoteChangeScope";
 import type { Item } from "../sync/reducer";
 
 export interface ChangedFile {
@@ -10,6 +12,8 @@ export interface ChangedFile {
   added: number;
   removed: number;
   created: boolean;
+  /** A file a link in the chat named that isn't one of the list's: shown, with no counts. */
+  linked?: boolean;
 }
 
 const nameOf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
@@ -45,4 +49,35 @@ export function changesLine(files: ChangedFile[]): string | null {
 export function changedFileOf(files: ChangedFile[], path: string): string | null {
   const ends = (long: string, short: string) => long === short || long.endsWith("/" + short.replace(/^\.?\//, ""));
   return files.find((f) => ends(f.path, path) || ends(path, f.path))?.path ?? null;
+}
+
+/** The Changes pane's views, as the Mac's Changes tab names them. */
+export const SCOPES: { value: RemoteChangeScope; label: string }[] = [
+  { value: "chat", label: "This chat" },
+  { value: "uncommitted", label: "Uncommitted" },
+  { value: "branch", label: "This branch" },
+];
+
+/** What a view says when it lists nothing. */
+export const EMPTY_SCOPE: Record<RemoteChangeScope, string> = {
+  chat: "Nothing changed in this chat yet.",
+  uncommitted: "Nothing uncommitted.",
+  branch: "This branch has no changes of its own yet.",
+};
+
+/** The Mac's list of a view, as the pane's rows: by path, as its Changes tab lists them. */
+export function fromMac(files: RemoteChangedFile[]): ChangedFile[] {
+  return files.map((f) => ({ path: f.path, name: nameOf(f.path), folder: folderOf(f.path), added: f.added, removed: f.removed, created: f.created }));
+}
+
+/** The rows, with a file a link named first when it isn't one of them (by the path it names in the list, if it is). */
+export function withLinked(files: ChangedFile[], linked: string | null): ChangedFile[] {
+  if (!linked || changedFileOf(files, linked)) return files;
+  return [{ path: linked, name: nameOf(linked), folder: folderOf(linked), added: 0, removed: 0, created: false, linked: true }, ...files];
+}
+
+/** The Mac's list of what the chat changed (by path) in the order of the chat's own edits, newest first; what it adds (a script's edits) after them. */
+export function inEditOrder(files: ChangedFile[], edits: ChangedFile[]): ChangedFile[] {
+  const at = new Map(edits.map((f, i) => [f.path, i]));
+  return [...files].sort((a, b) => (at.get(a.path) ?? edits.length) - (at.get(b.path) ?? edits.length));
 }

@@ -189,6 +189,26 @@ fn phone_diff(path: &str, d: &FileDiff) -> String {
 
 /// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
 /// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
+/// A file as the checked-out branch changed it, from where it left the default branch: only a text file in that repository,
+/// no bigger than a named file may be (outside::MAX_BYTES).
+fn branch_file(folder: &std::path::Path, path: &str) -> Result<FileDiff, String> {
+    // git names the repository by its real path, so a folder reached through a link is compared as git sees it (a deleted
+    // file has no real path: its own is used).
+    let real = std::path::Path::new(path).canonicalize().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
+    let (range, _) = pr::branch(folder, std::slice::from_ref(&real), None)?;
+    if !std::path::Path::new(&real).starts_with(&range.root) {
+        return Err("That file isn't in this repository.".into());
+    }
+    let d = pr::file(&range, &real)?;
+    if [&d.original, &d.current].iter().any(|t| t.len() as u64 > outside::MAX_BYTES) {
+        return Err("That file is too big to show.".into());
+    }
+    if [&d.original, &d.current].iter().any(|t| t.contains('\0')) {
+        return Err("That file isn't text.".into());
+    }
+    Ok(d)
+}
+
 fn named_file_diff(path: &str, original: Option<String>, current: Option<String>) -> Result<String, String> {
     if original.is_none() && current.is_none() {
         return Err("There is no file by that name in the open folder.".into());
@@ -681,8 +701,63 @@ impl remote::gateway::Host for RemoteHost {
             // Any other file a message names (a script's edit, an earlier step, one only read): git's view of it, from the folder the Changes pane reads.
             let view = s.view_folder()?;
             let abs = if std::path::Path::new(&named).is_absolute() { std::path::PathBuf::from(&named) } else { view.join(&named) };
-            let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::named_sides(&view, &abs)).await.map_err(|e| e.to_string())??;
-            named_file_diff(&path, original, current)
+            let shown = path.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let (original, current) = outside::named_sides(&view, &abs)?;
+                // Nothing uncommitted: the change may be in a commit already, so the branch's change to it, when it has one.
+                if original.is_some() && original == current {
+                    if let Ok(d) = branch_file(&view, &abs.to_string_lossy()) {
+                        if d.original != d.current {
+                            return Ok(phone_diff(&shown, &d));
+                        }
+                    }
+                }
+                named_file_diff(&shown, original, current)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        })
+    }
+
+    fn scoped_diff(&self, slot: String, path: String, scope: remote::protocol::RemoteChangeScope) -> remote::gateway::BoxFut<Result<String, String>> {
+        use remote::protocol::RemoteChangeScope as S;
+        if scope == S::Chat {
+            return self.diff(slot, path);
+        }
+        let app = self.app.clone();
+        Box::pin(async move {
+            let view = app.state::<AppState>().slots.get(&slot)?.view_folder()?;
+            let abs = if std::path::Path::new(&path).is_absolute() { std::path::PathBuf::from(&path) } else { view.join(&path) };
+            let shown = abs.to_string_lossy().into_owned();
+            if scope == S::Uncommitted {
+                // As a file a message names: inside the folder, not git's own, not ignored, small and text (outside::named_sides).
+                let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::named_sides(&view, &abs)).await.map_err(|e| e.to_string())??;
+                return named_file_diff(&shown, original, current);
+            }
+            let d = tauri::async_runtime::spawn_blocking(move || branch_file(&view, &shown)).await.map_err(|e| e.to_string())??;
+            Ok(phone_diff(&d.path.clone(), &d))
+        })
+    }
+
+    fn changes(&self, slot: String, scope: remote::protocol::RemoteChangeScope) -> remote::gateway::BoxFut<Result<remote::protocol::RemoteChanges, String>> {
+        use remote::protocol::RemoteChangeScope as S;
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let base = if scope == S::Branch {
+                let view = state.slots.get(&slot)?.view_folder()?;
+                tauri::async_runtime::spawn_blocking(move || pr::branch(&view, &[], None).map(|(_, review)| review.base)).await.map_err(|e| e.to_string())?.ok()
+            } else {
+                None
+            };
+            let scope = match scope {
+                S::Chat => changes::Scope::Session,
+                S::Uncommitted => changes::Scope::Git,
+                S::Branch => changes::Scope::Branch,
+            };
+            let files = summary_of(&state, &slot, Some(scope), None, None, None, None, None).await?;
+            let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+            Ok(remote::protocol::RemoteChanges { files: files.into_iter().map(|f| remote::protocol::RemoteChangedFile { path: f.path, created: f.created, deleted: f.deleted, added: count(f.added), removed: count(f.removed) }).collect(), base })
         })
     }
 
@@ -2748,9 +2823,15 @@ async fn change_summary(
     hints: Option<Vec<String>>,
     base: Option<String>,
 ) -> Result<Vec<changes::ChangeSummary>, String> {
-    let s = state.slots.get(&slot)?;
+    summary_of(&state, &slot, scope, turn, to_turn, pr, hints, base).await
+}
+
+/// change_summary's answer, for the window and for a phone's Changes pane.
+#[allow(clippy::too_many_arguments)]
+async fn summary_of(state: &AppState, slot: &str, scope: Option<changes::Scope>, turn: Option<usize>, to_turn: Option<usize>, pr: Option<u32>, hints: Option<Vec<String>>, base: Option<String>) -> Result<Vec<changes::ChangeSummary>, String> {
+    let s = state.slots.get(slot)?;
     if scope == Some(changes::Scope::Pr) {
-        let range = pr_range(&state, s.folder()?, pr, hints.unwrap_or_default()).await?;
+        let range = pr_range(state, s.folder()?, pr, hints.unwrap_or_default()).await?;
         return tauri::async_runtime::spawn_blocking(move || pr::summary(&range)).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Branch) {
@@ -4248,6 +4329,32 @@ mod tests {
         assert!(named_file_diff("/p/a.swift", None, Some("new\n".into())).unwrap().contains("+new"));
         assert!(named_file_diff("/p/a.swift", Some("gone\n".into()), None).unwrap().contains("-gone"));
         assert!(named_file_diff("/p/a.swift", None, None).is_err());
+    }
+
+    /// A phone's This branch view of a file: its change since the branch left main, and nothing from outside the repository.
+    #[test]
+    fn a_branch_file_is_its_change_since_main_and_only_in_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        // Not the real path: /var is a link to /private/var, as /tmp is to /private/tmp.
+        let d = dir.path().to_path_buf();
+        let sh = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&d).args(args).output().unwrap().status.success(), "git {args:?}");
+        sh(&["init", "-qb", "main"]);
+        sh(&["config", "user.email", "t@t"]);
+        sh(&["config", "user.name", "t"]);
+        std::fs::write(d.join("a.txt"), "one\n").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "init"]);
+        sh(&["checkout", "-qb", "feat/x"]);
+        std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
+        sh(&["commit", "-qam", "two"]);
+        let a = d.join("a.txt").to_string_lossy().into_owned();
+        let f = branch_file(&d, &a).unwrap();
+        assert_eq!((f.original.as_str(), f.current.as_str()), ("one\n", "one\ntwo\n"));
+        assert!(branch_file(&d, "/etc/passwd").is_err());
+        std::fs::write(d.join("pic.bin"), b"\x89PNG\0\0").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "pic"]);
+        assert_eq!(branch_file(&d, &d.join("pic.bin").to_string_lossy()).unwrap_err(), "That file isn't text.");
     }
 
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.

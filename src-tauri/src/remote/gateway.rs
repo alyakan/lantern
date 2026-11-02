@@ -89,6 +89,7 @@ const TEAM_ON_MAC: &str = "A team is started on your Mac.";
 const NO_STORAGE: &str = "This Mac can't show its storage.";
 const NO_TODOS: &str = "This Mac has no to-do lists.";
 const NO_ARTIFACTS: &str = "This Mac can't show artifacts.";
+const NO_SCOPES: &str = "This Mac can't show uncommitted or branch changes.";
 /// The longest an artifact's name may be, as the phone asks for it.
 const ARTIFACT_NAME_MAX: usize = 300;
 
@@ -144,6 +145,15 @@ pub trait Host: Send + Sync + 'static {
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
+    /// A file's diff in one of the Changes pane's other views (Uncommitted: against the last commit; Branch: against where the
+    /// branch left the default one), as a unified diff. Only a file in the chat's repository, which git doesn't ignore.
+    fn scoped_diff(&self, _slot: String, _path: String, _scope: protocol::RemoteChangeScope) -> BoxFut<Result<String, String>> {
+        Box::pin(async { Err(NO_SCOPES.to_string()) })
+    }
+    /// The files changed in one of the Changes pane's views (see Request::Changes).
+    fn changes(&self, _slot: String, _scope: protocol::RemoteChangeScope) -> BoxFut<Result<protocol::RemoteChanges, String>> {
+        Box::pin(async { Err(NO_SCOPES.to_string()) })
+    }
     /// A file of what the chat is reviewing, as a unified diff of the pull request or branch: `path` is relative to the
     /// repository or absolute in it (checked by `reviewed_path`), and a file outside the repository is refused.
     fn review_diff(&self, slot: String, path: String, target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>>;
@@ -327,9 +337,24 @@ impl Gateway {
 
     /// A file's change in a chat (Request::Diff). For a file the chat never edited the Mac asks git, so it runs beside the
     /// phone's other requests, with no limit of its own: a sheet of changed files asks for several at once.
-    async fn file_diff(&self, slot: String, path: String) -> Result<serde_json::Value, String> {
+    async fn file_diff(&self, slot: String, path: String, scope: Option<protocol::RemoteChangeScope>) -> Result<serde_json::Value, String> {
         self.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
-        self.host.clone().diff(slot, path).await.map(serde_json::Value::String)
+        let host = self.host.clone();
+        match scope {
+            None | Some(protocol::RemoteChangeScope::Chat) => host.diff(slot, path).await,
+            // Read from git rather than the chat's own tracker: a path that climbs out with `..` is refused here, as a review's is.
+            Some(scope) => {
+                let path = reviewed_path(&path).map_err(|_| "That isn't a file in this chat's folder.".to_string())?.to_string();
+                host.scoped_diff(slot, path, scope).await
+            }
+        }
+        .map(serde_json::Value::String)
+    }
+
+    /// A Changes view's files (Request::Changes): git runs for them, so beside the phone's other requests, as Diff.
+    async fn changes(&self, slot: String, scope: protocol::RemoteChangeScope) -> Result<serde_json::Value, String> {
+        self.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+        self.host.clone().changes(slot, scope).await.and_then(|c| serde_json::to_value(&c).map_err(|e| e.to_string()))
     }
 
     async fn suggest(&self, refresh: bool) -> Result<serde_json::Value, String> {
@@ -846,7 +871,8 @@ impl<'a> Session<'a> {
                         Request::DeskTalk { desk, text, history } => slow.push(Box::pin(async move { (id, gw.desk_talk(desk, text, history).await) })),
                         Request::DeskReply { desk, slot, text, after } => slow.push(Box::pin(async move { (id, gw.desk_reply(desk, slot, text, after).await) })),
                         Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
-                        Request::Diff { slot, path } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path).await) })),
+                        Request::Diff { slot, path, scope } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path, scope).await) })),
+                        Request::Changes { slot, scope } => slow.push(Box::pin(async move { (id, gw.changes(slot, scope).await) })),
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider).await) }));
@@ -1165,10 +1191,8 @@ impl<'a> Session<'a> {
                 }
                 host.set_preset(&slot, &preset).map(|()| serde_json::Value::Null)
             }
-            Request::Diff { slot, path } => {
-                self.chat_known(&slot)?;
-                host.diff(slot, path).await.map(serde_json::Value::String)
-            }
+            Request::Diff { slot, path, scope } => self.gw.file_diff(slot, path, scope).await,
+            Request::Changes { slot, scope } => self.gw.changes(slot, scope).await,
             Request::ReviewDiff { slot, path } => self.gw.review_diff(slot, path).await,
             Request::Artifacts { slot } => {
                 self.chat_known(&slot)?;
@@ -1547,6 +1571,13 @@ pub(crate) mod tests {
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
+        }
+        fn scoped_diff(&self, _: String, path: String, scope: protocol::RemoteChangeScope) -> BoxFut<Result<String, String>> {
+            Box::pin(async move { Ok(format!("{scope:?} {path}")) })
+        }
+        fn changes(&self, _: String, scope: protocol::RemoteChangeScope) -> BoxFut<Result<protocol::RemoteChanges, String>> {
+            let file = protocol::RemoteChangedFile { path: format!("/p/{scope:?}.rs"), created: false, deleted: false, added: 2, removed: 1 };
+            Box::pin(async move { Ok(protocol::RemoteChanges { files: vec![file], base: (scope == protocol::RemoteChangeScope::Branch).then(|| "main".into()) }) })
         }
         fn review_diff(&self, _: String, path: String, target: super::super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
             let delay = *self.review_delay.lock().unwrap();
@@ -2047,8 +2078,16 @@ pub(crate) mod tests {
         let (_, mut p) = paired(&r).await;
         assert!(p.ask(Request::Wake { slot: "z".into() }).await.1.is_none());
         assert_eq!(*r.host.woken.lock().unwrap(), vec!["z".to_string()]);
-        assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
-        assert!(p.ask(Request::Diff { slot: "z".into(), path: "/etc/passwd".into() }).await.1.is_some());
+        assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into(), scope: None }).await.0, Some(json!("--- a\n+++ b\n")));
+        assert!(p.ask(Request::Diff { slot: "z".into(), path: "/etc/passwd".into(), scope: None }).await.1.is_some());
+        // The chat's own view is Diff as it was; the others ask the Mac's git, for open chats only.
+        assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into(), scope: Some(protocol::RemoteChangeScope::Chat) }).await.0, Some(json!("--- a\n+++ b\n")));
+        assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into(), scope: Some(protocol::RemoteChangeScope::Branch) }).await.0, Some(json!("Branch /p/a.rs")));
+        assert!(p.ask(Request::Diff { slot: "unknown".into(), path: "/p/a.rs".into(), scope: Some(protocol::RemoteChangeScope::Uncommitted) }).await.1.is_some());
+        assert!(p.ask(Request::Diff { slot: "z".into(), path: "/p/../etc/passwd".into(), scope: Some(protocol::RemoteChangeScope::Uncommitted) }).await.1.is_some());
+        assert_eq!(p.ask(Request::Changes { slot: "z".into(), scope: protocol::RemoteChangeScope::Branch }).await.0, Some(json!({"files": [{"path": "/p/Branch.rs", "created": false, "deleted": false, "added": 2, "removed": 1}], "base": "main"})));
+        assert!(p.ask(Request::Changes { slot: "unknown".into(), scope: protocol::RemoteChangeScope::Uncommitted }).await.1.is_some());
+        assert!(protocol::FEATURES.contains(&protocol::CHANGE_SCOPES));
         assert!(p.ask(Request::Wake { slot: "unknown".into() }).await.1.is_some());
     }
 

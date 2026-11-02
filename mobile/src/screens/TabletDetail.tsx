@@ -73,13 +73,15 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     setPicked({ slot, panel: p });
   };
   const showing: Panel = panel === "artifacts" && canArtifacts ? "artifacts" : panel === "todos" && canTodos ? "todos" : "changes";
-  // The pane stays once artifacts or to-dos were picked, even back on Changes with none: the menu is in it.
-  const [otherPicked, setOtherPicked] = useState(false);
+  // The pane stays once it was asked for (artifacts or to-dos picked, a file link tapped, its button), even on Changes with
+  // nothing changed in the chat: the menu and the other views are in it.
+  const [kept, setKept] = useState(false);
   const pick = (p: Panel) => {
-    if (p !== "changes") setOtherPicked(true);
+    if (p !== "changes") setKept(true);
     setPanel(p);
   };
-  const room = hasRoomForChanges(layout, win.width) && (changed.length > 0 || otherPicked || showing !== "changes");
+  const wide = hasRoomForChanges(layout, win.width);
+  const room = wide && (changed.length > 0 || kept || showing !== "changes");
   const project = (slot && chats.find((c) => c.slot === slot)?.project) || null;
   const mode: DockMode = !slot || !room || !changesOpen ? "hidden" : floating ? "float" : "dock";
   // The room this has (the window, less the chats when they are beside it), as laid out.
@@ -105,17 +107,24 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     movePanes();
     setChangesOpen(open);
   };
-  // A file link tapped in the chat: one of the files it changed is shown in the pane (brought back if it was put away), not in a
-  // sheet over the chat with the pane right beside it.
+  // A file link tapped in the chat is shown in the pane (brought back if it was put away), whether or not the chat changed it,
+  // never in a sheet over the chat with the pane right beside it.
   const [focus, setFocus] = useState<{ path: string; n: number } | undefined>(undefined);
   useEffect(() => setFocus(undefined), [slot]);
   const showFile = (link: string) => {
-    const path = room ? changedFileOf(changed, link) : null;
-    if (!path) return false;
+    if (!wide) return false;
+    const path = changedFileOf(changed, link) ?? link;
     setFocus((f) => ({ path, n: (f?.n ?? 0) + 1 }));
     setPanel("changes");
-    if (!changesOpen) toggleChanges(true);
+    setKept(true);
+    if (!changesOpen || !room) toggleChanges(true);
     return true;
+  };
+  // The chat's Changes button: the pane wherever the window has room for it.
+  const togglePane = () => {
+    if (room) return toggleChanges(!changesOpen);
+    setKept(true);
+    toggleChanges(true);
   };
   const toggleFloat = () => {
     movePanes();
@@ -132,7 +141,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const main = slot ? (
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={room ? { shown: changesOpen, onToggle: () => toggleChanges(!changesOpen), onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+      <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={wide ? { shown: mode !== "hidden", onToggle: togglePane, onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
   ) : canDesk ? (
     <DeskScreen
