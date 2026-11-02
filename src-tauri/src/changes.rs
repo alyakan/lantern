@@ -61,6 +61,9 @@ pub struct ChangeSummary {
     pub deleted: bool,
     pub added: usize,
     pub removed: usize,
+    /// Where a branch or pull request moved it from (absolute), when it was moved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -217,7 +220,7 @@ impl ChangeTracker {
                         }
                     }
                 }
-                Some(ChangeSummary { path: path.clone(), created: original.is_none(), deleted: current.is_none(), added, removed })
+                Some(ChangeSummary { path: path.clone(), created: original.is_none(), deleted: current.is_none(), added, removed, moved_from: None })
             })
             .collect();
         out.sort_by(|a, b| a.path.cmp(&b.path));
@@ -340,7 +343,7 @@ mod tests {
         t.record(&p("deleted.txt"), Some("gone\n".into()));
         let s = t.summary(Scope::Session, None, None);
         assert_eq!(s.iter().map(|c| c.path.rsplit('/').next().unwrap()).collect::<Vec<_>>(), vec!["deleted.txt", "edited.txt"]);
-        assert_eq!(s[1], ChangeSummary { path: p("edited.txt"), created: false, deleted: false, added: 2, removed: 1 });
+        assert_eq!(s[1], ChangeSummary { path: p("edited.txt"), created: false, deleted: false, added: 2, removed: 1, moved_from: None });
         assert!(s[0].deleted && s[0].removed == 1);
     }
 
@@ -457,7 +460,7 @@ mod tests {
         // A turn starting now snapshots it by its stamp, and it's unchanged in that turn.
         t.start_turn();
         assert!(t.summary(Scope::Turn, None, None).is_empty());
-        assert_eq!(t.summary(Scope::Session, None, None), vec![ChangeSummary { path: p.into(), created: false, deleted: false, added: 0, removed: 0 }]);
+        assert_eq!(t.summary(Scope::Session, None, None), vec![ChangeSummary { path: p.into(), created: false, deleted: false, added: 0, removed: 0, moved_from: None }]);
         assert_eq!(t.diff(p, Scope::Session, None, None).unwrap_err(), TOO_LARGE);
     }
 

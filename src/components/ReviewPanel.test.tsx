@@ -58,6 +58,15 @@ describe("ReviewPanel's worktree chip", () => {
   });
 });
 
+describe("ReviewPanel's file list", () => {
+  it("marks a moved file as moved, with where it was, once rather than as one new and one deleted", () => {
+    const moved = [{ path: "/p/Kit/a.swift", created: false, added: 1, removed: 0, moved_from: "/p/a.swift" }];
+    render(<ReviewPanel {...base} files={moved} selected="/p/Kit/a.swift" follow />);
+    expect(screen.getByTitle("Moved from a.swift")).toHaveTextContent("moved");
+    expect(screen.queryByText("new")).toBeNull();
+  });
+});
+
 describe("ReviewPanel reverts", () => {
   it("a file's Revert opens a dialog for that file", () => {
     render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);

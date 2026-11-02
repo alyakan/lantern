@@ -190,6 +190,13 @@ fn phone_diff(path: &str, d: &FileDiff) -> String {
 
 /// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
 /// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
+/// Where a review of the checked-out branch may be: the folder the Changes pane reads (the worktree the chat last edited
+/// in), then the chat's own folder (see pr::review_branch).
+fn review_folders(s: &slots::Slot) -> Result<Vec<std::path::PathBuf>, String> {
+    let (view, own) = (s.view_folder()?, s.folder()?);
+    Ok(if view == own { vec![view] } else { vec![view, own] })
+}
+
 /// A file as the checked-out branch changed it, from where it left the default branch: only a text file in that repository,
 /// no bigger than a named file may be (outside::MAX_BYTES).
 fn branch_file(folder: &std::path::Path, path: &str) -> Result<FileDiff, String> {
@@ -781,8 +788,8 @@ impl remote::gateway::Host for RemoteHost {
             let range = match target.pr {
                 Some(pr) => pr_range(&state, s.folder()?, Some(u32::try_from(pr).map_err(|_| "That pull request number is too big.")?), vec![path.clone()]).await?,
                 None => {
-                    let (folder, hints, base) = (s.view_folder()?, vec![path.clone()], target.base.clone());
-                    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
+                    let (folders, hints, base) = (review_folders(&s)?, vec![path.clone()], target.base.clone());
+                    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&folders, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
                 }
             };
             // Only a file in the repository: pr::file reads it from the review's two commits there.
@@ -2747,7 +2754,7 @@ fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<()
 async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>, base: Option<String>) -> Result<pr::BranchReview, String> {
     let s = state.slots.get(&slot)?;
     let hints = hints.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
 }
 
 /// The worktree the chat is working in (Claude entered one itself), which the Changes pane reads from instead of the
@@ -2848,12 +2855,12 @@ async fn summary_of(state: &AppState, slot: &str, scope: Option<changes::Scope>,
     }
     if scope == Some(changes::Scope::Branch) {
         let hints = hints.unwrap_or_default();
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         return tauri::async_runtime::spawn_blocking(move || {
             let rows = outside::uncommitted(&s.view_folder()?).ok_or("This folder isn't in a git repository.")?;
-            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed }).collect();
+            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed, moved_from: None }).collect();
             out.sort_by(|a, b| a.path.cmp(&b.path));
             Ok(out)
         })
