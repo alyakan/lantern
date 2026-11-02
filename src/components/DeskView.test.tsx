@@ -5,6 +5,7 @@ import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { NO_DESKS } from "../lib/desks";
 import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
+import { forgetSent } from "./YourWork";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
@@ -39,6 +40,7 @@ const needs = () => screen.getByRole("region", { name: "Needs you" });
 
 describe("the Desk", () => {
   beforeEach(() => {
+    forgetSent();
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -203,11 +205,24 @@ describe("the Desk", () => {
     expect(next.queryByRole("button", { name: /Fix failing checks/ })).toBeNull();
   });
 
+  it("sets Next apart in a card of its own, and groups where things stand by feature when Linear is connected", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } } });
+    expect(within(screen.getByRole("region", { name: "Next" })).getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
+    const stand = screen.getByRole("region", { name: "Where things stand" });
+    const sync = within(stand).getByRole("region", { name: "Sync" });
+    expect(sync).toHaveTextContent("1 doing");
+    // Under its feature's heading, a row doesn't name the feature again.
+    expect(within(sync).getByText(/^ENG-1 · lantern · aly\/eng-1-a$/)).toBeInTheDocument();
+    expect(within(stand).getByRole("region", { name: "No feature" })).toHaveTextContent("PR 8");
+  });
+
   it("says when there is no work open, asks again on Refresh, and shows nothing before the Mac has said", () => {
     const { rerender, props } = setup();
-    expect(screen.queryByRole("region", { name: "Your work" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Next" })).toBeNull();
     rerender({ repos: [repo("/p/lantern")] });
-    const card = screen.getByRole("region", { name: "Your work" });
+    const card = screen.getByRole("region", { name: "Next" });
     expect(card).toHaveTextContent("Nothing open");
     fireEvent.click(within(card).getByRole("button", { name: "Refresh" }));
     expect(props.onRefreshRepos).toHaveBeenCalled();
