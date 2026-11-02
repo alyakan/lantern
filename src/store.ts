@@ -404,7 +404,7 @@ export type Action =
   | { type: "agent_available" }
   | { type: "claude_found"; path: string }
   | { type: "claude_missing"; error: string }
-  | { type: "folder_opened"; folder: string }
+  | { type: "folder_opened"; folder: string; /** What a chat brought back from the last launch was called, until its history says. */ title?: string }
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null; earlier?: number }
   /** The turns before the ones loaded: `expected` is how many were not loaded when they were asked for, `hidden` how many still aren't. */
@@ -855,7 +855,8 @@ export function reducer(state: State, action: Action): State {
       const fresh = freshSession(state, action.folder);
       // A chat waking from sleep is still that conversation until its history arrives: it stays saved for the next launch, found
       // by its session, and called what it was called (not "New chat" for the moment it takes to load).
-      return state.status === "asleep" ? { ...fresh, sessionId: state.sessionId, asleepTitle: state.asleepTitle, asleepSaved: state.asleepSaved } : fresh;
+      if (state.status === "asleep") return { ...fresh, sessionId: state.sessionId, asleepTitle: state.asleepTitle, asleepSaved: state.asleepSaved };
+      return action.title ? { ...fresh, asleepTitle: action.title } : fresh;
     }
     case "sleep":
       return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title, asleepSaved: action.saved ?? null };
@@ -866,7 +867,13 @@ export function reducer(state: State, action: Action): State {
       // The backend keeps the replayed session's last turn as turn 0; earlier turns' changes aren't known.
       const last = replayed.items.map((it) => it.type).lastIndexOf("user");
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0 };
+      // Its name stays until the history has the chat's own first prompt: a chat with no title of its own (another provider's)
+      // is called what it was called, not "New chat" because the history has no prompt (or begins after it, on a later page).
+      // An open chat that starts again on the same session was called by its first message: that is its name, too.
+      const was = state.sessionId === action.sessionId ? state.items.find((it) => it.type === "user" && !it.auto) : undefined;
+      const name = state.asleepTitle ?? (was?.type === "user" ? was.text.split("\n")[0] || null : null);
+      const first = !action.earlier && items.some((it) => it.type === "user" && !it.auto);
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : name };
     }
     case "earlier_loaded": {
       // A page for a chat that has moved on (another session, or loaded further since) is let go.

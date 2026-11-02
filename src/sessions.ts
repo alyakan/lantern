@@ -173,7 +173,9 @@ export function firstPrompt(s: State): string | null {
 
 /** What a chat is called in menus: its title once one is made (`titles`, by session id), until then its first prompt. */
 export function chatTitle(s: State, titles: Record<string, string> = {}): string {
-  return (s.sessionId && titles[s.sessionId]) || firstPrompt(s)?.split("\n")[0] || s.asleepTitle || "New chat";
+  // The first message in memory is the chat's own first only once no earlier turns are left unloaded: until then, the name it had.
+  const remembered = s.earlierTurns > 0 ? s.asleepTitle : null;
+  return (s.sessionId && titles[s.sessionId]) || remembered || firstPrompt(s)?.split("\n")[0] || s.asleepTitle || "New chat";
 }
 
 /**
