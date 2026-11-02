@@ -658,4 +658,47 @@ mod tests {
         assert!(!format!("{:?}", launch.key).contains("sk-ant"));
         assert!(!format!("{:?}", k.state()).contains("sk-ant"));
     }
+
+    /// Every place that starts Claude Code with a model asks for the key (a launch that doesn't would run on the sign-in the user
+    /// chose not to use). A file that builds such a command line (it names a Claude Code flag only a model run takes) must apply
+    /// the key as often as it starts a process; `args.rs` only builds the arguments and this file is the helper itself.
+    #[test]
+    fn every_launch_of_claude_code_with_a_model_applies_the_key() {
+        fn files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        files(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut all);
+        let mut checked = 0;
+        for path in all {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            if name == "provider_keys.rs" || name == "args.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            // What is run in production: the code before the file's tests.
+            let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
+            if !(code.contains("\"--setting-sources\"") || code.contains("\"--output-format\"") || code.contains("\"stream-json\"")) {
+                continue;
+            }
+            checked += 1;
+            let spawns = code.matches("Command::new(").count();
+            let applied = code.matches("provider_keys::apply_claude").count();
+            assert!(applied >= spawns, "{} starts {spawns} process(es) but applies the key {applied} time(s)", path.display());
+        }
+        // Titles, suggestions and the Desk's calls and agent name the flags themselves: fewer than that and the scan found nothing.
+        assert!(checked >= 4, "only {checked} files were checked");
+        // The chat builds its command line in args.rs, so it is named here.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for file in ["provider/claude_session.rs", "aside.rs"] {
+            assert!(std::fs::read_to_string(src.join(file)).unwrap().contains("provider_keys::apply_claude"), "{file} doesn't apply the key");
+        }
+    }
 }
