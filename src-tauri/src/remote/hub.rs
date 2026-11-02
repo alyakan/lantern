@@ -182,7 +182,9 @@ impl Log {
                     self.first_prompt = title_from(text);
                 }
             }
-            UiEvent::Thinking { .. } | UiEvent::TextDelta { .. } | UiEvent::ToolStarted { .. } => self.working = true,
+            // The agent itself (following up on its own too). A helper still at work after the turn ended isn't: no turn would
+            // end to say it stopped, and the chat would look busy for good, with nothing for Stop to stop and Clear refused.
+            UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. } => self.working = true,
             UiEvent::TurnDone { context_window, .. } => {
                 self.working = false;
                 self.window = context_window.or(self.window);
@@ -644,6 +646,22 @@ mod tests {
         assert!(!hub.extras("a").iter().any(|e| matches!(e, super::super::protocol::RemoteEvent::Commands { commands } if !commands.is_empty())));
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
         assert_eq!(hub.chat("a").unwrap().session_id, None);
+    }
+
+    #[test]
+    fn a_helper_still_at_work_after_the_turn_ended_leaves_the_chat_idle_so_it_can_be_cleared() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("run the tests in the background"), done()]);
+        let helper = Some("agent-1".to_string());
+        feed(&hub, "a", vec![
+            UiEvent::Thinking { parent: helper.clone() },
+            UiEvent::ToolStarted { parent: helper.clone(), tool_use_id: "t9".into(), name: "Bash".into(), summary: "npm test".into() },
+            UiEvent::TextDelta { parent: helper, block_id: "b9".into(), text: "still going".into() },
+        ]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Idle);
+        // The agent following up on its own is working.
+        feed(&hub, "a", vec![UiEvent::Thinking { parent: None }]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Working);
     }
 
     #[test]

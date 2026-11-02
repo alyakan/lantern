@@ -542,9 +542,10 @@ function freshSession(state: State, folder: string | null): State {
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
-// opened by a note in place of a prompt.
-function wake(state: State): State {
-  if (state.status !== "idle") return state;
+// opened by a note in place of a prompt. A helper's own steps (`parent`) aren't: one still at work after the turn ended
+// would leave the chat running with no turn to end, which nothing could stop or clear.
+function wake(state: State, parent: string | null): State {
+  if (state.status !== "idle" || parent !== null) return state;
   const seq = state.seq + 1;
   const text = state.lastEndedTask ? `After ${state.lastEndedTask} ended` : `${agentName(state.provider)} followed up on its own`;
   return { ...state, status: "running", seq, lastEndedTask: null, items: [...state.items, { type: "user", id: `u${seq}`, text, at: Date.now(), auto: true }] };
@@ -611,17 +612,17 @@ function applyEvent(state: State, ev: UiEvent): State {
       if (ev.id.startsWith(RUN_PREFIX)) return state;
       return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, secret: ev.secret })) };
     case "thinking":
-      return { ...wake(state), thinking: true };
+      return { ...wake(state, ev.parent), thinking: true };
     case "text_delta": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: upsertText(s.items, ev.parent, ev.block_id, (t) => t + ev.text) };
     }
     case "assistant_text": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: upsertText(s.items, ev.parent, ev.block_id, () => ev.text) };
     }
     case "tool_started": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return {
         ...s,
         thinking: false,
@@ -655,7 +656,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     // The advisor is a step like any other in the turn's work: running while it's consulted, then what it said.
     case "advisor_started": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: insert(s.items, ev.parent, { type: "tool", id: ev.id, name: "advisor", summary: "", status: "running", output: null, edit: null, children: [], startedAt: Date.now() }) };
     }
     case "advisor_done": {
@@ -689,8 +690,9 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "mcp_tools":
       return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
+    // Lantern runs /clear by starting the agent afresh, so no turn ends it: the chat is free again here.
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0 };
+      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: signInText(state.provider), action: null }
@@ -915,7 +917,8 @@ export function reducer(state: State, action: Action): State {
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
       // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
       const autoStreak = action.auto ? state.autoStreak + 1 : 0;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
+      // A new message is a new turn: a /clear before it (which no turn ended) no longer hides its end.
+      return { ...state, status: "running", thinking: true, stopRequested: false, cleared: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
     }
     case "wakes_taken":
       return { ...state, wakes: [] };

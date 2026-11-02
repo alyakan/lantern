@@ -1892,7 +1892,12 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
     let _control = s.control.lock().await;
     if state.remote.hub.has_background(slot) { return Err("This chat has background tasks. Stop them before clearing it.".into()); }
     let info = state.remote.hub.chat(slot).ok_or("This chat is not open")?;
-    if !matches!(info.status, remote::hub::ChatStatus::Idle) { return Err("Wait until the chat has finished.".into()); }
+    match info.status {
+        remote::hub::ChatStatus::Idle => {}
+        remote::hub::ChatStatus::Working => return Err("Wait until the chat has finished, or stop it.".into()),
+        remote::hub::ChatStatus::NeedsYou => return Err("This chat is waiting on you. Answer it or stop it first.".into()),
+        remote::hub::ChatStatus::Asleep | remote::hub::ChatStatus::Ended => return Err("This chat isn't running. Open it to start it again first.".into()),
+    }
     match action {
         "compact" => s.session.lock().await.as_mut().ok_or("The agent stopped")?.compact().await,
         "clear" => {
