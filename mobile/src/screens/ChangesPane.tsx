@@ -9,7 +9,7 @@ import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
-import { changedFileOf, changedFiles, changesLine, EMPTY_SCOPE, fromMac, SCOPES, withLinked, type ChangedFile } from "../view/changes";
+import { changedFileOf, changedFiles, changesLine, EMPTY_SCOPE, fromMac, inEditOrder, SCOPES, withLinked, type ChangedFile } from "../view/changes";
 import { DiffView } from "./DiffView";
 
 /**
@@ -42,7 +42,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
   }, [canScopes, controller, slot, scope, edits]);
   const mine = listed?.scope === scope ? listed : null;
   // The chat's own edits stand in until the Mac's list comes (and are all there is from an older Mac).
-  const known: ChangedFile[] | null = mine && "files" in mine ? mine.files : scope === "chat" ? local : null;
+  const known: ChangedFile[] | null = mine && "files" in mine ? (scope === "chat" ? inEditOrder(mine.files, local) : mine.files) : scope === "chat" ? local : null;
   const failed = mine && "error" in mine ? mine.error : null;
   // A file a link named stays on the list, at its top, when it isn't one of it.
   const [linked, setLinked] = useState<string | null>(focus?.path ?? null);

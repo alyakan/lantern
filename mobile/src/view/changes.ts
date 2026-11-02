@@ -75,3 +75,9 @@ export function withLinked(files: ChangedFile[], linked: string | null): Changed
   if (!linked || changedFileOf(files, linked)) return files;
   return [{ path: linked, name: nameOf(linked), folder: folderOf(linked), added: 0, removed: 0, created: false, linked: true }, ...files];
 }
+
+/** The Mac's list of what the chat changed (by path) in the order of the chat's own edits, newest first; what it adds (a script's edits) after them. */
+export function inEditOrder(files: ChangedFile[], edits: ChangedFile[]): ChangedFile[] {
+  const at = new Map(edits.map((f, i) => [f.path, i]));
+  return [...files].sort((a, b) => (at.get(a.path) ?? edits.length) - (at.get(b.path) ?? edits.length));
+}

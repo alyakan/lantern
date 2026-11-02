@@ -189,13 +189,24 @@ fn phone_diff(path: &str, d: &FileDiff) -> String {
 
 /// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
 /// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
-/// A file as the checked-out branch changed it, from where it left the default branch: only a file in that repository.
+/// A file as the checked-out branch changed it, from where it left the default branch: only a text file in that repository,
+/// no bigger than a named file may be (outside::MAX_BYTES).
 fn branch_file(folder: &std::path::Path, path: &str) -> Result<FileDiff, String> {
-    let (range, _) = pr::branch(folder, &[path.to_string()], None)?;
-    if !std::path::Path::new(path).starts_with(&range.root) {
+    // git names the repository by its real path, so a folder reached through a link is compared as git sees it (a deleted
+    // file has no real path: its own is used).
+    let real = std::path::Path::new(path).canonicalize().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
+    let (range, _) = pr::branch(folder, std::slice::from_ref(&real), None)?;
+    if !std::path::Path::new(&real).starts_with(&range.root) {
         return Err("That file isn't in this repository.".into());
     }
-    pr::file(&range, path)
+    let d = pr::file(&range, &real)?;
+    if [&d.original, &d.current].iter().any(|t| t.len() as u64 > outside::MAX_BYTES) {
+        return Err("That file is too big to show.".into());
+    }
+    if [&d.original, &d.current].iter().any(|t| t.contains('\0')) {
+        return Err("That file isn't text.".into());
+    }
+    Ok(d)
 }
 
 fn named_file_diff(path: &str, original: Option<String>, current: Option<String>) -> Result<String, String> {
@@ -4324,7 +4335,8 @@ mod tests {
     #[test]
     fn a_branch_file_is_its_change_since_main_and_only_in_the_repository() {
         let dir = tempfile::tempdir().unwrap();
-        let d = dir.path().canonicalize().unwrap();
+        // Not the real path: /var is a link to /private/var, as /tmp is to /private/tmp.
+        let d = dir.path().to_path_buf();
         let sh = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&d).args(args).output().unwrap().status.success(), "git {args:?}");
         sh(&["init", "-qb", "main"]);
         sh(&["config", "user.email", "t@t"]);
@@ -4339,6 +4351,10 @@ mod tests {
         let f = branch_file(&d, &a).unwrap();
         assert_eq!((f.original.as_str(), f.current.as_str()), ("one\n", "one\ntwo\n"));
         assert!(branch_file(&d, "/etc/passwd").is_err());
+        std::fs::write(d.join("pic.bin"), b"\x89PNG\0\0").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "pic"]);
+        assert_eq!(branch_file(&d, &d.join("pic.bin").to_string_lossy()).unwrap_err(), "That file isn't text.");
     }
 
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.

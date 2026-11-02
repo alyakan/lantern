@@ -70,6 +70,14 @@ describe("the Changes pane", () => {
       expect(screen.getByRole("tab", { name: "This chat", selected: true })).toBeTruthy();
     });
 
+    it("keeps the newest edit first and shown once the Mac's list (by path) comes", async () => {
+      const { lastOf } = await pane({ changes: lists, diff: "+x" }, events, ["changescopes"]);
+      await screen.findByRole("button", { name: "gen.sh, 1 added, 0 removed" });
+      expect(screen.getAllByRole("button", { name: /added/ }).map((b) => b.props.accessibilityLabel.split(",")[0])).toEqual(["b.ts", "a.ts", "gen.sh"]);
+      expect(screen.getByRole("button", { name: "b.ts, 9 added, 0 removed" }).props.accessibilityState).toMatchObject({ selected: true });
+      expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/b.ts" });
+    });
+
     it("switches to the branch's changes, says what they're against, and reads a file's diff in that view", async () => {
       const { lastOf } = await pane({ changes: lists, diff: "+x" }, events, ["changescopes"]);
       await fireEvent.press(screen.getByRole("tab", { name: "This branch" }));

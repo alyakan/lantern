@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Bigger files, and binary ones, aren't worth a diff.
-const MAX_BYTES: u64 = 5 << 20;
+pub(crate) const MAX_BYTES: u64 = 5 << 20;
 /// Without git, a folder with more files than this isn't listed.
 const MAX_FILES: usize = 100_000;
 
