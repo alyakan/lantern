@@ -97,7 +97,7 @@ impl FixtureHost {
 
     fn build(remote: &Remote, pace: Duration, waiting: bool) -> Arc<Self> {
         let (bus, hub) = (remote.bus.clone(), remote.hub.clone());
-        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
+        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: None };
 
         let mut history: HashMap<String, Vec<UiEvent>> = HashMap::new();
         history.insert(
@@ -180,21 +180,25 @@ impl Host for FixtureHost {
         Box::pin(async { Ok(()) })
     }
 
-    fn pending(&self, slot: &str) -> Vec<Pending> {
-        self.pending.lock().unwrap().get(slot).cloned().unwrap_or_default()
+    fn pending(&self, slot: &str) -> BoxFut<Vec<Pending>> {
+        let pending = self.pending.lock().unwrap().get(slot).cloned().unwrap_or_default();
+        Box::pin(async move { pending })
     }
 
-    fn answer(&self, slot: &str, request_id: &str, allow: bool, _message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
-        let mut pending = self.pending.lock().unwrap();
-        let list = pending.get_mut(slot).ok_or("That was answered already.")?;
-        let at = list.iter().position(|p| p.request_id == request_id).ok_or("That was answered already.")?;
-        list.remove(at);
-        drop(pending);
-        self.bus.publish(slot, UiEvent::PermissionResolved { request_id: request_id.into(), allow, by: by.into() });
-        if self.pending(slot).is_empty() {
-            self.reply(slot, in_words(allow, updated_input.as_ref()));
-        }
-        Ok(())
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, _message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> BoxFut<Result<(), String>> {
+        let result = (|| {
+            let mut pending = self.pending.lock().unwrap();
+            let list = pending.get_mut(slot).ok_or("That was answered already.")?;
+            let at = list.iter().position(|p| p.request_id == request_id).ok_or("That was answered already.")?;
+            list.remove(at);
+            drop(pending);
+            self.bus.publish(slot, UiEvent::PermissionResolved { request_id: request_id.into(), allow, by: by.into() });
+            if self.pending.lock().unwrap().get(slot).is_none_or(|p| p.is_empty()) {
+                self.reply(slot, in_words(allow, updated_input.as_ref()));
+            }
+            Ok(())
+        })();
+        Box::pin(async move { result })
     }
 
     fn wake(&self, slot: &str) -> Result<(), String> {
@@ -208,6 +212,16 @@ impl Host for FixtureHost {
 
     fn close(&self, slot: &str) -> Result<(), String> {
         self.hub.closed(slot);
+        Ok(())
+    }
+
+    fn rename(&self, slot: &str, title: String) -> Result<(), String> {
+        self.hub.titled(slot, &title);
+        Ok(())
+    }
+    // No window here: the fixture says it back itself.
+    fn set_single(&self, folder: Option<String>) -> Result<(), String> {
+        self.hub.single.set(folder.map(|folder| super::single::WindowSingle { folder, color: Some("#0f8a7e".into()) }));
         Ok(())
     }
 
@@ -259,9 +273,13 @@ impl Host for FixtureHost {
         Ok(())
     }
 
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow) -> BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>> {
         let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
         self.hub.opened(&slot, &folder);
+        // A chat that isn't on Claude carries the provider's name, as the window sends it for a real one.
+        if let Some(p) = self.hub.providers().into_iter().find(|p| Some(&p.id) == provider.as_ref()).filter(|p| p.id != "claude") {
+            self.hub.set_provider(&slot, Some(&p.name));
+        }
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
         self.hub.flow(&slot, workflow.as_str());
         self.hub.titled(&slot, &title_of(&text));
@@ -276,6 +294,28 @@ impl Host for FixtureHost {
         Box::pin(async move {
             tokio::time::sleep(wait).await;
             Ok(SUGGESTIONS.to_string())
+        })
+    }
+
+    fn review_diff(&self, slot: String, path: String, _target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
+        self.diff(slot, path)
+    }
+
+    fn artifacts(&self, _slot: String) -> BoxFut<Result<Vec<super::protocol::RemoteArtifact>, String>> {
+        let item = |name: &str, kind: &str, modified: u64, size: u64| super::protocol::RemoteArtifact { name: name.into(), kind: kind.into(), modified, size };
+        Box::pin(async move { Ok(vec![item("tonight.html", "html", 1_761_800_000_000, 900), item("release-flow.md", "markdown", 1_761_700_000_000, 300), item("architecture.mmd", "mermaid", 1_761_600_000_000, 120)]) })
+    }
+
+    fn artifact_read(&self, _slot: String, name: String) -> BoxFut<Result<String, String>> {
+        Box::pin(async move {
+            match name.as_str() {
+                "tonight.html" => Ok(crate::artifacts::defuse(
+                    r#"<!doctype html><link rel="preconnect" href="http://127.0.0.1:9"><h1>Tonight</h1><p class="muted">A page with a chart.</p><div style="display:flex;gap:6px;align-items:flex-end;height:80px"><div style="flex:1;height:40%;background:var(--series-1,#4c8bf5)"></div><div style="flex:1;height:70%;background:var(--series-2,#e0903c)"></div><div style="flex:1;height:55%;background:var(--series-3,#3fa37c)"></div></div><p><a href="http://127.0.0.1:9/x">a link out</a></p>"#,
+                )),
+                "release-flow.md" => Ok("# Release flow\n\n1. Feature PR\n2. Version PR\n3. Tag\n4. Draft, then **publish**\n".into()),
+                "architecture.mmd" => Ok("graph TD\n  Phone --> Gateway\n  Gateway --> Mac\n".into()),
+                _ => Err("That artifact is gone.".into()),
+            }
         })
     }
 

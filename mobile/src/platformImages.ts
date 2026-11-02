@@ -23,7 +23,7 @@ let counter = 0;
  * saved anew, which normally leaves out what the camera wrote into the file (where it was taken, say); that isn't checked
  * here, so it is not promised to anyone.
  */
-async function shrink(asset: ImagePicker.ImagePickerAsset): Promise<PickedImage> {
+async function shrink(asset: { uri: string; width: number; height: number }): Promise<PickedImage> {
   for (const [edge, quality] of LADDER) {
     const context = ImageManipulator.manipulate(asset.uri);
     const size = fitLongEdge(asset.width, asset.height, edge);
@@ -37,6 +37,9 @@ async function shrink(asset: ImagePicker.ImagePickerAsset): Promise<PickedImage>
   }
   throw new Error("too big");
 }
+
+/** A picture the phone made itself (a marked-up one), made small the same way as a picked one. */
+export const shrinkImage = (uri: string, width: number, height: number): Promise<PickedImage> => shrink({ uri, width, height });
 
 /**
  * Asks for up to `room` pictures: the library's picker (it needs no permission: the person gives it only the ones they

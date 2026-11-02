@@ -12,11 +12,16 @@ import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
+import { runButton, TAP } from "./src/notificationActions";
+import { todoOfNotification } from "./src/view/todos";
 import { slotOfLink } from "./src/liveActivity";
 import { AccentFromPledge, TipsContext } from "./src/shell/tipsContext";
 import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
 import { demoPlatform, TipJar } from "./src/tips";
-import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
+import { actionHost, onNotificationResponse, pushPlatform, quietInForeground, registerButtons } from "./src/platformPush";
+import { pushKeyStore } from "./src/platformPushKey";
+import { randomBytes } from "./src/platform/random";
+import { sharePushKey } from "./src/pushKey";
 import { secureMacStore } from "./src/storage";
 import { AppLock } from "./src/lock";
 import { lockPlatform, secureLockMemory } from "./src/platformLock";
@@ -59,11 +64,18 @@ export default function App() {
   }, [lock]);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
+  const [openTodos, setOpenTodos] = useState<string | null>(null);
   const registered = useRef(false);
 
   useEffect(() => {
+    // An app launched in the background (a notification's button) is not in front: it mustn't take the lock-screen card for
+    // its own to replace, as only an app in front can start one.
+    controller.setForeground(AppState.currentState === "active");
     void controller.start();
-    const sub = AppState.addEventListener("change", (s) => s === "active" && controller.resume());
+    const sub = AppState.addEventListener("change", (s) => {
+      controller.setForeground(s === "active");
+      if (s === "active") controller.resume();
+    });
     return () => sub.remove();
   }, [controller]);
 
@@ -80,11 +92,21 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // Notifications: registered once a Mac is connected, and a tap opens its chat.
+  // Notifications: registered once a Mac is connected, a tap opens its chat, and a button (Allow, Deny, Reply) does its work in the
+  // background, answering for the phone and for its watch.
+  const handled = useRef(new Set<string>());
   useEffect(() => {
     quietInForeground();
-    return onNotificationTap((data) => setOpenSlot(slotOfNotification(data)));
-  }, []);
+    void registerButtons();
+    const host = actionHost(controller, lock);
+    return onNotificationResponse((r) => {
+      if (r.actionIdentifier !== TAP) return void runButton(r, host, handled.current);
+      // A reminder opens its project's to-dos; anything else, its chat.
+      const todo = todoOfNotification(r.notification.request.content.data);
+      if (todo) setOpenTodos(todo.project);
+      else setOpenSlot(slotOfNotification(r.notification.request.content.data));
+    });
+  }, [controller, lock]);
   useEffect(() => {
     const check = () => {
       if (registered.current || controller.getConnection().kind !== "connected") return;
@@ -95,9 +117,26 @@ export default function App() {
     const stop = controller.subscribeConnection(check);
     return () => void stop();
   }, [controller]);
+  // The key for the words of notifications goes to the Mac on every connection (it keeps the last one it was given).
+  useEffect(() => {
+    let sent = false;
+    const give = () => {
+      const up = controller.getConnection().kind === "connected";
+      if (!up) sent = false;
+      if (!up || sent) return;
+      sent = true;
+      void sharePushKey(controller.sync, pushKeyStore, randomBytes).then((ok) => {
+        if (!ok) sent = false;
+      });
+    };
+    give();
+    const stop = controller.subscribeConnection(give);
+    return () => void stop();
+  }, [controller]);
 
   const clearLink = useCallback(() => setPendingLink(null), []);
   const clearSlot = useCallback(() => setOpenSlot(null), []);
+  const clearTodos = useCallback(() => setOpenTodos(null), []);
   useEffect(() => {
     if (fontsReady) void SplashScreen.hideAsync().catch(() => {});
   }, [fontsReady]);
@@ -110,7 +149,7 @@ export default function App() {
         <AccentFromPledge>
           <LockContext.Provider value={lock}>
             <LockGate>
-              <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+              <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} openTodos={openTodos} onTodosOpened={clearTodos} />
             </LockGate>
           </LockContext.Provider>
         </AccentFromPledge>

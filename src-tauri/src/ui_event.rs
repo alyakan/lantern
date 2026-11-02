@@ -1,12 +1,32 @@
 use crate::permission::rules::{Rule, Scope};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
+
+/// A provider-reported limit; durations are supplied by the provider, never assumed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct UsageWindow {
+    pub label: String,
+    pub used: f64,
+    #[ts(type = "number | null")]
+    pub resets_at: Option<u64>,
+    pub minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct ProviderUsage {
+    pub provider: String,
+    pub windows: Vec<UsageWindow>,
+    #[ts(type = "number")]
+    pub updated_at: u64,
+}
 
 /// Receives every event destined for the UI.
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlashCommand {
     pub name: String,
     pub description: String,
@@ -14,7 +34,7 @@ pub struct SlashCommand {
 }
 
 /// One line of the plan Claude keeps with TodoWrite. `status`: "pending", "in_progress" or "completed".
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
     pub content: String,
     pub status: String,
@@ -24,7 +44,7 @@ pub struct Todo {
 /// One check (a Reviewer, a QA tester…) in a `ReviewUpdate`. `state`: "waiting" (for a free slot), "running", "done", "failed"
 /// (it stopped before reporting) or "skipped" (the setting was switched off before it started). `findings` and `passed`
 /// come from the report's last line (`RESULT: pass` or `RESULT: issues 3`), and are None when it has none.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReviewCheck {
     pub role: String,
     pub label: String,
@@ -35,7 +55,7 @@ pub struct ReviewCheck {
 }
 
 /// A model claude offers. `value` is what `--model` takes ("default" means no flag).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelOption {
     pub value: String,
     pub display_name: String,
@@ -45,7 +65,7 @@ pub struct ModelOption {
     pub effort_levels: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hunk {
     pub old_start: u64,
     pub old_lines: u64,
@@ -54,7 +74,7 @@ pub struct Hunk {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCost {
     pub model: String,
     pub cost_usd: f64,
@@ -62,7 +82,7 @@ pub struct ModelCost {
     pub output_tokens: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackgroundTask {
     pub id: String,
     /// claude's task type: "local_bash", "local_agent", …
@@ -74,9 +94,10 @@ fn is_zero(n: &u32) -> bool {
     *n == 0
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
+    ProviderChanged { provider: crate::provider::ProviderInfo, key: String },
     SessionStarted { session_id: String, model: String, cwd: String, permission_mode: String, claude_version: String },
     /// Something the user typed, and when (ms since the epoch). History replay emits these; so does every message sent
     /// live, with `sent_by`: who sent it ("desktop", or a paired phone's id). The window adds its own messages itself, so
@@ -236,6 +257,10 @@ pub enum UiEvent {
     /// The subscription's five-hour window: `used` from 0 to 1, when it resets (unix seconds), and the CLI's status for it
     /// ("allowed", "allowed_warning", "rejected"). For the whole account, so every chat reports the same.
     PlanUsage { used: f64, resets_at: Option<u64>, status: String },
+    /// The subscription's weekly (seven-day) window: `used` from 0 to 1 and when it resets (unix seconds). Said by the same
+    /// `rate_limit_event` as the five-hour one, and for the whole account too.
+    WeekUsage { used: f64, resets_at: Option<u64> },
+    ProviderUsage { usage: ProviderUsage },
     /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
     Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },

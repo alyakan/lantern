@@ -6,6 +6,11 @@ import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
 import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import { ChecksTab, hasChecks } from "./ChecksTab";
+import { DashboardTab } from "./DashboardTab";
+import { ArtifactsTab } from "./ArtifactsTab";
+import { artifactName } from "../lib/artifacts";
+import { TodosTab, type TodoChat } from "./TodosTab";
+import { useTodoCounts, type Todo } from "../lib/todos";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
 import type { NetworkItem } from "../types";
@@ -24,7 +29,7 @@ import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
-import { DEFAULT_PINNED, TABS, migrateTab, validPinned, type Tab } from "../lib/reviewTabs";
+import { DEFAULT_PINNED, TABS, adoptSession, chatTabOf, keepChatTab, migrateTab, validPinned, type ChatKey, type Tab } from "../lib/reviewTabs";
 import { PaneTabsMenu, type TabBadge } from "./PaneTabsMenu";
 import { commentsMessage, type CommentControls } from "../lib/diffComments";
 import { CommentBar } from "./DiffComments";
@@ -32,6 +37,8 @@ import { CommentBar } from "./DiffComments";
 const FullDiff = lazy(() => import("./FullDiff"));
 
 interface Props {
+  /** The chat on screen: each chat keeps the tab picked in it. */
+  chat?: ChatKey;
   folder: string | null;
   /** The session has started, so the backend knows which folder may be browsed. */
   ready: boolean;
@@ -72,6 +79,12 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null; onUpdate?: () => void };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** An artifact's Refresh data: asks Claude in this chat to gather its data again and rewrite it (absent: no chat to ask). */
+  onRefreshArtifact?: (name: string) => void;
+  /** The file the chat's latest edit was to, in which chat (`slot`), and its count of edits: an artifact Claude writes opens in Artifacts. */
+  lastEdit?: { slot: string; path: string | null; count: number };
+  /** The Todos tab: the chats open now (an item's linked chat), how to start a chat on an item, and how to open a chat. */
+  todos?: { chats: Record<string, TodoChat>; onStart?: (todo: Todo) => void; onOpenChat: (slot: string) => void; openKey?: number };
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
   /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
@@ -109,7 +122,17 @@ function useRequest(name: string, key: unknown, act: () => void) {
 }
 
 export function ReviewPanel(props: Props) {
-  const [savedTab, setTab] = usePersistentState<string>("review.tab", "changes");
+  // Each chat's own tab: the one picked in it the last time it was on screen. A chat put back after a restart gets its session
+  // a moment after it shows, and only then is its tab known: the session is part of which chat this is.
+  const chatId = `${props.chat?.slot ?? ""}\n${props.chat?.session ?? ""}`;
+  const [shown, setShown] = useState<{ chat: string; tab: Tab }>(() => ({ chat: chatId, tab: chatTabOf(props.chat) }));
+  const tab = shown.chat === chatId ? shown.tab : chatTabOf(props.chat);
+  const setTab = (next: Tab) => {
+    keepChatTab(props.chat, next);
+    setShown({ chat: chatId, tab: next });
+  };
+  // A tab picked in a new chat before its first message is kept under its session once it has one, to outlast a restart.
+  useEffect(() => adoptSession(props.chat), [props.chat?.session]);
   const count = props.files.length;
   const runs = props.testRuns ?? [];
   // The folder's watched requests: the Network tab lists them once there's a watch or a summary, and explains itself until then.
@@ -121,11 +144,6 @@ export function ReviewPanel(props: Props) {
   // The pinned tabs (shared by every chat) are the strip; any other tab is in the ⋯ menu, and shows in the strip only while it is the one open.
   const [savedPinned, setPinned] = usePersistentState<unknown>("review.tabs", DEFAULT_PINNED);
   const pinned = validPinned(savedPinned);
-  // Every tab always exists, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
-  const tab = migrateTab(savedTab);
-  useEffect(() => {
-    if (savedTab !== tab) setTab(tab);
-  }, [savedTab]);
   // With both a map and a plan (a Design chat), Plan shows one at a time: the map first.
   const [planView, setPlanView] = useState<"map" | "plan">("map");
   const [shownRun, setShownRun] = useState<string | null>(null);
@@ -157,7 +175,11 @@ export function ReviewPanel(props: Props) {
       setTab("files");
     }
   });
+  const artifactOpen = useArtifactEdits(props.lastEdit, props.folder, () => setTab("artifacts"));
+  useRequest("todos", props.todos?.openKey, () => setTab("todos"));
+  const todoCount = useTodoCounts(props.folder ? [props.folder] : [])[props.folder ?? ""];
   const badges: Partial<Record<Tab, TabBadge>> = {};
+  if (todoCount && todoCount.open > 0) badges.todos = { text: `${todoCount.open}`, failed: todoCount.overdue > 0, attention: todoCount.overdue > 0 };
   if (count > 0) badges.changes = { text: `${count}`, failed: false, attention: false };
   if (latestRun?.outcome === "failed") badges.tests = { text: `${latestRun.failed || "!"}`, failed: true, attention: true };
   if (checkTotals && checkTotals.total > 0) badges.checks = { text: `${checkTotals.failed || checkTotals.total}`, failed: checkTotals.failed > 0, attention: checkTotals.failed > 0 };
@@ -291,6 +313,21 @@ export function ReviewPanel(props: Props) {
           {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
         </div>
       )}
+      {tab === "dashboard" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("dashboard")}>
+          {props.folder ? <DashboardTab folder={props.folder} refreshKey={props.refreshKey} /> : <TabEmpty title="Dashboard">Open a folder to see its dashboards.</TabEmpty>}
+        </div>
+      )}
+      {tab === "artifacts" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("artifacts")}>
+          {props.folder ? <ArtifactsTab folder={props.folder} refreshKey={props.refreshKey} open={artifactOpen} busy={props.chatBusy} onRefresh={props.onRefreshArtifact} /> : <TabEmpty title="Artifacts">Open a folder to see its artifacts.</TabEmpty>}
+        </div>
+      )}
+      {tab === "todos" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("todos")}>
+          {props.folder ? <TodosTab folder={props.folder} chats={props.todos?.chats ?? {}} onStart={props.todos?.onStart} onOpenChat={props.todos?.onOpenChat ?? (() => {})} /> : <TabEmpty title="To-dos">Open a folder to see its project's to-dos.</TabEmpty>}
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
@@ -318,7 +355,32 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   tests: undefined,
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
+  dashboard: "This folder's dashboards: forms whose buttons run commands, with their results and history",
+  todos: "Your to-do list for this project, with due dates and reminders",
+  artifacts: "Pages Claude made to show you something (maps, flows, charts, reports), from .lantern/artifacts/",
 };
+
+/** The edit count each chat was last seen at: a chat seen for the first time (opened, or switched to) opens nothing. */
+const seenEdits = new Map<string, number>();
+
+/**
+ * When the chat's latest edit is to an artifact, brings up the Artifacts tab on it: once per edit, and only for an edit
+ * made while the chat was on screen, not one found when switching to it.
+ */
+function useArtifactEdits(edit: Props["lastEdit"], folder: string | null, show: () => void) {
+  const [open, setOpen] = useState<{ name: string; key: number } | null>(null);
+  useEffect(() => {
+    if (!edit) return;
+    const seen = seenEdits.get(edit.slot);
+    seenEdits.set(edit.slot, edit.count);
+    if (seen === undefined || edit.count <= seen || !edit.path) return;
+    const name = artifactName(edit.path, folder);
+    if (!name) return;
+    setOpen({ name, key: Date.now() });
+    show();
+  }, [edit?.slot, edit?.count]);
+  return open;
+}
 
 /**
  * Plan: the architecture map in a Design chat (the plan so far under a toggle), the plan and progress in any Step by

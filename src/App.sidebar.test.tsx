@@ -267,7 +267,7 @@ describe("the hidden sidebar", () => {
     fireEvent.pointerEnter(edge());
     await rest();
     const acme = await project("acme-api");
-    fireEvent.click(within(acme).getByRole("button", { name: /^New chat, acme-api/ }));
+    fireEvent.click(within(acme).getByRole("button", { name: /^New chat, Claude, acme-api/ }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
     // Still hidden: picking is not pinning.
     expect(screen.getByRole("button", { name: "Show sidebar" })).toBeInTheDocument();
@@ -318,7 +318,7 @@ describe("the collapsed sidebar", () => {
     expect(full()).toBeNull();
     expect(localStorage.getItem("sidebar.compact")).toBe("true");
     // The empty chat on screen is its one square, lit.
-    expect(within(slim).getByRole("button", { name: /^New chat, acme-api/ })).toHaveAttribute("aria-current", "true");
+    expect(within(slim).getByRole("button", { name: /^New chat, Claude, acme-api/ })).toHaveAttribute("aria-current", "true");
     fireEvent.click(within(slim).getByRole("button", { name: "Expand sidebar" }));
     expect(await project("acme-api")).toBeInTheDocument();
     expect(localStorage.getItem("sidebar.compact")).toBe("false");
@@ -416,7 +416,7 @@ describe("the collapsed sidebar", () => {
       fireEvent.pointerEnter(p);
       await rest();
       await waitFor(() => expect(p).toHaveClass("expanded"));
-      fireEvent.click(within(p).getByRole("button", { name: /^New chat, acme-api/ }));
+      fireEvent.click(within(p).getByRole("button", { name: /^New chat, Claude, acme-api/ }));
       expect(p).not.toHaveClass("expanded");
       expect(localStorage.getItem("sidebar.compact")).toBe("true");
     });
@@ -447,8 +447,8 @@ describe("a team in the sidebar", () => {
 
     fireEvent.click(row);
     expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
-    fireEvent.click(within(agents).getByRole("button", { name: /^Login form, acme-api/ }));
-    await waitFor(() => expect(within(agents).getByRole("button", { name: /^Login form, acme-api/ })).toHaveAttribute("aria-current", "true"));
+    fireEvent.click(within(agents).getByRole("button", { name: /^Login form, Claude, acme-api/ }));
+    await waitFor(() => expect(within(agents).getByRole("button", { name: /^Login form, Claude, acme-api/ })).toHaveAttribute("aria-current", "true"));
     // The team is still on its canvas.
     expect(screen.getByLabelText(/^Lead,/)).toBeInTheDocument();
   });
@@ -479,7 +479,7 @@ describe("a team in the sidebar", () => {
       fireEvent.click(teamRow(acme));
       await waitFor(() => expect(screen.getByRole("button", { name: "Canvas" })).toHaveAttribute("aria-pressed", "false"));
       expect(screen.queryByLabelText(/^Lead,/)).toBeNull();
-      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, acme-api/ })).toHaveAttribute("aria-current", "true");
+      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, Claude, acme-api/ })).toHaveAttribute("aria-current", "true");
     });
 
     it("shows the Lead when it was open full size", async () => {
@@ -487,7 +487,7 @@ describe("a team in the sidebar", () => {
       fireEvent.click(teamRow(acme));
       await waitFor(() => expect(screen.getByRole("button", { name: "Canvas" })).toHaveAttribute("aria-pressed", "false"));
       expect(screen.queryByLabelText(/^Lead,/)).toBeNull();
-      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, acme-api/ })).not.toHaveAttribute("aria-current", "true");
+      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, Claude, acme-api/ })).not.toHaveAttribute("aria-current", "true");
     });
 
     it("shows the canvas when the agent that was open full size has been closed", async () => {

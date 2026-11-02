@@ -5,7 +5,7 @@ describe("migrateTab", () => {
   it("sends Summary and Map to Plan, and the tabs that left the pane (and anything unknown) to Changes", () => {
     expect(["summary", "map"].map(migrateTab)).toEqual(["plan", "plan"]);
     expect(["activity", "agents", "storage", "x", ""].map(migrateTab)).toEqual(["changes", "changes", "changes", "changes", "changes"]);
-    expect(["files", "tests", "checks", "network"].map(migrateTab)).toEqual(["files", "tests", "checks", "network"]);
+    expect(["files", "tests", "checks", "network", "dashboard"].map(migrateTab)).toEqual(["files", "tests", "checks", "network", "dashboard"]);
   });
 });
 

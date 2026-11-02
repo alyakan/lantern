@@ -8,7 +8,9 @@
 export type Span =
   | { kind: "text" | "code"; text: string }
   | { kind: "bold" | "italic" | "strike"; text: string; spans?: Span[] }
-  | { kind: "link"; text: string; url: string };
+  | { kind: "link"; text: string; url: string; spans?: Span[] }
+  /** A link to a file on the Mac (`[a.ts:35](/repo/src/a.ts#L35)`): its path, and the line it points at (null: none). */
+  | { kind: "file"; text: string; path: string; line: number | null; spans?: Span[] };
 
 export type Align = "left" | "center" | "right";
 
@@ -38,7 +40,27 @@ function marked(kind: "bold" | "italic" | "strike", inner: string): Span {
   return spans.length === 1 && spans[0].kind === "text" ? { kind, text: inner } : { kind, text: inner, spans };
 }
 
-/** Code, **bold**, *italic*, ~~strikethrough~~, [links](url) and bare links, in that order of binding; unmatched marks stay as text. */
+/** A link's words, with their marks only when they have some (`[`a.ts`](…)`). */
+function labelled(label: string): { text: string; spans?: Span[] } {
+  const spans = parseInline(label);
+  return spans.length === 1 && spans[0].kind === "text" ? { text: label } : { text: plainText(spans), spans };
+}
+
+/** A link's target as a file on the Mac: a path (absolute, or relative with no scheme; a folder or a dot in it), maybe with a `#L35` line. */
+function fileTarget(url: string): { path: string; line: number | null } | null {
+  const [raw, anchor = ""] = url.split("#", 2);
+  if (!raw || raw.includes(":") || !/[/.]/.test(raw)) return null;
+  let path = raw;
+  try {
+    path = decodeURI(raw);
+  } catch {
+    // Not escaped as a URL: the path is as written.
+  }
+  const line = /^L(\d+)/.exec(anchor);
+  return { path, line: line ? Number(line[1]) : null };
+}
+
+/** [links](url) first (their words may hold code), then code, **bold**, *italic*, ~~strikethrough~~ and bare links; unmatched marks stay as text. */
 export function parseInline(s: string): Span[] {
   const out: Span[] = [];
   let text = "";
@@ -50,7 +72,14 @@ export function parseInline(s: string): Span[] {
     const rest = s.slice(i);
     const before = s[i - 1] ?? "";
     let m: RegExpExecArray | null;
-    if ((m = /^`([^`\n]+)`/.exec(rest))) {
+    let file: ReturnType<typeof fileTarget> = null;
+    if ((m = /^\[((?:`[^`\n]*`|[^\]`\n])+)\]\((https?:\/\/[^)\s]+)\)/.exec(rest))) {
+      flush();
+      out.push({ kind: "link", ...labelled(m[1]), url: m[2] });
+    } else if ((m = /^\[((?:`[^`\n]*`|[^\]`\n])+)\]\(([^)\s]+)\)/.exec(rest)) && (file = fileTarget(m[2]))) {
+      flush();
+      out.push({ kind: "file", ...labelled(m[1]), ...file });
+    } else if ((m = /^`([^`\n]+)`/.exec(rest))) {
       flush();
       out.push({ kind: "code", text: m[1] });
     } else if ((m = /^(?:\*\*([^*\n]+)\*\*|__([^_\n]+)__)/.exec(rest)) && (m[1] !== undefined || !/\w/.test(before))) {
@@ -62,9 +91,6 @@ export function parseInline(s: string): Span[] {
     } else if ((m = /^(?:\*([^*\s][^*\n]*)\*|_([^_\s][^_\n]*)_)/.exec(rest)) && !/\w/.test(before)) {
       flush();
       out.push(marked("italic", m[1] ?? m[2]));
-    } else if ((m = /^\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/.exec(rest))) {
-      flush();
-      out.push({ kind: "link", text: m[1], url: m[2] });
     } else if ((m = /^https?:\/\/[^\s<>]+/.exec(rest)) && !/\w/.test(before)) {
       // A bare link: what ends the sentence around it (a full stop, a closing bracket) is not part of it.
       const url = m[0].replace(/[.,;:!?)\]'"]+$/, "");

@@ -47,6 +47,13 @@ export const OPEN_CHATS = "session.openChats";
 
 /** Every key the app saves that isn't about one folder (a session, a model, a setting). Listed so a new key is a decision. */
 export const NOT_FOLDER_KEYED = [
+  // The Desks, each a list of its projects' folders. Not moved with a folder: a moved project goes back to the first
+  // Desk, and is put on its Desk again in Edit Desks.
+  "desk.desks",
+  // The Desk's Ask pane: shown or not, and how wide. The sidebar's list: Chats or Timeline.
+  "desk.askCollapsed",
+  "desk.askRatio",
+  "sidebar.view",
   "settings.modeBySession",
   "settings.harnessBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.
@@ -71,11 +78,12 @@ export const NOT_FOLDER_KEYED = [
   "settings.textSize",
   // Asking before a team starts while another is working.
   "settings.warnSecondTeam",
+  // Whether the sidebar orders a project's chats by recent activity.
+  "settings.sortChatsByActivity",
   "review.collapsed",
   "review.canvasPanel",
   "review.ratio",
   "review.scope",
-  "review.tab",
   "review.tabs",
   "review.diffLayout",
   "review.commitsOpen",
@@ -88,6 +96,9 @@ export const NOT_FOLDER_KEYED = [
   "sidebar.width",
   "sidebar.expanded",
   "sidebar.hidden",
+  // The one project the sidebar shows on its own. Not moved with a folder: after a move its banner says nothing is open
+  // there, and its × shows every project again.
+  "sidebar.single",
 ] as const;
 
 /**

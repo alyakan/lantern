@@ -1,6 +1,7 @@
 //! A running `codex app-server`: JSON-RPC over stdio, one JSON object per line (Codex leaves out the `"jsonrpc"` field, and
 //! so does this). Requests Lantern makes get their reply by id; the server's notifications become `UiEvent`s (codex_events);
-//! its approval requests become the same Allow/Deny cards Claude's do, answered in the JSON-RPC reply.
+//! in Ask, its approval requests become the same Allow/Deny cards Claude's do, answered in the JSON-RPC reply. In Auto,
+//! Codex's separate reviewer handles boundary-crossing requests before they reach Lantern.
 //!
 //! Signing in is the user's own (`codex login` in a terminal). Lantern asks the app-server only whether it is signed in, never
 //! reads or sends a credential, and refuses the server's request for tokens.
@@ -37,13 +38,17 @@ const TRANSCRIPT_PAGES: usize = 20;
 
 const SIGN_IN: &str = "Codex isn't signed in. Run `codex login` in a terminal, then send your message again.";
 
-/// What Codex asks before it acts, and where it may write, for every mode Lantern has. Lantern has no Auto for Codex (see
-/// Capabilities), so Ask and Step by step are the only ones that arrive, and an Auto that does is Ask: `on-request` with a
+/// What Codex asks before it acts, and where it may write, for every mode Lantern has. `on-request` with a
 /// workspace-write sandbox applies edits inside the folder as they are made and asks for a command outside the sandbox,
 /// network access or a file elsewhere. Nothing here ever maps to `never` or `danger-full-access`, whatever the user's
 /// ~/.codex/config.toml says: it is sent with the thread and again with every turn.
 pub fn approval_policy(_mode: Mode) -> &'static str {
     "on-request"
+}
+
+/// Auto changes who reviews boundary-crossing requests, never the sandbox or approval policy.
+fn approvals_reviewer(mode: Mode, auto_approve: bool) -> &'static str {
+    if crate::args::is_auto(mode, auto_approve) { "auto_review" } else { "user" }
 }
 
 /// The sandbox that goes with `approval_policy`, as thread/start's `sandbox` takes it. A read-only agent (one sharing its
@@ -78,6 +83,7 @@ enum Ready {
 struct Pending {
     /// The JSON-RPC id of the server's request, to answer it by.
     rpc_id: Value,
+    asked: crate::permission::bridge::Pending,
     kind: ApprovalKind,
     /// The request as it came, to raise its card again if what it is about changes (see `patch_updated`).
     method: String,
@@ -97,7 +103,7 @@ struct State {
     busy: bool,
     /// Interrupt was asked before the turn's id was known.
     interrupt_when_started: bool,
-    queued: VecDeque<String>,
+    queued: VecDeque<(String, Vec<Value>)>,
     /// The model the user chose, for the next turn on; None is Codex's own default.
     model: Option<String>,
     /// What Codex uses when none is chosen (from `model/list`): sent when the user goes back to "default", because a model
@@ -120,9 +126,11 @@ struct Ctx {
     state: Arc<Mutex<State>>,
     cwd: String,
     mode: Mode,
+    auto_approve: bool,
     /// A read-only agent: Codex's read-only sandbox, whatever it asks.
     read_only: bool,
     instructions: Arc<String>,
+    ephemeral: bool,
 }
 
 impl Ctx {
@@ -162,7 +170,7 @@ impl Ctx {
     }
 
     /// Starts a turn with `text`, on the model, effort, folder and permissions this chat has now.
-    async fn begin_turn(&self, text: &str) -> Result<(), String> {
+    async fn begin_turn(&self, text: &str, images: Vec<Value>) -> Result<(), String> {
         let (thread, model, effort) = {
             let mut s = self.state.lock().unwrap();
             s.busy = true;
@@ -173,12 +181,14 @@ impl Ctx {
             self.state.lock().unwrap().busy = false;
             return Err("The Codex conversation isn't open.".into());
         };
+        let mut input = images;
+        input.push(json!({"type": "text", "text": text, "text_elements": []}));
         let mut params = json!({
             "threadId": thread,
-            "input": [{"type": "text", "text": text, "text_elements": []}],
+            "input": input,
             "cwd": self.cwd,
             "approvalPolicy": approval_policy(self.mode),
-            "approvalsReviewer": "user",
+            "approvalsReviewer": approvals_reviewer(self.mode, self.auto_approve),
             "sandboxPolicy": sandbox_policy(self.read_only),
         });
         if let Some(m) = model {
@@ -225,10 +235,35 @@ pub struct CodexSession {
 fn command(cfg: &SessionConfig) -> Command {
     let mut cmd = Command::new(&cfg.binary);
     cmd.arg("app-server").current_dir(&cfg.folder);
+    // App-side inference has no MCP tools, including ones from the user's own config.
+    if cfg.helper.socket.is_empty() { cmd.arg("-c").arg("mcp_servers={}"); }
+    // Session-local overrides: never write to the user's Codex configuration.
+    for setting in if cfg.helper.socket.is_empty() { vec![] } else { lantern_mcp_settings(cfg) } {
+        cmd.arg("-c").arg(setting);
+    }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
     }
     cmd
+}
+
+/// Codex's `-c` values are TOML. JSON string literals also quote these paths and
+/// socket values safely as TOML basic strings, including spaces and backslashes.
+fn lantern_mcp_settings(cfg: &SessionConfig) -> Vec<String> {
+    let quote = |s: &str| serde_json::to_string(s).unwrap();
+    let mut env = vec![format!("LANTERN_SOCKET = {}", quote(&cfg.helper.socket))];
+    if matches!(cfg.helper.role, Role::Worker { read_only: true, .. }) {
+        env.push(format!("LANTERN_ROLE = {}", quote(crate::permission::catalogue::READER_ROLE)));
+    }
+    if cfg.mode == Mode::Steps {
+        env.push("LANTERN_STEPS = \"1\"".into());
+    }
+    vec![
+        format!("mcp_servers.lantern.command={}", quote(&cfg.helper.exe)),
+        "mcp_servers.lantern.args=[\"--permission-helper\"]".into(),
+        format!("mcp_servers.lantern.env={{ {} }}", env.join(", ")),
+        "mcp_servers.lantern.enabled=true".into(),
+    ]
 }
 
 impl CodexSession {
@@ -257,7 +292,7 @@ impl CodexSession {
         let stderr = child.stderr.take().ok_or("codex has no stderr pipe")?;
 
         let state = Arc::new(Mutex::new(State { model: cfg.model.clone(), effort: cfg.effort.clone(), thread_id: None, ..State::default() }));
-        let ctx = Ctx { stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(codex_prompt::instructions(cfg.mode, &cfg.helper.role)) };
+        let ctx = Ctx { ephemeral: cfg.helper.socket.is_empty(), stdin, state: state.clone(), cwd: cfg.folder.display().to_string(), mode: cfg.mode, auto_approve: cfg.auto_approve, read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }), instructions: Arc::new(format!("{}{}", codex_prompt::instructions(cfg.mode, cfg.auto_approve, &cfg.helper.role), cfg.helper.project_notes.as_ref().map(|n|format!("\n\n{n}")).unwrap_or_default())) };
         let stopping = Arc::new(AtomicBool::new(false));
         let tail = Arc::new(Mutex::new(String::new()));
         let (exit_tx, exited) = watch::channel(false);
@@ -362,7 +397,7 @@ impl CodexSession {
         let _ = self.wait_ready().await;
     }
 
-    async fn wait_ready(&self) -> Result<(), String> {
+    pub(crate) async fn wait_ready(&self) -> Result<(), String> {
         let mut ready = self.ready.clone();
         let outcome = tokio::time::timeout(READY_WAIT, ready.wait_for(|r| *r != Ready::Starting)).await.map(|r| r.map(|state| state.clone()));
         match outcome {
@@ -374,7 +409,19 @@ impl CodexSession {
     }
 
     /// A message from the user: a new turn, or after the running one when there is one (Claude queues the same way).
-    pub async fn send(&mut self, text: &str) -> Result<(), String> {
+    pub async fn send(&mut self, text: &str) -> Result<(), String> { self.send_with(text, vec![]).await }
+
+    pub async fn compact(&mut self) -> Result<(), String> {
+        self.wait_ready().await?;
+        let thread = self.ctx.state.lock().unwrap().thread_id.clone().ok_or("No conversation is open")?;
+        { let mut state = self.ctx.state.lock().unwrap(); if state.busy { return Err("This conversation is already working".into()); } state.busy = true; }
+        match self.ctx.request("thread/compact/start", json!({"threadId": thread}), STEP_WAIT).await {
+            Ok(_) => Ok(()),
+            Err(e) => { self.ctx.state.lock().unwrap().busy = false; Err(e) },
+        }
+    }
+
+    pub async fn send_with(&mut self, text: &str, images: Vec<Value>) -> Result<(), String> {
         self.wait_ready().await?;
         if self.ctx.state.lock().unwrap().signed_out && self.ctx.signed_in().await {
             self.ctx.state.lock().unwrap().signed_out = false;
@@ -387,11 +434,11 @@ impl CodexSession {
         {
             let mut s = self.ctx.state.lock().unwrap();
             if s.busy {
-                s.queued.push_back(text.to_string());
+                s.queued.push_back((text.to_string(), images));
                 return Ok(());
             }
         }
-        self.ctx.begin_turn(text).await
+        self.ctx.begin_turn(text, images).await
     }
 
     /// Ends the running turn (it finishes as interrupted) and answers the cards waiting on it; the process keeps running.
@@ -451,9 +498,15 @@ impl CodexSession {
     }
 
     /// The model from the next turn on; None goes back to Codex's own.
+    pub fn set_effort(&mut self, effort: Option<&str>) { self.ctx.state.lock().unwrap().effort = effort.map(str::to_string); }
+
     pub async fn set_model(&mut self, model: Option<&str>) -> Result<(), String> {
         self.ctx.state.lock().unwrap().model = model.map(String::from);
         Ok(())
+    }
+
+    pub fn pending_permissions(&self) -> Vec<crate::permission::bridge::Pending> {
+        self.ctx.state.lock().unwrap().pending.values().map(|p| p.asked.clone()).collect()
     }
 
     /// The user's answer to a card. False when there is no such card (it was answered, or it isn't Codex's).
@@ -541,12 +594,20 @@ async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>, model: Option<S
         }
     }
 
+    if signed_in {
+        if let Ok(reading) = ctx.request("account/rateLimits/read", json!({}), Duration::from_secs(2)).await {
+            if let Some(usage) = super::codex_events::rate_limits(reading["rateLimitsByLimitId"].get("codex").unwrap_or(&reading["rateLimits"])) {
+                sink(UiEvent::ProviderUsage { usage });
+            }
+        }
+    }
     let mut params = json!({
         "cwd": ctx.cwd,
         "approvalPolicy": approval_policy(ctx.mode),
-        "approvalsReviewer": "user",
+        "approvalsReviewer": approvals_reviewer(ctx.mode, ctx.auto_approve),
         "sandbox": sandbox_mode(ctx.mode, ctx.read_only),
         "developerInstructions": *ctx.instructions,
+        "ephemeral": ctx.ephemeral,
     });
     if let Some(m) = model {
         params["model"] = m.into();
@@ -656,7 +717,11 @@ fn declined_step(sink: &Sink, why: &str) {
 /// Puts a card up for the request, which is answered by the number it came with.
 fn raise(ctx: &Ctx, sink: &Sink, rpc_id: &Value, method: &str, params: &Value, a: Approval) {
     let request_id = format!("codex-{}", CARDS.fetch_add(1, Ordering::SeqCst) + 1);
-    let pending = Pending { rpc_id: rpc_id.clone(), kind: a.kind, method: method.to_string(), params: params.clone(), item: a.item };
+    let asked = crate::permission::bridge::Pending {
+        request_id: request_id.clone(), tool_name: a.tool_name.clone(), input: a.input.clone(),
+        at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64),
+    };
+    let pending = Pending { rpc_id: rpc_id.clone(), asked, kind: a.kind, method: method.to_string(), params: params.clone(), item: a.item };
     ctx.state.lock().unwrap().pending.insert(request_id.clone(), pending);
     sink(UiEvent::PermissionRequested { request_id, tool_name: a.tool_name, input: a.input });
 }
@@ -751,10 +816,10 @@ fn notification(ctx: &Ctx, sink: &Sink, on_edit: &EditHook, mapper: &mut CodexMa
         on_edit(&path, original);
     }
     // The message sent while that turn ran, after its end has been shown.
-    if let Some(text) = next {
+    if let Some((text, images)) = next {
         let (ctx, sink) = (ctx.clone(), sink.clone());
         tokio::spawn(async move {
-            if let Err(why) = ctx.begin_turn(&text).await {
+            if let Err(why) = ctx.begin_turn(&text, images).await {
                 sink(UiEvent::TurnDone { is_error: true, result: Some(why), cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
             }
         });
@@ -800,6 +865,10 @@ mod tests {
         assert_eq!(sandbox_policy(false)["type"], "workspaceWrite");
         assert_eq!(sandbox_policy(true)["type"], "readOnly");
         assert_eq!(sandbox_policy(false)["networkAccess"], false);
+        assert_eq!(approvals_reviewer(Mode::Ask, false), "user");
+        assert_eq!(approvals_reviewer(Mode::Steps, false), "user");
+        assert_eq!(approvals_reviewer(Mode::Auto, false), "auto_review");
+        assert_eq!(approvals_reviewer(Mode::Steps, true), "auto_review");
     }
 
     #[test]
@@ -824,6 +893,24 @@ mod fake_server_tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use tokio::sync::mpsc;
+
+    #[test]
+    fn lantern_server_is_scoped_to_the_session_and_reader_role() {
+        let mut cfg = config("/bin/codex".into(), Path::new("/tmp"), None);
+        cfg.helper.exe = "/Applications/Lantern App/lantern".into();
+        cfg.helper.socket = "/tmp/chat socket".into();
+        cfg.mode = Mode::Steps;
+        cfg.helper.role = Role::Worker { name: "reader".into(), read_only: true };
+        let settings = lantern_mcp_settings(&cfg).join("\n");
+        assert!(settings.contains("/Applications/Lantern App/lantern"));
+        assert!(settings.contains("LANTERN_SOCKET = \"/tmp/chat socket\""));
+        assert!(settings.contains("LANTERN_STEPS = \"1\""));
+        assert!(settings.contains(crate::permission::catalogue::READER_ROLE));
+        cfg.mode = Mode::Ask;
+        cfg.helper.role = Role::Normal;
+        let settings = lantern_mcp_settings(&cfg).join("\n");
+        assert!(!settings.contains("LANTERN_ROLE") && !settings.contains("LANTERN_STEPS"));
+    }
 
     /// What the fake does when a turn starts, after it has answered turn/start.
     const NOTHING: &str = ":";
@@ -864,11 +951,15 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) reply "$id" '{{"userAgent":"lantern/{version} (Mac OS 26.4.1; arm64) unknown (lantern; 0)","codexHome":"/tmp/h","platformFamily":"unix","platformOs":"macos"}}' ;;
     *'"method":"account/read"'*) reply "$id" '{account}' ;;
+    *'"method":"account/rateLimits/read"'*) reply "$id" '{{}}' ;;
     *'"method":"model/list"'*) reply "$id" '{{"data":[{{"id":"gpt-x","model":"gpt-x","displayName":"GPT X","description":"d","hidden":false,"isDefault":true,"supportedReasoningEfforts":[{{"reasoningEffort":"low","description":""}},{{"reasoningEffort":"ultra","description":""}}]}}],"nextCursor":null}}' ;;
     *'"method":"thread/resume"'*) {resume} ;;
     *'"method":"thread/start"'*) reply "$id" '{{"thread":{{"id":"thr-1"}},"model":"gpt-x","cwd":"{dir}"}}' ;;
     *'"method":"thread/turns/list"'*) {turns} ;;
     *'"method":"thread/read"'*) {read} ;;
+    *'"method":"thread/compact/start"'*) reply "$id" '{{}}'
+{on_turn}
+      ;;
     *'"method":"turn/start"'*) reply "$id" '{{"turn":{{"id":"turn-1","status":"inProgress","items":[]}}}}'
 {on_turn}
       ;;
@@ -961,6 +1052,49 @@ done
     }
 
     #[tokio::test]
+    async fn compact_uses_the_protocol_and_effort_changes_apply_to_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}")), dir.path(), None).await;
+        s.set_effort(Some("low"));
+        s.send("first").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert_eq!(requests(dir.path(), "turn/start")[0]["params"]["effort"], "low");
+        s.compact().await.unwrap();
+        assert_eq!(requests(dir.path(), "thread/compact/start")[0]["params"]["threadId"], "thr-1");
+        assert_eq!(requests(dir.path(), "turn/start").len(), 1, "compact must not send a slash command as a prompt");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn pictures_are_sent_to_codex_as_data_urls_before_the_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}"));
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake.script(dir.path()), dir.path(), None), sink, no_edits()).unwrap();
+        s.initialize().await;
+        s.send_with("what is this?", vec![crate::session::InputImage { media_type: "image/png".into(), data: "aGVsbG8=".into() }]).await.unwrap();
+        until_turn_done(&mut rx).await;
+        let turns = requests(dir.path(), "turn/start");
+        assert_eq!(turns[0]["params"]["input"][0], json!({"type":"image","url":"data:image/png;base64,aGVsbG8="}));
+        assert_eq!(turns[0]["params"]["input"][1]["text"], "what is this?");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn project_notes_and_provider_handoff_reach_codex_without_replacing_its_own_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(Fake::new(NOTHING).script(dir.path()), dir.path(), None);
+        cfg.helper.project_notes = Some("Keep the existing API. Earlier user: fix retries.".into());
+        let (sink, _) = channel_sink();
+        let mut s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        s.initialize().await;
+        let start = requests(dir.path(), "thread/start").remove(0);
+        assert!(start["params"]["developerInstructions"].as_str().unwrap().contains("Earlier user: fix retries."));
+        assert!(start["params"].get("baseInstructions").is_none());
+        s.stop().await;
+    }
+
+    #[tokio::test]
     async fn the_handshake_starts_a_conversation_with_lanterns_instructions_and_asks_before_it_acts() {
         let dir = tempfile::tempdir().unwrap();
         let (s, mut rx) = open(&Fake::new(NOTHING), dir.path(), None).await;
@@ -980,14 +1114,38 @@ done
 
         let all = sent(dir.path());
         let methods: Vec<&str> = all.iter().filter_map(|m| m["method"].as_str()).collect();
-        assert_eq!(methods, ["initialize", "initialized", "account/read", "model/list", "thread/start"]);
+        assert_eq!(methods, ["initialize", "initialized", "account/read", "model/list", "account/rateLimits/read", "thread/start"]);
         assert_eq!(all[0]["params"]["clientInfo"]["name"], "lantern");
-        let start = &all[4]["params"];
+        let start = &all[5]["params"];
         assert_eq!((start["approvalPolicy"].as_str(), start["sandbox"].as_str(), start["approvalsReviewer"].as_str()), (Some("on-request"), Some("workspace-write"), Some("user")));
         assert_eq!(start["cwd"], dir.path().display().to_string());
         assert!(start["developerInstructions"].as_str().unwrap().contains("running inside Lantern, a macOS desktop app for coding agents"));
         assert!(start.get("threadId").is_none());
         s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn auto_review_is_sent_at_thread_start_and_again_for_each_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::new(&format!("{TURN_STARTED}\n{TURN_DONE}"));
+        let mut cfg = config(fake.script(dir.path()), dir.path(), None);
+        cfg.mode = Mode::Steps;
+        cfg.auto_approve = true;
+        let (sink, mut rx) = channel_sink();
+        let mut session = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        session.initialize().await;
+        let start = requests(dir.path(), "thread/start").remove(0);
+        assert_eq!(start["params"]["approvalsReviewer"], "auto_review");
+        assert_eq!(start["params"]["approvalPolicy"], "on-request");
+        assert_eq!(start["params"]["sandbox"], "workspace-write");
+        assert!(start["params"]["developerInstructions"].as_str().unwrap().contains("Permissions are Auto"));
+        session.send("continue").await.unwrap();
+        until_turn_done(&mut rx).await;
+        let turn = requests(dir.path(), "turn/start").remove(0);
+        assert_eq!(turn["params"]["approvalsReviewer"], "auto_review");
+        assert_eq!(turn["params"]["approvalPolicy"], "on-request");
+        assert_eq!(turn["params"]["sandboxPolicy"]["type"], "workspaceWrite");
+        session.stop().await;
     }
 
     const RECORDED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/codex/handshake.jsonl");
@@ -1111,7 +1269,12 @@ done
             _ => unreachable!(),
         };
         assert_eq!((tool.as_str(), input["command"].as_str(), input["description"].as_str()), ("Bash", Some("npm test"), Some("needs the network")));
+        let waiting = s.pending_permissions();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!((&waiting[0].request_id, &waiting[0].tool_name, &waiting[0].input), (&id, &tool, &input));
+        assert!(waiting[0].at > 0);
         assert!(s.respond_permission(&id, true).await);
+        assert!(s.pending_permissions().iter().all(|p| p.request_id != id));
         assert!(!s.respond_permission(&id, true).await, "a card is answered once");
 
         let (id2, tool2, input2) = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {

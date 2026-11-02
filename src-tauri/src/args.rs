@@ -32,7 +32,7 @@ fn lantern_prompt(mode: Mode, auto_approve: bool, role: &Role) -> String {
         _ => "Chat",
     };
     format!(
-        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Activity (you, your advisor and your subagents as a graph), Tests and Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries). They pick the settings and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change any of them. Every chat has two settings that work independently:
+        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Activity (you, your advisor and your subagents as a graph), Tests, Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries) and Artifacts. They pick the settings and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change any of them. Every chat has two settings that work independently:
 Permissions, which means the same in every workflow:
 - Ask: edits apply as you make them; anything else that needs permission shows the user an Allow/Deny card.
 - Auto: Claude Code's auto-mode classifier decides what runs.
@@ -40,7 +40,8 @@ Workflow:
 - Chat: you work as usual.
 - Step by step: one page per message, in a flavour (Build, Review, Debug or Design), and Build and Debug have an Explain as you go option.
 - Team: a Lead runs a team of agents, each with a chat of its own on a canvas. An agent never has more freedom than its Lead: a Lead on Ask means every agent asks.
-This chat's Permissions are {permissions} and its Workflow is {workflow}. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
+This chat's Permissions are {permissions} and its Workflow is {workflow}. To show the user something visual (an architecture map, a flow, a chart, a report), write it with the Write tool as a self-contained file in .lantern/artifacts/ in this folder: .html, .svg, .md or .mmd (Mermaid). Lantern opens it in the Artifacts tab. HTML runs sandboxed with no network: inline your scripts and styles, load nothing from a CDN, and draw charts with SVG or canvas. Link lantern.css (<link rel=\"stylesheet\" href=\"lantern.css\">, beside the page) for the app's colours and fonts as CSS variables (--text, --pane, --line, --accent, --add, --del, --ui, --mono…), so it matches the app in light and dark.
+A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
 Lantern's own tools are on its MCP server (mcp__lantern__…), whose instructions say what each is for. Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one.
 Before an action the user must approve that is hard to reverse or outward-facing (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside your own worktree), call mcp__lantern__request_approval instead of asking in the chat. A yes covers exactly the action you named and nothing more."
     )
@@ -372,6 +373,11 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     allowed.extend(crate::network::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The storage tools scan and mark suggestions inside Lantern (read-only on disk): only the Storage tab's Delete deletes.
     allowed.extend(crate::storage::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The dashboard tools read and show, except dashboard_run, which asks the user with a card of its own every time (the helper
+    // does, before the app runs anything): it is allowed here so the CLI doesn't ask twice, not so that it runs without a yes.
+    allowed.extend(crate::dashboard_tools::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The to-do tools read the user's list, add to it and tick items off (never reword, reopen or delete: see todos.rs).
+    allowed.extend(crate::todos::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The approval card is the user's own say on one named action; Lantern runs nothing and remembers nothing.
     allowed.push(format!("mcp__lantern__{}", crate::permission::helper::APPROVAL_TOOL));
     if helper.role == Role::Main {
@@ -509,10 +515,41 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
     a
 }
 
+/// The tools that start other agents: a subagent inline, or a workflow's.
+pub const SUBAGENT_TOOLS: [&str; 3] = ["Agent", "Task", "Workflow"];
+
+/// `a` with subagents off (a harness preset can say so): their tools added to `--disallowedTools`, the one already there
+/// (a worker's) or a new one.
+pub fn without_subagents(a: &mut Vec<String>) {
+    match a.iter().position(|x| x == "--disallowedTools").map(|i| i + 1).filter(|i| *i < a.len()) {
+        Some(i) => {
+            let mut denied: Vec<String> = a[i].split(',').map(String::from).collect();
+            denied.extend(SUBAGENT_TOOLS.iter().filter(|t| !denied.iter().any(|d| d == *t)).map(|t| t.to_string()).collect::<Vec<_>>());
+            a[i] = denied.join(",");
+        }
+        None => {
+            a.push("--disallowedTools".into());
+            a.push(SUBAGENT_TOOLS.join(","));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::provider::ProviderId;
+
+    #[test]
+    fn subagents_off_adds_their_tools_to_the_one_disallowed_list() {
+        let mut a = vec!["--model".to_string(), "sonnet".into()];
+        without_subagents(&mut a);
+        assert_eq!(value_after(&a, "--disallowedTools"), Some("Agent,Task,Workflow"));
+        // A worker already has one: it grows, and there is still only one.
+        let mut w = launch_args(Mode::Auto, false, None, None, None, None, &worker(true), &[]);
+        without_subagents(&mut w);
+        assert_eq!(w.iter().filter(|x| x.as_str() == "--disallowedTools").count(), 1);
+        assert_eq!(value_after(&w, "--disallowedTools"), Some("Agent,Task,Edit,Write,MultiEdit,NotebookEdit,Workflow"));
+    }
 
     #[test]
     fn the_advisor_is_a_flag_only_when_chosen() {
@@ -669,7 +706,7 @@ mod tests {
     }
 
     /// Every chat's network tools, allowed without asking (see network.rs).
-    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval";
+    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval";
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
@@ -706,7 +743,7 @@ mod tests {
             lantern_prompt(Mode::Steps, true, &Role::Main)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));

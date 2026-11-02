@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, StyleSheet, View, type ViewProps } from "react-native";
+import { AccessibilityInfo, StyleSheet, useColorScheme, View, type ViewProps } from "react-native";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { shadow, useColors } from "./theme";
 
@@ -54,7 +54,9 @@ export const COMPOSER_FILL = "a6";
 export function Glass({ style, lift = 0.08, solid = false, fill = GLASS_FILL, children, ...rest }: ViewProps & { /** The solid look's shadow strength. */ lift?: number; /** The card colour kept under the glass, as two hex digits of alpha: a tint unless the words on it need more. */ fill?: string; /** Always the solid card: for what holds words that must read over whatever is behind it. */ solid?: boolean }) {
   const glass = useGlass();
   const colors = useColors();
+  const scheme = useColorScheme() === "dark" ? "dark" : "light";
   if (glass && !solid) {
+    // (Never put this where it fades in from nothing: the glass then stays clear. See `FadeSlideIn`'s `glass` in motion.tsx.)
     // The glass is a layer behind the children. The surface itself has a faint fill of the card's colour and a hairline, which
     // don't depend on it: a glass view that mounts late (a chat's message box when the chat wakes) has sometimes drawn nothing,
     // and over a plain page there was then no edge at all. The fill is under the glass, so what the glass blurs includes it: a
@@ -63,7 +65,8 @@ export function Glass({ style, lift = 0.08, solid = false, fill = GLASS_FILL, ch
     const radius = StyleSheet.flatten(style)?.borderRadius;
     return (
       <View style={[{ backgroundColor: `${colors.card}${fill}`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
-        <GlassView pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
+        {/* The glass is told which look the app is in, and is made again when that changes: left to follow the system by itself it has stayed clear (switching light and dark put it right). */}
+        <GlassView key={scheme} colorScheme={scheme} pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
         {children}
       </View>
     );

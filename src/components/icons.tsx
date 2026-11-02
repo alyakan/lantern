@@ -65,6 +65,23 @@ export const ClockIcon = () => (
   </svg>
 );
 
+// A desk lamp's shade over a desk: the Desk, every chat at once.
+export const DeskIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M1.4 11.6h11.2" />
+    <path d="M3 11.6V8.4h8v3.2" />
+    <path d="M4.6 5.6 7 2.4l2.4 3.2z" />
+  </svg>
+);
+
+// A target: one project at a time.
+export const FocusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="7" cy="7" r="5.6" />
+    <circle cx="7" cy="7" r="2.4" />
+  </svg>
+);
+
 export const ArrowUpIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" {...base} strokeWidth={1.6}>
     <path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" />
@@ -296,5 +313,12 @@ export const NoteIcon = () => (
 export const PlayIcon = () => (
   <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
     <path d="M2 1.2v8.6L8.6 5.5z" />
+  </svg>
+);
+
+// An arrow pointing left: Back to the previous chat.
+export const BackIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M12 7H2.5M6.5 2.8 2.3 7l4.2 4.2" />
   </svg>
 );

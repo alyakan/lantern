@@ -31,6 +31,8 @@ export interface Palette {
   cobalt: string;
   go: string;
   stop: string;
+  /** Claude's orange (the desktop's): something a chat runs in the background. */
+  working: string;
   /** Always white: on the full-screen decision's night, and on go, stop and Ember fills. */
   white: string;
   /** The full-screen decision's own dark. */
@@ -67,6 +69,7 @@ export const lightColors: Palette = {
   cobalt: "#2f5bff",
   go: "#1f9d55",
   stop: "#d93b3b",
+  working: "#d4693f",
   white: "#ffffff",
   night: "#15212e",
   nightText: "#b8c2cf",
@@ -96,6 +99,7 @@ export const darkColors: Palette = {
   cobalt: "#7b97ff",
   go: "#34b56c",
   stop: "#ff7272",
+  working: "#ef8a5c",
   white: "#ffffff",
   night: "#15212e",
   nightText: "#b8c2cf",
@@ -126,6 +130,16 @@ export const fonts = {
 /** The names of the font files to load, as expo-font takes them. */
 export const FONT_FILES = ["BricolageGrotesque_700Bold", "BricolageGrotesque_800ExtraBold"] as const;
 
+/**
+ * The height of the round buttons, the title bar and the chat bar that sit near one another in a chat (the back button, the title,
+ * Stop, the search circle, the message box at rest): one number, so they line up. The message box's own field is `control - 12`
+ * (6 points of capsule around it).
+ */
+export const control = 44;
+
+/** The round buttons inside the chat bar (send, dictate, attach, Stop): a little inside its capsule. */
+export const barButton = control - 8;
+
 export const radius = { card: 24, inner: 14, pill: 999, sheet: 22 } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 } as const;
@@ -155,5 +169,5 @@ export const shadow = {
   }) as object,
 };
 
-/** The smallest a touch target is (Apple's 44, Material's 48: the larger). */
-export const MIN_TARGET = 48;
+/** The smallest a touch target is: Apple's 44 points. */
+export const MIN_TARGET = 44;

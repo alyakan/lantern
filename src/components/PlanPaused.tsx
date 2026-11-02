@@ -19,7 +19,7 @@ export function PlanPaused({ pause, onResume, onDismiss }: { pause: PlanPause; o
   return (
     <div className="banner banner-info plan-paused" role="status">
       <span>
-        <strong>{pausedLine(pause, now)}.</strong> {n === 1 ? "1 agent was stopped" : `${n} agents were stopped`}, none ended. Nothing starts again until you press Resume. Dismiss leaves them stopped.
+        <strong>{pausedLine(pause, now)}.</strong> {n === 1 ? "1 agent was stopped" : `${n} agents were stopped`}, none ended. These agents stay paused until you press Resume. Dismiss leaves them stopped.
       </span>
       <span className="banner-actions">
         <button className="primary" onClick={onResume}>

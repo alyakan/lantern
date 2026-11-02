@@ -16,6 +16,10 @@ export const CLAUDE_CAPABILITIES: Capabilities = {
   model_switchable: true,
   supports_lantern_tools: true,
   can_lead_team: true,
+  phone_approvals: true,
+  supports_images: true,
+  supports_compact: true,
+  supports_clear: true,
 };
 
 /** What a provider can do; Claude's all of it when unknown. A flag a (newer or older) backend leaves out counts as Claude's too. */

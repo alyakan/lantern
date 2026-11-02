@@ -1,16 +1,17 @@
-//! Keeps the window on Lantern's own pages. A link that would load somewhere else opens in the browser instead,
-//! so no click (whatever button, whatever element) can replace the app with a web page.
+//! Keeps the window on Lantern's own pages: nothing (whatever button, whatever element) can replace the app with a
+//! web page. The app opens links in the browser itself (ExternalLink, with the opener plugin), so a navigation to a
+//! web page is refused, not handed to the browser. Defense in depth for artifacts: WebKit asks this about every
+//! frame's navigations without saying which frame, and today the window's `frame-src` already stops an artifact's
+//! frame from loading a web page before this is asked; were that ever loosened, a frame that could get URLs opened
+//! could send what it holds out in one.
 
 use tauri::plugin::{Builder, TauriPlugin};
 use tauri::{Manager, Runtime, Url};
-use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, PartialEq)]
 pub enum Navigation {
-    /// One of Lantern's own pages: load it.
+    /// One of Lantern's own pages, or an artifact in its frame: load it.
     Stay,
-    /// A web page or mail link: hand it to the browser or mail app.
-    OpenOutside,
     /// Anything else: ignore it.
     Block,
 }
@@ -20,14 +21,14 @@ pub fn decide(url: &Url, dev_url: Option<&Url>) -> Navigation {
     let ours = match url.scheme() {
         // macOS and Linux serve the app from tauri://localhost.
         "tauri" | "about" => true,
+        // The Artifacts tab's frame (see artifacts.rs).
+        crate::artifacts::SCHEME => true,
         // Windows serves it from http(s)://tauri.localhost.
         "http" | "https" => url.host_str() == Some("tauri.localhost") || dev_url.is_some_and(|dev| dev.origin() == url.origin()),
         _ => false,
     };
     if ours {
         Navigation::Stay
-    } else if matches!(url.scheme(), "http" | "https" | "mailto") {
-        Navigation::OpenOutside
     } else {
         Navigation::Block
     }
@@ -38,14 +39,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .on_navigation(|webview, url| {
             let app = webview.app_handle();
             let dev_url = if cfg!(debug_assertions) { app.config().build.dev_url.clone() } else { None };
-            match decide(url, dev_url.as_ref()) {
-                Navigation::Stay => true,
-                Navigation::OpenOutside => {
-                    let _ = app.opener().open_url(url.as_str(), None::<&str>);
-                    false
-                }
-                Navigation::Block => false,
-            }
+            decide(url, dev_url.as_ref()) == Navigation::Stay
         })
         .build()
 }
@@ -68,13 +62,19 @@ mod tests {
     }
 
     #[test]
-    fn web_pages_open_outside() {
-        assert_eq!(decide(&url("https://github.com/alyakan/lantern"), None), Navigation::OpenOutside);
-        assert_eq!(decide(&url("mailto:someone@example.com"), None), Navigation::OpenOutside);
+    fn artifacts_load_in_their_frame() {
+        assert_eq!(decide(&url("lantern-artifact://localhost/0a1b/map.html"), None), Navigation::Stay);
+    }
+
+    #[test]
+    fn web_pages_are_refused_not_opened() {
+        // Not opened in the browser either: an artifact's frame mustn't be able to get a URL opened (see the module note).
+        assert_eq!(decide(&url("https://github.com/alyakan/lantern"), None), Navigation::Block);
+        assert_eq!(decide(&url("mailto:someone@example.com"), None), Navigation::Block);
         // Another local server is not the app, even while developing.
         let dev = url("http://localhost:1420");
-        assert_eq!(decide(&url("http://localhost:3000/"), Some(&dev)), Navigation::OpenOutside);
-        assert_eq!(decide(&url("http://localhost:1420/"), None), Navigation::OpenOutside);
+        assert_eq!(decide(&url("http://localhost:3000/"), Some(&dev)), Navigation::Block);
+        assert_eq!(decide(&url("http://localhost:1420/"), None), Navigation::Block);
     }
 
     #[test]

@@ -223,16 +223,23 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
             </h3>
             <label className="general-option">
               <input type="checkbox" checked={view.show_titles} onChange={(e) => act(api.remoteSetShowTitles(e.target.checked))} />
-              <span>Show chat titles in notifications</span>
+              <span>Show chat and to-do titles in notifications</span>
             </label>
-            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they only say that a chat needs you or finished.</span>
+            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or stopped with an error (a chat that finished well shows on the lock-screen card, not as a notification). On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use; a to-do's reminder gives the to-do's title.</span>
+            <label className="general-option">
+              <input type="checkbox" checked={view.rich_notifications} onChange={(e) => act(api.remoteSetRichNotifications(e.target.checked))} />
+              <span>Show what Claude asks in notifications</span>
+            </label>
+            <span className="settings-muted">
+              On, a notification that asks to run a command, change a file or use a tool shows the whole command, the file and what changes, or the question, so you can judge it from the lock screen. It is encrypted on this Mac with a key your phone made, so Apple's servers carry only bytes they can't read; the phone decrypts it itself. Only a phone on a recent build of the app can, and any other still gets the short words. It is on your lock screen, so the phone's own Show Previews setting (Settings › Notifications) still applies.
+            </span>
           </section>
           <section className="general-section" aria-labelledby="remote-live">
             <h3 id="remote-live" className="general-title">
               Lock screen cards
             </h3>
             <span className="settings-muted">
-              A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, never a chat's title, a command or a file.
+              A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, with the chat's title, how far its plan has got, what it needs in a word and the plan's usage when it has them, never a command, a file or a question.
             </span>
             <p>{view.live_key ? `Push key: ${view.live_key}` : "No push key yet, so no card is kept up to date."}</p>
             {keyForm ? (

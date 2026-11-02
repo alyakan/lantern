@@ -4,8 +4,9 @@
 // &providers: a second, fake agent CLI ("Codex", without Auto mode, advisor, skills or dollar cost) beside Claude Code.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
+import type { DashboardRun, McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
+import dashboardSpec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import { TESTO_MAP } from "../lib/testoMap";
 import { DENSE_MAP, DENSE_PARTS } from "../lib/denseMap";
 import type { ReviewCheck } from "../lib/reviewChain";
@@ -20,10 +21,10 @@ const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "u
 // mode, no advisor, no skills, no dollar cost. It is for seeing the provider pickers and everything a provider hides.
 // Without it the app has Claude Code alone, as the real one does until another CLI is installed.
 let SECOND_PROVIDER = new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("providers");
-const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true } };
-const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false, can_lead_team: false } };
+const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true, phone_approvals: true } };
+const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false } };
 /** An endpoint the user set up: Claude Code sent elsewhere, with its skills and tools but not Anthropic's auto mode, advisor, effort or price. */
-const GATEWAY_INFO = { id: "gateway", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false } };
+const GATEWAY_INFO = { id: "gateway", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true } };
 const CODEX_MODELS = ["gpt-5-codex", "gpt-5", "o3"];
 const providerInfo = (id: unknown) => (id === "codex" ? CODEX_INFO : id === "gateway" ? GATEWAY_INFO : CLAUDE_INFO);
 /** Which provider each chat runs on (absent: Claude). */
@@ -149,10 +150,14 @@ async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: 
   if (!showUsage()) return;
   await send({ kind: "model_usage", models: models.map(([model, cost_usd, tokens]) => ({ model, cost_usd, input_tokens: Math.round(tokens * 0.95), output_tokens: Math.round(tokens * 0.05) })) });
   await send({ kind: "plan_usage", used: planUsed(), resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
+  // Three and a half days into a week with 70% used: the pace runs it out before the reset.
+  await send({ kind: "week_usage", used: 0.7, resets_at: Math.floor(Date.now() / 1000) + 3.5 * 24 * 3600 });
 }
 
 // Each chat's permission mode, as the backend would run it.
 const slotMode: Record<string, string> = {};
+/** The folder each chat was started in, for the Desk's status of its repositories. */
+const slotFolder: Record<string, string> = {};
 
 /** Step by step's Debug: hypotheses, a round of evidence with the reproduce card, the fix, then done; Next moves on. */
 async function playDebug(slot: string, text: string) {
@@ -1249,6 +1254,69 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
+// The Dashboard tab: which mock dashboards are trusted, the runs kept, and whether the form is running.
+let dashTrusted: string[] = [];
+let dashRuns: DashboardRun[] = [];
+let dashRunning: string | null = null;
+// The shared spec has one function; the preview adds two more so the tabs can be seen.
+const STAGINGS = ["1", "2", "3", "7", "9"];
+const dashboardPreviewSpec = {
+  ...dashboardSpec,
+  panels: [
+    ...dashboardSpec.panels,
+    {
+      type: "form",
+      id: "addons",
+      title: "Change addons",
+      fields: [
+        { id: "staging", type: "select", label: "Staging", required: true, options: STAGINGS },
+        { id: "org", type: "number", label: "Org id", required: true },
+        { id: "enable", type: "multiselect", label: "Turn on", required: false, options: ["approvals", "sso", "trainings", "webhooks"] },
+        { id: "disable", type: "multiselect", label: "Turn off", required: false, options: ["approvals", "sso", "trainings", "webhooks"] },
+      ],
+      action: { command: ["python3", "lumi_staging.py", "addons-set", "--staging", "{staging}", "--org", "{org}", "--enable", "{enable}", "--disable", "{disable}"], confirm: "Changes the addons of org {org} on staging {staging}", output: "json" },
+    },
+    { type: "result", of: "addons" },
+    { type: "history", id: "addons-runs", title: "Past runs", of: "addons" },
+    {
+      type: "form",
+      id: "users",
+      title: "Add users",
+      fields: [
+        { id: "staging", type: "select", label: "Staging", required: true, options: STAGINGS },
+        { id: "org", type: "number", label: "Org id", required: true },
+        { id: "count", type: "number", label: "How many", required: false, default: 3, min: 1, max: 20 },
+        { id: "admin", type: "toggle", label: "Make them admins", required: false, default: false },
+      ],
+      action: { command: ["python3", "lumi_staging.py", "users", "--staging", "{staging}", "--org", "{org}", "--count", "{count}"], output: "json" },
+    },
+    { type: "result", of: "users" },
+    { type: "history", id: "users-runs", title: "Past runs", of: "users" },
+  ],
+};
+// The kept addon lists, by the staging they were loaded for (testo_sensors exists on staging 7 only).
+let dashOptions: Record<string, { options: string[]; loaded_at: number }> = {};
+const addonsOf = (staging: string) => ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", ...(staging === "7" ? ["testo_sensors"] : []), "all_integrations"];
+const dashSummary = ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs }: DashboardRun) => ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs });
+function mockDashboardRun(values: Record<string, unknown>, form = "org"): DashboardRun {
+  const staging = String(values.staging ?? "");
+  const users = Number(values.users ?? 2);
+  const logins = Array.from({ length: users }, (_, i) => ({ email: `qa+${Date.now() % 100000}-${i + 1}@example.com`, password: "Sup3r-secret", role: i === 0 ? "admin" : "user" }));
+  const output =
+    form === "addons"
+      ? { org: { id: values.org, staging }, turned_on: values.enable ?? [], turned_off: values.disable ?? [] }
+      : form === "users"
+        ? { users: logins.slice(0, Number(values.count ?? 3)).map((l) => ({ ...l, role: values.admin ? "admin" : "user" })) }
+        : { org: { id: 41872, name: String(values.name ?? ""), staging }, addons: values.addons ?? [], users: logins };
+  const args =
+    form === "addons"
+      ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons-set", "--staging", staging, "--org", String(values.org ?? "")]
+      : form === "users"
+        ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "users", "--staging", staging, "--org", String(values.org ?? ""), "--count", String(values.count ?? 3)]
+        : ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", staging, "--users", String(users), "--admins", String(values.admins ?? 1), "--enable", ([] as string[]).concat((values.addons ?? []) as string[]).join(","), `--name=${String(values.name ?? "")}`];
+  return { id: `${Date.now()}-${dashRuns.length + 1}`, file: "staging.json", form, started_at: Date.now(), duration_ms: 1840, exit_code: 0, stopped: false, timed_out: false, inputs: values as DashboardRun["inputs"], args, stdout: `creating org on staging ${staging}\n${JSON.stringify(output)}\n`, stderr: "", truncated: false, output };
+}
+
 // The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
@@ -1443,6 +1511,15 @@ async function stressDrive() {
 }
 
 /** `providers`: installs the second, fake provider whatever the address says (the address's `&providers` otherwise). */
+const mockTodoLists: Record<string, import("../lib/todos").Todo[]> = {};
+function mockTodos(folder: string): import("../lib/todos").Todo[] {
+  return (mockTodoLists[folder] ??= [
+    { id: "t1", title: "Renew the staging certificate", done: false, created_at: Date.now() - 86_400_000, created_by: "user", due: { date: "2026-01-05", time: null } },
+    { id: "t2", title: "Write the release notes for 0.1.82", note: "Mention the Todos tab.", done: false, created_at: Date.now(), created_by: "claude", chat_title: "Release prep" },
+    { id: "t3", title: "Answer the PR review on #317", done: true, created_at: Date.now() - 3_600_000, created_by: "user", done_by: "claude", done_at: Date.now() - 600_000, chat_title: "PR review" },
+  ]);
+}
+
 export function installMockBackend(options: { providers?: boolean; endpoints?: boolean } = {}) {
   SECOND_PROVIDER = options.providers ?? new URLSearchParams(location.search).has("providers");
   mockEndpoints = (options.endpoints ?? new URLSearchParams(location.search).has("endpoints")) ? [{ id: "ollama", name: "Ollama", url: "http://localhost:11434", key_env: null, models: ["qwen3:8b", "llama3"] }] : [];
@@ -1478,7 +1555,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
         case "list_providers":
           return [
-            { ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null },
+            ...(new URLSearchParams(location.search).get("claude") === "missing" ? [] : [{ ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null }]),
             ...(SECOND_PROVIDER ? [{ ...CODEX_INFO, models: CODEX_MODELS, binary: "/Users/you/.local/bin/codex" }] : []),
             ...mockEndpoints.map((e) => ({ ...GATEWAY_INFO, models: e.models, binary: null, endpoint: { id: e.id, name: e.name } })),
           ];
@@ -1547,6 +1624,20 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         }
         case "plugin:opener|reveal_item_in_dir":
           return null;
+        case "conversation_metadata": return null;
+        case "conversation_settings": {
+          const slot = String(a.slot);
+          const change = a.change as { provider?: string; model?: string | null; effort?: string | null } | null;
+          if (change?.provider) slotProvider[slot] = change.provider;
+          const id = slotProvider[slot] ?? "claude";
+          const info = providerInfo(id);
+          if (change) void emit("conversation-configured", { slot, provider: info ?? CLAUDE_INFO, mode: id === "claude" ? slotMode[slot] ?? "ask" : "ask", autoApprove: false, model: change.model ?? null, effort: change.effort ?? null });
+          return { provider: id, capabilities: (info ?? CLAUDE_INFO).capabilities, model: change?.model ?? null, effort: change?.effort ?? null, models: id === "codex" ? CODEX_MODELS : ["opus", "sonnet", "haiku"], effort_levels: ["low", "medium", "high"] };
+        }
+        case "conversation_action": {
+          if (a.action === "clear") void sendTo(String(a.slot))({ kind: "conversation_reset" });
+          return null;
+        }
         case "start_session":
           // A second project opens too, for switching between projects; the rest are gone.
           if (STRESS) {
@@ -1556,6 +1647,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             stressStarted.push({ slot: String(a.slot), folder: String(a.folder), team });
           } else if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
           slotMode[String(a.slot)] = String((a.settings as { mode?: string } | undefined)?.mode ?? "ask");
+          slotFolder[String(a.slot)] = String(a.folder);
           slotProvider[String(a.slot)] = (a.settings as { provider?: string } | undefined)?.provider ?? "claude";
           if ((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator) mockMain = String(a.slot);
           setTimeout(() => {
@@ -1859,6 +1951,106 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           if (session) session.title = String(a.title);
           return undefined;
         }
+        // A browser can't serve the artifact scheme, so the mock has a Markdown and a Mermaid artifact to show.
+        case "artifacts_list":
+          return {
+            key: "mock",
+            scripts: true,
+            items: [
+              { name: "auth-flow.mmd", path: `${a.folder}/.lantern/artifacts/auth-flow.mmd`, kind: "mermaid", modified: Date.now() - 60_000, size: 80 },
+              { name: "report.md", path: `${a.folder}/.lantern/artifacts/report.md`, kind: "markdown", modified: Date.now() - 3_600_000, size: 60 },
+            ],
+          };
+        case "artifacts_read":
+          return a.name === "auth-flow.mmd" ? "flowchart LR\n  App --> Gateway --> Auth\n  Auth --> DB[(Users)]" : "# Weekly report\n\n- 12 pull requests merged\n- 2 releases";
+        case "artifacts_theme":
+          return null;
+        // An in-memory to-do list per folder, with one overdue item and one Claude added, to show the tab's states.
+        case "todos_list":
+          return { key: String(a.folder), items: mockTodos(String(a.folder)) };
+        case "todos_counts":
+          return Object.fromEntries((a.folders as string[]).map((f) => {
+            const items = mockTodos(f).filter((t) => !t.done);
+            return [f, { open: items.length, overdue: items.filter((t) => t.due && t.due.date < new Date().toISOString().slice(0, 10)).length }];
+          }));
+        case "todos_edit": {
+          const folder = String(a.folder);
+          const items = mockTodos(folder);
+          const e = a.edit as { op: string; id?: string; title?: string; due?: unknown; done?: boolean; ids?: string[]; patch?: Record<string, unknown>; until?: number; chat?: string };
+          const find = () => items.find((t) => t.id === e.id)!;
+          if (e.op === "add") items.splice(items.filter((t) => !t.done).length, 0, { id: `m${Date.now()}`, title: String(e.title), done: false, created_at: Date.now(), created_by: "user", due: (e.due as never) ?? null });
+          else if (e.op === "done") Object.assign(find(), { done: e.done, done_by: e.done ? "user" : null, done_at: e.done ? Date.now() : null });
+          else if (e.op === "update") Object.assign(find(), e.patch);
+          else if (e.op === "delete") items.splice(items.indexOf(find()), 1);
+          else if (e.op === "clear_done") mockTodoLists[folder] = items.filter((t) => !t.done);
+          else if (e.op === "reorder") mockTodoLists[folder] = [...e.ids!.map((id) => items.find((t) => t.id === id)!), ...items.filter((t) => !e.ids!.includes(t.id))];
+          else if (e.op === "snooze") find().snoozed_until = e.until;
+          else if (e.op === "link") find().chat = e.chat;
+          return { key: folder, items: mockTodos(folder) };
+        }
+        case "dashboards_list":
+          // The same spec the Rust tests check, plus one file that doesn't check out.
+          return [
+            { file: "staging.json", hash: "mock-staging", spec: dashboardPreviewSpec, issues: [] },
+            { file: "broken.json", hash: "mock-broken", spec: null, issues: [{ path: "panels[0].action.command[2]", message: "must be a string (the command is a list of strings, not a shell line)" }] },
+          ];
+        case "dashboards_state":
+          return { trusted: dashTrusted, running: dashRunning ? [{ file: "staging.json", form: dashRunning }] : [], runs: dashRuns.map(dashSummary) };
+        case "dashboard_trust":
+          if (a.hash === "mock-staging") dashTrusted = [...dashTrusted, "mock-staging"];
+          void emit("dashboards-changed");
+          return undefined;
+        case "dashboard_commands":
+          return [
+            { form: "org", title: "Create org", kind: "action", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null },
+            { form: "org", title: "Create org", kind: "options", field: "addons", depends_on: ["staging"], command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--staging", "{staging}", "--json"], program: "/opt/homebrew/bin/python3", error: null },
+          ];
+        case "dashboard_options":
+          // What was kept the last time the command ran for this staging; this never runs it.
+          return dashOptions[String((a.values as Record<string, unknown>)?.staging ?? "")] ?? null;
+        case "dashboard_load_options": {
+          const staging = String((a.values as Record<string, unknown>)?.staging ?? "");
+          if (!staging) return Promise.reject("Choose Staging first.");
+          // `?optionsfail` shows the field's error state; otherwise the staging's own list, after a moment.
+          if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging " + staging);
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              dashOptions = { ...dashOptions, [staging]: { options: addonsOf(staging), loaded_at: Date.now() } };
+              void emit("dashboards-changed");
+              resolve(dashOptions[staging]);
+            }, 400),
+          );
+        }
+        case "dashboard_preview": {
+          const values = a.values as Record<string, unknown>;
+          if (!values.staging) return Promise.reject("Staging is required.");
+          return { args: mockDashboardRun(values, String(a.form)).args, confirm: a.form === "users" ? null : `Changes real data on staging ${values.staging}` };
+        }
+        case "dashboard_run": {
+          dashRunning = String(a.form);
+          void emit("dashboards-changed");
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const run = mockDashboardRun(a.values as Record<string, unknown>, String(a.form));
+              dashRuns = [run, ...dashRuns];
+              dashRunning = null;
+              void emit("dashboards-changed");
+              resolve(run);
+            }, 900),
+          );
+        }
+        case "dashboard_run_detail":
+          return dashRuns.find((r) => r.id === a.id) ?? null;
+        case "dashboard_stop":
+          return false;
+        case "dashboard_delete_run":
+          dashRuns = dashRuns.filter((r) => r.id !== a.id);
+          void emit("dashboards-changed");
+          return true;
+        case "dashboard_clear_runs":
+          dashRuns = [];
+          void emit("dashboards-changed");
+          return undefined;
         case "network_state":
           return mockNetwork();
         case "network_response":
@@ -1886,15 +2078,18 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "remote_settings":
         case "remote_set_enabled":
         case "remote_set_show_titles":
+        case "remote_set_rich_notifications":
         case "remote_set_keep_awake":
         case "remote_set_allow_auto":
         case "remote_remove_device":
         case "remote_set_live_key":
-          return { enabled: false, show_titles: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";
         case "remote_pair_cancel":
         case "remote_window_chats":
+        case "remote_window_desk":
+        case "remote_window_single":
         case "remote_window_controls":
         case "remote_new_chat_done":
         case "remote_claude_path":
@@ -1948,6 +2143,45 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             { old: "/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/web-dashboard/fix-login-w3", suggested: null },
             { old: "/Users/you/projects/web-dashboard/.claude/worktrees/agent-a1b2c3", suggested: null },
           ].filter((m) => !/\/(io\.github\.alyakan\.lantern|\.claude)\/worktrees\//.test(m.old));
+        case "desk_status": {
+          // The open chats' folders, each its own repository on GitHub, as status.rs would find them.
+          const today = (h: number) => new Date(new Date().setHours(h, 0, 0, 0)).toISOString();
+          const folders = [...new Set(Object.values(slotFolder))];
+          return folders.map((folder, i) => ({
+            repo: folder,
+            github: `you/${folder.split("/").pop()}`,
+            folders: [{ folder, branch: i === 0 ? "feat/retry-fetch" : "main", changed: i === 0 ? 3 : 0 }],
+            worktrees:
+              i === 0
+                ? [
+                    // The same worktrees the Storage scan lists (mockStorageItems), so the page shows its verdicts.
+                    { path: "/Users/you/acme-api/wt-retry", branch: "lantern/retry", locked: false, agent: false },
+                    { path: "/Users/you/acme-api/wt-login", branch: "fix/login", locked: false, agent: false },
+                    { path: `/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/acme-api/w1`, branch: null, locked: false, agent: true },
+                  ]
+                : [],
+            gh: "ready",
+            prs:
+              i === 0
+                ? [
+                    { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false, checks: "fail", review: "REVIEW_REQUIRED" },
+                    { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false, checks: "pending", review: null },
+                  ]
+                : [],
+            merged:
+              i === 0
+                ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }]
+                : i === 1
+                  ? [
+                      { number: 58, title: "Chart tooltips flip at the right edge", merged_at: today(0) },
+                      { number: 56, title: "Dark mode for the settings page", merged_at: today(0) },
+                    ]
+                  : [],
+            release: i === 0 ? { tag: "v2.4.0", published_at: today(0) } : null,
+            drafts: i === 0 ? ["v2.4.1"] : [],
+            error: null,
+          }));
+        }
         case "list_open_prs":
           // ?prs=missing shows what the picker says when gh isn't installed.
           if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");
@@ -1972,6 +2206,60 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           }
           return new Promise((r) => setTimeout(() => r({ project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 }), 400));
         }
+        case "desk_route": {
+          // Like the Haiku router (desk.rs), a moment later: "which/where…?" searches, "new …" starts a chat in the first
+          // project, a word of a chat's title sends it there, and anything else is asked about.
+          const text = String(a.text);
+          const chats = (a.chats ?? []) as { id: string; title: string }[];
+          const projects = (a.projects ?? []) as string[];
+          const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+          const hit = chats.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
+          const answer = /^(how|what's the status|where are we)\b/i.test(text)
+            ? { kind: "answer", terms: words.slice(-2).join(" ") }
+            : /^(which|where)\b/i.test(text)
+            ? { kind: "search", terms: words.slice(-2).join(" ") }
+            : /^new\b/i.test(text) && projects[0]
+              ? { kind: "start", project: projects[0], workflow: "chat" }
+              : hit
+                ? { kind: "route", chat: hit.id }
+                : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
+          return new Promise((r) => setTimeout(() => r(answer), 500));
+        }
+        case "desk_talk": {
+          // Like Sonnet on the Desk (desk.rs talk): a greeting or thanks is only answered; anything else is routed as the router
+          // above would, with a sentence saying what it understood.
+          const text = String(a.text);
+          const chats = (a.chats ?? []) as { id: string; title: string }[];
+          const projects = (a.projects ?? []) as string[];
+          if (/^(hi|hey|hello|thanks|thank you)\b/i.test(text))
+            return new Promise((r) => setTimeout(() => r({ say: `Hi! ${chats.length} chats are open on this Desk; tell me what you need.`, route: null }), 500));
+          const words = text.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+          const hit = chats.find((c) => words.some((w) => c.title.toLowerCase().includes(w)));
+          const route = /^(how|what's the status|where are we)\b/i.test(text)
+            ? { kind: "answer", terms: words.slice(-2).join(" ") }
+            : /^(which|where)\b/i.test(text)
+              ? { kind: "search", terms: words.slice(-2).join(" ") }
+              : /^new\b/i.test(text) && projects[0]
+                ? { kind: "start", project: projects[0], workflow: "chat" }
+                : hit
+                  ? { kind: "route", chat: hit.id }
+                  : { kind: "ask", chats: chats.slice(0, 3).map((c) => c.id), unsure: false };
+          const say =
+            route.kind === "route" ? "On it: I'll pass that on and tell you what comes back." : route.kind === "start" ? "That's new work, so it gets a chat of its own." : route.kind === "ask" ? "Which chat is this for?" : route.kind === "search" ? "Let me look through your chats." : "Let me read what your chats say about it.";
+          return new Promise((r) => setTimeout(() => r({ say, route }), 500));
+        }
+        case "desk_summary":
+          // Like Haiku: a moment later, the start of the reply in a sentence.
+          return new Promise((r) => setTimeout(() => r(`Done: ${String(a.reply).split(/(?<=[.!?])\s/)[0].slice(0, 160)}`), 400));
+        case "desk_answer":
+          // Like the Sonnet call: a little later, one sentence, then Done / Open / Blocked citing the chats it was given.
+          return new Promise((r) =>
+            setTimeout(() => {
+              const chats = (a.chats ?? []) as { title: string }[];
+              const cite = (i: number) => `[${(i % Math.max(chats.length, 1)) + 1}]`;
+              r(`Mostly done: retries work, one test is still red.\n\n**Done**\n- Retry on 5xx with backoff ${cite(0)}\n- Cap the delay at 8 seconds ${cite(1)}\n\n**Open**\n- Log each retry once ${cite(0)}\n\n**Blocked**\n- The timeout test is flaky on CI ${cite(2)}`);
+            }, 900),
+          );
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

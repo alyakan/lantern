@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { planLevel, planLine, planSentence, usePlanUsage } from "../lib/planUsage";
+import { useEffect, useState } from "react";
+import { currentWindow, useProviderUsage } from "../lib/planUsage";
+import { weekSentence } from "../lib/weekUsage";
+import { providerName } from "../lib/provider";
+import { DAY_SECS, HOUR_SECS, windowMarks, type Mark, type Marks } from "../lib/usageMarks";
 import { usageLine } from "../lib/cost";
 import { modelLine, type ModelShare, type UsageRow, type UsageState } from "../lib/usage";
 import { usePopover } from "../lib/usePopover";
@@ -7,48 +10,125 @@ import { ChevronIcon } from "./icons";
 
 interface Props {
   /** What the popover lists (computed when it opens), and opening one of the chats. Left out: the meter is only a reading. */
-  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void };
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void };
 }
 
 const STATE_LABEL: Record<UsageState, string> = { working: "Working", waiting: "Needs you", idle: "Idle", ended: "Stopped" };
 
-/**
- * How full the plan's five-hour window is, once claude has said: amber from 80%, red from 95% (no new workers then).
- * Pressed, it lists where the use went: every open chat and team, biggest first.
- */
+/** Provider account limits, followed by lifetime totals for open chats and teams. */
 export function PlanMeter({ usage }: Props) {
-  const plan = usePlanUsage();
+  const providers = useProviderUsage();
   const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(Date.now);
   const { box, button, list, id } = usePopover(open, () => setOpen(false));
-  if (!plan) return null;
-  const level = planLevel(plan);
-  const title = level === "stop" ? "Nearly used up: no new agents start until it resets." : level === "warn" ? "Getting close to the plan's five-hour limit." : "The plan's five-hour window, for every chat and team. Press to see where it went.";
-  if (!usage) {
-    return (
-      <span className={`plan-meter ${level}`} role="status" title={title}>
-        {planLine(plan)}
-      </span>
-    );
-  }
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const summaries = [...new Set(["claude", "codex", ...Object.keys(providers)])].map(name => {
+    const reading = providers[name];
+    const windows = reading?.windows.filter(w => currentWindow(w, now)) ?? [];
+    const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
+    return { name, reading, windows, used };
+  });
+  const label = summaries.map(p => `${providerName(p.name)}: ${p.used === null ? "usage unavailable" : `${pct(p.used)}% used`}`).join(", ");
   return (
     <div className="plan-meter-box" ref={box}>
-      <button ref={button} className={`plan-meter ${level}`} aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title={title} onClick={() => setOpen(!open)}>
-        {planLine(plan)}
+      <button
+        ref={button}
+        className="plan-meter"
+        title="Usage is separate for each provider. Each number is its fullest reported window."
+        aria-label={`Usage by provider. ${label}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={open ? id : undefined}
+        onClick={() => setOpen(!open)}
+      >
+        {summaries.map(p => (
+          <span key={p.name} className={`mini-meter ${usageLevel(p.used)}`}>
+            <span>{providerName(p.name)} {p.used === null ? "—" : `${pct(p.used)}%`}</span>
+            <span className="mini-meter-track" aria-hidden>
+              {p.used !== null && <span className="mini-meter-fill" style={{ width: `${pct(p.used)}%` }} />}
+            </span>
+          </span>
+        ))}
+        <ChevronIcon up={open} />
       </button>
       {open && (
-        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Where the plan's usage went">
-          <p className="usage-plan">{planSentence(plan)}</p>
-          <UsageList
-            rows={usage.rows()}
-            onOpen={(slot) => {
-              setOpen(false);
-              usage.onOpen(slot);
-            }}
-          />
-          <p className="usage-note">Since each chat or team started, not just this window. Closed ones aren't counted, so it won't add up to the plan's percentage. Models are from each one's latest turn.</p>
+        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Usage by provider">
+          {summaries.map(({ name, reading, windows }) => (
+            <section key={name} aria-label={`${providerName(name)} usage`}>
+              <p className="usage-heading">{providerName(name)}</p>
+              {windows.length === 0 ? <p className="usage-empty">Usage unavailable</p> : windows.map(w => (
+                <UsageBar
+                  key={w.label}
+                  label={w.label}
+                  used={w.used}
+                  level={usageLevel(w.used)}
+                  sentence={w.minutes === 10080
+                    ? weekSentence({ used: w.used, resetsAt: w.resets_at }, now)
+                    : `${pct(w.used)}% used${w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}`}
+                  marks={w.minutes
+                    ? windowMarks(w.resets_at, w.minutes * 60, w.minutes === 10080 ? DAY_SECS : HOUR_SECS, now)
+                    : { marks: [], middles: [], pace: null }}
+                  unit={w.minutes === 10080 ? "day" : "hour"}
+                />
+              ))}
+              {name === "claude" && windows.some(w => w.used >= .95) && usage?.switchToCodex && (
+                <button className="soft" onClick={() => { setOpen(false); usage.switchToCodex!(); }}>Switch this chat to Codex</button>
+              )}
+              {reading && <p className="usage-note">Last updated {new Date(reading.updated_at * 1000).toLocaleTimeString()}</p>}
+            </section>
+          ))}
+          {usage && <>
+            <p className="usage-heading">Open chats and teams</p>
+            <UsageList rows={usage.rows()} onOpen={slot => { setOpen(false); usage.onOpen(slot); }} />
+            <p className="usage-note">Totals since each chat started, across providers. These do not add up to a subscription percentage.</p>
+          </>}
         </div>
       )}
     </div>
+  );
+}
+
+const usageLevel = (used: number | null): "ok" | "warn" | "stop" => used !== null && used >= .95 ? "stop" : used !== null && used >= .8 ? "warn" : "ok";
+
+const pct = (used: number) => Math.round(Math.min(1, Math.max(0, used)) * 100);
+
+/**
+ * One window as a full bar: what is used, a tick where an even pace would have it at the end of each hour (or day), a
+ * marker where an even pace would be now, and the sentence on where it stands.
+ */
+function UsageBar({ label, used, level, sentence, marks, unit }: { label: string; used: number; level: "ok" | "warn" | "stop"; sentence: string; marks: Marks; unit: "hour" | "day" }) {
+  const clock = (d: Date) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const tickTitle = (m: Mark) => {
+    const when = new Date(m.when * 1000);
+    return `${pct(m.at)}% by ${unit === "day" ? `${when.toLocaleDateString([], { weekday: "short" })} ${clock(when)}` : clock(when)} at an even pace`;
+  };
+  return (
+    <section className={`usage-bar ${level}`} aria-label={label}>
+      <div className="usage-bar-head">
+        <span className="usage-bar-label">{label}</span>
+        <span className="usage-bar-pct">{Math.round(used * 100)}%</span>
+      </div>
+      <div className="usage-bar-track" role="meter" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct(used)}>
+        <span className="usage-bar-fill" style={{ width: `${pct(used)}%` }} />
+        {marks.marks.map((m) => (
+          <span key={m.when} className="usage-bar-tick" style={{ left: `${m.at * 100}%` }} title={tickTitle(m)} />
+        ))}
+        {marks.pace !== null && <span className="usage-bar-pace" style={{ left: `${marks.pace * 100}%` }} title={`An even pace would be at ${pct(marks.pace)}% now`} />}
+      </div>
+      {unit === "day" && marks.middles.length > 0 && (
+        <div className="usage-bar-days" aria-hidden>
+          {marks.middles.map((m) => (
+            <span key={m.when} style={{ left: `${m.at * 100}%` }}>
+              {new Date(m.when * 1000).toLocaleDateString([], { weekday: "short" })}
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="usage-bar-sentence">{sentence}</p>
+    </section>
   );
 }
 

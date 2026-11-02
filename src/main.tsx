@@ -35,7 +35,7 @@ async function boot() {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       <ErrorBoundary name={panel ? "menu bar panel" : "window"} reloadWindow>
-        {panel ? <MenuBarPanel /> : <App />}
+        {panel ? <MenuBarPanel /> : <App startOnDesk />}
       </ErrorBoundary>
     </React.StrictMode>,
   );

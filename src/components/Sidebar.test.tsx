@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import { PROJECT_COLORS } from "../lib/projectColors";
+import { usePersistentState } from "../lib/layout";
 import type { CloseCheck } from "../types";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
 
@@ -29,12 +30,21 @@ const ALL_OPEN = { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen, [IOS]: iosOpe
 
 const noLoss: CloseCheck = { worktree: true, branch: "lantern/x", uncommitted: 0, unmerged_commits: 0 };
 
-function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
+type Props = Omit<React.ComponentProps<typeof Sidebar>, "single" | "onSingle">;
+
+/** The sidebar with its One project kept as the app keeps it: saved, and handed back down. */
+function Kept(props: Props) {
+  const [single, setSingle] = usePersistentState<string | null>("sidebar.single", null);
+  return <Sidebar {...props} single={single} onSingle={setSingle} />;
+}
+
+function setup(over: Partial<Props> = {}) {
   const h = {
     onChat: vi.fn(),
     onTeam: vi.fn(),
     onAgent: vi.fn(),
     onCloseChats: vi.fn(),
+    onRename: vi.fn(),
     closeCheck: vi.fn(async () => noLoss),
     closeWorker: vi.fn(async () => {}),
     onHistory: vi.fn(),
@@ -56,7 +66,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onDismissMoved: vi.fn(),
     onColors: vi.fn(),
   };
-  const props: React.ComponentProps<typeof Sidebar> = {
+  const props: Props = {
     ...h,
     mode: "pinned",
     width: SIDEBAR_DEFAULT,
@@ -70,7 +80,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     colors: {},
     ...over,
   };
-  const view = render(<Sidebar {...props} />);
+  const view = render(<Kept {...props} />);
   return { h, props, ...view };
 }
 
@@ -143,7 +153,7 @@ describe("the open sidebar's projects", () => {
 
   it("lists open chats as squares with their state", () => {
     setup();
-    expect(rowOf("Fix restore mode, lantern, Needs you")).toBeInTheDocument();
+    expect(rowOf("Fix restore mode, Claude, lantern, Needs you")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /, lantern, Working$/ }).length).toBeGreaterThanOrEqual(2);
     const row = rowOf(/Network tab polish/);
     expect(row).toHaveAttribute("aria-current", "true");
@@ -152,11 +162,18 @@ describe("the open sidebar's projects", () => {
     expect(row.querySelector(".sb-status")).toHaveTextContent("Working");
   });
 
+  it("shows each chat's provider beside its title", () => {
+    const open = { [LANTERN]: { ...lanternOpen, items: [{ kind: "chat" as const, ...chat("cx", "Code review", { provider: "Codex" }) }] } };
+    setup({ open });
+    const row = rowOf("Code review, Codex, lantern, Done");
+    expect(row.querySelector(".sb-provider")).toHaveTextContent("Codex");
+  });
+
   it("says when a chat is pinned or has tasks in the background", () => {
     const open = { [LANTERN]: { ...lanternOpen, items: [{ kind: "chat" as const, ...chat("s9", "Long task", { pinned: true, background: 2 }) }] } };
     setup({ open });
     const row = rowOf(/Long task/);
-    expect(row).toHaveAccessibleName("Long task, lantern, Done, pinned, 2 running in the background");
+    expect(row).toHaveAccessibleName("Long task, Claude, lantern, Done, pinned, 2 running in the background");
     expect(row.querySelector(".sb-pin")).not.toBeNull();
     expect(row.querySelector(".spinner")).not.toBeNull();
   });
@@ -180,10 +197,10 @@ describe("the open sidebar's projects", () => {
     const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "running" }), agents: [chat("a1", "Reviewer: login form", { state: "running", role: "Reviewer" }), chat("a2", "ui pass")] };
     setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });
     showAgents();
-    const row = screen.getByRole("button", { name: "Reviewer: login form, Reviewer, lantern, Working" });
+    const row = screen.getByRole("button", { name: "Reviewer: login form, Claude, Reviewer, lantern, Working" });
     expect(row).toHaveTextContent("Reviewer · Working");
     // An agent with no role reads as before.
-    expect(screen.getByRole("button", { name: "ui pass, lantern, Done" }).querySelector(".sb-status")?.textContent).toBe("Done");
+    expect(screen.getByRole("button", { name: "ui pass, Claude, lantern, Done" }).querySelector(".sb-status")?.textContent).toBe("Done");
   });
 
   it("says who needs you on the line that folds a team's agents", () => {
@@ -204,7 +221,7 @@ describe("the open sidebar's projects", () => {
     showAgents();
     const agents = screen.getByRole("list", { name: "Agents in audit sweep" });
     expect(within(agents).getAllByRole("button", { name: /, lantern,/ }).map((b) => b.getAttribute("title"))).toEqual(["security pass", "ui pass"]);
-    expect(within(agents).getByRole("button", { name: "ui pass, lantern, Unread" })).toBeInTheDocument();
+    expect(within(agents).getByRole("button", { name: "ui pass, Claude, lantern, Unread" })).toBeInTheDocument();
     const team = rowOf(/^Team: audit sweep/);
     expect(team.querySelector(".sb-chip")).toHaveClass("team");
     expect(team).toHaveTextContent("Team: audit sweep");
@@ -256,10 +273,10 @@ describe("the open sidebar's projects", () => {
     await waitFor(() => expect(onColors).toHaveBeenCalledWith({ [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 }));
     // Once saved (and after a restart, read back), nothing new is saved and the colours stay.
     const saved = { [MONITOR]: 0, [LANTERN]: 1, [IOS]: 2 };
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     onColors.mockClear();
-    rerender(<Sidebar {...props} colors={saved} />);
+    rerender(<Kept {...props} colors={saved} />);
     await act(async () => {});
     expect(color("lantern")).toBe(PROJECT_COLORS[1]);
     expect(onColors).not.toHaveBeenCalled();
@@ -294,11 +311,11 @@ describe("clicking in the open sidebar", () => {
     expect(more).toHaveFocus();
   });
 
-  it("has a ⋯ menu per project: New team, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
+  it("has a ⋯ menu per project: New team, Only this project, Close finished chats, Project notes…, Project setup…, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
@@ -469,6 +486,53 @@ describe("closing from the sidebar", () => {
     expect(within(project("lantern")).getByRole("status")).toHaveTextContent("Closed 2 finished chats");
   });
 
+  describe("naming a chat", () => {
+    const menuOf = (row: RegExp) => fireEvent.contextMenu(rowOf(row), { clientX: 30, clientY: 200 });
+
+    it("is in the menu of a right click: its name opens where the user pressed, and Enter keeps what was typed", () => {
+      const { h } = setup();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      expect(screen.queryByRole("menu", { name: "Chat" })).toBeNull();
+      const box = screen.getByRole("group", { name: "Rename Done chat" });
+      expect(box).toHaveStyle({ left: "30px", top: "200px" });
+      const input = within(box).getByRole("textbox", { name: "Chat name" });
+      expect(input).toHaveValue("Done chat");
+      fireEvent.change(input, { target: { value: "  Release 0.1.84 " } });
+      fireEvent.submit(box);
+      expect(h.onRename).toHaveBeenCalledWith("s3", "  Release 0.1.84 ");
+      expect(screen.queryByRole("group", { name: "Rename Done chat" })).toBeNull();
+    });
+
+    it("keeps nothing on Escape, a press elsewhere, or a name with nothing in it", () => {
+      const { h } = setup();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      const input = screen.getByRole("textbox", { name: "Chat name" });
+      fireEvent.change(input, { target: { value: "   " } });
+      expect(within(screen.getByRole("group", { name: "Rename Done chat" })).getByRole("button", { name: "Rename" })).toBeDisabled();
+      fireEvent.submit(screen.getByRole("group", { name: "Rename Done chat" }));
+      expect(h.onRename).not.toHaveBeenCalled();
+      fireEvent.keyDown(input, { key: "Escape" });
+      expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+      menuOf(/^Done chat/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rename chat" }));
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("textbox", { name: "Chat name" })).toBeNull();
+      expect(h.onRename).not.toHaveBeenCalled();
+    });
+
+    it("is not offered for a draft, which has no conversation to name, or for a team", () => {
+      setup();
+      menuOf(/^Typing a draft/);
+      expect(screen.getByRole("menuitem", { name: "Close chat" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Rename chat" })).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      menuOf(/^Team: audit sweep/);
+      expect(screen.queryByRole("menuitem", { name: "Rename chat" })).toBeNull();
+    });
+  });
+
   describe("in the collapsed bar", () => {
     const bar = (over: Partial<React.ComponentProps<typeof Sidebar>> = {}) => setup({ mode: "collapsed", ...over });
 
@@ -543,6 +607,66 @@ describe("New ▾", () => {
   });
 });
 
+describe("one project", () => {
+  it("picks a project from the button, lists only it under a banner in its colour, and shows every project again", async () => {
+    setup({ open: ALL_OPEN, colors: { [LANTERN]: 2, [MONITOR]: 1, [IOS]: 0 } });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "network-monitor" }));
+    expect(regions()).toEqual(["network-monitor"]);
+    const banner = screen.getByRole("status", { name: "Only network-monitor" });
+    expect(banner.style.getPropertyValue("--pc")).toBe(PROJECT_COLORS[1]);
+    expect(screen.getByRole("button", { name: "Show all projects", pressed: true })).toBeInTheDocument();
+    fireEvent.click(within(banner).getByRole("button", { name: "Show all projects" }));
+    expect(regions()).toHaveLength(3);
+    expect(screen.queryByRole("status", { name: /^Only/ })).toBeNull();
+  });
+
+  it("is kept across restarts", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toEqual(["lumiform-ios"]));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+  });
+
+  it("starts from a project's ⋯ menu, and the banner's + starts a chat there", async () => {
+    const { h } = setup({ open: ALL_OPEN });
+    await waitFor(() => expect(regions()).toHaveLength(3));
+    fireEvent.click(within(project("lantern")).getByRole("button", { name: "More for lantern" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Only this project" }));
+    expect(regions()).toEqual(["lantern"]);
+    fireEvent.click(within(screen.getByRole("status", { name: "Only lantern" })).getByRole("button", { name: "New chat in lantern" }));
+    expect(h.onNewChatIn).toHaveBeenCalledWith(LANTERN);
+  });
+
+  it("offers recent projects with nothing open, and picking one leaves only its banner", async () => {
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(regions()).toEqual(["lantern"]));
+    fireEvent.click(screen.getByRole("button", { name: "One project" }));
+    const menu = screen.getByRole("menu", { name: "Show only" });
+    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["lantern", "network-monitor", "lumiform-ios"]));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "lumiform-ios" }));
+    expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("keeps the banner when the chosen project has nothing open", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(IOS));
+    setup({ open: { [LANTERN]: lanternOpen } });
+    await waitFor(() => expect(screen.getByText(/Nothing open in lumiform-ios/)).toBeInTheDocument());
+    expect(screen.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("shows only that project's squares in the collapsed bar, under a strip of its colour", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(MONITOR));
+    setup({ mode: "collapsed", open: ALL_OPEN });
+    await waitFor(() => expect(screen.getByRole("img", { name: "Only network-monitor" })).toBeInTheDocument());
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-label"))).toEqual(["network-monitor"]);
+  });
+});
+
 describe("the Moved? notice", () => {
   it("sits on the header of an open project whose folder moved, and brings its chats or is dismissed", () => {
     const moved = [{ old: LANTERN, suggested: "/projects/lantern" }];
@@ -587,7 +711,7 @@ describe("resizing", () => {
     expect(h.onWidth).toHaveBeenLastCalledWith(316);
     fireEvent.keyDown(edge, { key: "ArrowLeft", shiftKey: true });
     expect(h.onWidth).toHaveBeenLastCalledWith(252);
-    rerender(<Sidebar {...props} width={SIDEBAR_MAX} />);
+    rerender(<Kept {...props} width={SIDEBAR_MAX} />);
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the sidebar" }), { key: "ArrowRight" });
     expect(h.onWidth).toHaveBeenLastCalledWith(SIDEBAR_MAX);
   });
@@ -671,11 +795,60 @@ describe("the collapsed sidebar", () => {
     expect(square(/Fix restore mode/)).not.toHaveAttribute("aria-current");
   });
 
+  describe("a folded project", () => {
+    const fold = (...folders: string[]) => localStorage.setItem("sidebar.expanded", JSON.stringify(Object.fromEntries(folders.map((f) => [f, false]))));
+    const squares = (name: string) => within(screen.getByRole("list", { name })).getAllByRole("button");
+
+    it("is one square for the project, not one for each chat, and the others keep theirs", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      expect(squares("lantern").map((b) => b.querySelector(".sb-initials")?.textContent)).toEqual(["LA"]);
+      expect(squares("network-monitor").map((b) => b.querySelector(".sb-initials")?.textContent)).toEqual(["RP"]);
+    });
+
+    it("has no mark and isn't lit when nothing in it works, needs you or is on screen", async () => {
+      fold(MONITOR);
+      bar();
+      await screen.findByRole("list", { name: "network-monitor" });
+      const [only] = squares("network-monitor");
+      expect(only.querySelectorAll(".sb-mark")).toHaveLength(0);
+      expect(only).not.toHaveAttribute("aria-current");
+      expect(only).toHaveAccessibleName("network-monitor, folded, 1 open chat");
+    });
+
+    it("carries the most pressing mark of its chats (needs you over working over unread), and says how many need you", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      const [only] = squares("lantern");
+      expect(Array.from(only.querySelectorAll(".sb-mark")).map((m) => m.className)).toEqual(["sb-mark waiting"]);
+      expect(only).toHaveAccessibleName("lantern, folded, 6 open chats, 1 needs you");
+    });
+
+    it("is lit while one of its chats is on screen", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      expect(squares("lantern")[0]).toHaveAttribute("aria-current", "true");
+      expect(squares("lantern")[0]).toHaveClass("current");
+    });
+
+    it("unfolds into its chats when its square is pressed", async () => {
+      fold(LANTERN);
+      bar();
+      await screen.findByRole("list", { name: "lantern" });
+      fireEvent.click(squares("lantern")[0]);
+      expect(squares("lantern")).toHaveLength(6);
+      expect(JSON.parse(localStorage.getItem("sidebar.expanded")!)).toEqual({ [LANTERN]: true });
+    });
+  });
+
   it("has the title, the project and the status as each row's name, and keeps the title and status beside the square", async () => {
     bar();
     await screen.findByRole("list", { name: "lantern" });
     const row = square(/Fix restore mode/);
-    expect(row).toHaveAccessibleName("Fix restore mode, lantern, Needs you");
+    expect(row).toHaveAccessibleName("Fix restore mode, Claude, lantern, Needs you");
     expect(row.querySelector(".sb-title")).toHaveTextContent("Fix restore mode");
     expect(row.querySelector(".sb-status")).toHaveTextContent("Needs you");
     expect(row.querySelector(".sb-status")).toHaveClass("waiting");

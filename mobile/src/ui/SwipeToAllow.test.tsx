@@ -81,6 +81,16 @@ describe("swipe to allow once allowed", () => {
   });
 });
 
+describe("swipe to allow taking the touch", () => {
+  it("takes it the moment the knob is touched, so what it sits in is held still before it can scroll, and not once it is allowed", async () => {
+    await render(<SwipeToAllow onAllow={jest.fn()} />);
+    const knob = () => screen.getByTestId("swipe-knob");
+    expect(knob().props.onStartShouldSetResponder({})).toBe(true);
+    await act(async () => activate());
+    expect(knob().props.onStartShouldSetResponder({})).toBe(false);
+  });
+});
+
 describe("swipe to allow while it is dragged", () => {
   it("shows no green until the knob moves, then fills the bar behind it", async () => {
     const x = await bar();

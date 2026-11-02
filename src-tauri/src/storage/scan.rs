@@ -189,7 +189,7 @@ pub fn worktrees(repo: &Path, env: &Env) -> Vec<Wt> {
     parse_worktrees(&out)
 }
 
-fn parse_worktrees(out: &str) -> Vec<Wt> {
+pub(crate) fn parse_worktrees(out: &str) -> Vec<Wt> {
     let mut list = vec![];
     let mut cur: Option<Wt> = None;
     for field in out.split('\0') {

@@ -44,6 +44,7 @@ describe("openProjects", () => {
   describe("ordered by recent activity", () => {
     const titles = (open: ReturnType<typeof openProjects>) => open["/work/lantern"].items.map((i) => i.title);
     const sentAt = (text: string, at: number) => ({ type: "user" as const, id: `u-${text}`, text, at });
+    const byTime = { ...opts, byActivity: true };
 
     it("lists the chat that did something last first, whatever order they were opened in", () => {
       const open = openProjects(
@@ -52,7 +53,7 @@ describe("openProjects", () => {
           newest: idle({ items: [said("newest")], activityAt: 3_000 }),
           middle: idle({ items: [said("middle")], activityAt: 2_000 }),
         }),
-        opts,
+        byTime,
       );
       expect(titles(open)).toEqual(["newest", "middle", "old"]);
     });
@@ -60,17 +61,17 @@ describe("openProjects", () => {
     it("moves a chat up when it does something, and a chat that needs you doesn't jump above one that did something later", () => {
       const waiting = idle({ items: [said("waiting"), asking], activityAt: 1_000 });
       const later = idle({ items: [said("later")], activityAt: 5_000 });
-      expect(titles(openProjects(chats({ waiting, later }), opts))).toEqual(["later", "waiting"]);
-      expect(titles(openProjects(chats({ waiting: { ...waiting, activityAt: 9_000 }, later }), opts))).toEqual(["waiting", "later"]);
+      expect(titles(openProjects(chats({ waiting, later }), byTime))).toEqual(["later", "waiting"]);
+      expect(titles(openProjects(chats({ waiting: { ...waiting, activityAt: 9_000 }, later }), byTime))).toEqual(["waiting", "later"]);
     });
 
     it("puts the chats working now first, ordered by when their turn began, so working chats don't swap places as they write", () => {
       const working = (text: string, began: number, lastLine: number) => idle({ status: "running", items: [sentAt(text, began)], activityAt: lastLine });
       const idleRecently = idle({ items: [said("idle")], activityAt: 50_000 });
-      const first = openProjects(chats({ idleRecently, a: working("a", 1_000, 60_000), b: working("b", 2_000, 61_000) }), opts);
+      const first = openProjects(chats({ idleRecently, a: working("a", 1_000, 60_000), b: working("b", 2_000, 61_000) }), byTime);
       expect(titles(first)).toEqual(["b", "a", "idle"]);
       // "a" writes another line: still behind "b", which began later.
-      const second = openProjects(chats({ idleRecently, a: working("a", 1_000, 99_000), b: working("b", 2_000, 61_000) }), opts);
+      const second = openProjects(chats({ idleRecently, a: working("a", 1_000, 99_000), b: working("b", 2_000, 61_000) }), byTime);
       expect(titles(second)).toEqual(["b", "a", "idle"]);
     });
 
@@ -84,7 +85,7 @@ describe("openProjects", () => {
           },
           { agents: { a1: meta("lead", "worker") } },
         ),
-        opts,
+        byTime,
       );
       expect(titles(open)).toEqual(["team", "plain"]);
       const quiet = openProjects(
@@ -96,9 +97,29 @@ describe("openProjects", () => {
           },
           { agents: { a1: meta("lead", "worker") } },
         ),
-        opts,
+        byTime,
       );
       expect(titles(quiet)).toEqual(["plain", "team"]);
+    });
+  });
+
+  describe("without the activity order (the default)", () => {
+    const titles = (open: ReturnType<typeof openProjects>) => open["/work/lantern"].items.map((i) => i.title);
+
+    it("lists nothing for no chats, and keeps the opening order for chats that never did anything", () => {
+      expect(openProjects(chats({}), opts)).toEqual({});
+      expect(titles(openProjects(chats({ a: idle({ items: [said("a")] }), b: idle({ items: [said("b")] }) }), opts))).toEqual(["a", "b"]);
+    });
+
+    it("keeps a chat in its place when it does something later than the others", () => {
+      const open = openProjects(chats({ old: idle({ items: [said("old")], activityAt: 1_000 }), newest: idle({ items: [said("newest")], activityAt: 9_000 }), middle: idle({ items: [said("middle")], activityAt: 2_000 }) }), opts);
+      expect(titles(open)).toEqual(["old", "newest", "middle"]);
+    });
+
+    it("keeps a chat that is working now in its place too, and still counts what needs you", () => {
+      const open = openProjects(chats({ idle: idle({ items: [said("idle")], activityAt: 1_000 }), working: idle({ status: "running", items: [said("working")], activityAt: 9_000 }), waiting: idle({ items: [said("waiting"), asking], activityAt: 5_000 }) }), opts);
+      expect(titles(open)).toEqual(["idle", "working", "waiting"]);
+      expect(open["/work/lantern"].needs).toBe(1);
     });
   });
 
@@ -151,7 +172,7 @@ describe("openProjects", () => {
   it("calls an empty Lead a new team, lists no chat without a folder, and marks pinned chats", () => {
     const open = openProjects(
       chats({ s1: idle({ items: [said("current")], sessionId: "c" }), lead: idle({ orchestrator: true }), blank: idle({ folder: null }), s4: idle({ items: [said("done one")], sessionId: "d" }), s5: idle({ items: [said("running")], status: "running" }) }),
-      { ...opts, pinned: { "/work/lantern": ["d"] }, drafts: { s5: "" } },
+      { ...opts, byActivity: true, pinned: { "/work/lantern": ["d"] }, drafts: { s5: "" } },
     );
     const items = open["/work/lantern"].items;
     // The chat working now comes first; the rest keep the order they were opened in, none of them having done anything.

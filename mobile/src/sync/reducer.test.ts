@@ -134,6 +134,24 @@ describe("turns", () => {
   });
 });
 
+describe("the post-hook", () => {
+  it("marks where the hook's turn begins, once however often it is told, after the answer", () => {
+    const hook: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    const s = run([...turn.slice(0, 5), hook, hook, { kind: "assistant_text", block_id: "h1", text: "Updated." } as RemoteEvent].map((e, i) => event("a", i + 1, e)));
+    const kinds = items(s).map((it) => it.kind);
+    expect(kinds).toEqual(["user", "assistant", "hook", "assistant"]);
+    expect(items(s)[2]).toEqual({ kind: "hook", id: "hook-u-1-ship it", text: "Update the brain if needed" });
+  });
+
+  it("keeps the first hook's place when a second comes in the same turn (a Stop hook, then the post-hook)", () => {
+    const stop: RemoteEvent = { kind: "hook_turn", text: "Before you finish: save it." };
+    const post: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    const said = (id: string, text: string) => ({ kind: "assistant_text", block_id: id, text }) as RemoteEvent;
+    const s = run([...turn.slice(0, 5), stop, said("h1", "Saved."), post, said("h2", "Nothing more.")].map((e, i) => event("a", i + 1, e)));
+    expect(items(s).map((it) => it.kind)).toEqual(["user", "assistant", "hook", "assistant", "assistant"]);
+  });
+});
+
 describe("a message sent from this phone", () => {
   it("shows at once, and the Mac's copy takes its place", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "ship it", at: 5 });
@@ -189,6 +207,30 @@ describe("prompts", () => {
     s = run([event("a", 2, { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" })], s);
     expect(openPrompts(s.views.a)).toHaveLength(0);
     expect(items(s)[0]).toMatchObject({ state: "allowed", by: "desktop" });
+  });
+
+  it("reconciles replayed approvals against the authoritative pending list without guessing their answer", () => {
+    let s = run([reset("a", 12, [asked, { ...asked, request_id: "live" }])]);
+    const pending: Waiting = { slot: "a", chat_title: "A chat", request_id: "live", tool_name: "Bash", input: {}, at: 1 };
+    s = reducer(s, { type: "waiting", list: [pending], observedPrompts: { a: ["p1", "live"] } });
+    expect(items(s)[0]).toMatchObject({ id: "p1", state: "withdrawn", by: null });
+    expect(openPrompts(s.views.a).map((p) => p.id)).toEqual(["live"]);
+    // A delayed real outcome still replaces the neutral status.
+    s = reducer(s, event("a", 13, { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" }));
+    expect(items(s)[0]).toMatchObject({ state: "allowed", by: "desktop" });
+  });
+
+  it("does not dismiss a new live approval using an older pending-list response", () => {
+    const s = run([reset("a", 12, []), event("a", 13, asked)]);
+    const next = reducer(s, { type: "waiting", list: [], observedPrompts: { a: [] } });
+    expect(openPrompts(next.views.a).map((p) => p.id)).toEqual(["p1"]);
+  });
+
+  it("does not reopen an answered approval when loading overlapping earlier history", () => {
+    const s = run([event("a", 1, asked), event("a", 2, { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" })]);
+    const next = reducer(s, { type: "earlier", slot: "a", hidden: 0, events: [asked] });
+    expect(openPrompts(next.views.a)).toHaveLength(0);
+    expect(items(next)[0]).toMatchObject({ state: "allowed", by: "desktop" });
   });
 
   it("remember what this phone answered a question with, for showing beside it", () => {
@@ -306,6 +348,18 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
     expect(run([event("b", 1, done(200_000))]).views.b.context).toBeNull();
   });
 
+  it("keep what runs in the background as it was last said, until the chat's claude ends or sleeps", () => {
+    const background = (...tasks: string[]): RemoteEvent => ({ kind: "background", tasks });
+    let s = run([event("a", 1, background("npm run dev", "cargo watch"))]);
+    expect(s.views.a.background).toEqual(["npm run dev", "cargo watch"]);
+    expect(items(s)).toEqual([]);
+    s = run([event("a", 2, background("cargo watch"))], s);
+    expect(s.views.a.background).toEqual(["cargo watch"]);
+    expect(run([event("a", 3, { kind: "asleep", asleep: true })], s).views.a.background).toEqual([]);
+    expect(run([event("a", 3, { kind: "asleep", asleep: false })], s).views.a.background).toEqual(["cargo watch"]);
+    expect(run([event("a", 3, { kind: "session_ended", code: 0 })], s).views.a.background).toEqual([]);
+  });
+
   it("stay through a catch-up that starts the chat over, and come again with it", () => {
     const hi: RemoteEvent = { kind: "user_text", text: "hi", at: 1, sent_by: null };
     const s = run([event("a", 1, commands), reset("a", 9, [hi])]);
@@ -324,6 +378,10 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
   it("make the account's usage the app's, whichever chat is open, and ignore a message it doesn't know", () => {
     const plan: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed" } };
     expect(run([plan]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed" });
+    // The weekly window comes with it from a Mac that knows it, and is gone again from one message that doesn't have it.
+    const withWeek: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed", week_used: 0.25, week_resets_at: 777 } };
+    expect(run([withWeek]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed", week: { used: 0.25, resetsAt: 777 } });
+    expect(run([withWeek, plan]).plan?.week).toBeUndefined();
     const unknown = { type: "from_a_newer_mac" } as unknown as Action extends { msg: infer M } ? M : never;
     const before = run([plan]);
     expect(reducer(before, { type: "pushed", msg: unknown } as Action)).toEqual(before);
@@ -349,4 +407,14 @@ describe("when each working chat started", () => {
     const again = reducer(first, list(chatOf("a", "working", 300)));
     expect(again.workingSince).toBe(first.workingSince);
   });
+});
+
+it("keeps provider snapshots independent from Claude and clears them for a new Mac run", () => {
+  const usage = { provider: "codex", updated_at: 10, windows: [{ label: "5 hours", minutes: 300, used: .2, resets_at: null }] };
+  const before = run([{ type: "pushed", msg: { type: "plan", used: 1, resets_at: null, status: "rejected" } }, { type: "pushed", msg: { type: "provider_usage", usage: [usage] } }]);
+  expect(before.plan?.used).toBe(1);
+  expect(before.providerUsage.codex.windows[0].used).toBe(.2);
+  const after = reducer(before, { type: "welcome", epoch: 999 });
+  expect(after.plan).toBeNull();
+  expect(after.providerUsage).toEqual({});
 });

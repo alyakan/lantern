@@ -1,0 +1,251 @@
+import { describe, expect, it } from "vitest";
+import { initialState, type ChatItem, type State } from "../store";
+import type { Chats } from "../sessions";
+import { answerShape, clip, deskFeed, deskHistory, replyOf, type DeskEntry, readLog, deskLive, MAX_CARDS, plain, routeCandidates, SAID_CHARS, windowDesk } from "./desk";
+import { addDesk, moveProject, NO_DESKS } from "./desks";
+import { openProjects } from "./sidebar";
+
+const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
+const said = (text: string, at?: number, auto = false): ChatItem => ({ type: "user", id: `u-${text}`, text, at, ...(auto ? { auto } : {}) });
+const answer = (text: string, id = text): ChatItem => ({ type: "assistant", id: `a-${id}`, text });
+const turn = (id: string, over: { isError?: boolean; stopped?: boolean } = {}): ChatItem => ({ type: "turn", id, isError: false, stopped: false, result: null, durationMs: 1, denied: 0, ...over });
+const chats = (slots: Record<string, State>): Chats => ({ active: Object.keys(slots)[0], slots, agents: {} });
+const open = (c: Chats) => openProjects(c, { titles: {}, drafts: {}, unread: {}, pinned: {} });
+const feed = (c: Chats) => deskFeed(c, open(c));
+
+describe("the Desk's feed", () => {
+  it("has a card for each finished answer: which chat, what you said, and the start of Claude's last words", () => {
+    const c = chats({ s1: idle({ items: [said("Fix the build", 100), answer("Looking."), answer("Fixed: the **lockfile** was stale."), turn("t1")] }) });
+    expect(feed(c)).toEqual([{ key: "s1:t1", slot: "s1", title: "Fix the build", where: "lantern", at: 100, asked: "Fix the build", auto: false, said: "Fixed: the lockfile was stale.", outcome: "done" }]);
+  });
+
+  it("leaves out a turn still going, and says when one failed or was stopped", () => {
+    const c = chats({ s1: idle({ status: "running", items: [said("one", 1), answer("x"), turn("t1", { isError: true }), said("two", 2), turn("t2", { stopped: true }), said("three", 3), answer("going")] }) });
+    expect(feed(c).map((k) => [k.asked, k.outcome])).toEqual([
+      ["one", "failed"],
+      ["two", "stopped"],
+    ]);
+  });
+
+  it("puts every chat's cards in the order they were asked, and says when Claude went on by itself", () => {
+    const c = chats({
+      s1: idle({ items: [said("first", 10), answer("a"), turn("t1"), said("A background task ended", 30, true), answer("c"), turn("t3")] }),
+      s2: idle({ folder: "/work/site", items: [said("second", 20), answer("b"), turn("t2")] }),
+    });
+    expect(feed(c).map((k) => [k.asked, k.where, k.auto])).toEqual([
+      ["first", "lantern", false],
+      ["second", "site", false],
+      ["A background task ended", "lantern", true],
+    ]);
+  });
+
+  it("ends the card where the post-hook starts: what its run says isn't the answer", () => {
+    const c = chats({ s1: idle({ items: [said("Ship it", 1), answer("Shipped."), { type: "hook", id: "h", text: "Update the brain" }, answer("Nothing new to save."), turn("t1")] }) });
+    expect(feed(c).map((k) => k.said)).toEqual(["Shipped."]);
+  });
+
+  it("has the cards of a chat reopened from its transcript, which has no turn ends, with the post-hook's run left out", () => {
+    const hook: ChatItem = { type: "hook", id: "h1", text: "Update the brain" };
+    const c = chats({ s1: idle({ items: [said("Fix it", 1), answer("Fixed."), hook, answer("Nothing new to save."), said("Ship it", 2), answer("Shipped.")] }) });
+    expect(feed(c).map((k) => [k.asked, k.said])).toEqual([
+      ["Fix it", "Fixed."],
+      ["Ship it", "Shipped."],
+    ]);
+  });
+
+  it("has no card yet for a reopened chat's last message while it is being answered", () => {
+    const c = chats({ s1: idle({ status: "running", items: [said("Fix it", 1), answer("Fixed."), said("Ship it", 2), answer("Working on")] }) });
+    expect(feed(c).map((k) => k.asked)).toEqual(["Fix it"]);
+  });
+
+  it("keeps only the newest cards", () => {
+    const items = Array.from({ length: MAX_CARDS + 5 }, (_, i) => [said(`m${i}`, i), answer("ok", `${i}`), turn(`t${i}`)]).flat();
+    const cards = feed(chats({ s1: idle({ items }) }));
+    expect(cards).toHaveLength(MAX_CARDS);
+    expect(cards[0].asked).toBe("m5");
+  });
+
+  it("cuts a long answer at a word, on one line", () => {
+    const long = `${"word ".repeat(100)}end`;
+    const card = feed(chats({ s1: idle({ items: [said("q", 1), answer(long), turn("t1")] }) }))[0];
+    expect(card.said.length).toBeLessThanOrEqual(SAID_CHARS);
+    expect(card.said.endsWith("word…")).toBe(true);
+  });
+});
+
+describe("the Desk's live line", () => {
+  it("lists the chats working and waiting, the waiting first, with what each is doing", () => {
+    const running: State = idle({ status: "running", items: [said("Run the tests", 1), { type: "tool", id: "x", name: "Bash", summary: "npm test", status: "running", output: null, edit: null, children: [] }] });
+    const waiting: State = idle({ folder: "/work/site", items: [said("Deploy", 2), { type: "permission", id: "p", toolName: "Bash", input: { command: "ls" }, decision: null }] });
+    const done: State = idle({ items: [said("Done one", 3), answer("ok"), turn("t")] });
+    const c = chats({ s1: running, s2: waiting, s3: done });
+    expect(deskLive(c, open(c)).map((l) => [l.slot, l.waiting, l.line])).toEqual([
+      ["s2", true, "Needs you"],
+      ["s1", false, "Bash: npm test"],
+    ]);
+  });
+});
+
+describe("what the router is shown of each chat", () => {
+  it("is its name, project, settings and what it was last asked and answered, never the post-hook's reply", () => {
+    const hook: ChatItem = { type: "hook", id: "h", text: "Update the brain" };
+    const c = chats({ s1: idle({ items: [said("Fix the push sound", 1), answer("Only approvals buzz now."), turn("t1"), hook, answer("Nothing new to save."), turn("t2")] }) });
+    expect(routeCandidates(c, open(c))).toEqual([{ id: "s1", title: "Fix the push sound", project: "lantern", workflow: "chat", status: "idle", last: "Asked: Fix the push sound Answered: Only approvals buzz now." }]);
+  });
+
+  it("is only its project and settings for a chat on another provider: nothing said there is put to Claude", () => {
+    const c = chats({ s1: idle({ items: [said("Secret plans", 1), answer("Noted."), turn("t1")] }) });
+    expect(routeCandidates(c, open(c), (slot) => slot === "s1")).toEqual([{ id: "s1", title: "", project: "lantern", workflow: "chat", status: "idle", last: "" }]);
+  });
+});
+
+describe("what a phone's Desk is told", () => {
+  it("is each Desk's projects and chats, and every card with the Desk it is on", () => {
+    const c = chats({
+      s1: idle({ items: [said("Fix the build", 1), answer("Fixed."), turn("t1")] }),
+      s2: idle({ folder: "/work/job", items: [said("Ship the release", 2), answer("Shipped."), turn("t2")] }),
+    });
+    const desks = moveProject(addDesk(NO_DESKS, "Work", "work")!, "/work/job", "work");
+    const told = windowDesk(c, open(c), desks);
+    expect(told.desks.map((d) => [d.id, d.name, d.projects, d.chats.map((x) => x.id)])).toEqual([
+      ["home", "Desk", [{ folder: "/work/lantern", label: "lantern" }], ["s1"]],
+      ["work", "Work", [{ folder: "/work/job", label: "job" }], ["s2"]],
+    ]);
+    expect(told.cards.map((k) => [k.desk, k.asked])).toEqual([
+      ["home", "Fix the build"],
+      ["work", "Ship the release"],
+    ]);
+  });
+
+  it("lists a project given to a Desk with nothing open in it, for starting a chat there", () => {
+    const c = chats({ s1: idle() });
+    const desks = moveProject(addDesk(NO_DESKS, "Work", "work")!, "/work/job", "work");
+    expect(windowDesk(c, open(c), desks).desks[1].projects).toEqual([{ folder: "/work/job", label: "job" }]);
+  });
+});
+
+describe("a card's text", () => {
+  it("drops markdown's marks, keeping a bullet for each item of a list", () => {
+    expect(plain("# Done\n\n- **bold** and `code`, a [link](http://x)\n```\nhidden\n```")).toBe("Done\n\n• bold and code, a link\n ");
+  });
+
+  it("is left whole when it fits", () => {
+    expect(clip("  short\n text ", 20)).toBe("short text");
+  });
+});
+
+describe("the Desk's messages read back", () => {
+  it("says an answer that wasn't finished when Lantern closed has none, and keeps a finished one", () => {
+    const at = 1;
+    const read = readLog([
+      { id: "a", desk: "home", at, text: "How is it?", also: [], outcome: { kind: "answer", terms: "it", hits: [], text: null } },
+      { id: "b", desk: "home", at, text: "And now?", also: [], outcome: { kind: "answer", terms: "it", hits: null, text: null } },
+      { id: "c", desk: "home", at, text: "Done?", also: [], outcome: { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" } },
+    ]);
+    expect(read.map((e) => e.outcome)).toEqual([
+      { kind: "answer", terms: "it", hits: [], text: null, error: "Lantern closed before it answered." },
+      { kind: "answer", terms: "it", hits: "failed", text: null, error: "Lantern closed before it answered." },
+      { kind: "answer", terms: "it", hits: [], text: "- Yes [1]" },
+    ]);
+  });
+});
+
+describe("the Desk's answer, laid out", () => {
+  it("reads the sentence that answers, then Done, Open and Blocked, in that order whatever order they came in", () => {
+    const text = "Almost done: pairing works, one test is red.\n\n**Blocked**\n- UI test fails on CI only [3]\n\n**Done**\n- Pairing screen [1]\n- Fake sensor for **demos** [2]\n\n**Open**\n- Reconnect after sleep [1]";
+    expect(answerShape(text)).toEqual({
+      lead: "Almost done: pairing works, one test is red.",
+      parts: [
+        { part: "done", points: ["Pairing screen [1]", "Fake sensor for demos [2]"] },
+        { part: "open", points: ["Reconnect after sleep [1]"] },
+        { part: "blocked", points: ["UI test fails on CI only [3]"] },
+      ],
+    });
+  });
+
+  it("takes the parts written as `Done:` or a heading, leaves out empty ones, and joins a point that runs onto a second line", () => {
+    expect(answerShape("Started.\nDone:\n- one\n  and more\n## Open\n**Blocked**")).toEqual({ lead: "Started.", parts: [{ part: "done", points: ["one and more"] }] });
+  });
+
+  it("takes a lone sentence (the chats didn't tell), and shows anything else as it came", () => {
+    expect(answerShape("The chats don't say how far it got.")).toEqual({ lead: "The chats don't say how far it got.", parts: [] });
+    expect(answerShape("- a bullet first\n- another")).toBeNull();
+    expect(answerShape("Para one.\nPara two.\nPara three.")).toBeNull();
+    expect(answerShape("")).toBeNull();
+  });
+});
+
+describe("the Desk's answer as Sonnet really writes it", () => {
+  it("lays out a real answer (from `cargo test real_desk_answer -- --ignored`)", () => {
+    const text = "Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.\n\n**Done**\n- Aruana's PR merged into spike/testo; Mac advertises real readings [1]\n\n**Open**\n- iPad pairing screen still left to do [1]\n- Unpairing a sensor is next [2]\n- Demo build on TestFlight after that [2]\n\n**Blocked**\n- Probe firmware needed for temperature units [2]";
+    const shape = answerShape(text);
+    expect(shape?.lead).toBe("Testo is partly done: Aruana's PR is merged, but pairing, unpairing and the demo build remain.");
+    expect(shape?.parts.map((p) => [p.part, p.points.length])).toEqual([
+      ["done", 1],
+      ["open", 3],
+      ["blocked", 1],
+    ]);
+  });
+});
+
+describe("what came back to a Desk message", () => {
+  it("finds the turn the message started in its chat, once it finished, with the whole of Claude's last words", () => {
+    const s = idle({ items: [said("older ask", 50), answer("old"), turn("t0"), said("[Lantern: a note]\n\nCap the delay at 8s", 1000), answer("Looking."), answer("Capped it at **8s** and added a test."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 990)).toEqual({ key: "s1:t1", said: "Capped it at **8s** and added a test.", outcome: "done" });
+  });
+
+  it("finds a queued message in the turn it was sent with, joined to the others queued", () => {
+    const s = idle({ items: [said("first\n\nCap the delay at 8s", 2000), answer("Both done."), turn("t1")] });
+    expect(replyOf("s1", s, "Cap the delay at 8s", 1500)?.key).toBe("s1:t1");
+  });
+
+  it("finds nothing while the turn runs, in a turn from before the message, or ending at the post-hook's reply", () => {
+    expect(replyOf("s1", idle({ status: "running", items: [said("Cap it", 1000), answer("Working on")] }), "Cap it", 990)).toBeNull();
+    expect(replyOf("s1", idle({ items: [said("Cap it", 100), answer("Done."), turn("t1")] }), "Cap it", 10_000)).toBeNull();
+    const hook: ChatItem = { type: "hook", id: "h", text: "Update the brain" };
+    expect(replyOf("s1", idle({ items: [said("Ship it", 1000), answer("Shipped."), hook, answer("Nothing new to save."), turn("t1")] }), "Ship it", 990)?.said).toBe("Shipped.");
+  });
+
+  it("tells the Desk the last exchanges on this Desk only, with what came back, and nothing from a chat on another provider", () => {
+    const base = { also: [], at: 1 };
+    const entries: DeskEntry[] = [
+      { ...base, id: "a", desk: "home", text: "cap the delay", say: "On it.", outcome: { kind: "sent", slot: "s1", title: "Retries", started: false, queued: false }, reply: { status: "done", key: "k", full: "x", outcome: "done", summary: "Capped at 8s." } },
+      { ...base, id: "b", desk: "work", text: "elsewhere", outcome: { kind: "talk" } },
+      { ...base, id: "c", desk: "home", text: "fix the copy", outcome: { kind: "sent", slot: "s2", title: "Gemini chat", started: false, queued: false }, reply: { status: "done", key: "k2", full: "y", outcome: "done", summary: "secret" } },
+      { ...base, id: "d", desk: "home", text: "hi", say: "Hi!", outcome: { kind: "talk" } },
+    ];
+    expect(deskHistory(entries, "home", (slot) => slot === "s2")).toEqual([
+      { you: "cap the delay", desk: 'On it. (sent to "Retries"; it replied: Capped at 8s.)' },
+      { you: "fix the copy", desk: "(sent to)" },
+      { you: "hi", desk: "Hi!" },
+    ]);
+  });
+
+  it("reads back what the Desk said and what came back, a summary cut short by closing as failed, and older messages as they were", () => {
+    const [kept, cut, old] = readLog([
+      { id: "a", desk: "home", at: 1, text: "x", also: [], say: "On it.", outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "done", key: "k", full: "f", outcome: "done", summary: "S" } },
+      { id: "b", desk: "home", at: 2, text: "y", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "summarizing", key: "k", full: "f", outcome: "done" } },
+      { id: "c", desk: "home", at: 3, text: "z", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false } },
+    ]);
+    expect([kept.say, kept.reply?.status]).toEqual(["On it.", "done"]);
+    expect(cut.reply).toMatchObject({ status: "failed", why: expect.stringMatching(/closed/) });
+    expect(old.reply).toBeUndefined();
+  });
+});
+
+describe("a Desk message's reply is never another turn's", () => {
+  it("doesn't take a turn that only holds its words inside something else, or one Claude went on with by itself", () => {
+    const typed = idle({ items: [said("yes, and also fix the footer", 2000), answer("Both."), turn("t1")] });
+    expect(replyOf("s1", typed, "yes", 1000)).toBeNull();
+    const auto = idle({ items: [said("yes", 2000, true), answer("Went on."), turn("t1")] });
+    expect(replyOf("s1", auto, "yes", 1000)).toBeNull();
+    // The whole message, or a whole part of a queue, after Lantern's notes.
+    expect(replyOf("s1", idle({ items: [said("[Lantern: a]\n\n[Lantern: b]\n\nyes", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+    expect(replyOf("s1", idle({ items: [said("yes\n\nand the footer", 2000), answer("Ok."), turn("t1")] }), "yes", 1000)?.key).toBe("s1:t1");
+  });
+
+  it("stops waiting for a reply across a restart, as the chat's place may be another chat's by then", () => {
+    const [entry] = readLog([{ id: "a", desk: "home", at: 1, text: "x", also: [], outcome: { kind: "sent", slot: "s1", title: "T", started: false, queued: false }, reply: { status: "waiting" } }]);
+    expect(entry.reply).toEqual({ status: "lost" });
+  });
+});

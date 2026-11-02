@@ -28,9 +28,23 @@ describe("deciding", () => {
     await decide();
     expect(screen.getByText("Run a command")).toBeTruthy();
     expect(screen.getByText("Push the release branch")).toBeTruthy();
-    expect(screen.getByText("Release 0.1.53, in lantern")).toBeTruthy();
+    // Where: the project, the chat, and how long it has waited.
+    expect(screen.getByText("lantern")).toBeTruthy();
+    expect(screen.getByText("Release 0.1.53")).toBeTruthy();
+    expect(screen.getByText(/ ago$|^just now$/)).toBeTruthy();
+    expect(screen.getByText("COMMAND")).toBeTruthy();
     expect(screen.getByText("git push origin release/0.1.53")).toBeTruthy();
     expect(screen.getByText(/This runs on/)).toBeTruthy();
+  });
+
+  it("floats its buttons over the decision, with nothing laid behind them, and keeps room under the decision's last words", async () => {
+    await decide();
+    const buttons = screen.getByTestId("decide-buttons");
+    const style = StyleSheet.flatten(buttons.props.style);
+    expect(style).toMatchObject({ position: "absolute", bottom: 0 });
+    expect(style.backgroundColor).toBeUndefined();
+    await act(async () => fireEvent(buttons, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 360, height: 120 } } }));
+    expect(StyleSheet.flatten(screen.getByTestId("decide-scroll").props.contentContainerStyle).paddingBottom).toBe(136);
   });
 
   it("a tap on the swipe does not allow anything", async () => {
@@ -237,6 +251,35 @@ describe("deciding", () => {
     await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: true }));
     expect(approvalOf("Bash", {})).toBeNull();
   });
+
+  it("an approval as the Mac sends it shows all of what Claude says about it, and sends a note with the answer", async () => {
+    const details = "CI is green on both checks.\nSquash merge, then delete the branch.";
+    const approval = waiting({ request_id: "ap", tool_name: "Approval", input: { action: "Merge PR #144", details } });
+    const { lastOf } = await decide(approval);
+    expect(screen.getByText("Approve Merge PR #144?")).toBeTruthy();
+    expect(screen.getByText("WHAT CLAUDE SAYS")).toBeTruthy();
+    expect(screen.getByText(details)).toBeTruthy();
+    expect(screen.queryByText(/This runs on/)).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("A note for Claude"), "  after lunch  ");
+    await act(async () => void activate(screen.getByLabelText("Swipe to approve")));
+    await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: true, message: "after lunch" }));
+  });
+
+  it("an approval with no details says so, and a denial goes without a blank note", async () => {
+    const { lastOf } = await decide(waiting({ request_id: "ap", tool_name: "Approval", input: { action: "Push tag v1" } }));
+    expect(screen.getByText(/Claude gave no details/)).toBeTruthy();
+    await act(async () => void fireEvent.press(screen.getByText("Don't approve")));
+    await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "ap", allow: false, message: null }));
+  });
+
+  it("an MCP tool lists everything it is given, not only its first line", async () => {
+    await decide(waiting({ request_id: "t", tool_name: "mcp__github__create_issue", input: { repo: "alyakan/lantern", title: "Bug", labels: ["mobile"] } }));
+    expect(screen.getByText("WHAT IT IS GIVEN")).toBeTruthy();
+    expect(screen.getByText("alyakan/lantern")).toBeTruthy();
+    expect(screen.getByText("Bug")).toBeTruthy();
+    expect(screen.getByText(/"mobile"/)).toBeTruthy();
+    expect(screen.queryByLabelText("A note for Claude")).toBeNull();
+  });
 });
 
 describe("a question", () => {
@@ -282,5 +325,30 @@ describe("a question's answers", () => {
     expect(answersFrom(qs, { "One?": ["a"], "Many?": ["x"] }, { "One?": " mine " })).toEqual({ "One?": "mine", "Many?": "x" });
     expect(answersFrom(qs, { "One?": ["a"] }, {})).toBeNull();
     expect(answersFrom(qs, {}, {})).toBeNull();
+  });
+});
+
+describe("a file change", () => {
+  const edit = waiting({ request_id: "e1", tool_name: "Edit", input: { file_path: "/p/a.ts", old_string: "let a = 1;", new_string: "let a = 2;" } });
+
+  it("shows the diff it would make before it is allowed", async () => {
+    await decide(edit);
+    expect(screen.getByTestId("diff-preview")).toBeTruthy();
+    expect(screen.getByText("What changes")).toBeTruthy();
+    expect(screen.getByText("+1 −1")).toBeTruthy();
+    expect(screen.getByText("let a = 1;")).toBeTruthy();
+    expect(screen.getByText("let a = 2;")).toBeTruthy();
+    expect(screen.queryByText(/Only part of this change/)).toBeNull();
+  });
+
+  it("says when only part of the change is shown", async () => {
+    await decide(waiting({ request_id: "e2", tool_name: "Write", input: { file_path: "/p/b.ts", content: "x\n… (cut short: the rest is on your Mac)" } }));
+    expect(screen.getByText(/Only part of this change is shown/)).toBeTruthy();
+    expect(screen.getByText("What it writes")).toBeTruthy();
+  });
+
+  it("has no diff for a command", async () => {
+    await decide();
+    expect(screen.queryByTestId("diff-preview")).toBeNull();
   });
 });

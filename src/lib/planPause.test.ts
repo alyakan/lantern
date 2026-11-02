@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { loadPauseMemory, pauseAtPercent, pausedLine, pauseStep, pauseWarning, savePauseMemory, setPauseAtPercent, usePauseAtPercent, windowKey } from "./planPause";
+import { pauseEndsAt, loadPauseMemory, pauseAtPercent, pausedLine, pauseStep, pauseWarning, savePauseMemory, setPauseAtPercent, usePauseAtPercent, windowKey } from "./planPause";
 
 const plan = (percent: number, resetsAt: number | null = 2_000_000) => ({ used: percent / 100, resetsAt });
 const none = { paused: null, warned: null };
@@ -84,4 +84,9 @@ describe("the words", () => {
     expect(pausedLine({ percent: 96, resetsAt: now / 1000 - 5 }, now)).toBe("Paused: your plan is 96% used, it is resetting now");
     expect(pauseWarning(90, 95)).toBe("Your plan is 90% used. Lantern will pause the teams' work at 95%.");
   });
+});
+
+it("does not invent a five-hour reset for Codex when none was reported", () => {
+  expect(pauseEndsAt({ provider: "codex", resetsAt: null, since: 0 })).toBeNull();
+  expect(pauseEndsAt({ provider: "codex", resetsAt: 100, since: 0 })).toBe(100000);
 });

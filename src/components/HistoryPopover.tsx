@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ChatSearchResults, OldLocation, SessionSummary } from "../types";
 import { pinnedFirst, type SessionActions } from "../lib/sessionActions";
 import { PlusIcon } from "./icons";
@@ -105,7 +105,9 @@ export function HistoryPopover({ projects, initial = null, exclude, load, loadOl
     return () => clearTimeout(timer);
   }, [text, searching]);
 
-  useEffect(() => {
+  // Set up in the commit that shows History, not after it: a passive effect can run late, and an Escape or a press outside
+  // that comes first (the instant History appears) would be lost and leave it open.
+  useLayoutEffect(() => {
     // The button that opens History toggles it, so a press on it isn't "outside".
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && !(e.target as Element).closest?.("[data-history-toggle]") && onClose();
     const onKey = (e: KeyboardEvent) => {

@@ -2249,7 +2249,7 @@ dependencies = [
 
 [[package]]
 name = "lantern"
-version = "0.1.64"
+version = "0.1.97"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -2258,6 +2258,7 @@ dependencies = [
  "ignore",
  "libc",
  "muda",
+ "objc2",
  "qrcode",
  "regex",
  "reqwest",
@@ -2266,6 +2267,7 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
+ "sha2",
  "similar",
  "snow",
  "tauri",

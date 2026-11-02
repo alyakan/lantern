@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "../mobile/src/protocol/generated/ProviderUsage";
 import type { AgentRole } from "./lib/roles";
 import type { ReviewCheck } from "./lib/reviewChain";
 
@@ -49,6 +50,11 @@ export interface Capabilities {
   supports_lantern_tools: boolean;
   /** It can be the Lead of a team (start agents): for now only Claude Code's. */
   can_lead_team: boolean;
+  /** A paired phone can see and answer its approval cards (they come through Claude Code's permission bridge); Codex's ask in its own protocol. */
+  phone_approvals: boolean;
+  supports_images?: boolean;
+  supports_compact?: boolean;
+  supports_clear?: boolean;
 }
 
 export interface ProviderInfo {
@@ -94,6 +100,7 @@ export interface AuthState {
 }
 
 export type UiEvent =
+  | { kind: "provider_changed"; provider: ProviderInfo; key: string }
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
   | { kind: "user_text"; text: string; at?: number; sent_by?: string; images?: number }
   | { kind: "thinking"; parent: string | null }
@@ -153,7 +160,10 @@ export type UiEvent =
   /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why), or
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
   /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "provider_usage"; usage: ProviderUsage }
   | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
+  /** The subscription's weekly window, the same way: `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "week_usage"; used: number; resets_at: number | null }
   /** The chat's review_target call: what the Changes pane compares (a pull request, or the checked-out branch against `base`; null: Lantern finds it). */
   | { kind: "review_target"; pr: number | null; base: string | null }
   | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
@@ -414,6 +424,22 @@ export interface ChatHit {
   snippets: { role: "user" | "assistant"; pieces: ChatPiece[] }[];
 }
 
+/** Where the Desk's router sends a message (desk.rs's Route). */
+export type DeskRoute =
+  | { kind: "route"; chat: string }
+  | { kind: "start"; project: string; workflow: "chat" | "steps" }
+  /** `unsure`: the router couldn't be asked, or answered something unusable. */
+  | { kind: "ask"; chats: string[]; unsure: boolean }
+  | { kind: "search"; terms: string }
+  /** The Desk answers it itself, from the chats about `terms` (see deskAnswer). */
+  | { kind: "answer"; terms: string };
+
+/** What the Mac's Desk says back to a message, and what it does with it (null: it only replied). desk.rs's Talk. */
+export interface DeskTalk {
+  say: string;
+  route: DeskRoute | null;
+}
+
 export interface ChatSearchResults {
   /** Newest first. */
   chats: ChatHit[];
@@ -526,6 +552,125 @@ export interface NetworkView {
   watches: NetworkWatch[];
   /** Newest first. */
   items: NetworkItem[];
+}
+
+/** A problem found in a dashboard file, where it is (like `panels[0].fields[2].default`; empty for the whole file) and what's wrong. */
+export interface DashboardIssue {
+  path: string;
+  message: string;
+}
+
+export type DashboardFieldKind = "text" | "number" | "select" | "multiselect" | "toggle";
+
+export interface DashboardField {
+  id: string;
+  type: DashboardFieldKind;
+  label?: string;
+  required: boolean;
+  /** A string, number, boolean or list of strings, matching the type. */
+  default?: string | number | boolean | string[];
+  /** Select and multiselect only. */
+  options?: string[];
+  /** Select and multiselect only, instead of `options`: a command whose last line of output is a JSON list of strings, run when the form opens. */
+  optionsFrom?: { command: string[]; dependsOn?: string[] };
+  /** Number only. */
+  min?: number;
+  max?: number;
+}
+
+export interface DashboardAction {
+  /** The program, then its arguments; `{field}` stands for that field's value. */
+  command: string[];
+  /** Shown, with the values in, before the command runs. */
+  confirm?: string;
+  output: "json" | "text";
+}
+
+export type DashboardPanel =
+  | { type: "form"; id: string; title?: string; fields: DashboardField[]; action: DashboardAction }
+  /** `of` is the id of the form it belongs to. */
+  | { type: "result" | "history"; id?: string; title?: string; of: string };
+
+export interface DashboardSpec {
+  title: string;
+  panels: DashboardPanel[];
+}
+
+/** One file in a folder's `.lantern/dashboards/`: its checked spec, or why it isn't one. Lantern checks; the UI only renders. */
+export interface Dashboard {
+  file: string;
+  /** SHA-256 of the exact bytes that were checked; what trusting a dashboard pins. */
+  hash: string;
+  spec: DashboardSpec | null;
+  issues: DashboardIssue[];
+}
+
+/** What a form's fields were set to: field id to a string, number, boolean or list of strings. */
+export type DashboardValues = Record<string, string | number | boolean | string[]>;
+
+/** One run of a dashboard form, as kept in the history. */
+export interface DashboardRun {
+  id: string;
+  file: string;
+  form: string;
+  /** Milliseconds since 1970. */
+  started_at: number;
+  duration_ms: number;
+  /** Null when a signal ended it (stopped or timed out) rather than the command exiting. */
+  exit_code: number | null;
+  stopped: boolean;
+  timed_out: boolean;
+  inputs: DashboardValues;
+  /** The program and arguments that ran, with the values in. */
+  args: string[];
+  stdout: string;
+  stderr: string;
+  /** More than the kept amount was printed; the start is missing. */
+  truncated: boolean;
+  /** For a form whose output is "json": the last line of stdout, when it parsed as an object or a list. */
+  output: Record<string, unknown> | unknown[] | null;
+}
+
+/** A run without its output, as the history list has it; the output is fetched (`dashboardRunDetail`) for the one opened. */
+export type DashboardRunSummary = Pick<DashboardRun, "id" | "file" | "form" | "started_at" | "duration_ms" | "exit_code" | "stopped" | "timed_out" | "inputs">;
+
+/** What the Dashboard tab knows about a folder besides its files. */
+export interface DashboardState {
+  /** Hashes of the dashboards the user trusted; one whose hash isn't here asks first. */
+  trusted: string[];
+  running: { file: string; form: string }[];
+  /** Newest first. */
+  runs: DashboardRunSummary[];
+}
+
+/** One form's command as the trust card shows it: what would run, before any value is in. */
+export interface DashboardCommand {
+  form: string;
+  title?: string;
+  /** "action": what the form's button runs. "options": what loads a select's options by itself when the form opens. */
+  kind: "action" | "options";
+  /** For "options": the field whose options it loads. */
+  field?: string;
+  /** For "options": the fields whose chosen values it takes (a `{field}` in the command), so the list is one per value. */
+  depends_on?: string[];
+  /** The program and arguments as written, `~` as the home folder; `{field}` stands for that field's value. */
+  command: string[];
+  /** Where the program is on disk; null with `error` saying why not. */
+  program: string | null;
+  error: string | null;
+}
+
+/** The list a select's options command printed the last time it ran for this dashboard file. */
+export interface DashboardOptionsList {
+  options: string[];
+  /** Milliseconds since 1970. */
+  loaded_at: number;
+}
+
+/** What pressing a form's button will run, worked out by the code that runs it. */
+export interface DashboardPreview {
+  args: string[];
+  confirm: string | null;
 }
 
 export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
@@ -657,6 +802,25 @@ export interface OpenPr {
   author: string;
   branch: string;
   draft: boolean;
+}
+
+/** How a repository with a chat open stands, for the Desk's board (status.rs). */
+export interface RepoStatus {
+  /** Its main checkout. */
+  repo: string;
+  /** "owner/name" on GitHub. */
+  github: string | null;
+  folders: { folder: string; branch: string | null; changed: number | null }[];
+  /** Linked worktrees, besides the main checkout, from git's list (`agent`: a worker's or a subagent's, the team's to clean up). */
+  worktrees: { path: string; branch: string | null; locked: boolean; agent: boolean }[];
+  gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
+  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
+  /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
+  merged: { number: number; title: string; merged_at: string }[];
+  release: { tag: string; published_at: string | null } | null;
+  /** Releases waiting as drafts, by tag. */
+  drafts: string[];
+  error: string | null;
 }
 
 /** How a worker's tests went when the user ran them from its merge card. */

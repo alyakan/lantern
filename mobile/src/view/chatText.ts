@@ -15,41 +15,34 @@ export function rowText(row: Row): string | null {
   }
 }
 
-export interface Hit {
-  /** The row's place in the list, to scroll to. */
+/** A message that says what was looked for: its place in the list, to scroll to, and its key. */
+export interface Match {
   index: number;
   key: string;
-  who: "You" | "Claude";
-  before: string;
-  match: string;
-  after: string;
 }
 
-const SNIPPET = 38;
-const flat = (s: string) => s.replace(/\s+/g, " ");
-
-/** The messages that say `query` (any case), the newest first, each with a little of what is around it. Nothing for a query of under two characters. */
-export function searchRows(rows: Row[], query: string, limit = 40): Hit[] {
+/** The messages that say `query` (any case), the oldest first, one entry per message. Nothing for a query of under two characters. */
+export function findRows(rows: Row[], query: string): Match[] {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
-  const hits: Hit[] = [];
-  for (let i = rows.length - 1; i >= 0 && hits.length < limit; i--) {
-    const text = rowText(rows[i]);
-    if (!text) continue;
-    const at = flat(text).toLowerCase().indexOf(q);
-    if (at < 0) continue;
-    const one = flat(text);
-    const start = Math.max(0, at - SNIPPET);
-    hits.push({
-      index: i,
-      key: rows[i].key,
-      who: rows[i].kind === "user" ? "You" : "Claude",
-      before: `${start > 0 ? "…" : ""}${one.slice(start, at)}`,
-      match: one.slice(at, at + q.length),
-      after: `${one.slice(at + q.length, at + q.length + SNIPPET)}${at + q.length + SNIPPET < one.length ? "…" : ""}`,
-    });
-  }
-  return hits;
+  const found: Match[] = [];
+  rows.forEach((row, index) => {
+    if (rowText(row)?.toLowerCase().includes(q)) found.push({ index, key: row.key });
+  });
+  return found;
+}
+
+/** The match being looked at: the one the cursor (a row's key) is on, else the newest, where looking starts. */
+export function currentMatch(matches: Match[], cursor: string | null): Match | null {
+  return matches.find((m) => m.key === cursor) ?? matches[matches.length - 1] ?? null;
+}
+
+/** The match a step away from the current one, older (-1) or newer (1), round to the other end at either end of the chat. */
+export function stepMatch(matches: Match[], cursor: string | null, dir: 1 | -1): Match | null {
+  const now = currentMatch(matches, cursor);
+  if (!now) return null;
+  const at = matches.indexOf(now);
+  return matches[(at + dir + matches.length) % matches.length];
 }
 
 /** Text quoted for a reply: each line behind a ">", with room to write under it. */

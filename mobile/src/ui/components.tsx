@@ -1,31 +1,38 @@
-import type { ReactNode } from "react";
-import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
+import { useEffect, useRef, type ReactNode } from "react";
+import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
 import { EMBER, useAccent, useRegular } from "./accent";
 import { Chevron } from "./Chevron";
-import { PressScale } from "./motion";
+import { PressScale, skips } from "./motion";
 import { projectTint } from "../view/home";
 import { MIN_TARGET, radius, space, type as scale, useColors, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. "white" is always white (on night, go and stop); "on-ink" is what is written on an ink fill. */
+/** How far larger than normal the phone's text size may make Lantern's text (a person who needs more can still read it: 1.8 is large). */
+export const MAX_TEXT_SCALE = 1.8;
+
 export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();
   const colors = useColors();
   const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
-  return <Text {...rest} style={[scale[variant], { color }, style]} />;
+  // The phone's text size is followed (Dynamic Type), up to a limit past which fixed-size things (a swipe bar, a tile) would break.
+  return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} {...rest} style={[scale[variant], { color }, style]} />;
 }
 
 type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
 
-/** A button at least as tall as a touch target; the label says what happens. */
-export function Button({ label, onPress, kind = "ink", disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
+/**
+ * A pill at least as tall as a touch target; the label says what happens. `link`: the second of two stacked, as
+ * underlined words in the kind's colour with no pill around them, so the main one is plainly the one to press.
+ */
+export function Button({ label, onPress, kind = "ink", link = false, disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; link?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
   // "hi" is the highlighter: dark words on yellow (white ones can't be read on it).
   // A regular's main buttons are Ember too.
   const regular = useRegular();
   const colors = useColors();
-  const bg = { ink: regular ? EMBER : colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
-  // On "hi" the words are dark in either appearance: they are on yellow.
-  const fg = kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
+  const bg = link ? "transparent" : { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // On "hi" the words are dark in either appearance: they are on yellow. A link has no fill, so its words are the page's.
+  const fg = link ? (kind === "night-stop" ? "night-stop" : kind.startsWith("night") ? "white" : "ink") : kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (
     <PressScale
       accessibilityRole="button"
@@ -35,9 +42,9 @@ export function Button({ label, onPress, kind = "ink", disabled, style, accessib
       disabled={disabled}
       onPress={onPress}
       opacity={disabled ? 0.4 : 1}
-      style={[{ minHeight: MIN_TARGET, borderRadius: radius.inner, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
+      style={[{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
     >
-      <Txt variant="body" tone={fg} style={{ fontWeight: "700" }}>
+      <Txt variant="body" tone={fg} style={link ? { fontWeight: "600", textDecorationLine: "underline" } : { fontWeight: "700" }}>
         {label}
       </Txt>
     </PressScale>
@@ -57,12 +64,13 @@ export function Tag({ children }: { children: string }) {
 }
 
 /** One small fact, as the timeline folds a turn's steps into a row of them. */
-export function Chip({ children, tone = "plain", onPress, chevron }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed" }) {
+export function Chip({ children, tone = "plain", onPress, chevron, busy = false }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed"; /** What it stands for is still going: a small spinner before the words. */ busy?: boolean }) {
   const colors = useColors();
   const border = tone === "ok" ? `${colors.go}55` : tone === "bad" ? `${colors.stop}55` : colors.rule;
   const content = (
     <View style={{ backgroundColor: colors.card, borderColor: border, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        {busy && <ActivityIndicator testID="chip-busy" size="small" color={colors.ink3} style={{ transform: [{ scale: 0.7 }], marginLeft: -4, marginRight: -2, height: 14 }} />}
         <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
           {children}
         </Txt>
@@ -81,15 +89,68 @@ export function Chip({ children, tone = "plain", onPress, chevron }: { children:
 /**
  * A project's name as a tag in its colour (the one the Mac's sidebar gives it): the colour faintly behind, the colour in the
  * words and in a dot, so which project a chat belongs to reads at a glance. A project the Mac gave no colour is a plain grey tag.
+ * `live` and `background` are only said, to a screen reader: the chat's title bar glows to show them (`WorkGlow`).
  */
-export function ProjectTag({ name, color }: { name: string; color: string | null }) {
+export function ProjectTag({ name, color, live = false, background = [] }: { name: string; color: string | null; live?: boolean; background?: string[] }) {
   const { bg, fg } = projectTint(color, useColors().plainTint);
+  const label = [name, live ? "working" : null, background.length ? `${background.length} running in the background: ${background.join(", ")}` : null].filter(Boolean).join(", ");
   return (
-    <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
+    <View accessible accessibilityLabel={label} style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
       <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
       <Txt variant="tiny" numberOfLines={1} style={{ color: fg, fontWeight: "700", flexShrink: 1 }}>
         {name}
       </Txt>
+    </View>
+  );
+}
+
+/**
+ * A border in `color` laid over what it sits on (give it the same `radius`), glowing out and fading back: work going on. Held
+ * still and bright when motion is reduced.
+ */
+export function WorkGlow({ color, radius: corner }: { color: string; radius: number }) {
+  const p = useRef(new Animated.Value(skips() ? 0.8 : 0)).current;
+  useEffect(() => {
+    if (skips()) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(p, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(p, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [p]);
+  return (
+    <Animated.View
+      testID="work-glow"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        // The shadow, in the same colour and with no offset, is the glow around the border (iOS; Android has the border alone).
+        { borderRadius: corner, borderWidth: 1.5, borderColor: color, shadowColor: color, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 }, opacity: p.interpolate({ inputRange: [0, 1], outputRange: [0.25, 1] }) },
+      ]}
+    />
+  );
+}
+
+/**
+ * What a chat runs in the background (commands, agents): a filled orange circle, the desktop's background-work colour, with how
+ * many when there is more than one.
+ */
+export function BackgroundDot({ tasks }: { tasks: string[] }) {
+  const colors = useColors();
+  if (!tasks.length) return null;
+  return (
+    <View testID="background-dot" accessible accessibilityLabel={`${tasks.length} running in the background: ${tasks.join(", ")}`} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.working }} />
+      {tasks.length > 1 && (
+        <Txt variant="tiny" style={{ color: colors.working, fontWeight: "700" }}>
+          {tasks.length}
+        </Txt>
+      )}
     </View>
   );
 }

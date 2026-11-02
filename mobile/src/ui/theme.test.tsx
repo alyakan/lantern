@@ -1,7 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { render, screen } from "@testing-library/react-native";
 import { Button, Tag, Txt } from "./components";
-import { darkColors, lightColors, paletteFor } from "./theme";
+import { darkColors, lightColors, MIN_TARGET, paletteFor, radius } from "./theme";
 
 /** A colour as the style gives it, for a node found by its label or text. */
 const style = (node: { props: { style?: unknown } }) => StyleSheet.flatten(node.props.style as never) as { color?: string; backgroundColor?: string };
@@ -71,5 +71,29 @@ describe("a screen in Night", () => {
     await render(<Button label="Start" onPress={() => {}} />);
     expect(style(screen.getByRole("button", { name: "Start" })).backgroundColor).toBe(lightColors.ink);
     expect(style(screen.getByText("Start")).color).toBe(lightColors.onInk);
+  });
+});
+
+describe("a button", () => {
+  const shape = (node: { props: { style?: unknown } }) => StyleSheet.flatten(node.props.style as never) as { borderRadius?: number; minHeight?: number; textDecorationLine?: string; color?: string; backgroundColor?: string };
+
+  it("is a pill", async () => {
+    await render(<Button label="Send answer" kind="hi" onPress={() => {}} />);
+    expect(shape(screen.getByRole("button", { name: "Send answer" })).borderRadius).toBe(radius.pill);
+  });
+
+  it("second of two is underlined words in its kind's colour, still a whole touch target", async () => {
+    await render(
+      <View>
+        <Button label="Deny" kind="night-stop" link onPress={() => {}} />
+        <Button label="Cancel" kind="ghost" link onPress={() => {}} />
+      </View>,
+    );
+    const deny = screen.getByRole("button", { name: "Deny" });
+    expect(shape(deny).backgroundColor).toBe("transparent");
+    expect(shape(deny).minHeight).toBe(MIN_TARGET);
+    expect(shape(screen.getByText("Deny"))).toMatchObject({ textDecorationLine: "underline", color: lightColors.nightStop });
+    expect(shape(screen.getByRole("button", { name: "Cancel" })).backgroundColor).toBe("transparent");
+    expect(shape(screen.getByText("Cancel"))).toMatchObject({ textDecorationLine: "underline", color: lightColors.ink });
   });
 });

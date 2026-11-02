@@ -324,6 +324,8 @@ struct Inner {
     next: u64,
     /// The plan's five-hour window as a chat last reported it: how much is used (0 to 1), and when it resets.
     plan: Option<(f64, Option<u64>)>,
+    week: Option<(f64, Option<u64>)>,
+    provider_usage: HashMap<String, crate::ui_event::ProviderUsage>,
     /// Each main agent's project's own roles, as the window last told us (the built-in ones need no telling).
     custom_roles: HashMap<String, Vec<RoleDef>>,
     /// Each main agent's "Review and test what an agent builds" setting, as the window last told us (see review.rs).
@@ -724,7 +726,7 @@ impl Orchestra {
         // Its worktree is filled in once there is one.
         let id = {
             let mut inner = self.inner.lock().unwrap();
-            if let Some(full) = Self::no_room(&inner, main, limit) {
+            if let Some(full) = Self::no_room(&inner, main, limit, provider) {
                 return Err(full);
             }
             inner.next += 1;
@@ -849,15 +851,19 @@ impl Orchestra {
 
     /// Why no worker can be started for `main` now, when none can: the plan is nearly used up, its team has all it may
     /// have, or Lantern as a whole is running as many as the user allows.
-    fn no_room(inner: &Inner, main: &str, limit: usize) -> Option<String> {
-        if let Some((used, resets)) = inner.plan.filter(|(used, _)| *used >= PLAN_STOP) {
-            return Some(format!("The plan's five-hour usage is at {:.0}%{}. Don't start more agents now: wait for it to reset, or ask the user.", used * 100.0, resets_in(resets)));
+    fn no_room(inner: &Inner, main: &str, limit: usize, provider: ProviderId) -> Option<String> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let reading = if provider == ProviderId::Claude { [inner.plan, inner.week].into_iter().flatten().find(|(used, at)| *used >= PLAN_STOP && at.is_none_or(|at| at > now)) } else {
+            inner.provider_usage.get(provider.name()).and_then(|p| p.windows.iter().find(|w| w.used >= PLAN_STOP && w.resets_at.is_none_or(|at| at > now))).map(|w| (w.used, w.resets_at))
+        };
+        if let Some((used, resets)) = reading.filter(|(used, at)| *used >= PLAN_STOP && at.is_none_or(|at| at > now)) {
+            return Some(format!("{} usage is at {:.0}%{}. Don't start more agents now: wait for it to reset, or ask the user.", provider.name(), used * 100.0, resets_in(resets)));
         }
         let live = inner.workers.values().filter(|w| w.parent == main && w.status.live()).count();
         if live >= MAX_WORKERS {
             return Some(format!("{live} agents are already going (the most is {MAX_WORKERS}). Wait for one to finish, or stop_agent one."));
         }
-        // Every team's, in every project: they all spend the same plan.
+        // The user's concurrency limit still covers every provider and project.
         let running = inner.workers.values().filter(|w| matches!(w.status, Status::Working | Status::Waiting)).count();
         if running >= limit {
             return Some(format!("{running} agent{} running across Lantern (your limit in Settings). Wait for one to finish, or stop_agent one.", if running == 1 { " is" } else { "s are" }));
@@ -1619,7 +1625,19 @@ impl Orchestra {
     pub fn observe(self: &Arc<Self>, slot: &str, ev: &UiEvent) {
         let mut guard = self.inner.lock().unwrap();
         let inner = &mut *guard;
-        // The plan is the account's, whichever chat said how full it is.
+        if let UiEvent::ProviderUsage { usage } = ev {
+            inner.provider_usage.insert(usage.provider.clone(), usage.clone());
+            drop(guard);
+            self.kick();
+            return;
+        }
+        if let UiEvent::WeekUsage { used, resets_at } = ev {
+            inner.week = Some((*used, *resets_at));
+            drop(guard);
+            self.kick();
+            return;
+        }
+        // Legacy readings belong exclusively to Claude.
         if let UiEvent::PlanUsage { used, resets_at, .. } = ev {
             inner.plan = Some((*used, *resets_at));
             drop(guard);
@@ -3544,9 +3562,25 @@ mod tests {
         spawn(&o, "fits").await;
         o.observe("s7", &UiEvent::PlanUsage { used: 0.96, resets_at: Some(now + 1800), status: "allowed_warning".into() });
         let err = call(&o, "spawn_agent", json!({"name": "late", "brief": "y"})).await.unwrap_err();
-        assert_eq!(err, "The plan's five-hour usage is at 96% (it resets in 30 min). Don't start more agents now: wait for it to reset, or ask the user.");
+        assert_eq!(err, "claude usage is at 96% (it resets in 30 min). Don't start more agents now: wait for it to reset, or ask the user.");
         o.observe("s7", &UiEvent::PlanUsage { used: 0.1, resets_at: None, status: "allowed".into() });
         assert!(call(&o, "spawn_agent", json!({"name": "after", "brief": "y"})).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn provider_limits_do_not_block_other_providers() {
+        let (host, o, _r, _w) = setup();
+        *host.installed.lock().unwrap() = vec![ProviderId::Fake];
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        o.observe("s7", &UiEvent::PlanUsage { used: 1.0, resets_at: Some(now + 1800), status: "rejected".into() });
+        assert!(call(&o, "spawn_agent", json!({"name": "other", "brief": "y", "provider": "fake", "isolation": "shared"})).await.is_ok());
+        o.observe("s7", &UiEvent::ProviderUsage { usage: crate::ui_event::ProviderUsage { provider: "fake".into(), updated_at: now, windows: vec![crate::ui_event::UsageWindow { label: "Week".into(), used: 1.0, resets_at: Some(now + 1800), minutes: Some(10080) }] } });
+        let err = call(&o, "spawn_agent", json!({"name": "blocked", "brief": "y", "provider": "fake"})).await.unwrap_err();
+        assert!(err.contains("fake usage"), "{err}");
+        o.observe("s7", &UiEvent::PlanUsage { used: 0.1, resets_at: None, status: "allowed".into() });
+        assert!(call(&o, "spawn_agent", json!({"name": "claude", "brief": "y", "isolation": "shared"})).await.is_ok());
+        o.observe("s7", &UiEvent::ProviderUsage { usage: crate::ui_event::ProviderUsage { provider: "fake".into(), updated_at: now, windows: vec![crate::ui_event::UsageWindow { label: "Session".into(), used: 1.0, resets_at: Some(now - 1), minutes: Some(300) }] } });
+        assert!(call(&o, "spawn_agent", json!({"name": "reset", "brief": "y", "provider": "fake", "isolation": "shared"})).await.is_ok());
     }
 
     fn spawned_role(host: &FakeHost, i: usize) -> Option<RoleTag> {

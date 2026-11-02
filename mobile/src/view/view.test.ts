@@ -3,7 +3,7 @@ import type { Waiting } from "../protocol/generated/Waiting";
 import { ago, groups, cards, headline, projectColorOf, projectTint, rows } from "./home";
 import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
-import { approvalOf, promptView, questionsOf } from "./prompts";
+import { approvalOf, fieldsOf, promptView, questionsOf } from "./prompts";
 
 describe("what a prompt says", () => {
   it("names a command, with the line to read before allowing it", () => {
@@ -30,6 +30,19 @@ describe("what a prompt says", () => {
     expect(promptView("mcp__lantern__storage_scan", { path: "/tmp" })).toMatchObject({ tag: "Use a tool", title: "Use lantern storage_scan?", detail: "/tmp" });
     expect(approvalOf("mcp__lantern__request_approval", { action: "merge PR 12", reason: "CI is green" })).toEqual({ action: "merge PR 12", why: "CI is green" });
     expect(approvalOf("Bash", {})).toBeNull();
+  });
+
+  it("reads an approval as the Mac sends it: named Approval, with its action and details", () => {
+    expect(approvalOf("Approval", { action: "Merge PR #144", details: "CI is green.\nSquash merge." })).toEqual({ action: "Merge PR #144", why: "CI is green.\nSquash merge." });
+    expect(promptView("Approval", { action: "Merge PR #144", details: "CI is green." })).toMatchObject({ kind: "allow", tag: "Approval", title: "Approve Merge PR #144?", detail: "CI is green." });
+    expect(promptView("Approval", { action: "Push tag v1" }).detail).toBeNull();
+    expect(fieldsOf({ file_path: "/tmp/a", count: 3, deep: { a: 1 }, empty: "  ", gone: null })).toEqual([
+      { label: "file path", value: "/tmp/a" },
+      { label: "count", value: "3" },
+      { label: "deep", value: '{\n  "a": 1\n}' },
+    ]);
+    expect(fieldsOf("garbage")).toEqual([]);
+    expect(promptView("ExitPlanMode", { plan: "1. Do it" })).toMatchObject({ tag: "A plan", title: "Approve Claude's plan?", detail: "1. Do it" });
   });
 });
 
@@ -109,14 +122,14 @@ describe("the Home screen", () => {
     );
     const g = groups(list);
     expect(g.map((x) => [x.project, x.rows.map((r) => r.slot), x.needsYou])).toEqual([
-      ["beta", ["b1", "b2"], 1],
       ["alpha", ["a2", "a1"], 0],
+      ["beta", ["b1", "b2"], 1],
       ["", ["n1"], 0],
     ]);
     expect(groups([])).toEqual([]);
   });
 
-  it("puts the projects with a chat that needs you first, then those with one working, the newest first, and never lets a quiet one go above them", () => {
+  it("keeps the projects in name order, whatever their chats are doing: one that needs you or is working does not move up", () => {
     const list = rows(
       [
         chat({ slot: "a", project: "alpha", status: "working", active_at: 900 }),
@@ -130,18 +143,12 @@ describe("the Home screen", () => {
       null,
       { a: 400, d: 450 },
     );
-    expect(groups(list).map((x) => x.project)).toEqual(["echo", "charlie", "delta", "alpha", "beta", ""]);
+    expect(groups(list).map((x) => x.project)).toEqual(["alpha", "beta", "charlie", "delta", "echo", ""]);
   });
 
-  it("holds the working projects where they are as their chats work, and moves one up when something in it starts to need you", () => {
-    const at = (aActive: number, status: "idle" | "working" | "needs_you") => groups(rows([chat({ slot: "a", project: "alpha", status: "working", active_at: aActive }), chat({ slot: "z", project: "zed", status, active_at: 50 })], 9000, null, { a: 100, z: 200 })).map((x) => x.project);
-    // Alpha's events move its activity, not its place.
-    expect(at(300, "idle")).toEqual(["alpha", "zed"]);
-    expect(at(900, "idle")).toEqual(["alpha", "zed"]);
-    // Zed's chat starts to need you: it goes above, and when it is answered and idle again it goes back down.
-    expect(at(900, "needs_you")).toEqual(["zed", "alpha"]);
-    // Both working: the one that started last is first.
-    expect(at(900, "working")).toEqual(["zed", "alpha"]);
+  it("does not move a project when a chat in it starts to need you or is answered", () => {
+    const at = (status: "idle" | "working" | "needs_you") => groups(rows([chat({ slot: "a", project: "alpha", status: "working", active_at: 900 }), chat({ slot: "z", project: "zed", status, active_at: 50 })], 9000, null, { a: 100, z: 200 })).map((x) => x.project);
+    for (const status of ["idle", "working", "needs_you"] as const) expect(at(status)).toEqual(["alpha", "zed"]);
   });
 
   it("keeps the projects where they are however the chats move, whatever the case of their names", () => {
@@ -188,9 +195,13 @@ describe("Step by step's pages", () => {
     expect(readPage("# Switch to Debug — a crash")!.actions[1].reply).toBe("Start Debug.");
   });
 
-  it("gives other pages Next, and the last ones none", () => {
+  it("gives other pages Next, the Done page what to do next on the phone itself, and the Summary none", () => {
     expect(readPage("# Plan complete — 5 steps")!.actions.map((a) => a.reply)).toEqual(["Next"]);
-    expect(readPage("# Done — built it")!.actions).toEqual([]);
+    // Nothing is sent to Claude for either: one opens the changes, the other a new chat.
+    expect(readPage("# Done — built it")!.actions).toEqual([
+      { label: "Review the changes", reply: null, primary: false, go: "changes" },
+      { label: "Start something new", reply: null, primary: true, go: "new" },
+    ]);
     expect(readPage("# Summary — all")!.actions).toEqual([]);
   });
 
@@ -293,6 +304,34 @@ describe("the little markdown", () => {
 
   it("starts another list when the kind changes at the list's own level", () => {
     expect(parseMarkdown("- a\n\n1. b").map((b) => b.kind)).toEqual(["list", "list"]);
+  });
+
+  it("reads a link to a file on the Mac, its words in code, as the file and its line", () => {
+    expect(parseInline("1. [`App/Flow.swift:35`](/Users/me/App/Flow.swift#L35): gone")).toEqual([
+      { kind: "text", text: "1. " },
+      { kind: "file", text: "App/Flow.swift:35", spans: [{ kind: "code", text: "App/Flow.swift:35" }], path: "/Users/me/App/Flow.swift", line: 35 },
+      { kind: "text", text: ": gone" },
+    ]);
+    expect(parseInline("[a b](src/My%20File.ts)")).toEqual([{ kind: "file", text: "a b", path: "src/My File.ts", line: null }]);
+    expect(parseInline("[`docs`](https://a.b/c)")).toEqual([{ kind: "link", text: "docs", spans: [{ kind: "code", text: "docs" }], url: "https://a.b/c" }]);
+    expect(parseInline("[x](mailto:a@b.c)")).toEqual([{ kind: "text", text: "[x](mailto:a@b.c)" }]);
+    expect(parseInline("arr[0](x)")).toEqual([{ kind: "text", text: "arr[0](x)" }]);
+    // As Claude wrote it in a step: a range of lines, in a list, with code after the link.
+    const [item] = parseMarkdown("2. [`Lumiform/Testo/TestoConnectionFlow.swift:94-105`](/Users/me/ios-app/Lumiform/Testo/TestoConnectionFlow.swift#L94): new `mutating func timedOut() -> [Output]`.");
+    expect(item).toEqual({
+      kind: "list",
+      ordered: true,
+      items: [
+        [
+          { kind: "file", text: "Lumiform/Testo/TestoConnectionFlow.swift:94-105", spans: [{ kind: "code", text: "Lumiform/Testo/TestoConnectionFlow.swift:94-105" }], path: "/Users/me/ios-app/Lumiform/Testo/TestoConnectionFlow.swift", line: 94 },
+          { kind: "text", text: ": new " },
+          { kind: "code", text: "mutating func timedOut() -> [Output]" },
+          { kind: "text", text: "." },
+        ],
+      ],
+      meta: [expect.objectContaining({ depth: 0 })],
+    });
+    expect(parseInline("`[x](y)`")).toEqual([{ kind: "code", text: "[x](y)" }]);
   });
 
   it("reads strikethrough, marks inside marks, and bare links without the full stop after them", () => {

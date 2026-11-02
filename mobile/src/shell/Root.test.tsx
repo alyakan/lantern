@@ -1,9 +1,10 @@
 import "@shopify/flash-list/jestSetup";
-import { BackHandler } from "react-native";
+import { BackHandler, StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { toBase64Url } from "../pairing";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, seed, waiting } from "../test/render";
+import { motion } from "../ui/motion";
 import { Root, type RootProps } from "./Root";
 
 jest.mock("expo-camera", () => ({ CameraView: () => null, useCameraPermissions: () => [{ granted: false, canAskAgain: true }, jest.fn()] }));
@@ -34,6 +35,26 @@ beforeEach(() => {
 });
 
 const press = (name: string | RegExp) => fireEvent.press(screen.getByRole("button", { name }));
+
+describe("the glass of the chats", () => {
+  it("is not under a fade from nothing as the chats appear: under one the glass of the header and message box stayed clear", async () => {
+    // Animations are skipped in tests: turned on here to see what the chats start at.
+    const was = motion.instant;
+    motion.instant = false;
+    try {
+      // Four chats, so Home has its glass search circle: neither it nor anything it is in starts from nothing.
+      await open({ connection: connected, chats: ["a", "b", "c", "d"].map((slot) => chat({ slot, title: `Chat ${slot}` })) });
+      let node = screen.getByRole("button", { name: "Search chats" }).parent;
+      while (node) {
+        const o = StyleSheet.flatten(node.props.style)?.opacity;
+        if (typeof o === "number") expect(o).toBe(1);
+        node = node.parent;
+      }
+    } finally {
+      motion.instant = was;
+    }
+  });
+});
 
 describe("which screen is up", () => {
   it("asks to pair when no Mac is paired", async () => {

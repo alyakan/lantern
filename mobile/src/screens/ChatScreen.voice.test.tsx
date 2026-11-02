@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith } from "../test/render";
+import { resetDrafts } from "../drafts";
 import { SILENCE_MS } from "../ui/useDictation";
 import { Composer } from "./ChatParts";
 import { ChatScreen } from "./ChatScreen";
@@ -26,6 +27,8 @@ const box = () => screen.getByLabelText("Message");
 const tapMic = () => act(async () => void fireEvent.press(screen.getByRole("button", { name: "Dictate" })));
 
 beforeEach(() => {
+  // A draft left in a chat by one test is not the next one's.
+  resetDrafts();
   for (const f of [module.start, module.stop, module.abort, module.requestPermissionsAsync]) f.mockClear();
   module.requestPermissionsAsync.mockResolvedValue({ granted: true });
 });
@@ -46,6 +49,9 @@ describe("dictating into the message box", () => {
     expect(module.requestPermissionsAsync).toHaveBeenCalled();
     expect(module.start).toHaveBeenCalledWith(expect.objectContaining({ interimResults: true, continuous: true, requiresOnDeviceRecognition: true }));
     expect(screen.getByRole("button", { name: "Stop dictating" })).toBeTruthy();
+    // Not yet: it says so until the recognizer has started.
+    expect(box().props.placeholder).toBe("Getting ready…");
+    await act(async () => __emit("start", null));
     expect(box().props.placeholder).toBe("Listening…");
     await heard("fix the");
     expect(box().props.value).toBe("fix the");

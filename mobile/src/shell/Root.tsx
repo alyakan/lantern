@@ -7,8 +7,10 @@ import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
+import { RememberChats } from "./RememberChats";
 import { PairDeviceSheet } from "../screens/PairDevice";
 import { StorageSheet } from "../screens/StorageSheet";
+import { TodosSheet } from "../screens/TodosSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -18,9 +20,9 @@ import { hasNotes, noteAction, notesId, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { ChatToast, type ToastShown } from "../ui/ChatToast";
 import { Button, Txt } from "../ui/components";
-import { FadeSlideIn } from "../ui/motion";
+import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
@@ -40,6 +42,9 @@ export interface RootProps {
   /** A tapped notification named this chat: open it, then say so. */
   openSlot?: string | null;
   onOpened?: () => void;
+  /** A tapped reminder named this project: open its to-dos, then say so. */
+  openTodos?: string | null;
+  onTodosOpened?: () => void;
 }
 
 /** Android's "Message a chat": pick which. */
@@ -49,12 +54,12 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   const colors = useColors();
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={{ flexShrink: 1, backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1, paddingBottom: insets.bottom + space.lg }}>
           <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
             Message which chat?
           </Txt>
-          <ScrollView style={{ flexShrink: 1 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }}>
             {rows(chats, Date.now(), null, workingSince).map((r) => (
               <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
                 <Txt variant="body" style={{ fontWeight: "600" }}>
@@ -77,7 +82,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   );
 }
 
-function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProps, "controller">) {
+function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTodosOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
   const { chats, chatsLoaded } = useSyncState();
@@ -97,6 +102,13 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [pairingDevice, setPairingDevice] = useState(false);
   // The Mac's storage, from the Mac sheet.
   const [storageOpen, setStorageOpen] = useState(false);
+  // The to-do lists, from the Mac sheet (any project) or a reminder (its project).
+  const [todos, setTodos] = useState<{ project: string | null } | null>(null);
+  useEffect(() => {
+    if (!openTodos) return;
+    setTodos({ project: openTodos });
+    onTodosOpened?.();
+  }, [openTodos, onTodosOpened]);
   // What changed in this build: once after an update, and from the Mac sheet.
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesDue, setNotesDue] = useState(false);
@@ -127,12 +139,15 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       live = false;
     };
   }, []);
+  // Pinning puts the chats beside the chat; unpinning takes them away entirely, so the chat has the whole width (and its Changes
+  // are beside it). From there the chat's own button, or a pull from the edge, slides them in again.
   const togglePin = () => {
     const next = !pinned;
+    // The chat's room changes as the column moves: it is laid out again on the column's curve, so the two move as one.
+    movePanes();
     setPinned(next);
     void saveSidebarPinned(next);
-    // Pinned, they are beside the chat. Unpinned from the list itself, they stay slid in until a chat is chosen.
-    setChatsOpen(!next);
+    setChatsOpen(false);
   };
 
   // The notes come up once, with Home, after an update. A phone that was unpaired at some point this session was paired just
@@ -160,7 +175,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [homeUp]);
   // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
   // in: it waits until they are gone. On a tablet the chats are always a tap away, so a chat open doesn't hold it back there.
-  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
+  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !todos && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
@@ -174,6 +189,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       if (notesOpen) return setNotesOpen(false), true;
       if (pairingDevice) return setPairingDevice(false), true;
       if (storageOpen) return setStorageOpen(false), true;
+      if (todos) return setTodos(null), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
@@ -184,13 +200,21 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, notesOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, todos, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
   // instead of stacking on it (and, slid in, the column goes away).
   const openChat = (slot: string) => {
+    // The Changes pane may come or go with the chat (one has changed files, the other not): the chat's room glides with it.
+    if (tablet) movePanes();
     go({ type: tablet ? "jump_to_chat" : "open_chat", slot });
+    setChatsOpen(false);
+  };
+  // A tablet's Desk is in its main area, where no chat is open: back to that.
+  const openDesk = () => {
+    movePanes();
+    go({ type: "home" });
     setChatsOpen(false);
   };
   const review = (slot: string, requestId: string) => {
@@ -227,9 +251,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [toast, stack, tablet, columnShown]);
   const clearToast = useCallback(() => setToast(null), []);
 
-  // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut.
+  // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut. Not the stack itself:
+  // its chats are glass (the header, the message box), and under a fade from nothing all of their glass stayed clear, also in a
+  // chat opened long after the fade was over (see `FadeSlideIn`'s `glass`). It is just there.
   const fade = (key: string, screen: ReactNode) => (
-    <FadeSlideIn key={key} from={0} ms={200} style={{ flex: 1 }}>
+    <FadeSlideIn key={key} from={0} ms={200} glass={key === "stack"} style={{ flex: 1 }}>
       {screen}
     </FadeSlideIn>
   );
@@ -251,7 +277,9 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
 
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} />;
+  // A chat's Done page: the new-chat sheet, on that chat's project.
+  const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} onOpenDesk={tablet ? openDesk : undefined} deskShown={tablet && !selectedSlot} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {
@@ -259,7 +287,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           case "home":
             return { key: `${i}:home`, kind: "push", element: homeScreen() };
           case "chat":
-            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
+            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} onStartNew={startNew} /> };
           case "decide":
             return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
         }
@@ -271,48 +299,41 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
+          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
       )}
       {macSheet && (
+        // Each of its buttons opens what it names once the sheet itself has gone (MacSheet waits for that).
         <MacSheet
           state={connection}
           onClose={() => setMacSheet(false)}
           onUnpair={unpair}
-          onSupport={() => {
-            setMacSheet(false);
-            setSupporting(true);
-          }}
-          onPairDevice={() => {
-            setMacSheet(false);
-            setPairingDevice(true);
-          }}
-          onStorage={() => {
-            setMacSheet(false);
-            setStorageOpen(true);
-          }}
+          onSupport={() => setSupporting(true)}
+          onPairDevice={() => setPairingDevice(true)}
+          onStorage={() => setStorageOpen(true)}
+          onTodos={() => setTodos({ project: null })}
           onWhatsNew={
             hasNotes(releaseNotes)
-              ? () => {
-                  setMacSheet(false);
-                  setNotesOpen(true);
-                }
+              ? () => setNotesOpen(true)
               : undefined
           }
         />
       )}
       <ReconnectPill state={connection} />
+      <RememberChats />
       <ChatToast toast={toast} onOpen={openChat} onDone={clearToast} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
+      {todos && <TodosSheet project={todos.project} onClose={() => setTodos(null)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (
         <NewChatSheet
           initialText={newChat.text}
           initialProject={newChat.project}
+          initialProjectName={newChat.projectName}
           continueChat={newChat.continueChat}
           onClose={() => setNewChat(null)}
           onStarted={(slot) => {

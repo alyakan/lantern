@@ -2,8 +2,11 @@ import { Platform, StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ControllerContext } from "../shell/hooks";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { resetSeen } from "../seen";
+import { resetPins } from "../pins";
 import { HomeScreen } from "./HomeScreen";
 
 // What Home remembers about how it lists the chats: kept in memory here, not in the Keychain.
@@ -17,6 +20,9 @@ beforeEach(() => {
   resetSeen();
 });
 jest.mock("../prefs", () => ({
+  // Home as the Desk or the chats: the Desk, as on a phone that never chose (only a Mac that has one shows it).
+  loadHomeMode: jest.fn(async () => "desk"),
+  saveHomeMode: jest.fn(async () => {}),
   loadGrouping: jest.fn(async () => mockRemembered),
   saveGrouping: jest.fn(async (g: "recent" | "project") => {
     mockRemembered = g;
@@ -169,7 +175,7 @@ describe("Home", () => {
     await renderWith(<HomeScreen {...h} />, {
       chats: [chat({ slot: "old", title: "Network tab filters", project: "network-monitor", status: "asleep", active_at: 1 }), chat({ slot: "w", title: "Mobile gateway design", status: "working" }), chat({ slot: "n", title: "Storage audit", status: "needs_you", active_at: 5 })],
     });
-    expect(screen.getByText("Asleep")).toBeTruthy();
+    expect(screen.getAllByText("Asleep")).toHaveLength(2); // the section's label and the chat's note
     expect(screen.getByText("Needs you")).toBeTruthy();
     expect(screen.getByLabelText("Working")).toBeTruthy();
     const names = screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /lantern|network-monitor/.test(l));
@@ -233,7 +239,7 @@ describe("Home's chats by project", () => {
     expect(screen.getByRole("button", { name: "prayers, 1 chat" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
     // The project is in the heading, not repeated under every chat.
-    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
   });
 
   it("puts each project and its chats in a card of their own, its header tinted in the project's colour", async () => {
@@ -245,10 +251,10 @@ describe("Home's chats by project", () => {
     const prayers = within(screen.getByTestId("project-card-prayers"));
     // Each card holds its project's header and its chats, and nobody else's.
     expect(lantern.getByRole("button", { name: "lantern, 2 chats" })).toBeTruthy();
-    expect(lantern.getByRole("button", { name: "Release" })).toBeTruthy();
-    expect(lantern.getByRole("button", { name: "Fix sync" })).toBeTruthy();
-    expect(lantern.queryByRole("button", { name: "Prayers widget" })).toBeNull();
-    expect(prayers.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Fix sync, Claude" })).toBeTruthy();
+    expect(lantern.queryByRole("button", { name: "Prayers widget, Claude" })).toBeNull();
+    expect(prayers.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
     // The header is a band of the project's colour at about 15%.
     expect(StyleSheet.flatten(lantern.getByRole("button", { name: "lantern, 2 chats" }).props.style).backgroundColor).toBe("#5b5bd626");
     expect(StyleSheet.flatten(prayers.getByRole("button", { name: "prayers, 1 chat" }).props.style).backgroundColor).toBe("#0f8a7e26");
@@ -260,7 +266,7 @@ describe("Home's chats by project", () => {
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
     const lantern = within(screen.getByTestId("project-card-lantern"));
     expect(lantern.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
-    expect(lantern.queryByRole("button", { name: "Release" })).toBeNull();
+    expect(lantern.queryByRole("button", { name: "Release, Claude" })).toBeNull();
   });
 
   it("holds every chat in a card in from the card's edges, with no lines between them", async () => {
@@ -271,23 +277,43 @@ describe("Home's chats by project", () => {
     for (const [slot, title] of [["a", "First"], ["b", "Second"], ["c", "Third"]]) {
       expect(rowStyle(slot).marginHorizontal).toBe(8);
       expect(rowStyle(slot).borderTopWidth).toBeUndefined();
-      expect(StyleSheet.flatten(screen.getByRole("button", { name: title }).props.style).paddingHorizontal).toBe(8);
+      expect(StyleSheet.flatten(screen.getByRole("button", { name: `${title}, Claude` }).props.style).paddingHorizontal).toBe(8);
     }
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
   });
 
-  it("marks the chat that is open with a slim bar of the accent on a faint wash of it, in the list and in a card", async () => {
+  it("marks the chat that is open with a bar of the accent down its left, and no background, in the list and in a card", async () => {
     const chats = [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 })];
     const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
-    const row = (title: string) => StyleSheet.flatten(screen.getByRole("button", { name: new RegExp(`^${title}`) }).props.style);
-    // Only the open one has the bar, and the wash is the accent faintly (not a flat grey block).
+    const style = (el: { props: { style?: unknown } }) => StyleSheet.flatten(el.props.style as never) as Record<string, unknown>;
+    const first = () => screen.getByRole("button", { name: /^First/ });
+    // Only the open one has the bar, down the left edge of its row.
     expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
-    expect(within(screen.getByRole("button", { name: /^First/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
-    expect(row("First").backgroundColor).toMatch(/^rgba\(\d+,\d+,\d+,0\.08\)$/);
-    expect(row("Second").backgroundColor).toBeUndefined();
+    expect(style(within(first()).getByTestId("selected-bar", { hidden: true }))).toMatchObject({ position: "absolute", left: 0, width: 3 });
+    expect(screen.queryByTestId("selected-underline", { hidden: true })).toBeNull();
+    // No wash on the row (it did not clip to the row's shape), the open one or any other.
+    expect(style(first()).backgroundColor).toBeUndefined();
+    expect(style(screen.getByRole("button", { name: /^Second/ })).backgroundColor).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
-    expect(within(screen.getByRole("button", { name: "First" })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    expect(style(screen.getByRole("button", { name: "First, Claude" })).backgroundColor).toBeUndefined();
+    await view.unmount();
+  });
+
+  it("moves the bar to the next chat that is opened, leaving it on one chat at a time", async () => {
+    const chats = [chat({ slot: "a", title: "First", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", active_at: NOW - 2_000 })];
+    const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
+    expect(within(screen.getByRole("button", { name: /^First/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    await view.rerender(
+      <SafeAreaProvider>
+        <ControllerContext.Provider value={view.controller}>
+          <HomeScreen {...handlers()} selectedSlot="b" />
+        </ControllerContext.Provider>
+      </SafeAreaProvider>,
+    );
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
+    expect(within(screen.getByRole("button", { name: /^Second/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    expect(within(screen.getByRole("button", { name: /^First/ })).queryByTestId("selected-bar", { hidden: true })).toBeNull();
     await view.unmount();
   });
 
@@ -309,17 +335,17 @@ describe("Home's chats by project", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
-    expect(screen.queryByRole("button", { name: "Release" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Release, Claude" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
-    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
   });
 
   it("opens a chat from under its project", async () => {
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Prayers widget" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Prayers widget, Claude" }));
     expect(h.onOpenChat).toHaveBeenCalledWith("b");
   });
 
@@ -377,8 +403,9 @@ describe("closing a chat from Home", () => {
 
   it("is offered when a chat is held down, asks first, and closes it on the Mac", async () => {
     const { lastOf } = await home();
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
-    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(lastOf("close")).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Close chat" }));
     await waitFor(() => expect(lastOf("close")).toEqual({ op: "close", slot: "a" }));
@@ -386,16 +413,57 @@ describe("closing a chat from Home", () => {
 
   it("says Claude is busy for a chat that is working, instead of asking", async () => {
     await home();
-    await fireEvent(screen.getByRole("button", { name: "Widget, lantern, working" }), "longPress");
-    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    await fireEvent(screen.getByRole("button", { name: "Widget, Claude, lantern, working" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Close chat…" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy(), { timeout: 2000 });
     expect(screen.getByText("Claude is busy in this chat. Stop it first, then close it.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Close chat" })).toBeNull();
   });
 
-  it("offers nothing for a Mac that can't close chats", async () => {
+  it("offers no closing for a Mac that can't close chats (the other actions are still there)", async () => {
     await home(connected);
-    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
+    expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close chat…" })).toBeNull();
     expect(screen.queryByText("Close this chat?")).toBeNull();
+  });
+});
+
+describe("what holding a chat down offers besides closing it", () => {
+  beforeEach(() => {
+    mockRemembered = "recent";
+    resetPins();
+  });
+  const chats = [chat({ slot: "a", title: "Release", active_at: NOW - 5 * 60_000 }), chat({ slot: "b", title: "Widget", active_at: NOW - 60_000 })];
+
+  it("pins a chat to the top, and unpins it", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    const order = () => screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /^(Release|Widget)/.test(l));
+    expect(order()[0]).toMatch(/^Widget/);
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Pin to the top" }));
+    await waitFor(() => expect(order()[0]).toMatch(/^Release.*pinned/));
+    await fireEvent(screen.getByRole("button", { name: /^Release.*pinned/ }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Unpin from the top" }));
+    await waitFor(() => expect(order()[0]).toMatch(/^Widget/));
+  });
+
+  it("marks an idle chat unread, and read again", async () => {
+    mockSeen = { a: NOW, b: NOW };
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Mark as unread" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, Claude, lantern, unread" })).toBeTruthy());
+    await fireEvent(screen.getByRole("button", { name: "Release, Claude, lantern, unread" }), "longPress");
+    await fireEvent.press(await screen.findByRole("button", { name: "Mark as read" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Release, Claude, lantern" })).toBeTruthy());
+  });
+
+  it("does not offer read or unread for a chat that is working", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "w", title: "Busy", status: "working" })] });
+    await fireEvent(screen.getByRole("button", { name: "Busy, Claude, lantern, working" }), "longPress");
+    expect(await screen.findByRole("button", { name: "Pin to the top" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Mark as/ })).toBeNull();
   });
 });
 
@@ -418,9 +486,9 @@ describe("project cards that stay folded", () => {
     mockFolded = ["lantern"];
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Release" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Release, Claude" })).toBeNull());
     expect(screen.getByRole("button", { name: "lantern, 1 chat" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prayers widget, Claude" })).toBeTruthy();
   });
 });
 
@@ -436,10 +504,10 @@ describe("what is unread", () => {
   it("marks a chat that has moved on since it was shown: a dot, a bold title and a stronger time, while a read one is plain", async () => {
     mockSeen = marks;
     await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
-    const news = await screen.findByRole("button", { name: "Has news, lantern, unread" });
+    const news = await screen.findByRole("button", { name: "Has news, Claude, lantern, unread" });
     expect(within(news).getByTestId("unread-dot", HIDDEN)).toBeTruthy();
     expect(StyleSheet.flatten(within(news).getByText("Has news").props.style).fontWeight).toBe("800");
-    const plain = screen.getByRole("button", { name: "Seen already, lantern" });
+    const plain = screen.getByRole("button", { name: "Seen already, Claude, lantern" });
     expect(within(plain).queryByTestId("unread-dot", HIDDEN)).toBeNull();
     expect(StyleSheet.flatten(within(plain).getByText("Seen already").props.style).fontWeight).toBe("400");
   });
@@ -447,7 +515,7 @@ describe("what is unread", () => {
   it("calls nothing unread the first time, when it has no idea what was shown", async () => {
     mockSeen = null;
     await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Has news, lantern" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Has news, Claude, lantern" })).toBeTruthy());
     expect(screen.queryByTestId("unread-dot", HIDDEN)).toBeNull();
     // And from then on, what happens in them does count.
     await waitFor(() => expect(mockSeen).toEqual({ a: NOW - 60_000, b: NOW - 30_000 }), SAVED);
@@ -473,7 +541,7 @@ describe("what is unread", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     const card = await screen.findByRole("button", { name: "lantern, 2 chats, 1 unread" });
     expect(within(card).getByTestId("unread-card-dot", HIDDEN)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Has news, lantern, unread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Has news, Claude, lantern, unread" })).toBeNull();
   });
 });
 
@@ -501,5 +569,20 @@ describe("the order of the chats", () => {
     expect(titles()).toEqual(["Busy one", "Rest two", "Rest one"]);
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [{ ...first[0], status: "idle", active_at: NOW - 1_000 }, first[1], { ...first[2], status: "working", active_at: NOW - 400 }] } }));
     expect(titles()).toEqual(["Rest two", "Busy one", "Rest one"]);
+  });
+});
+
+describe("a file change waiting on you", () => {
+  it("says how big it is on the card", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting({ request_id: "e1", tool_name: "Edit", input: { file_path: "/p/a.ts", old_string: "a", new_string: "b\nc" } })] });
+    expect(screen.getByTestId("deck-change")).toHaveTextContent(/^\+2 −1 lines/);
+  });
+});
+
+describe("the plan usage on Home", () => {
+  it("opens the usage in full when pressed", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], plan: { used: 0.4, resetsAt: null, status: "allowed" } });
+    await fireEvent.press(screen.getByRole("button", { name: /^Claude usage/ }));
+    expect(await screen.findByText("Usage by provider")).toBeTruthy();
   });
 });

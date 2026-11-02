@@ -53,6 +53,10 @@ fn command(cfg: &SessionConfig) -> Command {
     let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
     // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
     // go there, a command line is readable by any process), and the token and what to take out in the environment.
+    // Subagents off: claude starts without the tools that start them.
+    if cfg.subagent_model.as_deref() == Some(crate::session::SUBAGENTS_OFF) {
+        crate::args::without_subagents(&mut args);
+    }
     let gateway = cfg.endpoint.as_ref().zip(cfg.model.as_deref()).map(|(g, model)| gateway_env(g, model));
     if let Some(g) = &gateway {
         add_settings(&mut args, g.settings.clone());
@@ -73,8 +77,15 @@ fn command(cfg: &SessionConfig) -> Command {
             cmd.env(k, v);
         }
     }
-    if let Some(m) = &cfg.subagent_model {
-        cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+    match cfg.subagent_model.as_deref() {
+        // No subagents, so no model for them, whatever Lantern itself was started with.
+        Some(crate::session::SUBAGENTS_OFF) => {
+            cmd.env_remove("CLAUDE_CODE_SUBAGENT_MODEL");
+        }
+        Some(m) => {
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+        }
+        None => {}
     }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
@@ -420,7 +431,8 @@ mod tests {
     async fn wait_for_file(path: &std::path::Path) -> String {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                // Non-empty, too: the shell creates the file before writing to it.
+                // Non-empty, too: the shell creates the file before writing to it. A script whose file is read while it is
+                // still being written (more than one line) writes it elsewhere and moves it into place, so it is whole once here.
                 if let Some(contents) = std::fs::read_to_string(path).ok().filter(|c| !c.is_empty()) {
                     return contents;
                 }
@@ -671,10 +683,10 @@ done"#,
         let (sink, mut rx) = channel_sink();
         let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
         let block = serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
-        s.send_with("what is this?", vec![block.clone()]).await.unwrap();
+        s.send_with("what is this?", vec![crate::session::InputImage { media_type: "image/jpeg".into(), data: "/9j/4AAQ".into() }]).await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
         // A picture alone is a message of one block, with no empty text after it; words alone are as they always were.
-        s.send_with("", vec![block.clone()]).await.unwrap();
+        s.send_with("", vec![crate::session::InputImage { media_type: "image/jpeg".into(), data: "/9j/4AAQ".into() }]).await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
         s.send("just words").await.unwrap();
         next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
@@ -705,7 +717,7 @@ done"#,
     async fn resume_id_is_passed_and_kept() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
-        let fake = script(dir.path(), &format!("printf '%s\\n' \"$@\" > {d}/args.txt\ncat > /dev/null"));
+        let fake = script(dir.path(), &format!("printf '%s\\n' \"$@\" > {d}/args.tmp\nmv {d}/args.tmp {d}/args.txt\ncat > /dev/null"));
         let (sink, _rx) = channel_sink();
         let s = Session::spawn(&config(fake, dir.path(), Some("sess-42")), sink, no_edits()).unwrap();
         assert_eq!(s.session_id().as_deref(), Some("sess-42"));
@@ -720,7 +732,7 @@ done"#,
     async fn the_harness_reaches_claude_as_its_advisor_flag_and_subagent_model() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
-        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.txt\ncat > /dev/null"));
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.tmp\nmv {d}/seen.tmp {d}/seen.txt\ncat > /dev/null"));
         let (sink, _rx) = channel_sink();
         let mut cfg = config(fake, dir.path(), None);
         cfg.advisor = Some("opus".into());
@@ -730,6 +742,22 @@ done"#,
         let (args, sub) = seen.split_once('|').unwrap();
         assert!(args.ends_with("--advisor opus"), "{args}");
         assert_eq!(sub, "haiku");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn subagents_off_starts_claude_without_the_tool_and_no_subagent_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"${{CLAUDE_CODE_SUBAGENT_MODEL-unset}}\" > {d}/seen.tmp\nmv {d}/seen.tmp {d}/seen.txt\ncat > /dev/null"));
+        let (sink, _rx) = channel_sink();
+        let mut cfg = config(fake, dir.path(), None);
+        cfg.subagent_model = Some(crate::session::SUBAGENTS_OFF.into());
+        let s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        let seen = wait_for_file(&dir.path().join("seen.txt")).await;
+        let (args, sub) = seen.split_once('|').unwrap();
+        assert!(args.contains("--disallowedTools Agent,Task,Workflow"), "{args}");
+        assert_eq!(sub, "unset");
         s.stop().await;
     }
 

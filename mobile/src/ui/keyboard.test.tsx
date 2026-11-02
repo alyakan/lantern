@@ -1,6 +1,6 @@
 import { Keyboard, Platform, StyleSheet, Text } from "react-native";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react-native";
-import { AboveKeyboard, useKeyboardUp } from "./keyboard";
+import { AboveKeyboard, barRoom, KEYBOARD_GAP, useKeyboardUp } from "./keyboard";
 
 /** Stands in for the keyboard: keeps what was listened for, so a test can say the keyboard came or went. */
 function fakeKeyboard() {
@@ -17,6 +17,28 @@ describe("keyboard", () => {
   const original = Platform.OS;
   afterEach(() => {
     Platform.OS = original;
+  });
+
+  it("gives the library an offset that lifts the bar by the room under it less the gap it keeps above the keyboard", async () => {
+    // A phone with a home indicator (34 points) and one without (0): the bar keeps 8 points above the keyboard either way.
+    for (const bottom of [34, 0, 20]) {
+      const offset = KEYBOARD_GAP - barRoom(bottom);
+      expect(barRoom(bottom) + offset).toBe(KEYBOARD_GAP);
+    }
+    expect(barRoom(34)).toBe(34);
+    expect(barRoom(0)).toBe(12);
+    await render(
+      <AboveKeyboard offset={-26}>
+        <Text>inside</Text>
+      </AboveKeyboard>,
+    );
+    // The offset reaches the avoiding view (found in what was drawn, whichever view the library's stand-in is).
+    const found = (node: unknown): boolean => {
+      if (!node || typeof node !== "object") return false;
+      const n = node as { props?: Record<string, unknown>; children?: unknown[] | null };
+      return n.props?.keyboardVerticalOffset === -26 || (n.children ?? []).some(found);
+    };
+    expect(found(screen.toJSON())).toBe(true);
   });
 
   it("knows when the keyboard is up, on iOS as it starts to move", async () => {

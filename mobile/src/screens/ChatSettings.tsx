@@ -1,4 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { currentUsageWindows } from "../view/providerUsage";
+import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
+import type { ConversationSettings } from "../sync/sync";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
@@ -7,18 +10,29 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { PlanUsage } from "../sync/reducer";
 import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
-import { ContextRow, UsageRow } from "./ChatExtras";
+import { ContextRow, UsageRow, WeekRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
-import { Button, Txt } from "../ui/components";
+import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { radius, shadow, space, useColors } from "../ui/theme";
-import { autoNote, MODES, modeLabel, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
+import { radius, space, useColors } from "../ui/theme";
+import { autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
 export const SWITCH_WAIT_MS = 20_000;
+
+/** How a Step by step chat is shown on this phone. */
+export interface PagesChoice {
+  on: boolean;
+  onChange: (on: boolean) => void;
+}
+
+const SHOW: Option[] = [
+  { value: "pages", label: "Pages", hint: "One page at a time, side by side, as on the Mac" },
+  { value: "list", label: "One list", hint: "The whole chat as one list of messages" },
+];
 
 interface Option {
   value: string;
@@ -29,7 +43,7 @@ interface Option {
 }
 
 /** One choice of a few, as a row: its name and what it does, or why it can't be picked now. */
-function OptionRow({ option, selected, onPick }: { option: Option; selected: boolean; onPick: () => void }) {
+function OptionRow({ option, selected, onPick, notice }: { option: Option; selected: boolean; onPick: () => void; notice?: string | null }) {
   const colors = useColors();
   return (
     <PressScale
@@ -47,105 +61,106 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
         {selected ? `${option.label} ✓` : option.label}
       </Txt>
       <Txt variant="small" tone="ink2">
-        {option.off ?? option.hint}
+        {option.off && option.off !== notice ? option.off : option.hint}
       </Txt>
     </PressScale>
   );
 }
 
-/** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+interface SettingsSection {
+  id: string;
+  title: string;
+  value: string;
+  options: Option[];
+  selected: string;
+  onPick: (value: string) => void;
+}
+
+/** A setting's current value, opening its choices inline without changing pages. */
+function SettingsLink({ title, value, expanded, onPress }: { title: string; value: string; expanded: boolean; onPress: () => void }) {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
-          <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
-            <Txt variant="title" accessibilityRole="header">
-              Chat settings
-            </Txt>
-            <Txt variant="small" tone="ink2">
-              {off ?? "Claude restarts on the same conversation when you change these."}
-            </Txt>
-            {context && <ContextRow context={context} />}
-            {plan && <UsageRow plan={plan} />}
+    <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${value}`} accessibilityHint={expanded ? "Collapses choices" : "Expands choices"} accessibilityState={{ expanded }} onPress={onPress} haptic="select" scaleTo={0.98}
+      style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: colors.card, borderRadius: radius.inner }}>
+      <Txt variant="body" style={{ flexShrink: 0 }}>{title}</Txt>
+      <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flex: 1, textAlign: "right" }}>{value}</Txt>
+      <Txt variant="body" tone="ink3" accessibilityElementsHidden>{expanded ? "⌃" : "⌄"}</Txt>
+    </PressScale>
+  );
+}
+
+/** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
+function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const colors = useColors();
+  const [showOlder, setShowOlder] = useState(false);
+  const next = useRef<(() => void) | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const toggle = (id: string) => setExpanded((current) => current === id ? null : id);
+  const sections: SettingsSection[] = [];
+  if (configuration && onConfigure) {
+    const provider = providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider);
+    if (providers?.length) sections.push({ id: "provider", title: "Provider", value: provider, selected: configuration.provider,
+      options: providers.map((p) => ({ value: p.id, label: p.name, hint: "Continue this conversation with this provider", off })),
+      onPick: (provider) => onConfigure({ provider }) });
+    if (configuration.capabilities.model_switchable) sections.push({ id: "model", title: "Model", value: configuration.model ?? "Provider default", selected: configuration.model ?? "",
+      options: [{ value: "", label: "Provider default", hint: "Used for the next turn", off }, ...configuration.models.map((m) => ({ value: m, label: m, hint: "Used for the next turn", off }))],
+      onPick: (model) => onConfigure({ model: model || null }) });
+    if (configuration.capabilities.supports_effort && configuration.effort_levels.length) sections.push({ id: "effort", title: "Effort", value: configuration.effort ?? "Provider default", selected: configuration.effort ?? "",
+      options: configuration.effort_levels.map((e) => ({ value: e, label: e, hint: "Thinking effort", off })), onPick: (effort) => onConfigure({ effort }) });
+  }
+  if (workflows.length) sections.push({ id: "workflow", title: "Workflow", value: workflowLabel(chat.workflow ?? "chat"), selected: chat.workflow ?? "", options: workflows, onPick: onWorkflow });
+  if (pages) sections.push({ id: "show", title: "Show", value: pages.on ? "Pages" : "One list", selected: pages.on ? "pages" : "list", options: SHOW, onPick: (v) => pages.onChange(v === "pages") });
+  sections.push({ id: "permissions", title: "Permissions", value: modeLabel(chat.permissions ?? "ask"), selected: chat.permissions ?? "", options: modes, onPick: onMode });
+  if (presets.length) sections.push({ id: "presets", title: "Model preset", value: presets.find((p) => p.value === chat.preset)?.label ?? "Standard", selected: chat.preset ?? "", options: presets, onPick: onPreset });
+  const activeUsage = currentUsageWindows(providerUsage);
+  const hasUsage = !!context || !!plan || !!providerUsage || !!chat.provider;
+  return (
+    <Sheet onClose={() => { onClose(); next.current?.(); }}>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.lg, paddingVertical: 10, gap: 8 }}>
+            <Txt variant="body" accessibilityRole="header" style={{ flex: 1, fontWeight: "700" }}>Chat settings</Txt>
+            <PressScale accessibilityRole="button" accessibilityLabel="Done" onPress={close} hitSlop={8} style={{ minWidth: 60, minHeight: 44, alignItems: "flex-end", justifyContent: "center" }}><Txt variant="body" tone="cobalt" style={{ fontWeight: "700" }}>Done</Txt></PressScale>
+          </View>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
+            <View style={off ? { backgroundColor: colors.hiSoft, borderRadius: radius.inner, padding: 12 } : undefined}>
+              <Txt variant="small" tone={off ? "cobalt" : "ink2"}>{off ?? "Changes apply to this conversation."}</Txt>
+            </View>
             {loading ? (
-              <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}>
-                <Dots />
-              </View>
+              <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}><Dots /></View>
             ) : (
               <>
-                {workflows.length > 0 && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                      Workflow
-                    </Txt>
-                    {workflows.map((o) => (
-                      <OptionRow
-                        key={o.value}
-                        option={o}
-                        selected={o.value === chat.workflow}
-                        onPick={() => {
-                          onWorkflow(o.value);
-                          close();
-                        }}
-                      />
-                    ))}
-                  </>
-                )}
-                <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                  Permissions
-                </Txt>
-                {modes.map((o) => (
-                  <OptionRow
-                    key={o.value}
-                    option={o}
-                    selected={o.value === chat.permissions}
-                    onPick={() => {
-                      onMode(o.value);
-                      close();
-                    }}
-                  />
+                {(activeUsage.some(w => w.used >= .95) || plan && Math.max(plan.used, plan.week?.used ?? 0) >= .95) && configuration?.provider === "claude" && !off && providers?.some(p => p.id === "codex") && onConfigure && <PressScale accessibilityRole="button" accessibilityLabel="Switch this chat to Codex" onPress={() => { onConfigure({ provider: "codex" }); close(); }} style={{ paddingVertical: 12 }}><Txt variant="body" tone="cobalt">Switch this chat to Codex</Txt></PressScale>}
+                {sections.map((section) => (
+                  <Fragment key={section.id}>
+                    <SettingsLink title={section.title} value={section.value} expanded={expanded === section.id} onPress={() => toggle(section.id)} />
+                    {expanded === section.id && <View style={{ gap: 6, paddingHorizontal: 6 }}>
+                      {section.options.filter((option, index) => section.id !== "model" || showOlder || index <= 5 || option.value === section.selected).map((option) => <OptionRow key={option.value} notice={off} option={option} selected={option.value === section.selected} onPick={() => { section.onPick(option.value); close(); }} />)}
+                      {section.id === "model" && section.options.length > 6 && <PressScale accessibilityRole="button" accessibilityLabel={showOlder ? "Hide older models" : "Show older models"} onPress={() => setShowOlder((shown) => !shown)} style={{ padding: 12, minHeight: 44 }}>
+                        <Txt variant="small" tone="cobalt">{showOlder ? "Hide older models" : "Show older models"}</Txt>
+                      </PressScale>}
+                    </View>}
+                  </Fragment>
                 ))}
-                {presets.length > 0 && (
-                  <>
-                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
-                      Models
-                    </Txt>
-                    {presets.map((o) => (
-                      <OptionRow
-                        key={o.value}
-                        option={o}
-                        selected={o.value === chat.preset}
-                        onPick={() => {
-                          onPreset(o.value);
-                          close();
-                        }}
-                      />
-                    ))}
-                  </>
+                {hasUsage && <SettingsLink title="Usage & context" value={context ? contextOf(context).label : "View usage"} expanded={expanded === "usage"} onPress={() => toggle("usage")} />}
+                {expanded === "usage" && <>
+                  {context && <ContextRow context={context} />}
+                  {activeUsage.length ? activeUsage.map(w => <Txt key={w.label} variant="body">{chat.provider ?? "Claude"} · {w.label}: {Math.round(w.used * 100)}% used{w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}</Txt>) : !plan && <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
+                  {plan && <UsageRow plan={plan} />}
+                  {plan?.week && <WeekRow week={plan.week} />}
+                </>}
+                {onAskClose && (
+                  <PressScale accessibilityRole="button" accessibilityLabel="Close this chat" onPress={() => {
+                    // The question comes once this sheet is away: iOS shows no sheet while another is still going.
+                    next.current = onAskClose;
+                    close();
+                  }} haptic="select" scaleTo={0.98} style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}>
+                    <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>Close this chat</Txt>
+                  </PressScale>
                 )}
               </>
             )}
-            {onAskClose && (
-              <PressScale
-                accessibilityRole="button"
-                accessibilityLabel="Close this chat"
-                onPress={() => {
-                  close();
-                  onAskClose();
-                }}
-                haptic="select"
-                scaleTo={0.98}
-                style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}
-              >
-                <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>
-                  Close this chat
-                </Txt>
-              </PressScale>
-            )}
-            <Button label="Done" kind="ghost" onPress={close} />
           </ScrollView>
         </View>
       )}
@@ -160,10 +175,17 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
  * only offered while the chat is doing nothing; "Switching…" stays in the line until the chat says it changed.
  * `children` draws the title and what is under it, given the settings line (null when there is none).
  */
-export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
+export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; /** For a Step by step chat: pages or one list. */ pages?: PagesChoice; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
   const { sync } = useController();
   const { supported, controls, reload } = useControls();
   const [open, setOpen] = useState(false);
+  const canConversation = useMacCan("conversation");
+  const [configuration, setConfiguration] = useState<ConversationSettings | null>(null);
+  useEffect(() => {
+    let current = true;
+    if (open && canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, () => {});
+    return () => { current = false; };
+  }, [open, slot, chat?.provider, canConversation, sync]);
   const [closing, setClosing] = useState(false);
   const canClose = useMacCan("close");
   const canFlow = useMacCan("workflow");
@@ -192,13 +214,17 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
     });
   };
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
-  const preset = switching?.kind === "preset" ? "Switching…" : chat.preset ? presetName(controls, chat.preset) : null;
+  // (A chat on another provider than Claude's runs on its own model: the Mac records a preset for every chat, but it isn't one it runs on.)
+  const preset = switching?.kind === "preset" ? "Switching…" : chat.preset && !chat.provider ? presetName(controls, chat.preset) : null;
   // Step by step is said; a plain chat is the usual, and isn't.
   const flow = switching?.kind === "workflow" ? "Switching…" : chat.workflow && chat.workflow !== "chat" ? workflowLabel(chat.workflow) : null;
   const usage = plan ? usageOf(plan) : null;
-  const low = usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
+  const providerPercent = providerUsage?.windows.filter(w => w.resets_at === null || w.resets_at * 1000 > Date.now()).reduce((n, w) => Math.max(n, Math.round(w.used * 100)), 0);
+  const low = providerPercent !== undefined && providerPercent >= 80 ? providerPercent >= 100 ? "Limit reached" : `${providerPercent}% used` : usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
   const held = context ? contextOf(context) : null;
-  const line = [flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
+  // What it runs on, said first when that isn't Claude Code ("Ollama · Ask · 12k tokens"); a Claude chat's line is as it always was.
+  const provider = chat.provider ?? null;
+  const line = [provider, flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -220,13 +246,19 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
         <SettingsSheet
           chat={chat}
           plan={plan}
+          providerUsage={providerUsage}
           context={context}
           off={off}
           loading={!controls}
           workflows={canFlow && (chat.workflow === "chat" || chat.workflow === "steps") ? WORKFLOWS.map((w) => ({ value: w.value, label: w.label, hint: w.hint, off })) : []}
           onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
-          modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? autoNote(controls) : null) }))}
-          presets={(controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
+          // Another provider than Claude's has no Auto mode, and the Mac's presets are Claude Code's models: neither is offered for its chat.
+          configuration={configuration}
+          providers={controls?.providers ?? []}
+          onConfigure={(change) => { void sync.conversationSettings(slot, change).then(setConfiguration).catch((e: Error) => onProblem(e.message)); }}
+          modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? (configuration ? (configuration.capabilities.supports_auto_mode ? autoNote(controls) : noAutoOn(provider ?? configuration.provider)) : provider ? noAutoOn(provider) : autoNote(controls)) : null) }))}
+          pages={pages}
+          presets={(configuration ? !configuration.capabilities.supports_advisor : !!provider) ? [] : (controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
           onMode={(v) => v !== chat.permissions && pick("mode", v)}
           onPreset={(v) => v !== chat.preset && pick("preset", v)}
           onAskClose={canClose ? () => setClosing(true) : undefined}
@@ -236,7 +268,7 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
       {closing && (
         <CloseChatSheet
           title={chat.title?.trim() || "this chat"}
-          why={chat.status === "working" || chat.status === "needs_you" ? "Claude is busy in this chat. Stop it first, then close it." : null}
+          why={chat.status === "working" || chat.status === "needs_you" ? "The agent is busy in this chat. Stop it first, then close it." : null}
           onConfirm={() => sync.close(slot).then(() => onClosed?.())}
           onClose={() => setClosing(false)}
         />

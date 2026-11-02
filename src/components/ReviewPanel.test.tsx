@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ReviewPanel, migrateTab } from "./ReviewPanel";
+import { forgetChatTabs } from "../lib/reviewTabs";
 import { api } from "../api";
 import type { TestRunItem } from "../store";
 import { NetworkEmpty } from "./NetworkTab";
@@ -232,9 +233,9 @@ describe("ReviewPanel's tabs", () => {
     expect(screen.queryByRole("tab", { name: /Activity|Storage/ })).toBeNull();
     openMenu();
     const menu = screen.getByRole("menu", { name: "Side panel tabs" });
-    expect(within(menu).getAllByRole("menuitem").filter((i) => i.classList.contains("menu-row")).map((i) => i.textContent)).toEqual(["Changes2", "Files", "Plan", "Tests", "Checks", "Network", "Reset to default"]);
+    expect(within(menu).getAllByRole("menuitem").filter((i) => i.classList.contains("menu-row")).map((i) => i.textContent)).toEqual(["Changes2", "Files", "Plan", "Tests", "Checks", "Network", "Dashboard", "Artifacts", "Todos", "Reset to default"]);
     expect(within(menu).getAllByRole("menuitemcheckbox").map((c) => [c.getAttribute("aria-label"), c.getAttribute("aria-checked")])).toEqual([
-      ["Pin Changes", "true"], ["Pin Files", "true"], ["Pin Plan", "true"], ["Pin Tests", "false"], ["Pin Checks", "false"], ["Pin Network", "false"],
+      ["Pin Changes", "true"], ["Pin Files", "true"], ["Pin Plan", "true"], ["Pin Tests", "false"], ["Pin Checks", "false"], ["Pin Network", "false"], ["Pin Dashboard", "false"], ["Pin Artifacts", "false"], ["Pin Todos", "false"],
     ]);
     localStorage.clear();
   });
@@ -356,17 +357,57 @@ describe("ReviewPanel's tabs", () => {
     localStorage.clear();
   });
 
-  it("a tab saved under an old name moves to its new one: Summary and Map to Plan; Activity, Agents and Storage to Changes", () => {
+  it("a chat's tab saved under an old name moves to its new one: Summary and Map to Plan; Activity, Agents and Storage to Changes", () => {
     for (const [old, now] of [["summary", "Plan"], ["map", "Plan"], ["agents", "Changes2"], ["activity", "Changes2"], ["storage", "Changes2"], ["tests", "Tests"], ["gone", "Changes2"]]) {
-      localStorage.setItem("review.tab", JSON.stringify(old));
-      const { unmount } = render(<ReviewPanel {...base} selected={null} follow />);
+      localStorage.setItem("review.chatTabs", JSON.stringify({ "sess-old": old }));
+      const { unmount } = render(<ReviewPanel {...base} chat={{ slot: "s-old", session: "sess-old" }} selected={null} follow />);
       expect(selected()).toBe(now);
       unmount();
     }
-    // The saved name is rewritten, so it migrates once.
-    localStorage.setItem("review.tab", JSON.stringify("agents"));
-    render(<ReviewPanel {...base} selected={null} follow />);
-    expect(JSON.parse(localStorage.getItem("review.tab")!)).toBe("changes");
+    localStorage.clear();
+  });
+
+  it("keeps each chat's own tab, across switching and, by its session, a restart", () => {
+    forgetChatTabs();
+    const one = { slot: "s1", session: "sess-1" };
+    const two = { slot: "s2", session: null };
+    const { rerender, unmount } = render(<ReviewPanel {...base} chat={one} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    // Another chat opens on its own tab (Changes, never picked there), not the first chat's.
+    rerender(<ReviewPanel {...base} chat={two} selected={null} follow />);
+    expect(selected()).toBe("Changes2");
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    rerender(<ReviewPanel {...base} chat={one} selected={null} follow />);
+    expect(selected()).toBe("Files");
+    rerender(<ReviewPanel {...base} chat={two} selected={null} follow />);
+    expect(selected()).toBe("Plan");
+    unmount();
+    // After a restart slots are numbered afresh: the chat with a session finds its tab, the one without starts on Changes.
+    forgetChatTabs();
+    const again = render(<ReviewPanel {...base} chat={{ slot: "s9", session: "sess-1" }} selected={null} follow />);
+    expect(selected()).toBe("Files");
+    again.unmount();
+    render(<ReviewPanel {...base} chat={{ slot: "s2", session: null }} selected={null} follow />);
+    expect(selected()).toBe("Changes2");
+    localStorage.clear();
+  });
+
+  it("finds a put-back chat's tab when its session comes after it shows, and keeps a new chat's under the session it gets", () => {
+    forgetChatTabs();
+    localStorage.setItem("review.chatTabs", JSON.stringify({ "sess-1": "files" }));
+    const { rerender, unmount } = render(<ReviewPanel {...base} chat={{ slot: "s9", session: null }} selected={null} follow />);
+    expect(selected()).toBe("Changes2");
+    rerender(<ReviewPanel {...base} chat={{ slot: "s9", session: "sess-1" }} selected={null} follow />);
+    expect(selected()).toBe("Files");
+    // A new chat: Plan picked before its first message, then it gets a session.
+    rerender(<ReviewPanel {...base} chat={{ slot: "s10", session: null }} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    rerender(<ReviewPanel {...base} chat={{ slot: "s10", session: "sess-2" }} selected={null} follow />);
+    expect(selected()).toBe("Plan");
+    unmount();
+    forgetChatTabs();
+    render(<ReviewPanel {...base} chat={{ slot: "s3", session: "sess-2" }} selected={null} follow />);
+    expect(selected()).toBe("Plan");
     localStorage.clear();
   });
 

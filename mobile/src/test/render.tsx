@@ -35,6 +35,8 @@ export interface Seed {
   events?: Record<string, RemoteEvent[]>;
   /** The tip jar the screens find (none: one with no store behind it). */
   tips?: TipJar;
+  /** What the Mac says of the plan's usage (used 0 to 1; the weekly window's `week`, when it says it). */
+  plan?: { used: number; resetsAt: number | null; status: string; week?: { used: number; resetsAt: number | null } };
 }
 
 /** Connected to a Mac that has Controls (Welcome's features), as an up-to-date Lantern is. */
@@ -53,6 +55,7 @@ export function seed(controller: Controller, s: Seed) {
     sync.apply({ type: "pushed", msg: { type: "chats", chats: s.chats ?? [] } });
     sync.apply({ type: "waiting", list: s.waiting ?? [] });
   }
+  if (s.plan) sync.apply({ type: "pushed", msg: { type: "plan", used: s.plan.used, resets_at: s.plan.resetsAt, status: s.plan.status, week_used: s.plan.week?.used, week_resets_at: s.plan.week?.resetsAt } });
   for (const [slot, events] of Object.entries(s.events ?? {})) events.forEach((event, i) => sync.apply({ type: "pushed", msg: { type: "event", slot, seq: i + 1, event } }));
 }
 

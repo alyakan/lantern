@@ -248,6 +248,13 @@ describe("reducer", () => {
     expect(firstPrompt(replayed)).toBeNull();
   });
 
+  it("a Stop hook keeping Claude going is a hook too, so the answer before it stays the answer", () => {
+    const running = { ...initialState, status: "running" as const, items: [{ type: "user" as const, id: "u1", text: "any more reports?" }, { type: "assistant" as const, id: "m1", text: "Yes, 44 users." }] };
+    const after = ev(running, { kind: "user_text", text: "Stop hook feedback:\n[brain nudge]: Save what you learned.\n", at: 9 });
+    expect(after.items[2]).toEqual({ type: "hook", id: "h1", text: "Save what you learned.", at: 9 });
+    expect(after.status).toBe("running");
+  });
+
   it("a compaction is Lantern's bookkeeping: the chat shows nothing of it", () => {
     const s = { ...initialState, status: "running" as const };
     expect(ev(s, { kind: "compacted" })).toEqual(s);
@@ -421,6 +428,16 @@ describe("reducer", () => {
   it("session_started records the session id", () => {
     const s = ev(running, { kind: "session_started", session_id: "s-1", model: "m", cwd: "/p", permission_mode: "ask", claude_version: "2" });
     expect(s.sessionId).toBe("s-1");
+  });
+
+  it("a claude that has just started saying what it can do isn't the chat doing something, but a message is", () => {
+    const woken = { ...running, activityAt: null };
+    const started = ev(woken, { kind: "session_started", session_id: "s-1", model: "m", cwd: "/p", permission_mode: "ask", claude_version: "2" });
+    expect(started.activityAt).toBeNull();
+    expect(ev(started, { kind: "commands", commands: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "models", models: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "mcp_tools", tools: [] }).activityAt).toBeNull();
+    expect(ev(started, { kind: "assistant_text", parent: null, block_id: "m:0", text: "Hi" } as UiEvent).activityAt).not.toBeNull();
   });
 
   it("history_loaded replaces the conversation with the replayed session", () => {

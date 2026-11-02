@@ -55,7 +55,10 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
 
   const pan = useRef(
     PanResponder.create({
-      // Only a drag starts it: a touch that doesn't move is never an allow.
+      // The knob takes the touch the moment it lands, so what it sits in (a page of Step by step, a chat) is held still before it
+      // can start to scroll: waiting for the drag, the page had already begun to go to the one before. A touch that doesn't move is
+      // still never an allow (release checks how far it went).
+      onStartShouldSetPanResponder: () => !done.current,
       onMoveShouldSetPanResponder: (_, g) => !done.current && Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
       onPanResponderGrant: () => {
         buzz("select");

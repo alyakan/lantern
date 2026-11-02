@@ -154,7 +154,8 @@ describe("single provider: the whole window", () => {
     const { default: App } = await import("./App");
     render(<App />);
     await screen.findByPlaceholderText("Ask Claude…");
-    await waitFor(() => expect(document.querySelector(".model-button")).not.toBeNull());
+    // Once Claude has said which model it runs: before that the chip says "Default", and the snapshot raced it.
+    await waitFor(() => expect(document.querySelector(".model-button")?.textContent).toContain("Opus 5.5"));
     expect(document.querySelector(".composer")).toMatchSnapshot("composer");
     const box = screen.getByRole("textbox");
     fireEvent.change(box, { target: { value: "retry on 503" } });

@@ -9,13 +9,21 @@ import type { EarlierPage } from "../protocol/generated/EarlierPage";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
+import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
+import type { RemoteDeskExchange } from "../protocol/generated/RemoteDeskExchange";
+import type { RemoteDeskReply } from "../protocol/generated/RemoteDeskReply";
+import type { RemoteDeskTalk } from "../protocol/generated/RemoteDeskTalk";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
+import type { RemoteUserTodos } from "../protocol/generated/RemoteUserTodos";
+import type { RemoteTodoEdit } from "../protocol/generated/RemoteTodoEdit";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
+import { artifactList, type Artifact } from "../view/artifacts";
 import { newShellId } from "../view/shell";
 import type { PickedImage } from "../view/attachments";
 import { initialState, reducer, type Action, type State } from "./reducer";
@@ -31,6 +39,9 @@ const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "f
 let ids = 0;
 const defaultId = () => `m-${Date.now().toString(36)}-${(++ids).toString(36)}`;
 
+/** How long the Mac has to say where a Desk's message goes: its router may take half a minute, and an answer two minutes more. */
+export const DESK_WAIT = 170_000;
+
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
 
@@ -40,6 +51,7 @@ export class Sync {
   private listeners = new Set<() => void>();
   private queue: Action[] = [];
   private scheduled = false;
+  private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
   private readonly schedule: (fn: () => void) => void;
@@ -89,6 +101,7 @@ export class Sync {
       if (statuses(msg.chats) !== statuses(this.state.chats)) void this.refreshWaiting();
     }
     this.apply({ type: "pushed", msg });
+    if (msg.type === "reset" && msg.done) void this.refreshWaiting();
   };
 
   /** Forgets everything (the phone was unpaired): the next Mac starts from nothing. */
@@ -107,6 +120,7 @@ export class Sync {
     this.flush();
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
+    void this.refreshDesk();
     this.onConnected?.();
   };
 
@@ -129,14 +143,72 @@ export class Sync {
   }
 
   async refreshWaiting() {
+    this.flush();
+    const session = this.session;
+    const request = ++this.waitingRequest;
+    const observedPrompts = Object.fromEntries(Object.entries(this.state.views).map(([slot, view]) => [slot, view.items.filter((it) => it.kind === "prompt" && it.state === "open").map((it) => it.id)]));
     try {
       const list = await this.ask<Waiting[]>({ op: "list_waiting" });
-      if (Array.isArray(list)) this.apply({ type: "waiting", list });
+      if (this.session === session && request === this.waitingRequest && Array.isArray(list)) this.apply({ type: "waiting", list, observedPrompts });
     } catch {
       // Not connected: it is asked again when a connection comes up. Connected but it failed: what was known stays, and Home
       // shows that rather than waiting for ever on an answer that isn't coming.
-      if (this.session) this.apply({ type: "waiting", list: this.state.waiting });
+      if (this.session === session && request === this.waitingRequest && this.session) this.apply({ type: "waiting", list: this.state.waiting });
     }
+  }
+
+  /** Whether the Mac shares its One project (it pushes it as it changes, and takes one picked here). */
+  followsSingle() {
+    return this.has("single");
+  }
+
+  /**
+   * Shows only `project` (a RemoteProject's id) on the Mac and here, or every project (null). Nothing changes here until the Mac
+   * says back what it shows, so the two never disagree.
+   */
+  setSingle(project: string | null) {
+    if (!this.has("single")) return Promise.reject(new Error("Update Lantern on your Mac to show one project."));
+    return this.ask<null>({ op: "set_single", project });
+  }
+
+  /** Asks for the Desk, from a Mac that has one (it pushes it as it changes; this is for the first time). */
+  async refreshDesk() {
+    if (!this.has("desk")) return;
+    try {
+      const desk = await this.ask<RemoteDesk>({ op: "desk" });
+      if (desk && Array.isArray(desk.desks) && Array.isArray(desk.cards)) this.apply({ type: "desk", desk });
+    } catch {
+      // What was known stays: the Mac pushes the Desk again when it changes.
+    }
+  }
+
+  /**
+   * Where a message typed on the Desk `desk` goes, decided on the Mac by a quick call to a small model (up to half a minute). Nothing
+   * is sent: the caller sends it there.
+   */
+  deskRoute(desk: string, text: string) {
+    if (!this.has("desk")) return Promise.reject(new Error("This Mac has no Desk yet. Update Lantern on it."));
+    return this.ask<RemoteDeskRoute>({ op: "desk_route", desk, text }, DESK_WAIT);
+  }
+
+  /** Whether the Mac's Desk talks back and sums up what came back (Request::DeskTalk, Request::DeskReply). */
+  deskTalks() {
+    return this.has("desktalk");
+  }
+
+  /**
+   * What the Desk says back to `text` typed on the Desk `desk`, given the last few exchanges there, and what it does with it (as
+   * deskRoute does; null: it only replied). Nothing is sent: the caller sends it.
+   */
+  deskTalk(desk: string, text: string, history: RemoteDeskExchange[]) {
+    if (!this.has("desktalk")) return Promise.reject(new Error("Update Lantern on your Mac for the Desk to talk."));
+    return this.ask<RemoteDeskTalk>({ op: "desk_talk", desk, text, history }, DESK_WAIT);
+  }
+
+  /** What came back from chat `slot` to the Desk message `text`, sent there after its event `after`: summed up once its turn ended. */
+  deskReply(desk: string, slot: string, text: string, after: number) {
+    if (!this.has("desktalk")) return Promise.reject(new Error("Update Lantern on your Mac to see what came back."));
+    return this.ask<RemoteDeskReply>({ op: "desk_reply", desk, slot, text, after }, DESK_WAIT);
   }
 
   /** Opens a chat: its events come from now on. */
@@ -172,6 +244,19 @@ export class Sync {
       if (carded) this.onFailed?.(clientId);
       this.apply({ type: "send_failed", slot, clientId, error: (e as Error).message });
     }
+  }
+
+  /** Whether the Mac answers over this connection now (a round trip), which a connection that looks up may not. */
+  alive() {
+    return this.ask({ op: "list_waiting" }, 4000).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  /** Sends a message without showing it as sending (a notification's Reply, with no screen to show it on): rejects with why it didn't go. */
+  sendQuiet(slot: string, text: string) {
+    return this.ask({ op: "send", slot, text, client_id: this.newId() });
   }
 
   /** Allows or denies a prompt (a question's answers with it); rejects with why (it was answered already…). */
@@ -215,12 +300,35 @@ export class Sync {
   /**
    * Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac. It is on Ask unless
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
-   * else the project's own.
+   * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team"> } = {}): Promise<string> {
-    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more.
-    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null });
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string } = {}): Promise<string> {
+    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider
+    // is left out altogether, not sent empty, when none was chosen.
+    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}) });
     return started.slot;
+  }
+
+  /** The user's own to-do list for a project (one of projects()' ids, or the project a reminder named). Only for a Mac that lists "todos". */
+  todos(project: string) {
+    if (!this.has("todos")) return Promise.reject(new Error("This Mac can't show to-dos yet. Update Lantern on it."));
+    return this.ask<RemoteUserTodos>({ op: "todos", project });
+  }
+
+  /** One change to a project's to-do list; the list after it. */
+  todoEdit(project: string, edit: RemoteTodoEdit) {
+    if (!this.has("todos")) return Promise.reject(new Error("This Mac can't show to-dos yet. Update Lantern on it."));
+    return this.ask<RemoteUserTodos>({ op: "todo_edit", project, edit });
+  }
+
+  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null): Promise<ConversationSettings> {
+    if (!this.has("conversation")) return Promise.reject(new Error("Update Lantern on your Mac to change providers."));
+    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change });
+  }
+
+  conversationAction(slot: string, action: "compact" | "clear") {
+    if (!this.has("conversation")) return this.send(slot, `/${action}`);
+    return this.ask({ op: "conversation_action", slot, action });
   }
 
   /** Whether this Mac says it can do `feature` (Welcome's features); an older Mac ends the connection at a request it doesn't know. */
@@ -259,13 +367,20 @@ export class Sync {
     await this.ask({ op: "close", slot });
   }
 
+  /** Names a chat on the Mac, as its History menu's Rename does (the chat's title everywhere changes with it); rejects with why not (no conversation yet, no name). */
+  async rename(slot: string, title: string): Promise<void> {
+    await this.ask({ op: "rename", slot, title });
+  }
+
   /** What may be chosen for a chat: whether Auto is allowed, and the presets. Null for a Mac that can't say. */
   async controls(): Promise<Controls | null> {
     if (!this.hasControls) return null;
     const c = await this.ask<Controls>({ op: "controls" });
     // Whatever the Mac sends is checked before it is shown.
     if (!c || typeof c.allow_auto !== "boolean" || !Array.isArray(c.presets)) throw new Error("What you can choose didn't come through.");
-    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })) };
+    // Where a chat may run is optional (an older Mac leaves it out, and a Mac with only Claude says none): kept only what is well formed.
+    const providers = (Array.isArray(c.providers) ? c.providers : []).filter((p) => p && typeof p.id === "string" && p.id.length > 0 && typeof p.name === "string" && p.name.length > 0).map((p) => ({ id: p.id, name: p.name, auto: p.auto === true, presets: p.presets === true }));
+    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers };
   }
 
   /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
@@ -285,6 +400,26 @@ export class Sync {
 
   diff(slot: string, path: string) {
     return this.ask<string>({ op: "diff", slot, path });
+  }
+
+  /** A reviewed file's diff in what the chat reviews (or its own change, when it reviews nothing). Only for a Mac that lists "reviewdiff". */
+  reviewDiff(slot: string, path: string) {
+    return this.ask<string>({ op: "review_diff", slot, path });
+  }
+
+  /** The artifacts in the chat's folder, newest first (`.lantern/artifacts/` on the Mac). Only for a Mac that lists "artifacts". */
+  async artifacts(slot: string): Promise<Artifact[]> {
+    return artifactList(await this.ask<unknown>({ op: "artifacts", slot }));
+  }
+
+  /**
+   * One artifact's text by the name `artifacts` gave: Markdown and Mermaid as written, HTML and SVG with what makes a page reach
+   * a server on its own taken out by the Mac (the page is drawn with scripts off, see ArtifactPage). Only for a Mac that lists "artifacts".
+   */
+  async artifactRead(slot: string, name: string): Promise<string> {
+    const text = await this.ask<unknown>({ op: "artifact_read", slot, name });
+    if (typeof text !== "string") throw new Error("That artifact didn't come through.");
+    return text;
   }
 
   /**
@@ -324,15 +459,27 @@ export class Sync {
     if (hidden === 0) return;
     const page = await this.ask<EarlierPage>({ op: "earlier", slot, hidden });
     this.apply({ type: "earlier", slot, events: page.events, hidden: page.hidden });
+    void this.refreshWaiting();
   }
 
   registerPushToken(token: string) {
     return this.ask({ op: "push_token", token });
   }
 
-  /** Tells the Mac which card this phone shows on its lock screen (null: none now). Only to a Mac that keeps them. */
-  liveActivity(state: { card: RemoteLiveCard | null }) {
+  /** Gives the Mac the key this phone made for its notifications' words (see pushKey.ts). Only to a Mac that lists "pushkey". */
+  registerPushKey(key: string) {
+    if (!this.has("pushkey")) return Promise.resolve();
+    return this.ask({ op: "push_key", key });
+  }
+
+  /**
+   * Tells the Mac which card this phone shows on its lock screen (null: none now), and its token for starting one by push
+   * (the Mac keeps the last one it was given). Only to a Mac that keeps them.
+   */
+  liveActivity(state: { card: RemoteLiveCard | null; start_token?: string }) {
     if (!this.has("liveactivity")) return Promise.resolve();
-    return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}) });
+    return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}), ...(state.start_token ? { start_token: state.start_token } : {}) });
   }
 }
+
+export type ConversationSettings = import("../protocol/generated/ConversationConfiguration").ConversationConfiguration;

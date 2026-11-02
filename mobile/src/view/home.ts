@@ -54,6 +54,7 @@ export function projectTint(color: string | null, plain: { bg: string; fg: strin
 export interface Row {
   slot: string;
   title: string;
+  provider?: string;
   project: string;
   /** The colour the Mac's window gives the project ("#rrggbb"), when it said. */
   projectColor: string | null;
@@ -70,6 +71,12 @@ export interface Row {
   rank: number;
   /** What the chat is ordered by within its rank, newest first: when it started (working), else when it was last active. */
   sortAt: number;
+  /** Pinned to the top of the list on this phone. */
+  pinned?: boolean;
+  /** One short line of what it is doing or last said, when the Mac sent one (an older Mac sends none). */
+  preview: string | null;
+  /** How long it has been working ("4 min"), once it has been for a while; null when it isn't working or has only just begun. */
+  elapsed: string | null;
 }
 
 const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => string | null> = {
@@ -93,17 +100,55 @@ const RANK: Record<RemoteChat["status"], number> = { needs_you: 0, working: 1, i
  * under the finger while several work. Ties fall to the slot, so the order is always the same one.
  */
 export function byOrder(a: Row, b: Row): number {
-  return a.rank - b.rank || b.sortAt - a.sortAt || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0);
+  // A pinned chat is at the top, whatever it is doing; the pinned ones are in the list's usual order among themselves.
+  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || a.rank - b.rank || b.sortAt - a.sortAt || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0);
 }
 
 /** Every chat as a row, in the list's order (see `byOrder`). `workingSince` is when each working chat was first seen working. */
-export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null, workingSince: Record<string, number> = {}): Row[] {
+export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null, workingSince: Record<string, number> = {}, pins: string[] = []): Row[] {
   return chats
     .map((c): Row => {
       const title = c.title?.trim() || "New chat";
-      return { rank: RANK[c.status], sortAt: c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen) };
+      const sortAt = c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at;
+      const spent = c.status === "working" ? ago(sortAt, now) : "now";
+      const provider = c.provider || "Claude";
+      return { provider, preview: c.preview?.trim() || null, elapsed: spent === "now" ? null : spent, rank: RANK[c.status], sortAt, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
     })
     .sort(byOrder);
+}
+
+/** The labelled stretches of the recent list. */
+export type SectionKey = "pinned" | "needs_you" | "working" | "earlier" | "asleep";
+
+export interface Section {
+  key: SectionKey;
+  label: string;
+  rows: Row[];
+}
+
+const SECTION_LABEL: Record<SectionKey, string> = { pinned: "Pinned", needs_you: "Waiting on you", working: "Working", earlier: "Earlier", asleep: "Asleep" };
+const SECTION_ORDER: SectionKey[] = ["pinned", "needs_you", "working", "earlier", "asleep"];
+
+/**
+ * The rows of the list (already in `byOrder`) cut into the stretches it is made of: pinned, then what needs you, what works,
+ * the rest, and last the chats that are asleep, each the most recent first. Only this recent list sets the asleep ones apart;
+ * under their projects they stay among their project's chats.
+ */
+export function sections(list: Row[]): Section[] {
+  const by = new Map<SectionKey, Row[]>();
+  for (const r of list) {
+    const key: SectionKey = r.pinned ? "pinned" : r.rank === 0 ? "needs_you" : r.rank === 1 ? "working" : r.status === "asleep" ? "asleep" : "earlier";
+    by.set(key, [...(by.get(key) ?? []), r]);
+  }
+  return SECTION_ORDER.flatMap((key): Section[] => (by.has(key) ? [{ key, label: SECTION_LABEL[key], rows: by.get(key)! }] : []));
+}
+
+/** Whether a chat answers a search: every word typed is somewhere in its title, project or preview (case aside); nothing typed matches all. */
+export function matches(r: Row, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = `${r.title} ${r.project} ${r.preview ?? ""}`.toLowerCase();
+  return words.every((w) => text.includes(w));
 }
 
 /** How Home lists the chats: all of them, the most recent first, or under their project. */
@@ -113,22 +158,19 @@ export interface Group {
   /** The project's name; "" for chats with none. */
   project: string;
   rows: Row[];
-  /** Where the card stands among the cards: 0 if a chat in it needs you, 1 if one is working, else 2. */
-  rank: number;
   /** How many of them need you. */
   needsYou: number;
   /** How many of them are unread. */
   unread: number;
 }
 
-/** The projects by name, those with none last: the order the quiet ones stay in. */
+/** The projects by name, those with none last. */
 const byName = (a: Group, b: Group) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
 
 /**
- * The rows under their projects, in the list's order inside each. The projects follow what is in them: those with a chat that
- * needs you first, then those with one working, each the newest first (by the chat that put it there), and then the rest by
- * name (chats with no project last), so the quiet ones stay where they are however their chats move. Projects are told apart
- * by name, which is all a phone is told of a folder.
+ * The rows under their projects, in the list's order inside each. The projects are by name (chats with no project last) and
+ * stay where they are however their chats move: a chat that needs you or starts working does not carry its project up the
+ * list (the card says so itself, with its dot). Projects are told apart by name, which is all a phone is told of a folder.
  */
 export function groups(list: Row[]): Group[] {
   const byProject = new Map<string, Row[]>();
@@ -136,7 +178,7 @@ export function groups(list: Row[]): Group[] {
   return [...byProject]
     .map(([project, rs]): Group => {
       const sorted = [...rs].sort(byOrder);
-      return { project, rows: sorted, rank: sorted[0]?.rank ?? 2, needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length };
+      return { project, rows: sorted, needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length };
     })
-    .sort((a, b) => a.rank - b.rank || (a.rank < 2 ? b.rows[0].sortAt - a.rows[0].sortAt : 0) || byName(a, b));
+    .sort(byName);
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
@@ -13,18 +13,23 @@ import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
-import { radius, shadow, space, useColors } from "../ui/theme";
-import { autoNote, MODES, WORKFLOWS } from "../view/controls";
+import { radius, space, useColors } from "../ui/theme";
+import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
+import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
   text: string;
   project?: string;
+  /** The project by its folder's name, when only that is known (a chat's): the sheet finds its folder in the Mac's list. */
+  projectName?: string | null;
   continueChat?: { slot: string; title: string };
 }
 
 export interface NewChatProps {
+  /** The project to start in, by its folder's name (a chat's own project): picked once the Mac's list is here. */
+  initialProjectName?: string | null;
   /** A draft to start from (a suggestion's), which the user may change. */
   initialText?: string;
   /** The project to start in (a suggestion's), when the Mac lists it. */
@@ -42,7 +47,7 @@ export interface NewChatProps {
  * The models are the project's own unless a preset is chosen. Only a project the user already works in on the Mac is
  * offered (the Mac decides, whatever is sent).
  */
-export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
+export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, onClose, onStarted }: NewChatProps) {
   const colors = useColors();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
@@ -59,8 +64,39 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const [error, setError] = useState<string | null>(null);
   // What it runs on: Ask unless chosen, and the project's own models unless a preset is.
   const { supported, controls } = useControls();
+  // Ask or Auto as the last chat was started with, from this phone (Ask until one was).
   const [permissions, setPermissions] = useState<RemotePermissions>("ask");
+  const picked = useRef(false);
+  useEffect(() => {
+    let live = true;
+    // (A choice made before it is read stands.)
+    void loadNewChatPermissions().then((p) => live && !picked.current && setPermissions(p));
+    return () => {
+      live = false;
+    };
+  }, []);
+  // A chat started: the sheet slides away first (iOS's own sheet stays up if it is just taken away), then the chat opens.
+  const started = useRef<string | null>(null);
+  const closeSheet = useRef<(() => void) | null>(null);
+  // Swiped away while the chat was starting: there is no sheet left to wait for, and the chat still opens.
+  const gone = useRef(false);
+  const finish = (slot: string) => {
+    started.current = slot;
+    if (closeSheet.current && !gone.current) closeSheet.current();
+    else onStarted(slot);
+  };
   const [preset, setPreset] = useState<string | null>(null);
+  // Where it runs: the project's own unless chosen. A Mac with only Claude Code to offer (or an older one) offers no choice.
+  const providers = providersOf(controls);
+  const [provider, setProvider] = useState<string | null>(null);
+  const chosen = providers.find((p) => p.id === provider) ?? null;
+  const chooseProvider = (id: string | null) => {
+    setProvider(id);
+    // What the new one has none of is let go of, so a choice made for another provider is never sent to it (nor shown as if it were).
+    const next = providers.find((p) => p.id === id);
+    if (next && !next.auto) setPermissions("ask");
+    if (next && !next.presets) setPreset(null);
+  };
   const canFlow = useMacCan("workflow");
   const [workflow, setWorkflow] = useState<Exclude<RemoteWorkflow, "team">>("chat");
   // The options behind the line that says what it runs on.
@@ -75,7 +111,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
         if (!live) return;
         // Listed by name so the list stays put; the one used last (the Mac's first) is still the one picked.
         setProjects([...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
-        setProject((now) => (now && list.some((p) => p.id === now) ? now : (list[0]?.id ?? null)));
+        setProject((now) => (now && list.some((p) => p.id === now) ? now : (list.find((p) => p.name === initialProjectName)?.id ?? list[0]?.id ?? null)));
       },
       (e: Error) => {
         if (!live) return;
@@ -94,14 +130,18 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
     if (continueChat) {
       // A send never throws: it shows in the chat at once, and says there if it didn't go.
       void sync.send(continueChat.slot, text.trim());
-      return onStarted(continueChat.slot);
+      return finish(continueChat.slot);
     }
     if (!project) return;
     setBusy(true);
     setError(null);
     try {
       // Only what was chosen is sent, and only to a Mac that can take it.
-      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions, ...(preset ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}) } : {}));
+      // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
+      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {});
+      // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
+      if (supported && !note) void saveNewChatPermissions(permissions);
+      finish(slot);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -110,16 +150,29 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
 
   const workflowName = WORKFLOWS.find((w) => w.value === workflow)?.label ?? "Chat";
   const presetLabel = controls?.presets.find((p) => p.id === preset)?.name ?? "Project's own";
+  // Where it runs has no Auto, or no presets (the Mac's presets are Claude Code's): what it can't do is shown off, with why.
+  const noAuto = chosen && !chosen.auto ? noAutoOn(chosen.name) : null;
+  const showPresets = (controls?.presets.length ?? 0) > 0 && (!chosen || chosen.presets);
   // What it will run on, said in a line: the options themselves open from it.
-  const summary = [canFlow ? workflowName : null, MODES.find((m) => m.value === permissions)?.label, presetLabel].filter(Boolean).join(" · ");
-  const note = autoNote(controls);
+  const note = noAuto ?? autoNote(controls);
+  // What it starts on: Ask where Auto can't be had (a remembered Auto included).
+  const mode: RemotePermissions = note ? "ask" : permissions;
+  const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
 
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
+    <Sheet
+      onClose={() => {
+        gone.current = true;
+        if (started.current) onStarted(started.current);
+        else onClose();
+      }}
+    >
+      {(close, scroll) => {
+        closeSheet.current = close;
+        return (
+        <View style={[{ flexShrink: 1 }]}>
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
-          <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Txt variant="title" accessibilityRole="header">
                 {continueChat ? "Carry on" : "New chat"}
@@ -138,7 +191,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
               </Txt>
             ) : !(supported && controls) ? (
               <Txt variant="small" tone="ink2">
-                It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.
+                It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.
               </Txt>
             ) : null}
 
@@ -146,11 +199,11 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
               accessibilityLabel="What to start with"
               value={text}
               {...list}
-              placeholder="What should Claude start with?"
+              placeholder={chosen ? `What should ${chosen.name} start with?` : "What should the agent start with?"}
               placeholderTextColor={colors.ink3}
               multiline
               editable={!busy}
-              style={{ backgroundColor: colors.paper, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
             />
 
             {continueChat ? null : projects === null ? (
@@ -173,7 +226,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
             {!continueChat && supported && controls && (
               <FadeSlideIn from={8}>
                 {/* One line says what it runs on; the options are behind it. */}
-                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 14, minHeight: 48 }}>
+                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.wash, borderRadius: 14, paddingHorizontal: 14, minHeight: 48 }}>
                   <View style={{ flexShrink: 1 }}>
                     <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
                       Runs on
@@ -192,6 +245,19 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                 {opened && (
                   <FadeSlideIn from={6} ms={180}>
                     <View style={{ gap: 12, paddingTop: 12 }}>
+                      {providers.length > 1 && (
+                        <View>
+                          <Caption>Provider</Caption>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                            {[{ id: null as string | null, name: "As on your Mac" }, ...providers].map((p) => (
+                              <Pill key={p.id ?? "own"} label={p.name} on={p.id === provider} onPress={() => chooseProvider(p.id)} />
+                            ))}
+                          </ScrollView>
+                          <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
+                            {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac uses this project’s selected provider."}
+                          </Txt>
+                        </View>
+                      )}
                       {canFlow && (
                         <View>
                           <Caption>How it works</Caption>
@@ -206,15 +272,18 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                         <Caption>Permissions</Caption>
                         <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                           {MODES.map((m) => {
-                            const off = m.value === "auto" ? note : null;
-                            return <Pill key={m.value} label={m.label} hint={off ?? m.hint} on={m.value === permissions} disabled={!!off} onPress={() => setPermissions(m.value)} />;
+                            const off = m.value === "auto" ? note : null; // (the Mac's setting, or the provider having none)
+                            return <Pill key={m.value} label={m.label} hint={off ?? m.hint} on={m.value === mode} disabled={!!off} onPress={() => {
+                              picked.current = true;
+                              setPermissions(m.value);
+                            }} />;
                           })}
                         </View>
                         <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                          {note ?? (permissions === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.")}
+                          {note ?? (mode === "auto" ? "It starts on Auto: a classifier approves most actions, so the agent rarely asks. Its questions come to this phone." : "It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.")}
                         </Txt>
                       </View>
-                      {controls.presets.length > 0 && (
+                      {showPresets && (
                         <View>
                           <Caption>Models</Caption>
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
@@ -238,7 +307,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
             <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
           </ScrollView>
         </View>
-      )}
+        );
+      }}
     </Sheet>
   );
 }

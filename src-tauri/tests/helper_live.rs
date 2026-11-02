@@ -259,3 +259,74 @@ async fn a_real_read_only_agent_has_a_git_tool_that_reads_and_no_shell_in_ask_an
         assert!(!cards.iter().any(|c| c.contains("git")), "the git tool raised a card: {cards:?}");
     }
 }
+
+/// A chat on an endpoint asks like any other, and a phone can answer it: a real `claude` started as a gateway chat is, against a
+/// stand-in endpoint that answers by asking to run a command, raises a card at the bridge (the one a phone reads: `pending`),
+/// and the answer a phone's `Answer` makes (`respond`) lets it run. Run by hand, with /tmp/gw-probe/bin/fake_gateway.py PORT LOG tool
+/// serving:
+///
+///     LANTERN_LIVE_GATEWAY_URL=http://127.0.0.1:18085 cargo test --test helper_live gateway -- --ignored --nocapture
+///
+/// It costs nothing: the model is the stand-in.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the claude CLI and the stand-in endpoint serving"]
+async fn a_chat_on_an_endpoint_raises_a_card_a_phone_can_see_and_answer() {
+    use lantern_lib::endpoints::GatewayLaunch;
+    let Ok(url) = std::env::var("LANTERN_LIVE_GATEWAY_URL") else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(dir.path()).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
+    let claude_pid = Arc::new(AtomicU32::new(0));
+    let exe = std::path::PathBuf::from(env!("CARGO_BIN_EXE_lantern"));
+    let sink_tx = tx.clone();
+    let bridge = PermissionBridge::start(folder.join("b.sock"), Arc::new(move |ev| { let _ = sink_tx.send(ev); }), Arc::new(FolderRules::load(None)), helper_of(claude_pid.clone(), exe.clone())).unwrap();
+    bridge.set_folder(&folder);
+    let cfg = SessionConfig {
+        provider: ProviderId::Gateway,
+        binary: which("claude"),
+        folder: folder.clone(),
+        mode: Mode::Ask,
+        auto_approve: false,
+        resume: None,
+        model: Some("openai/qwen3-coder:30b".into()),
+        effort: None,
+        advisor: None,
+        subagent_model: None,
+        helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None },
+        path_env: std::env::var("PATH").ok(),
+        endpoint: Some(GatewayLaunch { id: "fake".into(), url, key: None }),
+    };
+    let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
+    claude_pid.store(session.pid(), Ordering::SeqCst);
+    session.initialize().await;
+    session.send("write a file").await.unwrap();
+
+    let mut asked: Option<(String, String)> = None;
+    let mut listed_as_pending = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let ev = match tokio::time::timeout_at(deadline, rx.recv()).await {
+            Ok(Some(ev)) => ev,
+            _ => break,
+        };
+        eprintln!("event: {ev:?}");
+        match ev {
+            UiEvent::PermissionRequested { request_id, tool_name, .. } => {
+                // What a phone is shown: the bridge's pending list, as the gateway's `pending` reads it.
+                listed_as_pending = bridge.pending().iter().any(|p| p.request_id == request_id && p.tool_name == tool_name);
+                // What a phone's answer does: the same `respond`, by the card's id.
+                assert!(bridge.respond(&request_id, true, None, None), "the card was not answerable");
+                asked = Some((request_id, tool_name));
+            }
+            UiEvent::TurnDone { .. } => break,
+            _ => {}
+        }
+    }
+    session.stop().await;
+    bridge.close().await;
+
+    let (_, tool) = asked.expect("no card reached the bridge");
+    assert_eq!(tool, "Bash");
+    assert!(listed_as_pending, "the card wasn't in the bridge's pending list, which is what a phone reads");
+    assert_eq!(std::fs::read_to_string(folder.join("out.txt")).unwrap_or_default().trim(), "approved", "the approved command didn't run");
+}

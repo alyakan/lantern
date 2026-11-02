@@ -1,5 +1,6 @@
 /** What the phone remembers about how Home looks, on this phone only (the Keychain or Keystore, like everything else it keeps). */
 import * as SecureStore from "expo-secure-store";
+import type { RemotePermissions } from "./protocol/generated/RemotePermissions";
 import type { Grouping } from "./view/home";
 import { NOTES_UNREADABLE } from "./whatsNew";
 
@@ -39,6 +40,25 @@ export async function loadSuggestionPrefs(): Promise<SuggestionPrefs> {
 export async function saveSuggestionPrefs(p: SuggestionPrefs): Promise<void> {
   try {
     await SecureStore.setItemAsync(SUGGESTIONS_KEY, JSON.stringify({ collapsed: p.collapsed, dismissed: p.dismissed.slice(-DISMISSED_KEPT) }), OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
+const MODE_KEY = "lantern.home-mode";
+
+/** Whether Home is the Desk or the list of chats; the Desk when nothing was chosen or it can't be read. */
+export async function loadHomeMode(): Promise<"desk" | "chats"> {
+  try {
+    return (await SecureStore.getItemAsync(MODE_KEY, OPTIONS)) === "chats" ? "chats" : "desk";
+  } catch {
+    return "desk";
+  }
+}
+
+export async function saveHomeMode(mode: "desk" | "chats"): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(MODE_KEY, mode, OPTIONS);
   } catch {
     // Not remembered: it holds until the app closes.
   }
@@ -93,6 +113,26 @@ export async function saveSidebarPinned(pinned: boolean): Promise<void> {
   }
 }
 
+const CHANGES_SHARE_KEY = "lantern.changes-share";
+
+/** The share of a tablet's width the Changes pane was last dragged to beside the chat; null when it never was. */
+export async function loadChangesShare(): Promise<number | null> {
+  try {
+    const n = Number(await SecureStore.getItemAsync(CHANGES_SHARE_KEY, OPTIONS));
+    return Number.isFinite(n) && n > 0 && n < 1 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveChangesShare(share: number): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(CHANGES_SHARE_KEY, share.toFixed(3), OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
 const NOTES_KEY = "lantern.notes-seen";
 
 /**
@@ -140,3 +180,54 @@ export async function saveSeen(seen: Record<string, number>): Promise<void> {
     // Not remembered: they hold until the app closes.
   }
 }
+
+const NEW_CHAT_PERMISSIONS_KEY = "lantern.new-chat-permissions";
+
+/** Ask or Auto, as the last chat this phone started was started with (in any project); Ask when none was, or it can't be read. */
+export async function loadNewChatPermissions(): Promise<RemotePermissions> {
+  try {
+    return (await SecureStore.getItemAsync(NEW_CHAT_PERMISSIONS_KEY, OPTIONS)) === "auto" ? "auto" : "ask";
+  } catch {
+    return "ask";
+  }
+}
+
+export async function saveNewChatPermissions(p: RemotePermissions): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(NEW_CHAT_PERMISSIONS_KEY, p, OPTIONS);
+  } catch {
+    // Not remembered: the next chat starts on Ask.
+  }
+}
+
+const VOICE_KEY = "lantern.voice-engine";
+
+/**
+ * What turns speech into text in the message box: iOS 26's speech model on the phone ("model"), or Apple's speech service
+ * ("server", the older recognizer let go to Apple's servers). The model when nothing was chosen or it can't be read.
+ */
+export type VoiceEngine = "model" | "server";
+
+/** The choice made while the app is open, so it holds even when the store can't keep it. */
+let voiceChosen: VoiceEngine | null = null;
+
+export async function loadVoiceEngine(): Promise<VoiceEngine> {
+  if (voiceChosen) return voiceChosen;
+  try {
+    return (await SecureStore.getItemAsync(VOICE_KEY, OPTIONS)) === "server" ? "server" : "model";
+  } catch {
+    return "model";
+  }
+}
+
+export async function saveVoiceEngine(engine: VoiceEngine): Promise<void> {
+  voiceChosen = engine;
+  try {
+    await SecureStore.setItemAsync(VOICE_KEY, engine, OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
+/** For tests: forgets the choice made while the app is open. */
+export const resetVoiceChoice = () => void (voiceChosen = null);

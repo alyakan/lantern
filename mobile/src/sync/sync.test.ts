@@ -35,6 +35,16 @@ function rig() {
 const delta = (seq: number, text: string): Pushed => ({ type: "event", slot: "a", seq, event: { kind: "text_delta", block_id: "b", text } });
 
 describe("the phone's sync", () => {
+  it("refreshes pending approvals after replay so already answered requests cannot be answered again", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7, { list_waiting: [] }).session);
+    await settle();
+    sync.onPushed({ type: "reset", slot: "a", seq: 20, page: 0, done: true, hidden: 0, events: [{ kind: "permission_requested", request_id: "old", tool_name: "Bash", input: {} }] });
+    await settle();
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ kind: "prompt", state: "withdrawn" });
+  });
+
   it("applies streamed pieces once a frame, not one render each", () => {
     const { sync, renders, frame } = rig();
     for (let i = 1; i <= 50; i++) sync.onPushed(delta(i, "x"));
@@ -316,8 +326,35 @@ describe("what a phone may choose for a chat", () => {
     const { session, asked } = fakeSession(1, { controls: { allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: 5, name: "bad" }, { id: "b", name: "B" }] } }, {}, ["controls"]);
     sync.onSession(session);
     expect(sync.hasControls).toBe(true);
-    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: "b", name: "B", summary: "" }] });
+    // (A Mac that says nothing of providers is only Claude Code: none.)
+    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: "b", name: "B", summary: "" }], providers: [] });
     expect(asked).toContainEqual({ op: "controls" });
+  });
+
+  it("keeps the providers a Mac lists that are well formed, and nothing else", async () => {
+    const { sync } = rig();
+    const listed = [
+      { id: "claude", name: "Claude", auto: true, presets: true },
+      { id: "gateway:ollama", name: "Ollama", auto: false, presets: false },
+      { id: "", name: "No id", auto: true, presets: true },
+      { id: "x", name: "", auto: true, presets: true },
+      { id: 7, name: "Number", auto: true, presets: true },
+      null,
+      { id: "odd", name: "Odd", auto: "yes", presets: 1 },
+    ];
+    sync.onSession(fakeSession(1, { controls: { allow_auto: false, presets: [], providers: listed } }, {}, ["controls"]).session);
+    // What isn't exactly true counts as not having it: a phone never offers more than the Mac said.
+    expect((await sync.controls())?.providers).toEqual([
+      { id: "claude", name: "Claude", auto: true, presets: true },
+      { id: "gateway:ollama", name: "Ollama", auto: false, presets: false },
+      { id: "odd", name: "Odd", auto: false, presets: false },
+    ]);
+  });
+
+  it("reads a providers field that isn't a list as none, without refusing the rest", async () => {
+    const { sync } = rig();
+    sync.onSession(fakeSession(1, { controls: { allow_auto: true, presets: [], providers: "claude" } }, {}, ["controls"]).session);
+    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [], providers: [] });
   });
 
   it("never asks a Mac that can't say: it would end the connection at a request it doesn't know", async () => {
@@ -343,11 +380,15 @@ describe("what a phone may choose for a chat", () => {
     await sync.setPreset("a", "max");
     await sync.newChat("/p", "hi", { permissions: "auto", preset: "max" });
     await sync.newChat("/p", "hi");
+    await sync.newChat("/p", "hi", { permissions: "ask", provider: "gateway:ollama" });
     expect(asked.filter((r) => r.op !== "list_waiting")).toEqual([
       { op: "set_permissions", slot: "a", permissions: "auto" },
       { op: "set_preset", slot: "a", preset: "max" },
       { op: "new_chat", project: "/p", text: "hi", permissions: "auto", preset: "max", workflow: null },
+      // No provider chosen: the field isn't there at all, so a Mac that doesn't know it is never sent it.
       { op: "new_chat", project: "/p", text: "hi", permissions: null, preset: null, workflow: null },
+      { op: "new_chat", project: "/p", text: "hi", permissions: "ask", preset: null, workflow: null, provider: "gateway:ollama" },
     ]);
+    expect("provider" in (asked.filter((r) => r.op === "new_chat")[1] as object)).toBe(false);
   });
 });

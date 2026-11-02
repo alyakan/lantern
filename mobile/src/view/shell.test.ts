@@ -1,4 +1,4 @@
-import { cleanOutput, commandOf, endLine, isTerminal, keepEnd, KEEP_CHARS, hasHiddenChars, lastLines, newShellId, plainTyped, took } from "./shell";
+import { cleanOutput, commandOf, endLine, isTerminal, keepEnd, KEEP_CHARS, hasHiddenChars, lastLines, newShellId, plainTyped, tellClaude, TELL_LINES, took } from "./shell";
 
 describe("terminal mode", () => {
   it("starts with a '!', which is not part of the command", () => {
@@ -79,5 +79,25 @@ describe("hasHiddenChars", () => {
     for (const c of [...bidiAndZeroWidth, ...controls]) expect(hasHiddenChars(`ls ${c} -la`)).toBe(true);
     expect(hasHiddenChars(`${String.fromCodePoint(0xfeff)}ls`)).toBe(true);
     for (const fine of ["git status", "printf 'a\tb'", "echo café", "echo 日本語 😀", "ls -la ~/Documents", 'echo "quoted"']) expect(hasHiddenChars(fine)).toBe(false);
+  });
+});
+
+describe("tellClaude", () => {
+  it("says what was run, how it ended and what it printed, in a block", () => {
+    expect(tellClaude("npm test", "1 failed\n\x1b[31mFAIL\x1b[0m a.test.ts\n", "failed", 1)).toBe("I ran this in the terminal on my Mac (exit 1):\n\n```\n$ npm test\n1 failed\nFAIL a.test.ts\n```");
+  });
+
+  it("keeps the end of a long output and says the start is left out", () => {
+    const out = Array.from({ length: TELL_LINES + 10 }, (_, i) => `line ${i}`).join("\n");
+    const text = tellClaude("make", out, "done", 0);
+    expect(text).toContain("(the start of the output is left out)");
+    expect(text).toContain(`line ${TELL_LINES + 9}`);
+    expect(text).not.toContain("line 0\n");
+  });
+
+  it("uses a fence the output cannot close early", () => {
+    const text = tellClaude("echo", "```\nsneaky\n```", "done", 0);
+    expect(text.split("\n")[2]).toBe("````");
+    expect(text.endsWith("````")).toBe(true);
   });
 });

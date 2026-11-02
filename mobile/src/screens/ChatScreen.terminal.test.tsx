@@ -49,12 +49,47 @@ describe("the message box as a terminal", () => {
   it("turns into one when it starts with '!', hiding the '!' and saying where it runs", async () => {
     await terminal();
     await type("!ls -la");
+    await fireEvent(screen.getByLabelText("Shell command"), "focus");
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(screen.getByLabelText("Shell command").props.value).toBe("ls -la");
     expect(screen.getByRole("button", { name: "Run" })).toBeTruthy();
     // It promises nothing about Claude: a message sent from the phone carries none of the output.
     expect(screen.getByText(/Runs on your Mac, outside Claude/)).toBeTruthy();
     expect(screen.queryByText(/Claude sees/)).toBeNull();
+  });
+
+  it("keeps both boxes there, one out of sight, so the keyboard is handed across and never dropped", async () => {
+    await terminal();
+    const hidden = { includeHiddenElements: true };
+    // The terminal is there before it is wanted, out of sight; so is the message box once it is.
+    expect(screen.getByLabelText("Shell command", hidden)).toBeTruthy();
+    expect(screen.queryByLabelText("Shell command")).toBeNull();
+    const box = screen.getByLabelText("Message");
+    await type("!ls");
+    // The terminal comes in over the message box, which stays in view until the terminal has the keyboard: a box put away
+    // while it has the keyboard takes the keyboard down with it (seen on the simulator).
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
+    expect(screen.getByLabelText("Message")).toBe(box);
+    await fireEvent(screen.getByLabelText("Shell command"), "focus");
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    // The same message box, not a new one: it was never taken away, so nothing let go of the keyboard.
+    expect(screen.getByLabelText("Message", hidden)).toBe(box);
+    expect(screen.getByLabelText("Message", hidden).props.value).toBe("!ls");
+    // And back: the message box comes in, and the terminal is put away once the box has the keyboard.
+    await typeCommand("");
+    await fireEvent(screen.getByLabelText("Shell command"), "keyPress", { nativeEvent: { key: "Backspace" } });
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
+    await fireEvent(screen.getByLabelText("Message"), "focus");
+    expect(screen.queryByLabelText("Shell command")).toBeNull();
+  });
+
+  it("puts the box going away anyway when the other can't take the keyboard", async () => {
+    await terminal();
+    await type("!ls");
+    expect(screen.getByLabelText("Message")).toBeTruthy();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
   });
 
   it("is an ordinary message box for words, and for a '!' anywhere but the start", async () => {
@@ -209,6 +244,19 @@ describe("the card a command fills", () => {
     // More output arriving later lands in the same card.
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 9, event: { kind: "shell_output", id, text: "more\n" } } }));
     expect(screen.getByText(/more/)).toBeTruthy();
+  });
+
+  it("can tell Claude what it printed: the words go in the message box to be read, not sent", async () => {
+    const { lastOf } = await terminal({ events: [...started, { kind: "shell_output", id, text: "1 failed\n" }, { kind: "shell_done", id, code: 1, stopped: false }] });
+    await fireEvent.press(screen.getByRole("button", { name: "Tell Claude" }));
+    await waitFor(() => expect(screen.getByLabelText("Message").props.value).toContain("$ npm test\n1 failed"));
+    expect(screen.getByLabelText("Message").props.value).toContain("I ran this in the terminal on my Mac (exit 1):");
+    expect(lastOf("send")).toBeUndefined();
+  });
+
+  it("offers nothing to tell while the command runs, or when it printed nothing", async () => {
+    await terminal({ events: [...started, { kind: "shell_output", id, text: "working…\n" }] });
+    expect(screen.queryByRole("button", { name: "Tell Claude" })).toBeNull();
   });
 
   it("can be stopped while it runs, and a reply can be typed to it", async () => {

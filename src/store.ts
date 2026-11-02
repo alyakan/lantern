@@ -244,6 +244,8 @@ export interface State {
   editCount: number;
   selectedFile: string | null;
   lastEdited: string | null;
+  /** Counts Claude's own edits (not the re-reads `editCount` also counts): a new one to `lastEdited` is a fresh edit. */
+  claudeEdits: number;
   follow: boolean;
   thinking: boolean;
   /** When Claude last said or did anything (any event from its run): how long a working agent has been quiet. */
@@ -356,6 +358,7 @@ export const initialState: State = {
   editCount: 0,
   selectedFile: null,
   lastEdited: null,
+  claudeEdits: 0,
   follow: true,
   thinking: false,
   activityAt: null,
@@ -398,6 +401,7 @@ export function hasPendingPrompt(items: ChatItem[]): boolean {
 
 export type Action =
   | { type: "ui_event"; event: UiEvent }
+  | { type: "agent_available" }
   | { type: "claude_found"; path: string }
   | { type: "claude_missing"; error: string }
   | { type: "folder_opened"; folder: string }
@@ -534,7 +538,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -561,6 +565,8 @@ function lastLine(text: string): string {
 
 function applyEvent(state: State, ev: UiEvent): State {
   switch (ev.kind) {
+    case "provider_changed":
+      return reducer(state, { type: "provider_set", provider: { ...ev.provider, id: ev.key } });
     case "session_started":
       // A claude that has started is awake, whatever said it was asleep before.
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
@@ -630,6 +636,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         editCount: state.editCount + 1,
         changedFiles: addChange(state.changedFiles, ev.path, ev.created, ev.hunks),
         lastEdited: ev.path,
+        claudeEdits: state.claudeEdits + 1,
         selectedFile: state.follow ? ev.path : state.selectedFile,
         items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, edit: { path: ev.path, created: ev.created, hunks: ev.hunks } })),
       };
@@ -832,11 +839,14 @@ export function reducer(state: State, action: Action): State {
       if (state.status === "asleep") return state;
       // An event it doesn't know leaves the chat as it is (and isn't counted as Claude doing something).
       const next = applyEvent(state, action.event);
-      // A dev server's output and a setup command's progress aren't Claude doing something.
+      // A dev server's output and a setup command's progress aren't Claude doing something, nor is a claude that has just
+      // started (opening an asleep chat) saying what it can do.
       const ev = action.event;
-      const aside = ev.kind === "agent_setup" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
+      const aside = ev.kind === "agent_setup" || ev.kind === "session_started" || ev.kind === "commands" || ev.kind === "models" || ev.kind === "mcp_tools" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
       return next === state ? state : { ...next, activityAt: aside ? state.activityAt : Date.now() };
     }
+    case "agent_available":
+      return { ...state, status: state.folder ? state.status : "no_folder", setupError: null };
     case "claude_found":
       return { ...state, claudePath: action.path, setupError: null, status: state.folder ? state.status : "no_folder" };
     case "claude_missing":
@@ -881,9 +891,9 @@ export function reducer(state: State, action: Action): State {
     case "provider_set": {
       const next = action.provider;
       // Another provider's models, commands and tools are not this one's: they come again from its own session.
-      const moved = providerIdOf(state.provider) !== next.id ? { models: [], commands: [], mcpTools: [], modelUsage: [], model: null } : {};
+      const moved = providerIdOf(state.provider) !== next.id ? { models: [], commands: [], mcpTools: [], modelUsage: [], model: null, contextUsed: null } : {};
       // Dollars it can't report are taken away, so nothing shown for this chat is a price it never had (a provider told late).
-      const unpriced = reportsUsd(next) ? {} : { costBase: 0, costSeen: 0, sessionCost: null, items: state.items.map((it): ChatItem => (it.type === "turn" && it.cost ? { ...it, cost: null } : it)) };
+      const unpriced = reportsUsd(next) ? {} : { costBase: 0, costSeen: 0, sessionCost: null, items: state.provider ? state.items : state.items.map((it): ChatItem => (it.type === "turn" && it.cost ? { ...it, cost: null } : it)) };
       return { ...state, ...moved, ...unpriced, provider: next };
     }
     case "user_sent": {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
+import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
 import { useAppLock, useLockState } from "../shell/lockContext";
 import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
@@ -89,6 +90,46 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
   );
 }
 
+/** What the Mac listed last time, greyed and not to be pressed: so "can't reach" still says what is waiting there, and since when. */
+export function LastKnownList() {
+  const colors = useColors();
+  const [known, setKnown] = useState<LastKnown | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadLastKnown().then((k) => live && setKnown(k));
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!known) return null;
+  const shown = known.chats.slice(0, 5);
+  const more = known.chats.length - shown.length;
+  return (
+    <View testID="last-known" accessible accessibilityLabel={`Last time your Mac was here, ${ageText(known.at, Date.now())}: ${shown.map((c) => c.title).join(", ")}. Read only.`} style={{ alignSelf: "stretch", marginTop: 22, padding: 14, borderRadius: radius.inner, backgroundColor: colors.card, gap: 8, opacity: 0.65 }}>
+      <Txt variant="small" tone="ink3" style={{ fontWeight: "700" }}>
+        {`${known.mac ?? "Your Mac"} · ${ageText(known.at, Date.now())}`}
+      </Txt>
+      {shown.map((c, i) => (
+        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Txt variant="small" numberOfLines={1} style={{ flex: 1 }}>
+            {c.title}
+          </Txt>
+          {!!c.project && (
+            <Txt variant="tiny" tone="ink3" numberOfLines={1} style={{ maxWidth: 110 }}>
+              {c.project}
+            </Txt>
+          )}
+        </View>
+      ))}
+      {more > 0 && (
+        <Txt variant="tiny" tone="ink3">
+          and {more} more
+        </Txt>
+      )}
+    </View>
+  );
+}
+
 /**
  * Not connected yet: connecting (a moment), or why not and what to check. Once a try has failed it stays on why, through
  * the tries that follow on their own, so the address being typed in isn't swept away by each one.
@@ -123,6 +164,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
           )}
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           {onAddress && <AddressField onAddress={onAddress} />}
+          <LastKnownList />
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}
@@ -209,16 +251,29 @@ function LockRow() {
 }
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onStorage, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
+export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onStorage, onTodos, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens your to-do lists (kept on the Mac). Offered only to a Mac that lists "todos". */ onTodos?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
   const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
+  const canTodos = state.kind === "connected" && state.welcome.features?.includes("todos") === true && !!onTodos;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
+  // What a button opens comes once this sheet is away: iOS shows no sheet while another is still going.
+  const next = useRef<(() => void) | null>(null);
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
+    <Sheet
+      onClose={() => {
+        onClose();
+        next.current?.();
+      }}
+    >
+      {(close) => {
+        const then = (open?: () => void) => () => {
+          next.current = open ?? null;
+          close();
+        };
+        return (
+        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
           <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
           <Txt variant="body" tone="ink2">
             {where}
@@ -232,14 +287,16 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>
           <LockRow />
-          {canPair && <Button label="Pair another device" kind="ghost" onPress={() => onPairDevice?.()} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
-          {canStorage && <Button label="Mac storage" kind="ghost" onPress={() => onStorage?.()} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
-          {onWhatsNew && <Button label="What's new" kind="ghost" onPress={onWhatsNew} />}
-          {onSupport &&<Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
-          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />
+          {canPair && <Button label="Pair another device" kind="ghost" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+          {canTodos && <Button label="Your to-dos" kind="ghost" onPress={then(onTodos)} accessibilityHint="Shows the to-do list of each project on your Mac." />}
+          {canStorage && <Button label="Mac storage" kind="ghost" onPress={then(onStorage)} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
+          {onWhatsNew && <Button label="What's new" kind="ghost" onPress={then(onWhatsNew)} />}
+          {onSupport &&<Button label="Support development" kind="ghost" onPress={then(onSupport)} style={{ marginTop: 6 }} />}
+          <Button label="Unpair this phone" kind="ghost" onPress={then(onUnpair)} style={{ marginTop: onSupport ? 0 : 6 }} />
           <Button label="Close" onPress={close} />
         </View>
-      )}
+        );
+      }}
     </Sheet>
   );
 }

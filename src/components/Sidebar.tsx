@@ -5,17 +5,22 @@ import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type CompactChip, type CompactGroup, type ProjectOpen, type SidebarChat, type SidebarItem } from "../lib/sidebar";
 import { lostText } from "../lib/orchestraView";
-import { ChevronIcon, ClockIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { ChevronIcon, ClockIcon, DeskIcon, FocusIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
+import { Timeline } from "./Timeline";
+import type { TimelineEvent } from "../lib/timeline";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
 import { useReorder } from "../lib/useReorder";
+import { useTodoCounts, type TodoCount } from "../lib/todos";
 import { useMenuInside } from "../lib/useMenuInside";
 
 /** The sidebar's width in pixels: what Show/Hide Sidebar and the drag edge keep between these. */
 export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
+/** How wide the collapsed bar is (as styles.css draws it). */
+export const SIDEBAR_BAR = 56;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
 /** How long the pointer rests on the collapsed bar before it opens, so passing over it on the way to the chat doesn't. */
@@ -53,6 +58,8 @@ export interface SidebarHandlers {
   onChat: (slot: string) => void;
   onTeam: (slot: string) => void;
   onAgent: (slot: string, team: string) => void;
+  /** Names a chat, as the History menu's Rename does (the app finds its conversation; a chat with none yet is left alone). Absent: the menu has no Rename. */
+  onRename?: (slot: string, title: string) => void;
   /** Closes chats (any, the one on screen too: the app shows another, or the start screen). Asking first is the sidebar's job. */
   onCloseChats: (slots: string[]) => void;
   /** What closing an agent would throw away, and closing it (the same checked flow as the canvas's "Clean up and close"). */
@@ -125,8 +132,15 @@ interface Props extends SidebarHandlers {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
+  /** One project: the folder the sidebar shows on its own (null: every project), kept by the app (a phone can pick it too). */
+  single: string | null;
+  onSingle: (folder: string | null) => void;
   /** The projects that have notes: each is marked on its header. */
   noted?: string[];
+  /** The Desk (every chat at once): its button at the top, pressed while it is on screen, with how many things need you. */
+  desk?: { on: boolean; needs: number; onOpen: () => void };
+  /** The timeline's events (see timelineEvents), asked for only while it is shown: without it there is no Chats | Timeline switch. */
+  timeline?: () => TimelineEvent[];
 }
 
 /** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
@@ -205,6 +219,88 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr, 
   );
 }
 
+/** A project the sidebar can show on its own: its folder, its name, and its colour. */
+interface SingleChoice {
+  folder: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * The One project button: off, it opens a list of the projects to pick one from; on, it shows every project again. While it
+ * is on the sidebar lists only that project, under a banner in its colour.
+ */
+function SingleButton({ single, choices, full, closing, onPick }: { single: string | null; choices: SingleChoice[]; full: boolean; closing: boolean; onPick: (folder: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (closing) setOpen(false);
+  }, [closing]);
+  const root = useRef<HTMLDivElement>(null);
+  useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("button"));
+  const { ref: menuRef, style: menuStyle } = useMenuInside(open);
+  useEffect(() => {
+    if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
+  const on = single !== null;
+  const label = on ? "Show all projects" : "One project";
+  return (
+    <div className="sb-new" ref={root}>
+      <button
+        className={`icon sb-button single-button${full ? " labelled" : ""}${on ? " on" : ""}`}
+        aria-label={label}
+        aria-pressed={on}
+        aria-haspopup={on ? undefined : "menu"}
+        aria-expanded={on ? undefined : open}
+        title={on ? "Show every project again" : "Show only one project in the sidebar"}
+        disabled={!on && choices.length === 0}
+        onClick={() => (on ? onPick(null) : setOpen(!open))}
+      >
+        <FocusIcon />
+        {full && (
+          <Away across>
+            <span aria-hidden>One project</span>
+          </Away>
+        )}
+      </button>
+      {open && !closing && (
+        <div className="menu sb-menu" role="menu" aria-label="Show only" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+          {choices.map((c) => (
+            <button
+              key={c.folder}
+              role="menuitem"
+              className="menu-row"
+              title={c.folder}
+              onClick={() => {
+                setOpen(false);
+                onPick(c.folder);
+              }}
+            >
+              <span className="sb-single-swatch" style={{ "--pc": c.color } as CSSProperties} aria-hidden />
+              <span className="menu-row-title">{c.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The banner at the top of the list while one project is shown: its name on its colour, a new chat in it, and the way back to every project. */
+function SingleBanner({ choice, full, onNewChat, onShowAll }: { choice: SingleChoice; full: boolean; onNewChat: () => void; onShowAll: () => void }) {
+  if (!full) return <div className="sb-single-strip" role="img" aria-label={`Only ${choice.label}`} title={`Only ${choice.label}`} style={{ "--pc": choice.color } as CSSProperties} />;
+  return (
+    <div className="sb-single" role="status" aria-label={`Only ${choice.label}`} title={choice.folder} style={{ "--pc": choice.color } as CSSProperties}>
+      <span className="sb-single-name">{choice.label}</span>
+      <button className="icon" aria-label={`New chat in ${choice.label}`} title="New chat here" onClick={onNewChat}>
+        <PlusIcon />
+      </button>
+      <button className="icon" aria-label="Show all projects" title="Show every project again" onClick={onShowAll}>
+        ×
+      </button>
+    </div>
+  );
+}
+
 /** What a chat, a team or an agent is, for closing it: they are asked about and closed differently. */
 interface CloseTarget {
   slot: string;
@@ -247,6 +343,43 @@ interface Closer {
 const targetOf = (item: Pick<SidebarChat, "slot" | "title" | "state">, kind: CloseTarget["kind"], agents: string[] = []): CloseTarget => ({ slot: item.slot, kind, title: item.title, state: item.state, agents });
 const itemTarget = (item: SidebarItem): CloseTarget => (item.kind === "team" ? targetOf(item, "team", item.agents.map((a) => a.slot)) : targetOf(item, "chat"));
 
+/** Naming a chat, where the user pressed: its words are there to change, Enter keeps them, Escape or a press elsewhere doesn't. */
+function RenameBox({ target, at, onSave, onCancel }: { target: CloseTarget; at: At; onSave: (title: string) => void; onCancel: () => void }) {
+  const root = useRef<HTMLFormElement>(null);
+  const [title, setTitle] = useState(target.title);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && onCancel();
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  return (
+    <form
+      className="sb-rename"
+      role="group"
+      aria-label={`Rename ${target.title}`}
+      ref={root}
+      style={{ left: at.x, top: at.y }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (title.trim()) onSave(title);
+      }}
+    >
+      <input
+        autoFocus
+        aria-label="Chat name"
+        value={title}
+        maxLength={200}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onCancel()}
+      />
+      <button type="submit" className="sb-rename-save" disabled={!title.trim()}>
+        Rename
+      </button>
+    </form>
+  );
+}
+
 /** Closing's question, inline under the row (open pane) or on its own where the user pressed (the bar). */
 function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer: Closer; floating: boolean }) {
   const root = useRef<HTMLDivElement>(null);
@@ -278,7 +411,7 @@ function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer:
 /** What a row says to VoiceOver (and shows, once the pane is open): the title, the project and the status. */
 const describe = (chip: CompactChip, project: string, full: boolean) => {
   const extra = full ? `${chip.pinned ? ", pinned" : ""}${chip.background > 0 ? `, ${chip.background} running in the background` : ""}` : "";
-  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
+  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.provider ?? "Claude"}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
 };
 
 /**
@@ -314,6 +447,7 @@ function ChatRow({ chip, project, onClick, target, closer, full }: { chip: Compa
             {full ? (
               <span className="sb-title-line">
                 <span className="sb-title">{title}</span>
+                <span className="sb-provider">{chip.provider ?? "Claude"}</span>
                 {chip.pinned && (
                   <span className="sb-pin">
                     <PinIcon />
@@ -403,7 +537,7 @@ interface Moves {
   down: (() => void) | null;
 }
 
-function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: CompactGroup; h: SidebarHandlers; moves: Moves; finished: string[]; onClose: () => void; onClosed: (count: number) => void }) {
+function ProjectMenu({ group, h, moves, finished, onOnly, onClose, onClosed }: { group: CompactGroup; h: SidebarHandlers; moves: Moves; finished: string[]; onOnly?: () => void; onClose: () => void; onClosed: (count: number) => void }) {
   const { ref: root, style } = useMenuInside(true);
   useDismiss(true, root, onClose, () => root.current?.parentElement?.querySelector<HTMLElement>('[aria-haspopup="menu"]'));
   useEffect(() => {
@@ -418,6 +552,11 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onNewTeamIn(group.folder))}>
         <span className="menu-row-title">New team</span>
       </button>
+      {onOnly && (
+        <button role="menuitem" className="menu-row" title="Hide the other projects from the sidebar until you show them again" onClick={pick(onOnly)}>
+          <span className="menu-row-title">Only this project</span>
+        </button>
+      )}
       <button
         role="menuitem"
         className="menu-row"
@@ -476,6 +615,35 @@ interface Reorder {
   moves: Moves;
 }
 
+/**
+ * A folded project as the collapsed bar draws it: one square for the project, not one for each chat. It carries the most
+ * pressing mark among its chats (needs you, then working, then unread) and is the current one when a chat of it is on
+ * screen. Pressing it unfolds the project.
+ */
+function FoldedBar({ group, color, onUnfold }: { group: CompactGroup; color: string; onUnfold: () => void }) {
+  const marks = group.chips.map(markOf);
+  const mark = marks.includes("waiting") ? "waiting" : marks.includes("running") ? "running" : marks.includes("unread") ? "unread" : null;
+  const current = group.chips.some((c) => c.active);
+  const count = `${group.chips.length} open ${group.chips.length === 1 ? "chat" : "chats"}`;
+  const label = `${group.label}, folded, ${count}${group.needs > 0 ? `, ${group.needs} ${group.needs === 1 ? "needs" : "need"} you` : ""}`;
+  return (
+    <ul className="sb-group" aria-label={group.label} style={{ "--pc": color } as CSSProperties}>
+      <li>
+        <button className={`sb-row${current ? " current" : ""}`} aria-label={label} aria-current={current ? "true" : undefined} onClick={onUnfold}>
+          <span className={`sb-chip${current ? " current" : ""}`} aria-hidden>
+            <span className="sb-initials">{group.initials}</span>
+            {mark && <span className={`sb-mark ${mark}`} />}
+          </span>
+          <span className="sb-text" aria-hidden>
+            <span className="sb-title">{group.label}</span>
+            <span className={`sb-status ${mark ?? ""}`}>{count}</span>
+          </span>
+        </button>
+      </li>
+    </ul>
+  );
+}
+
 /** A project's squares as the collapsed bar draws them (no agents, no titles): also what a folded project unfolds into as the open pane closes. */
 function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: string; h: SidebarHandlers; closer: Closer }) {
   return (
@@ -491,7 +659,7 @@ function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: str
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, noted, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, todos, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents, onOnly }: { group: CompactGroup; color: string; noted: boolean; todos?: TodoCount; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void; onOnly?: () => void }) {
   const [menu, setMenu] = useState(false);
   // The pane closing takes the menu away at once: it would otherwise shrink with the pane, clipped as it goes.
   const shut = phase === "closing";
@@ -513,6 +681,12 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
               <NoteIcon />
             </span>
           )}
+          {todos && todos.open > 0 && (
+            <span className={`sb-todos${todos.overdue > 0 ? " overdue" : ""}`} role="img" aria-label={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""}`} title={`${todos.open} open to-do${todos.open === 1 ? "" : "s"}${todos.overdue > 0 ? `, ${todos.overdue} overdue` : ""} (the Todos tab)`}>
+              <span className="sb-todos-ring" aria-hidden />
+              {todos.open}
+            </span>
+          )}
           <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
             <ChevronIcon />
           </span>
@@ -532,7 +706,7 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
             ⋯
           </button>
         </span>
-        {menu && !shut && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
+        {menu && !shut && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onOnly={onOnly} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
       </div>
       {moved && (
         <Away>
@@ -553,11 +727,11 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
           ))}
         </ul>
       ) : (
-        // A folded project's squares are in the bar: they unfold as the pane closes and fold away as it opens, not pop in or out.
+        // A folded project's square is in the bar: it unfolds as the pane closes and folds away as it opens, not pops in or out.
         phase && (
           <div className={`sb-unfold${phase === "opening" ? " folding" : ""}`} aria-hidden>
             <div className="sb-away-in">
-              <BarGroup group={group} color={color} h={h} closer={closer} />
+              <FoldedBar group={group} color={color} onUnfold={onToggle} />
             </div>
           </div>
         )
@@ -579,7 +753,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * on screen is filled with it and has a bar beside it. A team is one square, for its Lead, with the team's combined state.
  *
  * Open (pinned beside the chat, or over it), the same pane lists the open chats and teams under a header for each project
- * (agents nested under their team, the chats working now first and then the most recently active) and nothing else: past chats are in History, which the
+ * (agents nested under their team, in the order they were opened, or with the setting on the chats working now first and then the most recently active) and nothing else: past chats are in History, which the
  * button under New opens. Chats close from the pane: a × on a row, "Close chat" in the menu of a right click, and "Close
  * finished chats" in a project's ⋯.
  *
@@ -588,7 +762,9 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], ...handlers } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], single, onSingle: setSingle, timeline, ...handlers } = props;
+  // The list it shows open: the chats by project, or the timeline of what happened in them.
+  const [view, setView] = usePersistentState<"chats" | "timeline">("sidebar.view", "chats");
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
@@ -643,6 +819,8 @@ export function Sidebar(props: Props) {
   }, [openKey]);
 
   const groups = useMemo(() => compactGroups(open, recent, order), [open, recent, order]);
+  // Each project's open to-dos, and how many are overdue (red).
+  const todoCounts = useTodoCounts(groups.map((g) => g.folder));
   // The projects with something open get their colours first, in the order the collapsed bar lists them, then the others the
   // sidebar knows, so the colours don't depend on which are open.
   const colors = assignColors([...groups.map((g) => g.folder), ...recent.filter((r) => !hidden.includes(r.path)).map((r) => r.path)], assignColors(groups.map((g) => g.folder), savedColors));
@@ -666,6 +844,15 @@ export function Sidebar(props: Props) {
   });
   const isExpanded = (g: CompactGroup) => by[g.folder] ?? true;
 
+  // One project: the sidebar lists only it, under a banner in its colour, until the user shows every project again. A project
+  // that has nothing open stays chosen, with only its banner showing.
+  const colorOf = (folder: string) => PROJECT_COLORS[colors[folder] ?? 0];
+  const labelOf = (folder: string) => groups.find((g) => g.folder === folder)?.label ?? folder.split("/").filter(Boolean).pop() ?? folder;
+  const choiceOf = (folder: string): SingleChoice => ({ folder, label: labelOf(folder), color: colorOf(folder) });
+  // Any project the sidebar knows can be picked: the open ones in their order, then the one on screen, then the recents.
+  const choices = [...new Set([...listed, ...(currentFolder ? [currentFolder] : []), ...recent.filter((r) => !hidden.includes(r.path)).map((r) => r.path)])].map(choiceOf);
+  const shown = single === null ? groups : groups.filter((g) => g.folder === single);
+
   const movedFor = (folder: string) => moved.find((m) => m.old === folder) ?? null;
   // Starting something in a project shows it there, even in one that was folded up.
   const opening = (run: (folder: string) => void) => (folder: string) => {
@@ -678,6 +865,7 @@ export function Sidebar(props: Props) {
   // inline under its row (the bar has no room, so there it opens where the user pressed). A menu is "Close chat".
   const [closing, setClosing] = useState<Closing | null>(null);
   const [menu, setMenu] = useState<{ target: CloseTarget; at: At } | null>(null);
+  const [renaming, setRenaming] = useState<{ target: CloseTarget; at: At } | null>(null);
   const [notice, setNotice] = useState<{ folder: string; text: string } | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const say = (folder: string, text: string) => {
@@ -733,7 +921,9 @@ export function Sidebar(props: Props) {
   const menuRoot = useRef<HTMLDivElement>(null);
   useDismiss(menu !== null, menuRoot, () => setMenu(null));
   // While a question or a menu is open the bar stays open under it, and shuts when it is done if the pointer went elsewhere.
-  const hold = closing !== null || menu !== null;
+  const hold = closing !== null || menu !== null || renaming !== null;
+  // A chat can be named once it has had a conversation (a draft has nothing to name yet); a team or an agent keeps its own name.
+  const canRename = !!handlers.onRename && menu?.target.kind === "chat" && menu.target.state !== "draft";
   const inside = useRef(false);
 
   useEffect(
@@ -905,16 +1095,46 @@ export function Sidebar(props: Props) {
             </button>
           )}
           {history}
+          <SingleButton single={single} choices={choices} full={full} closing={phase === "closing"} onPick={setSingle} />
+          {props.desk && (
+            <button className={`icon sb-button desk-button${full ? " labelled" : ""}${props.desk.on ? " on" : ""}`} aria-label={props.desk.needs > 0 ? `Desk, ${props.desk.needs} waiting` : "Desk"} aria-pressed={props.desk.on} title="Desk: every chat at once" onClick={props.desk.onOpen}>
+              <DeskIcon />
+              {full && (
+                <Away across>
+                  <span aria-hidden>Desk</span>
+                </Away>
+              )}
+              {props.desk.needs > 0 && (
+                <span className="inbox-badge" aria-hidden>
+                  {props.desk.needs}
+                </span>
+              )}
+            </button>
+          )}
         </div>
+        {full && timeline && (
+          <div className="sb-views" role="group" aria-label="Show">
+            <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
+              Chats
+            </button>
+            <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
+              Timeline
+            </button>
+          </div>
+        )}
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
-          {full ? (
+          {single !== null && <SingleBanner choice={choiceOf(single)} full={full} onNewChat={() => opening(h.onNewChatIn)(single)} onShowAll={() => setSingle(null)} />}
+          {full && timeline && view === "timeline" ? (
+            <Timeline events={single === null ? timeline() : timeline().filter((e) => e.folder === single)} onOpen={(e) => (e.team ? h.onTeam(e.slot) : h.onChat(e.slot))} />
+          ) : full ? (
             <>
-              {groups.map((g, i) => (
+              {shown.map((g, i) => (
                 <Project
                   key={g.folder}
                   group={g}
                   color={PROJECT_COLORS[colors[g.folder]]}
                   noted={noted.includes(g.folder)}
+                  todos={todoCounts[g.folder]}
                   expanded={isExpanded(g)}
                   phase={phase}
                   onToggle={() => toggle(g)}
@@ -925,23 +1145,25 @@ export function Sidebar(props: Props) {
                   onDismissMoved={onDismissMoved}
                   h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }}
                   closer={closer}
-                  reorder={{ handle: onOrder ? reorder.handle(g.folder) : {}, style: reorder.styleFor(g.folder), lifted: reorder.lifted === g.folder, moves: movesOf(g.folder, i) }}
+                  reorder={single === null ? { handle: onOrder ? reorder.handle(g.folder) : {}, style: reorder.styleFor(g.folder), lifted: reorder.lifted === g.folder, moves: movesOf(g.folder, i) } : { handle: {}, style: undefined, lifted: false, moves: { up: null, down: null } }}
                   notice={notice?.folder === g.folder ? notice.text : null}
                   onNotice={(text) => say(g.folder, text)}
                   agentsOpen={agentsOpen}
                   onAgents={(slot, open) => setAgentsOpen((was) => ({ ...was, [slot]: open }))}
+                  onOnly={single === null ? () => setSingle(g.folder) : undefined}
                 />
               ))}
-              {groups.length === 0 && <div className="sb-note">Nothing open. Start a chat with New, or find an old one in History.</div>}
+              {single === null && groups.length === 0 && <div className="sb-note">Nothing open. Start a chat with New, or find an old one in History.</div>}
+              {single !== null && shown.length === 0 && <div className="sb-note">Nothing open in {labelOf(single)}. Start a chat with + above, or find an old one in History.</div>}
             </>
           ) : (
-            groups.map((group) => (
+            shown.map((group) => (
               <Fragment key={group.folder}>
                 <div className="sb-project" title={group.label} aria-hidden style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
                   <span className="sb-project-initials">{group.initials}</span>
                   <span className="sb-project-name">{group.label}</span>
                 </div>
-                <BarGroup group={group} color={PROJECT_COLORS[colors[group.folder]]} h={h} closer={closer} />
+                {isExpanded(group) ? <BarGroup group={group} color={PROJECT_COLORS[colors[group.folder]]} h={h} closer={closer} /> : <FoldedBar group={group} color={PROJECT_COLORS[colors[group.folder]]} onUnfold={() => toggle(group)} />}
               </Fragment>
             ))
           )}
@@ -955,11 +1177,35 @@ export function Sidebar(props: Props) {
       </div>
       {menu && (
         <div className="menu sb-context" role="menu" aria-label="Chat" ref={menuRoot} style={{ left: menu.at.x, top: menu.at.y }} onKeyDown={menuKeys}>
-            <button role="menuitem" className="menu-row" autoFocus onClick={() => ask(menu.target, menu.at)}>
+            {canRename && (
+              <button
+                role="menuitem"
+                className="menu-row"
+                autoFocus
+                onClick={() => {
+                  setRenaming(menu);
+                  setMenu(null);
+                }}
+              >
+                <span className="menu-row-title">Rename chat</span>
+              </button>
+            )}
+            <button role="menuitem" className="menu-row" autoFocus={!canRename} onClick={() => ask(menu.target, menu.at)}>
               <span className="menu-row-title">{menu.target.kind === "team" ? "Close team" : menu.target.kind === "agent" ? "Close agent" : "Close chat"}</span>
             </button>
           </div>
         )}
+      {renaming && (
+        <RenameBox
+          target={renaming.target}
+          at={renaming.at}
+          onSave={(title) => {
+            handlers.onRename?.(renaming.target.slot, title);
+            setRenaming(null);
+          }}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
       {!full && closing && <CloseConfirm closing={closing} closer={closer} floating />}
       {mode === "pinned" && <div className="sb-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={shownWidth} tabIndex={0} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onResizeKey} />}
     </aside>

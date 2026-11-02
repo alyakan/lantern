@@ -86,6 +86,18 @@ describe("with one provider", () => {
   });
 });
 
+describe("with only Codex installed", () => {
+  it("opens the last project and starts Codex without Claude", async () => {
+    const previous = location.href;
+    window.history.replaceState({}, "", "?claude=missing");
+    try {
+      await launch(true, "Ask Codex…");
+      expect(started()[0]).toMatchObject({ claudePath: CODEX, settings: { provider: "codex" } });
+      expect(screen.queryByText(/Install Claude Code/)).toBeNull();
+    } finally { window.history.replaceState({}, "", previous); }
+  });
+});
+
 describe("with two providers", () => {
   it("offers the choice in a new chat, beside the model, and starts on Claude to begin with", async () => {
     await launch(true);
@@ -209,14 +221,14 @@ describe("with two providers", () => {
     expect(started()[1].settings.orchestrator).toBe(true);
   });
 
-  it("shows no provider chip once the chat has begun, and counts what a Codex turn used in tokens, never dollars", async () => {
+  it("keeps the provider chip disabled during a turn, and counts what a Codex turn used in tokens, never dollars", async () => {
     localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
     await launch(true, "Ask Codex…");
     const box = screen.getByRole("textbox");
     fireEvent.change(box, { target: { value: "retry on 503" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await screen.findByRole("button", { name: "Stop" });
-    expect(document.querySelector(".provider-picker")).toBeNull();
+    expect(document.querySelector(".provider-picker button")).toBeDisabled();
     fireEvent.click(await screen.findByRole("button", { name: "Allow" }, { timeout: 10_000 }));
     await screen.findByRole("button", { name: "Send" }, { timeout: 20_000 });
     expect(document.querySelector(".turn-usage")?.textContent).toBe("18k tokens");
@@ -224,6 +236,21 @@ describe("with two providers", () => {
     fireEvent.mouseEnter(document.querySelector(".context-meter")!);
     expect(document.querySelector(".context-meter")?.getAttribute("title")).toContain("This chat so far: 18k tokens");
   }, 40_000);
+
+  it("switches a populated conversation without starting over or removing its messages", async () => {
+    await launch(true);
+    fireEvent.click(screen.getByRole("button", { name: /Continue a session|Sessions|History/i }));
+    fireEvent.click(await screen.findByText("Fix the login redirect after OAuth callback"));
+    await screen.findByText("Add retries with backoff to fetchJson for transient errors");
+    await screen.findByRole("button", { name: "Send" });
+    const before = started().length;
+    openProvider();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Codex/ }));
+    await waitFor(() => expect(calls.some(([cmd, a]) => cmd === "conversation_settings" && (a.change as { provider?: string })?.provider === "codex")).toBe(true));
+    await screen.findByPlaceholderText("Ask Codex…");
+    expect(started()).toHaveLength(before);
+    expect(screen.getByText("Add retries with backoff to fetchJson for transient errors")).toBeInTheDocument();
+  });
 
   it("reopens a session on the provider it ran on, from History", async () => {
     localStorage.setItem("settings.providerBySession", JSON.stringify({ "3f1c2a": "codex" }));

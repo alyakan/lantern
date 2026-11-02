@@ -6,6 +6,11 @@ import { StartScreen } from "./StartScreen";
 import { ModeGuideContext } from "../lib/modeGuide";
 
 describe("ModeGuide", () => {
+  it("explains Codex Auto as sandbox review", () => {
+    render(<ModeGuide open="auto" permissions="auto" workflow="chat" flavour={null} codex onClose={() => {}} />);
+    expect(screen.getByText(/separate reviewer to decide sandbox approval requests/)).toBeInTheDocument();
+    expect(screen.getByText(/sandbox and approval policy stay the same/)).toBeInTheDocument();
+  });
   it("opens on a page, moves between modes and flavours, and switches to one", () => {
     const onUse = vi.fn();
     render(<ModeGuide open="review" permissions="ask" workflow="steps" flavour="review" onUse={onUse} onClose={() => {}} />);

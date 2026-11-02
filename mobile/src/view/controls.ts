@@ -2,6 +2,7 @@
 import type { Controls } from "../protocol/generated/Controls";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
+import type { RemoteProvider } from "../protocol/generated/RemoteProvider";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 
 export const MODES: { value: RemotePermissions; label: string; hint: string }[] = [
@@ -25,6 +26,12 @@ export const AUTO_OFF_NOTE = "Turn on “Let paired phones use Auto” in Lanter
 export function autoNote(controls: Controls | null): string | null {
   return controls && !controls.allow_auto ? AUTO_OFF_NOTE : null;
 }
+
+/** Where a chat may be started, when the Mac offers more than Claude Code. A Mac that is older leaves the field out: only Claude, as before. */
+export const providersOf = (controls: Controls | null): RemoteProvider[] => controls?.providers ?? [];
+
+/** Why Auto can't be chosen on a provider that has none, or null. */
+export const noAutoOn = (provider: string): string => `${provider} has no Auto mode: it asks before it acts.`;
 
 /** A preset's name by its id; the id itself when the Mac no longer lists it (a preset deleted since). */
 export function presetName(controls: Controls | null, id: string): string {

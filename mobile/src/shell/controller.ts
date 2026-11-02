@@ -8,6 +8,14 @@ import { keypairFrom } from "../noise/noise";
 import { fromBase64Url, readPairingLink, toBase64Url, type PairingOffer } from "../pairing";
 import { Sync, type SyncDeps } from "../sync/sync";
 import { LiveCards, type CardFactory } from "../liveActivity";
+import { forgetLastKnown } from "../lastKnown";
+import { forgetUsageHistory } from "../usageHistory";
+import { forgetDrafts } from "../drafts";
+import { forgetDeskLog } from "../deskLog";
+import { forgetPins } from "../pins";
+import { forgetPlaces } from "../view/stepPlace";
+import { forgetPanels } from "../view/panelChoice";
+import { pushKeyStore } from "../platformPushKey";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -46,6 +54,8 @@ export class Controller {
     this.sync.onSent = (id) => void this.liveCards.confirm(id);
     this.sync.onFailed = (id) => void this.liveCards.abandon(id);
     this.sync.onConnected = () => void this.liveCards.connected();
+    // The summary card (a Mac that keeps one) follows the chats: looked at again whenever what decides it changes.
+    this.sync.subscribe(() => this.lookAtCard());
     this.connection = new Connection({
       transport: d.transport,
       store: d.store,
@@ -58,9 +68,34 @@ export class Controller {
     });
   }
 
+  /** The app is in front: only then may it start a lock-screen card. */
+  private foreground = true;
+  /** What the summary card was last looked at for: a change in anything else is no reason to look again. */
+  private lastWorld = "";
+
+  private lookAtCard() {
+    const world = {
+      summary: this.state.kind === "connected" && this.sync.has("livesummary"),
+      connected: this.state.kind === "connected",
+      foreground: this.foreground,
+      busy: this.sync.getState().chats.some((c) => c.status === "working" || c.status === "needs_you"),
+    };
+    const key = JSON.stringify(world);
+    if (key === this.lastWorld) return;
+    this.lastWorld = key;
+    void this.liveCards.look(world);
+  }
+
+  /** The app came to the front, or went to the back. */
+  setForeground(active: boolean) {
+    this.foreground = active;
+    this.lookAtCard();
+  }
+
   /** Where the connection stands (the connection says so; the screens' tests do too). */
   setConnection(s: ConnectionState) {
     this.state = s;
+    this.lookAtCard();
     if (s.kind === "connected") void this.loadDeviceId();
     for (const l of this.listeners) l();
   }
@@ -124,5 +159,15 @@ export class Controller {
   async unpair() {
     await this.connection.forget();
     this.sync.reset();
+    // What this phone kept of that Mac (its chats' names, the usage, unsent drafts, the Desk's messages, pins, where Step by step chats were read) goes with it.
+    void forgetLastKnown();
+    void forgetUsageHistory();
+    void forgetDrafts();
+    void forgetDeskLog();
+    void forgetPins();
+    forgetPlaces();
+    forgetPanels();
+    // The key for the words of notifications was for this Mac: it goes with the pairing.
+    void pushKeyStore?.forget().catch(() => {});
   }
 }

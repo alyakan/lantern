@@ -3,7 +3,7 @@
 //! client was sent; anything older than it keeps is read from the chat's transcript.
 
 use super::bus::BusEvent;
-use super::protocol::RemotePreset;
+use super::protocol::{RemotePreset, RemoteProvider};
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -47,6 +47,10 @@ pub struct ChatInfo {
     pub color: Option<String>,
     /// "chat", "steps" or "team", as the window says (None until it has).
     pub workflow: Option<String>,
+    /// What it runs on when that isn't Claude Code (a name to show), as the window says (None for a Claude chat).
+    pub provider: Option<String>,
+    /// One short line of what the chat is doing (the tool it is in) or last said, for a list row (None until it has done either).
+    pub preview: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -57,6 +61,13 @@ pub enum Since {
     Events(Vec<BusEvent>),
     /// The events right after it are no longer kept: the client starts again from the transcript and `kept`.
     TooOld { kept: Vec<BusEvent> },
+}
+
+/// What a chat is reviewing: a pull request (`pr`), or the checked-out branch against `base` (None: Lantern finds it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewTarget {
+    pub pr: Option<u64>,
+    pub base: Option<String>,
 }
 
 #[derive(Default)]
@@ -80,13 +91,26 @@ struct Log {
     preset: Option<String>,
     color: Option<String>,
     workflow: Option<String>,
+    /// The name of what it runs on, when that isn't Claude Code.
+    provider: Option<String>,
+    /// The last thing the chat itself said (not a helper), as one line, and the tool it is in while a turn goes (a list row shows
+    /// the second, else the first).
+    said: Option<String>,
+    doing: Option<String>,
+    /// The turn going now is the user's post-hook (Lantern's own message after an answer): what it says is not the chat's answer, so
+    /// it never becomes the preview.
+    hook_turn: bool,
     /// What the chat's claude last said it offers after a "/", and the plan it last kept: a phone that opens the chat is
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
     todos: Option<Vec<crate::ui_event::Todo>>,
+    /// What the chat is reviewing, as its last review_target call said (a phone asks for a reviewed file's diff from it).
+    review: Option<ReviewTarget>,
     /// The tokens the chat holds, and its model's context size once a turn's result said it.
     context: Option<u64>,
     window: Option<u64>,
+    /// What the chat still runs in the background (a dev server, a subagent): the transcript a phone's history comes from doesn't say.
+    background: Vec<crate::ui_event::BackgroundTask>,
     /// The chat runs on another provider than Claude Code (a gateway's model, Codex): what is said in it is never put to Claude
     /// for the phone's suggestions, which are made on the user's own Claude login.
     off_claude: bool,
@@ -120,10 +144,37 @@ impl Log {
             preset: self.preset.clone(),
             color: self.color.clone(),
             workflow: self.workflow.clone(),
+            provider: self.provider.clone(),
+            preview: self.doing.clone().or_else(|| self.said.clone()),
+        }
+    }
+
+    /// What a list row says of the chat. Only what the chat itself does counts: a helper's steps would flicker the line, and what
+    /// the user typed, a shell printed or a prompt asked is never taken.
+    fn note_preview(&mut self, event: &UiEvent) {
+        match event {
+            UiEvent::UserText { text, .. } => {
+                self.doing = None;
+                self.hook_turn = crate::hooks::post_text(text.trim_start()).is_some();
+            }
+            UiEvent::ConversationReset => (self.said, self.doing, self.hook_turn) = (None, None, false),
+            UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } => (self.doing, self.hook_turn) = (None, false),
+            // The hook's own steps and words: the row goes on showing the answer the user is waiting to read.
+            _ if self.hook_turn => {}
+            UiEvent::Thinking { parent: None } => self.doing = Some("Thinking".into()),
+            UiEvent::ToolStarted { parent: None, name, summary, .. } => self.doing = preview_line(&format!("{name} {summary}")),
+            UiEvent::AssistantText { parent: None, text, .. } => {
+                self.doing = None;
+                if let Some(line) = said_line(text) {
+                    self.said = Some(line);
+                }
+            }
+            _ => {}
         }
     }
 
     fn note(&mut self, event: &UiEvent) {
+        self.note_preview(event);
         match event {
             UiEvent::UserText { text, .. } => {
                 self.working = true;
@@ -151,12 +202,22 @@ impl Log {
             UiEvent::SessionEnded { .. } => {
                 (self.working, self.ended) = (false, true);
                 self.pending.clear();
+                self.background.clear();
             }
-            UiEvent::AgentAsleep { asleep } => self.asleep = *asleep,
+            UiEvent::AgentAsleep { asleep } => {
+                self.asleep = *asleep;
+                if *asleep {
+                    self.background.clear();
+                }
+            }
+            UiEvent::BackgroundTasks { tasks } => self.background = tasks.clone(),
+            UiEvent::ProviderChanged { .. } => { self.commands = None; self.context = None; self.window = None; },
             UiEvent::ConversationReset => {
+                self.session_id = None;
                 self.first_prompt = None;
-                (self.todos, self.context) = (None, None);
+                (self.todos, self.context, self.review) = (None, None, None);
             }
+            UiEvent::ReviewTarget { pr, base } => self.review = Some(ReviewTarget { pr: *pr, base: base.clone() }),
             UiEvent::ContextUsed { tokens } => self.context = Some(*tokens),
             UiEvent::Commands { commands } => self.commands = Some(commands.clone()),
             UiEvent::Todos { parent: None, items } => self.todos = Some(items.clone()),
@@ -208,6 +269,41 @@ pub fn title_from(text: &str) -> Option<String> {
     Some(title)
 }
 
+/// How long a list row's preview line is, in characters.
+const PREVIEW_LEN: usize = 80;
+
+/// `text` as one line for a list row: whitespace folded, control and direction-changing characters dropped (a line is never
+/// allowed to read differently from what it is), cut to `PREVIEW_LEN`. None when nothing is left.
+pub fn preview_line(text: &str) -> Option<String> {
+    let clean: String = text.chars().filter(|c| !c.is_control() || c.is_whitespace()).filter(|c| !matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')).collect();
+    let line = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut out: String = line.chars().take(PREVIEW_LEN).collect();
+    if line.chars().count() > PREVIEW_LEN {
+        out.push('…');
+    }
+    Some(out)
+}
+
+/// The last line of what the chat said that is words (not an empty line, a code fence or a line of code inside one), without its
+/// markdown marks.
+fn said_line(text: &str) -> Option<String> {
+    let mut fenced = false;
+    let mut last = None;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("```") {
+            fenced = !fenced;
+        } else if !fenced && !line.is_empty() {
+            last = Some(line);
+        }
+    }
+    let last = last?;
+    let bare = last.trim_start_matches(['#', '>', '-', '*', ' ']).replace(['*', '`'], "");
+    preview_line(&bare)
+}
+
 /// A message without the notes Lantern puts before it: each is a `[Lantern…]` block, the long ones running to their end
 /// mark (they have blank lines of their own).
 pub fn without_notes(text: &str) -> &str {
@@ -230,12 +326,28 @@ pub fn without_notes(text: &str) -> &str {
     rest
 }
 
+/// What the account's two usage windows were last said to be.
+#[derive(Default)]
+struct PlanSeen {
+    five: Option<UiEvent>,
+    updated_at: Option<u64>,
+    providers: std::collections::BTreeMap<String, crate::ui_event::ProviderUsage>,
+    /// How much of the weekly window, and when it resets.
+    week: Option<(f64, Option<u64>)>,
+}
+
 pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
     /// The presets the window offers (Settings › Models), as it last said.
     presets: Mutex<Vec<RemotePreset>>,
+    /// Where the window lets a phone start a chat (Claude Code, and an endpoint or two), as it last said; empty when there is only Claude Code.
+    providers: Mutex<Vec<RemoteProvider>>,
     /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
-    plan: Mutex<Option<UiEvent>>,
+    plan: Mutex<PlanSeen>,
+    /// The Desk as the window last said it (see desk.rs).
+    pub desk: super::desk::Board,
+    /// The window's One project, for the phones that follow it.
+    pub single: super::single::Board,
     cap: usize,
     now: fn() -> u64,
 }
@@ -252,13 +364,16 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
     pub fn record(&self, ev: &BusEvent) {
-        if matches!(ev.event, UiEvent::PlanUsage { .. }) {
-            *self.plan.lock().unwrap() = Some(ev.event.clone());
+        match &ev.event {
+            UiEvent::ProviderUsage { usage } => { self.plan.lock().unwrap().providers.insert(usage.provider.clone(), usage.clone()); },
+            UiEvent::PlanUsage { .. } => { let mut plan = self.plan.lock().unwrap(); plan.five = Some(ev.event.clone()); plan.updated_at = Some((self.now)() / 1000); },
+            UiEvent::WeekUsage { used, resets_at } => { let mut plan = self.plan.lock().unwrap(); plan.week = Some((*used, *resets_at)); plan.updated_at = Some((self.now)() / 1000); },
+            _ => {}
         }
         let mut chats = self.chats.lock().unwrap();
         let log = chats.entry(ev.slot.clone()).or_default();
@@ -362,6 +477,34 @@ impl SessionHub {
         self.presets.lock().unwrap().clone()
     }
 
+    /// Where the window lets a phone start a chat, as it says it: at most a few dozen, with their names cut short, and none that
+    /// repeats an id. Fewer than two is "only Claude Code", which a phone is told by an empty list.
+    pub fn set_providers(&self, providers: Vec<RemoteProvider>) {
+        let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
+        let mut kept: Vec<RemoteProvider> = Vec::new();
+        for p in providers.into_iter().take(40) {
+            let p = RemoteProvider { id: cut(p.id, 80), name: cut(p.name, 60), ..p };
+            if !p.id.is_empty() && !kept.iter().any(|k| k.id == p.id) {
+                kept.push(p);
+            }
+        }
+        *self.providers.lock().unwrap() = if kept.len() < 2 { Vec::new() } else { kept };
+    }
+
+    pub fn has_background(&self, slot: &str) -> bool { self.chats.lock().unwrap().get(slot).is_some_and(|c|!c.background.is_empty()) }
+
+    pub fn providers(&self) -> Vec<RemoteProvider> {
+        self.providers.lock().unwrap().clone()
+    }
+
+    /// What a chat runs on when that isn't Claude Code, as the window names it ("Codex", an endpoint's name); None clears it.
+    pub fn set_provider(&self, slot: &str, name: Option<&str>) {
+        // Only a chat that is listed: this must never make one appear.
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.provider = name.map(|n| n.chars().take(60).collect());
+        }
+    }
+
     /// The window's title for the chat (it beats the first prompt).
     pub fn titled(&self, slot: &str, title: &str) {
         if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
@@ -381,8 +524,8 @@ impl SessionHub {
         self.chats.lock().unwrap().get(slot).map(|log| log.info(slot))
     }
 
-    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan and the context
-    /// it holds (each only if it has been said), since the kept events may no longer reach them.
+    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan, the context
+    /// it holds (each only if it has been said) and what it runs in the background, since the kept events may no longer reach them.
     pub fn extras(&self, slot: &str) -> Vec<super::protocol::RemoteEvent> {
         let chats = self.chats.lock().unwrap();
         let Some(log) = chats.get(slot) else { return Vec::new() };
@@ -390,7 +533,13 @@ impl SessionHub {
         out.extend(log.commands.clone().and_then(|commands| super::protocol::to_remote(&UiEvent::Commands { commands })));
         out.extend(log.todos.clone().and_then(|items| super::protocol::to_remote(&UiEvent::Todos { parent: None, items })));
         out.extend(log.context.map(|tokens| super::protocol::RemoteEvent::Context { tokens, window: log.window }));
+        out.extend(super::protocol::to_remote(&UiEvent::BackgroundTasks { tasks: log.background.clone() }));
         out
+    }
+
+    /// What the chat is reviewing (its last review_target call), if it said.
+    pub fn review_target(&self, slot: &str) -> Option<ReviewTarget> {
+        self.chats.lock().unwrap().get(slot)?.review.clone()
     }
 
     /// The chat's own title, when it has one: never the stand-in made from the first thing the user said, which would put their
@@ -408,11 +557,20 @@ impl SessionHub {
     }
 
     /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
+    pub fn plan_updated_at(&self) -> Option<u64> { self.plan.lock().unwrap().updated_at }
+
+    pub fn provider_usage(&self) -> Vec<crate::ui_event::ProviderUsage> { self.plan.lock().unwrap().providers.values().cloned().collect() }
+
     pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
-        match self.plan.lock().unwrap().as_ref()? {
+        match self.plan.lock().unwrap().five.as_ref()? {
             UiEvent::PlanUsage { used, resets_at, status } => Some((*used, *resets_at, status.clone())),
             _ => None,
         }
+    }
+
+    /// The weekly window as the last chat to report it said: how much of it, and when it resets.
+    pub fn week(&self) -> Option<(f64, Option<u64>)> {
+        self.plan.lock().unwrap().week
     }
 
     /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent. Only for the
@@ -449,7 +607,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -479,6 +637,28 @@ mod tests {
     }
 
     #[test]
+    fn clearing_forgets_the_old_native_session_and_switching_drops_cached_commands() {
+        let hub = SessionHub::default();
+        feed(&hub, "a", vec![UiEvent::SessionStarted { session_id: "aaaa".into(), model: "m".into(), cwd: "/p".into(), permission_mode: "ask".into(), claude_version: "".into() }, UiEvent::Commands { commands: vec![crate::ui_event::SlashCommand { name: "compact".into(), description: "".into(), argument_hint: "".into() }] }]);
+        feed(&hub, "a", vec![UiEvent::ProviderChanged { provider: crate::provider::ProviderId::Codex.info(), key: "codex".into() }]);
+        assert!(!hub.extras("a").iter().any(|e| matches!(e, super::super::protocol::RemoteEvent::Commands { commands } if !commands.is_empty())));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.chat("a").unwrap().session_id, None);
+    }
+
+    #[test]
+    fn a_chat_remembers_what_it_reviews_until_its_conversation_starts_again() {
+        let hub = hub();
+        assert_eq!(hub.review_target("a"), None);
+        feed(&hub, "a", vec![UiEvent::ReviewTarget { pr: Some(7), base: None }]);
+        assert_eq!(hub.review_target("a"), Some(ReviewTarget { pr: Some(7), base: None }));
+        feed(&hub, "a", vec![UiEvent::ReviewTarget { pr: None, base: Some("main".into()) }]);
+        assert_eq!(hub.review_target("a"), Some(ReviewTarget { pr: None, base: Some("main".into()) }));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.review_target("a"), None);
+    }
+
+    #[test]
     fn a_finished_block_stands_for_the_pieces_it_streamed_in() {
         let hub = hub();
         feed(&hub, "a", vec![user("hi"), delta("b1", "Hel"), delta("b1", "lo"), delta("b2", "other")]);
@@ -494,7 +674,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -507,14 +687,14 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
 
     #[test]
     fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
         assert_eq!(hub.steps("a"), None, "no plan yet");
@@ -530,8 +710,18 @@ mod tests {
     }
 
     #[test]
+    fn provider_usage_does_not_replace_claudes_subscription() {
+        let hub = hub();
+        feed(&hub, "a", vec![UiEvent::PlanUsage { used: 1.0, resets_at: None, status: "rejected".into() }]);
+        let usage = crate::ui_event::ProviderUsage { provider: "codex".into(), updated_at: 10, windows: vec![crate::ui_event::UsageWindow { label: "5 hours".into(), used: 0.2, resets_at: None, minutes: Some(300) }] };
+        feed(&hub, "b", vec![UiEvent::ProviderUsage { usage: usage.clone() }]);
+        assert_eq!(hub.plan().unwrap().0, 1.0);
+        assert_eq!(hub.provider_usage(), vec![usage]);
+    }
+
+    #[test]
     fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
         feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
@@ -541,8 +731,13 @@ mod tests {
         let told = hub.extras("a");
         assert!(matches!(&told[0], R::Todos { items } if items[0].status == "completed"));
         assert_eq!(told[1], R::Context { tokens: 50_000, window: None });
-        assert_eq!(told.len(), 2);
+        assert_eq!(told[2], R::Background { tasks: vec![] });
+        assert_eq!(told.len(), 3);
         assert_eq!(hub.plan(), Some((0.3, Some(5), "allowed".to_string())), "the account's usage is the last one said, by any chat");
+        assert_eq!(hub.week(), None, "nothing has said the week yet");
+        feed(&hub, "a", vec![UiEvent::WeekUsage { used: 0.12, resets_at: Some(900) }]);
+        feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.5, resets_at: Some(6), status: "allowed".into() }]);
+        assert_eq!(hub.week(), Some((0.12, Some(900))), "the week is kept apart from the five-hour window, whichever is said after");
         // A turn's result says the model's context size, and it is told from then on.
         let mut finished = done();
         if let UiEvent::TurnDone { context_window, .. } = &mut finished {
@@ -551,7 +746,23 @@ mod tests {
         feed(&hub, "a", vec![finished]);
         assert_eq!(hub.extras("a")[1], R::Context { tokens: 50_000, window: Some(200_000) });
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
-        assert!(hub.extras("a").is_empty(), "a new conversation has no plan and holds nothing");
+        assert_eq!(hub.extras("a"), vec![R::Background { tasks: vec![] }], "a new conversation has no plan and holds nothing");
+    }
+
+    #[test]
+    fn what_runs_in_the_background_is_told_until_it_ends_or_the_chat_sleeps() {
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
+        let task = |d: &str| crate::ui_event::BackgroundTask { id: d.into(), task_type: "local_bash".into(), description: d.into() };
+        use super::super::protocol::RemoteEvent as R;
+        let background = |hub: &SessionHub| hub.extras("a").into_iter().find(|e| matches!(e, R::Background { .. }));
+        feed(&hub, "a", vec![UiEvent::BackgroundTasks { tasks: vec![task("npm run dev"), task("cargo watch")] }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec!["npm run dev".into(), "cargo watch".into()] }));
+        feed(&hub, "a", vec![UiEvent::BackgroundTasks { tasks: vec![task("cargo watch")] }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec!["cargo watch".into()] }));
+        feed(&hub, "a", vec![UiEvent::AgentAsleep { asleep: true }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec![] }), "a sleeping chat's claude runs nothing");
+        feed(&hub, "a", vec![UiEvent::AgentAsleep { asleep: false }, UiEvent::BackgroundTasks { tasks: vec![task("x")] }, UiEvent::SessionEnded { code: Some(0), stderr_tail: String::new() }]);
+        assert_eq!(background(&hub), Some(R::Background { tasks: vec![] }), "nor does one that ended");
     }
 
     #[test]
@@ -717,10 +928,67 @@ mod tests {
         assert_eq!(title_from("[Lantern: only a note]"), None);
     }
 
+    fn said(text: &str) -> UiEvent {
+        UiEvent::AssistantText { parent: None, block_id: "b".into(), text: text.into() }
+    }
+
+    fn started(parent: Option<&str>, name: &str, summary: &str) -> UiEvent {
+        UiEvent::ToolStarted { parent: parent.map(String::from), tool_use_id: "t".into(), name: name.into(), summary: summary.into() }
+    }
+
+    #[test]
+    fn a_chats_preview_is_the_tool_it_is_in_and_then_what_it_last_said() {
+        let hub = hub();
+        assert_eq!(hub.chat("a").map(|c| c.preview), None);
+        feed(&hub, "a", vec![user("fix it")]);
+        assert_eq!(hub.chat("a").unwrap().preview, None, "what the user typed is never the preview");
+        feed(&hub, "a", vec![UiEvent::Thinking { parent: None }]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Thinking"));
+        feed(&hub, "a", vec![started(None, "Bash", "npm test")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Bash npm test"));
+        feed(&hub, "a", vec![said("Looking at it.\n\nThe tests pass now. Want me to open a PR?"), done()]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("The tests pass now. Want me to open a PR?"));
+        // A new turn shows its tool again, and a reset clears everything.
+        feed(&hub, "a", vec![user("go"), started(None, "Edit", "src/a.rs")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Edit src/a.rs"));
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert_eq!(hub.chat("a").unwrap().preview, None);
+    }
+
+    #[test]
+    fn the_post_hooks_turn_never_replaces_the_answer_in_the_preview() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("fix it"), said("All fixed.")]);
+        feed(&hub, "a", vec![UiEvent::UserText { text: crate::hooks::post_message("Update the brain if needed"), at: None, sent_by: Some("lantern".into()), images: 0 }, UiEvent::Thinking { parent: None }, started(None, "Bash", "brain log"), said("The brain is updated."), done()]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("All fixed."));
+        // The user's next turn is its own again.
+        feed(&hub, "a", vec![user("more"), said("Sure.")]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Sure."));
+    }
+
+    #[test]
+    fn a_helpers_steps_and_words_never_move_a_chats_preview() {
+        let hub = hub();
+        feed(&hub, "a", vec![said("Done."), UiEvent::Thinking { parent: Some("t1".into()) }, started(Some("t1"), "Bash", "rm -rf x"), UiEvent::AssistantText { parent: Some("t1".into()), block_id: "s".into(), text: "helper".into() }]);
+        assert_eq!(hub.chat("a").unwrap().preview.as_deref(), Some("Done."));
+    }
+
+    #[test]
+    fn a_preview_line_is_one_short_line_that_reads_as_it_is() {
+        assert_eq!(said_line("## **Done**\n```\ncode\n```").as_deref(), Some("Done"));
+        assert_eq!(said_line("- one\n- `two` items\n\n").as_deref(), Some("two items"));
+        assert_eq!(preview_line("a\n\tb   c").as_deref(), Some("a b c"));
+        assert_eq!(preview_line("ls \u{202e}evil\u{0007}").as_deref(), Some("ls evil"));
+        assert_eq!(preview_line(" \n "), None);
+        let long = preview_line(&"y".repeat(100)).unwrap();
+        assert_eq!(long.chars().count(), PREVIEW_LEN + 1);
+        assert!(long.ends_with('…'));
+    }
+
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

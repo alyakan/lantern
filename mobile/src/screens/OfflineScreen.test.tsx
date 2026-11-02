@@ -129,3 +129,27 @@ describe("the Mac's sheet", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("what the Mac listed last time", () => {
+  it("is shown greyed under the reason, with how long ago", async () => {
+    const lastKnown = require("../lastKnown") as typeof import("../lastKnown");
+    jest.spyOn(lastKnown, "loadLastKnown").mockResolvedValue({ at: Date.now() - 5 * 60_000, mac: "Aly's Mac", chats: [{ title: "Release 0.1.53", project: "lantern" }, { title: "Fix the toast", project: null }] });
+    const state: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    await render(<OfflineScreen state={state} onRetry={jest.fn()} onUnpair={jest.fn()} />);
+    expect(await screen.findByText("Aly's Mac · 5 min ago")).toBeTruthy();
+    expect(screen.getByText("Release 0.1.53")).toBeTruthy();
+    expect(screen.getByText("Fix the toast")).toBeTruthy();
+    // Read only: nothing in it can be pressed.
+    expect(screen.getByTestId("last-known").props.accessibilityLabel).toMatch(/Read only/);
+    jest.restoreAllMocks();
+  });
+
+  it("is not there when nothing was kept", async () => {
+    const lastKnown = require("../lastKnown") as typeof import("../lastKnown");
+    jest.spyOn(lastKnown, "loadLastKnown").mockResolvedValue(null);
+    const state: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    await render(<OfflineScreen state={state} onRetry={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.queryByTestId("last-known")).toBeNull();
+    jest.restoreAllMocks();
+  });
+});

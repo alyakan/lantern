@@ -48,6 +48,8 @@ export function useAttachments() {
     full: images.length >= MAX_IMAGES,
     add,
     remove: (id: string) => setImages((now) => now.filter((i) => i.id !== id)),
+    // A marked-up photo takes the place of the one it was made from.
+    replace: (id: string, image: PickedImage) => setImages((now) => now.map((i) => (i.id === id ? image : i))),
     clear: useCallback(() => setImages([]), []),
     dismiss: () => setProblem(null),
   };

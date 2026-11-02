@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
-import { contextOf, progressOf, shortTokens, usageOf } from "../view/plan";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import { contextOf, progressOf, shortTokens, usageOf, weekOf } from "../view/plan";
+import { ScrollView, Share, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
@@ -13,14 +13,13 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { fonts, radius, shadow, space, useColors } from "../ui/theme";
-import type { Hit } from "../view/chatText";
+import { fonts, radius, space, useColors } from "../ui/theme";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
   const colors = useColors();
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.paper, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.wash, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
       <Txt variant="body" tone={tone} style={{ fontWeight: "700" }}>
         {label}
       </Txt>
@@ -37,20 +36,20 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  * What can be done with a message held down: copy it, quote it in a reply, select part of it, and (your own last one) edit
  * it and send it again. Each does it and closes the sheet.
  */
-export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; onClose: () => void }) {
+export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, sentAt = null, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; /** When it was sent (your messages): said at the top, since the chat shows a time only now and then. */ sentAt?: number | null; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }, shadow.float]}>
+      {(close, scroll) => (
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }]}>
           {selecting ? (
             <>
               <Txt variant="heading" accessibilityRole="header">
                 Select text
               </Txt>
-              <ScrollView style={{ maxHeight: 360 }}>
+              <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
                 <Text selectable accessibilityLabel="The message's text" style={{ fontSize: 15, lineHeight: 21, color: colors.ink }}>
                   {text}
                 </Text>
@@ -59,6 +58,11 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
             </>
           ) : (
             <>
+              {sentAt !== null && (
+                <Txt variant="small" tone="ink3" style={{ marginBottom: 2 }}>
+                  Sent {new Date(sentAt).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </Txt>
+              )}
               <ActionRow
                 label="Copy"
                 onPress={() => {
@@ -75,6 +79,24 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
                 }}
               />
               <ActionRow label="Select text" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
+              <ActionRow
+                label="Share"
+                hint="Send it to another app"
+                onPress={() => {
+                  void Share.share({ message: text }).catch(() => {});
+                  close();
+                }}
+              />
+              {onReadAloud && (
+                <ActionRow
+                  label={reading ? "Stop reading" : "Read aloud"}
+                  hint={reading ? undefined : "The phone's voice reads the words, not the code"}
+                  onPress={() => {
+                    onReadAloud();
+                    close();
+                  }}
+                />
+              )}
               {onEdit && (
                 <ActionRow
                   label="Edit and send again"
@@ -94,65 +116,11 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
   );
 }
 
-/** Looking for something in the chat: type, and the messages that say it come, the newest first; one opens where it is. */
-export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: string) => Hit[]; onPick: (hit: Hit) => void; onClose: () => void }) {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  const keyboard = useKeyboardUp();
-  const [query, setQuery] = useState("");
-  const hits = search(query);
-  return (
-    <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 16) + 8, gap: 10 }, shadow.float]}>
-          <Txt variant="heading" accessibilityRole="header">
-            Search this chat
-          </Txt>
-          <TextInput accessibilityLabel="Search" autoFocus value={query} onChangeText={setQuery} placeholder="Words in a message" placeholderTextColor={colors.ink3} autoCorrect={false} autoCapitalize="none" returnKeyType="search" style={{ backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, color: colors.ink }} />
-          <ScrollView style={{ maxHeight: 340 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
-            {query.trim().length >= 2 && hits.length === 0 && (
-              <Txt variant="small" tone="ink2">
-                Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
-              </Txt>
-            )}
-            {hits.map((h) => (
-              <PressScale
-                key={h.key}
-                accessibilityRole="button"
-                accessibilityLabel={`${h.who}: ${h.before}${h.match}${h.after}`}
-                onPress={() => {
-                  onPick(h);
-                  close();
-                }}
-                haptic="select"
-                scaleTo={0.98}
-                style={{ borderRadius: radius.inner, backgroundColor: colors.paper, padding: 11, gap: 3 }}
-              >
-                <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700" }}>
-                  {h.who}
-                </Txt>
-                <Txt variant="small" numberOfLines={3}>
-                  {h.before}
-                  <Txt variant="small" style={{ fontWeight: "700", backgroundColor: colors.hiSoft }}>
-                    {h.match}
-                  </Txt>
-                  {h.after}
-                </Txt>
-              </PressScale>
-            ))}
-          </ScrollView>
-          <Button label="Close" kind="ghost" onPress={close} />
-        </View>
-      )}
-    </Sheet>
-  );
-}
-
 /** A round button over the chat that takes it to the latest message, with how many came while it was scrolled away. */
 export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; onPress: () => void; /** How far above the bottom of its box it sits, where the message box floats over the list. */ lift?: number }) {
   const colors = useColors();
   return (
-    <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10 + lift, alignItems: "flex-end", gap: 6 }}>
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10 + lift, alignItems: "flex-end", gap: 6 }}>
       {unseen > 0 && (
         <View accessibilityElementsHidden style={{ backgroundColor: colors.ink, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 }}>
           <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "700" }}>
@@ -274,10 +242,10 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+    <View accessibilityLabel={`Session: ${u.percent} percent of the five-hour window used. ${u.resets}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
         <Txt variant="body" style={{ fontWeight: "700" }}>
-          Plan usage
+          Session
         </Txt>
         <Txt variant="small" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
           {u.tone === "stop" ? "Limit reached" : `${u.percent}% used`}
@@ -295,13 +263,38 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
   );
 }
 
+/** The weekly limit, as a bar with where the pace so far leads (when it runs out, or where the week ends up). */
+export function WeekRow({ week }: { week: { used: number; resetsAt: number | null } }) {
+  const colors = useColors();
+  const w = weekOf(week);
+  const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          Weekly limit
+        </Txt>
+        <Txt variant="small" tone={w.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {w.tone === "stop" ? "Limit reached" : `${w.percent}% used`}
+        </Txt>
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 6, backgroundColor: fill }} />
+      </View>
+      <Txt variant="tiny" tone="ink2">
+        {w.sentence.replace(/^\d+% of the weekly limit used\. /, "")}
+      </Txt>
+    </View>
+  );
+}
+
 /** How full the chat's context is, as a bar with the tokens it holds. */
 export function ContextRow({ context }: { context: { tokens: number; window: number | null } }) {
   const colors = useColors();
   const c = contextOf(context);
   const fill = c.tone === "stop" ? colors.stop : c.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Context: ${c.label}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+    <View accessibilityLabel={`Context: ${c.label}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
         <Txt variant="body" style={{ fontWeight: "700" }}>
           Context
@@ -324,15 +317,15 @@ export function ContextRow({ context }: { context: { tokens: number; window: num
 }
 
 /** On Home: how much of the subscription's five-hour window is used, in a line with a thin bar under it. */
-export function UsageStrip({ plan }: { plan: PlanUsage }) {
+export function UsageStrip({ plan, onPress }: { plan: PlanUsage; /** Opens the usage in full (the chart). */ onPress?: () => void }) {
   const colors = useColors();
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessible style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
+    <PressScale accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={`Session: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessibilityHint={onPress ? "Opens the usage history" : undefined} accessible disabled={!onPress} onPress={onPress} haptic="select" scaleTo={0.98} style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Txt variant="tiny" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
-          {u.tone === "stop" ? "Plan limit reached" : `Plan · ${u.percent}% used`}
+          {u.tone === "stop" ? "Session limit reached" : `Session · ${u.percent}% used`}
         </Txt>
         {u.resets !== "" && (
           <Txt variant="tiny" tone="ink3">
@@ -342,6 +335,31 @@ export function UsageStrip({ plan }: { plan: PlanUsage }) {
       </View>
       <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
         <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
+      </View>
+      {plan.week && <WeekStrip week={plan.week} />}
+    </PressScale>
+  );
+}
+
+/** The weekly limit under the five-hour one: how much is used, and where the pace so far leads. */
+function WeekStrip({ week }: { week: { used: number; resetsAt: number | null } }) {
+  const colors = useColors();
+  const w = weekOf(week);
+  const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessible accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ gap: 5, marginTop: 6 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Txt variant="tiny" tone={w.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {w.tone === "stop" ? "Weekly limit reached" : `Week · ${w.percent}% used`}
+        </Txt>
+        {w.short !== "" && (
+          <Txt variant="tiny" tone={w.tone === "warn" ? "ink2" : "ink3"} style={w.tone === "warn" ? { fontWeight: "700" } : undefined}>
+            {w.short}
+          </Txt>
+        )}
+      </View>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 4, backgroundColor: fill }} />
       </View>
     </View>
   );
@@ -366,8 +384,8 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
   }, []);
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }, shadow.float]}>
+      {(close, scroll) => (
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }]}>
           <Txt variant="heading" accessibilityRole="header" numberOfLines={2}>
             {title}
           </Txt>
@@ -380,7 +398,7 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
               {state.error}
             </Txt>
           ) : (
-            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 4 }}>
+            <ScrollView ref={scroll} style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 4 }}>
               <Text selectable accessibilityLabel="What it printed" style={{ fontFamily: fonts.mono, fontSize: 12, lineHeight: 17, color: colors.ink }}>
                 {state.text.trim() === "" ? "It printed nothing." : state.text}
               </Text>

@@ -10,6 +10,7 @@ export interface RemoteDevice {
 export interface RemoteView {
   enabled: boolean;
   show_titles: boolean;
+  rich_notifications: boolean;
   /** The Mac isn't let to sleep from idling while Remote control is on. */
   keep_awake: boolean;
   /** The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home. */

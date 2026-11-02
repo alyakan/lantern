@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { AccessibilityInfo, Animated, Easing, LayoutAnimation, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
 
 /**
@@ -44,6 +44,91 @@ export function bounce(value: Animated.Value, to: number, o: { delay?: number; b
   Animated.sequence([Animated.delay(o.delay ?? 0), Animated.spring(value, { toValue: to, useNativeDriver: true, speed: o.speed ?? 14, bounciness: o.bounciness ?? 12 })]).start();
 }
 
+/**
+ * A spring for what layout draws (a width, a margin, a scale that follows them): the native driver can't move those, so this one
+ * runs in JavaScript. It overshoots a little, so a thing that grows swells past its size and settles.
+ */
+export function springLayout(value: Animated.Value, to: number, o: { bounciness?: number; speed?: number } = {}) {
+  if (skips()) {
+    value.setValue(to);
+    return;
+  }
+  Animated.spring(value, { toValue: to, useNativeDriver: false, speed: o.speed ?? 12, bounciness: o.bounciness ?? 10 }).start();
+}
+
+/**
+ * An eased move for what layout draws (a width, a margin), with no spring: it slows into place and never passes it. For a long
+ * way across the screen, where a spring's overshoot, however small, is seen.
+ */
+export function easeLayout(value: Animated.Value, to: number, ms = 300) {
+  if (skips()) {
+    value.setValue(to);
+    return;
+  }
+  Animated.timing(value, { toValue: to, duration: ms, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+}
+
+/**
+ * How long a tablet's panes take to move when one is shown, hidden or pinned: the chats' column, the chat beside it and the
+ * Changes pane go together, on one curve, so the screen moves as one thing and no edge of a pane parts from the next.
+ */
+export const PANE_MS = 300;
+/** The curve they share: what React Native's layout animation calls "easeOut" (1 - (1 - t)²), so a pane moved here and the chat laid out beside it by `movePanes` stay in step. */
+const paneEasing = Easing.out(Easing.quad);
+
+/** Moves a pane (`value`, on the native driver) to `to` on the panes' curve; `done` once it is there. */
+export function runPane(value: Animated.Value, to: number, done?: () => void) {
+  if (skips()) {
+    value.setValue(to);
+    done?.();
+    return;
+  }
+  Animated.timing(value, { toValue: to, duration: PANE_MS, easing: paneEasing, useNativeDriver: true }).start(({ finished }) => {
+    if (finished) done?.();
+  });
+}
+
+/**
+ * `runPane` for a value that sets a size or a place (the Changes pane's frame as it floats), which the native driver can't move.
+ * The same curve and time, so it keeps in step with what `movePanes` lays out beside it.
+ */
+export function runPaneFrame(value: Animated.Value, to: number, done?: () => void) {
+  if (skips()) {
+    value.setValue(to);
+    done?.();
+    return;
+  }
+  Animated.timing(value, { toValue: to, duration: PANE_MS, easing: paneEasing, useNativeDriver: false }).start(({ finished }) => {
+    if (finished) done?.();
+  });
+}
+
+/**
+ * Lets the next render's changes of place and size glide there on the panes' curve, instead of jumping: the chat narrowing as
+ * the chats are pinned beside it, its title moving over as its chats button goes. Only for what a person did (a tap), never
+ * for a turned tablet, which iOS animates itself. Nothing is faded in or out by it (Liquid Glass does not fade in, see
+ * `opacityOf`): what appears or goes plays its own entrance.
+ */
+export function movePanes() {
+  if (skips()) return;
+  LayoutAnimation.configureNext({ duration: PANE_MS, update: { type: LayoutAnimation.Types.easeOut } });
+}
+
+/**
+ * A drawer let go of: it springs the rest of the way to `to` from the speed the finger had (`velocity`, in the value's units per
+ * second), slowing into place without passing it, as iOS's own sheets and sidebars do.
+ */
+export function settleDrawer(value: Animated.Value, to: number, velocity = 0, done?: () => void) {
+  if (skips()) {
+    value.setValue(to);
+    done?.();
+    return;
+  }
+  Animated.spring(value, { toValue: to, velocity, stiffness: 280, damping: 34, mass: 1, overshootClamping: true, restDisplacementThreshold: 0.001, restSpeedThreshold: 0.01, useNativeDriver: true }).start(({ finished }) => {
+    if (finished) done?.();
+  });
+}
+
 /** A small tap on the phone: "light" for a press, "select" for a choice, "success" and "warning" for what a decision came to. */
 export function buzz(kind: "light" | "select" | "success" | "warning" = "light") {
   if (motion.instant) return;
@@ -59,26 +144,37 @@ export function buzz(kind: "light" | "select" | "success" | "warning" = "light")
 }
 
 /**
- * Fades its content in, and up from `from` points below, when it appears (after `delay`). A new `key` is a new arrival.
- * `animate={false}` is for things that were there from the start: they just are.
+ * Opacity that rises from nothing over Liquid Glass leaves the glass clear: not only glass there as it fades in, but glass that
+ * comes inside it later (a chat opened a minute after the app faded in had a clear header and message box). Seen on the
+ * simulator with the fade run natively and in JavaScript alike; glass that was already drawn and then faded out and back was
+ * fine, and so was glass that only moved in. So what holds glass moves in and doesn't fade (`glass`).
  */
-export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, style }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; style?: StyleProp<ViewStyle> }) {
+const opacityOf = (p: Animated.Value, glass: boolean) => (glass ? 1 : p);
+
+/**
+ * Fades its content in, and up from `from` points below, when it appears (after `delay`). A new `key` is a new arrival.
+ * `animate={false}` is for things that were there from the start: they just are. `glass`: it holds Liquid Glass, so it only
+ * moves up, without the fade (see `opacityOf`).
+ */
+export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, glass = false, style }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; glass?: boolean; style?: StyleProp<ViewStyle> }) {
   const p = useRef(new Animated.Value(skips() || !animate ? 1 : 0)).current;
   useEffect(() => {
     if (animate) run(p, 1, ms, undefined, delay);
     // Only when it appears: a list's recycled cell holding another item must not play it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <Animated.View style={[style, { opacity: p, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] }]}>{children}</Animated.View>;
+  return <Animated.View style={[style, { opacity: opacityOf(p, glass), transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] }]}>{children}</Animated.View>;
 }
 
-/** Pops its content in from small, with a little overshoot (a check mark, a badge). */
-export function PopIn({ children, delay = 0, style }: { children: ReactNode; delay?: number; style?: StyleProp<ViewStyle> }) {
-  const p = useRef(new Animated.Value(skips() ? 1 : 0)).current;
+/** Pops its content in from small, with a little overshoot (a check mark, a badge). `glass`: it only grows, without the fade. `animate={false}`: it was there from the start, and just is. */
+export function PopIn({ children, delay = 0, glass = false, animate = true, style }: { children: ReactNode; delay?: number; glass?: boolean; animate?: boolean; style?: StyleProp<ViewStyle> }) {
+  const p = useRef(new Animated.Value(skips() || !animate ? 1 : 0)).current;
   useEffect(() => {
-    bounce(p, 1, { delay, bounciness: 16 });
-  }, [p, delay]);
-  return <Animated.View style={[style, { opacity: p.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }), transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }]}>{children}</Animated.View>;
+    if (animate) bounce(p, 1, { delay, bounciness: 16 });
+    // Only when it appears.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <Animated.View style={[style, { opacity: glass ? 1 : p.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }), transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }]}>{children}</Animated.View>;
 }
 
 const APressable = Animated.createAnimatedComponent(Pressable);

@@ -4,10 +4,13 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
-import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset } from "./lib/remoteChats";
+import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, RemoteSingle, WindowChat, WindowPreset, WindowProvider, WindowSingle } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, AuthState, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { ArtifactListing } from "./lib/artifacts";
+import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
+import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
+import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -92,6 +95,10 @@ export const api = {
   /** Saves an endpoint's key in the Keychain (for an endpoint that is saved); it wins over the variable the endpoint names. */
   endpointKeySet: (id: string, key: string) => invoke<AuthState>("endpoint_key_set", { id, key }),
   endpointKeyClear: (id: string) => invoke<AuthState>("endpoint_key_clear", { id }),
+  conversationMetadata: (sessionId: string) => invoke<string | null>("conversation_metadata", { sessionId }),
+  conversationSettings: (slot: string, change?: { provider?: string; model?: string | null; effort?: string | null }) => invoke<import("../mobile/src/protocol/generated/ConversationConfiguration").ConversationConfiguration>("conversation_settings", { slot, change: change ?? null }),
+  conversationAction: (slot: string, action: "compact" | "clear") => invoke<void>("conversation_action", { slot, action }),
+  onConversationConfigured: (f: (r: { slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }) => void) => listen<{ slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }>("conversation-configured", (e) => f(e.payload)),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
   applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>
@@ -225,6 +232,14 @@ export const api = {
   stopTask: (slot: string, taskId: string) => invoke<void>("stop_task", { slot, taskId }),
   listSessions: (folder: string) => invoke<SessionSummary[]>("list_sessions", { folder }),
   searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
+  /** Where a message typed on the Desk goes (see desk.rs): the window then sends the user's own words there. */
+  deskRoute: (claudePath: string, text: string, chats: RouteCandidate[], projects: string[]) => invoke<DeskRoute>("desk_route", { claudePath, text, chats, projects }),
+  /** The Mac's Desk: what it says back to `text` (Sonnet), and what it does with it, given the last few exchanges. */
+  deskTalk: (claudePath: string, desk: string, text: string, history: Exchange[], chats: RouteCandidate[], projects: string[]) => invoke<DeskTalk>("desk_talk", { claudePath, desk, text, history, chats, projects }),
+  /** A short summary (Haiku) of what a chat replied to a message sent from the Desk. */
+  deskSummary: (claudePath: string, question: string, reply: string) => invoke<string>("desk_summary", { claudePath, question, reply }),
+  /** The Desk's own answer to `question` (Markdown, citing the chats as [1], [2] in order), from the past chats the search found. */
+  deskAnswer: (claudePath: string, question: string, chats: { id: string; folder: string; title: string; project: string }[]) => invoke<string>("desk_answer", { claudePath, question, chats }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
   renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
   /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */
@@ -249,6 +264,8 @@ export const api = {
   oldLocations: (folder: string) => invoke<OldLocation[]>("old_locations", { folder }),
   /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
   openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
+  /** How the repositories with a chat open stand (branches, pull requests and checks, merges, releases), for the Desk. */
+  deskStatus: () => invoke<RepoStatus[]>("desk_status"),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */
@@ -313,6 +330,46 @@ export const api = {
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */
   onOpenRecent: (cb: (path: string) => void): Promise<UnlistenFn> => listen<string>("open-recent", (e) => cb(e.payload)),
+  /** The folder's artifacts (`.lantern/artifacts/`), newest first, and the key the sandboxed frame loads them under. */
+  artifactsList: (folder: string) => invoke<ArtifactListing>("artifacts_list", { folder }),
+  /** A Markdown or Mermaid artifact's text. */
+  artifactsRead: (folder: string, name: string) => invoke<string>("artifacts_read", { folder, name }),
+  /** The theme `lantern.css` gives artifacts, as CSS variables. */
+  artifactsTheme: (vars: Record<string, string>) => invoke<void>("artifacts_theme", { vars }),
+  /** The user's to-do list for the folder's project (its repository's, shared by worktrees). */
+  todosList: (folder: string) => invoke<TodoListing>("todos_list", { folder }),
+  /** How many to-dos are open and overdue in each folder's project. */
+  todosCounts: (folders: string[]) => invoke<Record<string, TodoCount>>("todos_counts", { folders }),
+  /** One edit of the folder's project's list by the user; answers with the list after it. */
+  todosEdit: (folder: string, edit: TodoEdit) => invoke<TodoListing>("todos_edit", { folder, edit }),
+  /** A project's to-do list changed (the user, Claude, or a reminder going off). */
+  onTodosChanged: (cb: (key: string) => void): Promise<UnlistenFn> => listen<string>("todos-changed", (e) => cb(e.payload)),
+  /** To-do reminders that just went off, for the window to post. */
+  onTodosRemind: (cb: (due: TodoReminder[]) => void): Promise<UnlistenFn> => listen<TodoReminder[]>("todos-remind", (e) => cb(e.payload)),
+  /** The folder's dashboards (`.lantern/dashboards/*.json`), each checked: a spec to render, or the issues in the file. */
+  dashboardsList: (folder: string) => invoke<Dashboard[]>("dashboards_list", { folder }),
+  /** Which of the folder's dashboards are trusted, what is running, and the history of runs. */
+  dashboardsState: (folder: string) => invoke<DashboardState>("dashboards_state", { folder }),
+  /** Trusts a dashboard as the user saw it (the hash they were shown); rejects if the file changed since. */
+  dashboardTrust: (folder: string, file: string, hash: string) => invoke<void>("dashboard_trust", { folder, file, hash }),
+  /** Each form's command in a dashboard, `~` expanded and its program found: what the user reads before trusting it. */
+  dashboardCommands: (folder: string, file: string) => invoke<DashboardCommand[]>("dashboard_commands", { folder, file }),
+  /** The list a select's options command printed the last time it ran for this dashboard file and these chosen values of what it depends on (null if never). Runs nothing. */
+  dashboardOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList | null>("dashboard_options", { folder, file, form, field, values }),
+  /** Runs a select's options command now and keeps its list (rejects with why it couldn't). Only from a click: Trust, Reload, Retry, Load options. */
+  dashboardLoadOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList>("dashboard_load_options", { folder, file, form, field, values }),
+  /** What pressing a form's button would run, with the values in (rejects with why when a value is wrong). */
+  dashboardPreview: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardPreview>("dashboard_preview", { folder, file, form, values }),
+  /** Runs a form of a trusted dashboard; resolves when it ends, with the run (also in the history). Rejects with why it didn't start. */
+  dashboardRun: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardRun>("dashboard_run", { folder, file, form, values }),
+  /** One kept run with its output (null when it has been deleted). */
+  dashboardRunDetail: (folder: string, id: string) => invoke<DashboardRun | null>("dashboard_run_detail", { folder, id }),
+  /** Stops a running form's command and what it started; false when it wasn't running. */
+  dashboardStop: (folder: string, file: string, form: string) => invoke<boolean>("dashboard_stop", { folder, file, form }),
+  dashboardDeleteRun: (folder: string, id: string) => invoke<boolean>("dashboard_delete_run", { folder, id }),
+  dashboardClearRuns: (folder: string, file: string, form: string) => invoke<void>("dashboard_clear_runs", { folder, file, form }),
+  /** A dashboard was trusted, started, stopped or finished a run, or a run was deleted. */
+  onDashboardsChanged: (cb: () => void): Promise<UnlistenFn> => listen("dashboards-changed", () => cb()),
   /** The folder's Network tab: its watches, the requests that matched them (and summaries), and Network Monitor's state. */
   networkState: (folder: string) => invoke<NetworkView>("network_state", { folder }),
   /** One request's headers and bodies (rejects with why, e.g. Network Monitor no longer has it). */
@@ -355,6 +412,7 @@ export const api = {
   remoteSettings: () => invoke<RemoteView>("remote_settings"),
   remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
   remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  remoteSetRichNotifications: (on: boolean) => invoke<RemoteView>("remote_set_rich_notifications", { on }),
   /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
   remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
   remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
@@ -367,18 +425,26 @@ export const api = {
   remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
   /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** Tells the backend what the Desks hold, for a phone's Desk (see lib/desk.ts windowDesk). */
+  remoteWindowDesk: (desk: WindowDesk) => invoke<void>("remote_window_desk", { desk }),
+  /** The sidebar's One project (null: every project), for the phones that follow it. */
+  remoteWindowSingle: (single: WindowSingle | null) => invoke<void>("remote_window_single", { single }),
   /** A phone connected or went: ask remoteSettings who is connected now. */
   onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
   /** A paired phone asked for an asleep chat: wake it where it is. */
   onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
   /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
   onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
-  /** Which presets a phone may choose between (see lib/remoteChats.ts WindowPreset). */
-  remoteWindowControls: (presets: WindowPreset[]) => invoke<void>("remote_window_controls", { presets }),
+  /** Which presets a phone may choose between (see lib/remoteChats.ts WindowPreset), and where it may start a chat (WindowProvider). */
+  remoteWindowControls: (presets: WindowPreset[], providers: WindowProvider[]) => invoke<void>("remote_window_controls", { presets, providers }),
   /** A paired phone asked to put a chat on Ask or Auto: the window checks it (Auto only if Settings allows it) and switches it. */
   onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
   /** A paired phone asked to close a chat: the window checks it and closes it as the sidebar does. */
   onRemoteClose: (cb: (r: RemoteClose) => void): Promise<UnlistenFn> => listen<RemoteClose>("remote-close-chat", (e) => cb(e.payload)),
+  /** A paired phone named a chat (the backend checked it has a conversation and the name is one). */
+  onRemoteRename: (cb: (r: RemoteRename) => void): Promise<UnlistenFn> => listen<RemoteRename>("remote-rename-chat", (e) => cb(e.payload)),
+  /** A phone picked the One project, or showed every project again. */
+  onRemoteSingle: (cb: (r: RemoteSingle) => void): Promise<UnlistenFn> => listen<RemoteSingle>("remote-single", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on Chat or Step by step. */
   onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */

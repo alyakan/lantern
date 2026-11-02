@@ -70,3 +70,68 @@ export function usageOf(plan: PlanUsage, now = Date.now()): Usage {
     tone: stopped ? "stop" : percent >= 80 ? "warn" : "ok",
   };
 }
+
+const WEEK_SECS = 7 * 24 * 3600;
+/** Less of the window than this has gone and a pace means nothing (the first hours of a week would say it ends in a day). */
+const MIN_ELAPSED_SECS = 6 * 3600;
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** "today 18:20", "tomorrow 09:00", "Thu 18:20" (24-hour). */
+export function whenText(unixSecs: number, now = Date.now()): string {
+  const at = new Date(unixSecs * 1000);
+  const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((day(at) - day(new Date(now))) / 86_400_000);
+  if (days === 0) return `today ${clock}`;
+  if (days === 1) return `tomorrow ${clock}`;
+  return `${DAYS[at.getDay()]} ${clock}`;
+}
+
+export interface WeekForecast {
+  /** Unix seconds the limit is reached at this pace, only when that is before the window resets. */
+  runsOutAt: number | null;
+  /** Where the pace leads by the reset: 1 is the limit. */
+  byReset: number;
+}
+
+/** The pace so far (what is used over how long the window has run) carried on to the end of the window. */
+export function weekForecast(week: { used: number; resetsAt: number | null }, now = Date.now()): WeekForecast | null {
+  if (week.resetsAt === null || week.used <= 0) return null;
+  const at = now / 1000;
+  const start = week.resetsAt - WEEK_SECS;
+  const gone = Math.min(at - start, WEEK_SECS);
+  if (week.resetsAt <= at || gone < MIN_ELAPSED_SECS) return null;
+  const rate = week.used / gone;
+  const byReset = rate * WEEK_SECS;
+  if (week.used >= 1) return { runsOutAt: at, byReset };
+  return { runsOutAt: byReset >= 1 ? start + 1 / rate : null, byReset };
+}
+
+export interface Week {
+  /** Whole percent, 0 to 100. */
+  percent: number;
+  /** Where the pace leads, short: "Out Thu 18:20", "On pace for 60%", "Resets Fri 09:00", or "" when nothing is known. */
+  short: string;
+  /** The same in a sentence, for the sheet and the screen reader. */
+  sentence: string;
+  /** Amber when the pace runs it out before the reset or it is past 80%, red at the limit. */
+  tone: "ok" | "warn" | "stop";
+}
+
+/** The weekly window in words: how much is used and where the pace so far leads. */
+export function weekOf(week: { used: number; resetsAt: number | null }, now = Date.now()): Week {
+  const percent = Math.max(0, Math.min(100, Math.round(week.used * 100)));
+  const reset = week.resetsAt !== null && week.resetsAt * 1000 > now ? whenText(week.resetsAt, now) : null;
+  if (week.used >= 1) {
+    return { percent, short: reset ? `Resets ${reset}` : "Limit reached", sentence: `Weekly limit reached.${reset ? ` It resets ${reset}.` : ""}`, tone: "stop" };
+  }
+  const f = weekForecast(week, now);
+  const head = `${percent}% of the weekly limit used.`;
+  if (f?.runsOutAt != null) {
+    const out = whenText(f.runsOutAt, now);
+    return { percent, short: `Out ${out}`, sentence: `${head} At this pace it runs out ${out}${reset ? `, before it resets ${reset}` : ""}.`, tone: "warn" };
+  }
+  const tone = percent >= 80 ? "warn" : "ok";
+  if (f) return { percent, short: `On pace for ${Math.round(f.byReset * 100)}%`, sentence: `${head} At this pace about ${Math.round(f.byReset * 100)}% will be used by the reset${reset ? ` (${reset})` : ""}.`, tone };
+  return { percent, short: reset ? `Resets ${reset}` : "", sentence: `${head}${reset ? ` It resets ${reset}.` : ""}${week.used > 0 && reset ? " Too early in the week to tell where it is heading." : ""}`, tone };
+}

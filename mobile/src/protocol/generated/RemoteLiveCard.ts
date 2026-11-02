@@ -3,7 +3,11 @@
 /**
  * A phone's card on its lock screen, which the Mac keeps right with pushes to Apple.
  */
-export type RemoteLiveCard = { slot: string, 
+export type RemoteLiveCard = { 
+/**
+ * The chat the card is for; empty for a summary card.
+ */
+slot: string, 
 /**
  * The card's own push token, as Apple gave it to the phone (hex).
  */
@@ -15,4 +19,9 @@ project: string,
 /**
  * When the turn it shows began (ms since the epoch).
  */
-since: number, };
+since: number, 
+/**
+ * The card is about every chat (what is working, what needs you, what finished), not one (a Mac that lists
+ * "livesummary"); `slot` and `project` mean nothing then.
+ */
+summary?: boolean, };

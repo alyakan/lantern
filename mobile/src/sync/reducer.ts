@@ -9,6 +9,8 @@
  */
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -29,16 +31,21 @@ export type Item =
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
   | { kind: "desktop"; id: string; what: string }
   | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null }
+  /** The user's post-hook was sent after Claude's answer: what Claude says and does after this, to the turn's end, is the hook's. */
+  | { kind: "hook"; id: string; text: string }
   /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
   | { kind: "shell"; id: string; command: string; output: string; status: "running" | "done" | "failed" | "stopped"; code: number | null; /** It is reading a secret (a password): what is typed in reply is hidden. */ secret: boolean };
 
 /** The subscription's five-hour window, as the Mac last said it (the account's, the same in every chat). */
 export interface PlanUsage {
+  updatedAt?: number;
   /** 0 to 1. */
   used: number;
   /** Unix seconds. */
   resetsAt: number | null;
   status: string;
+  /** The weekly window, when the Mac says it (an older Mac doesn't). */
+  week?: { used: number; resetsAt: number | null };
 }
 
 export interface ChatView {
@@ -49,6 +56,8 @@ export interface ChatView {
   todos: RemoteTodo[];
   /** The tokens the chat holds, and its model's context size when the Mac has said it. */
   context: { tokens: number; window: number | null } | null;
+  /** What the chat still runs in the background (a dev server, a subagent): each one's description (empty for a Mac that can't say). */
+  background: string[];
   /** The number of the last event applied (in `epoch`). */
   seq: number;
   /** Earlier turns not loaded yet (Request::Earlier brings them). */
@@ -78,8 +87,13 @@ export interface State {
   views: Record<string, ChatView>;
   /** The subscription's usage, once a Mac that can say has said it. */
   plan: PlanUsage | null;
+  providerUsage: Record<string, import("../protocol/generated/ProviderUsage").ProviderUsage>;
   /** The Mac's run the numbers in `views` belong to (its Welcome's). */
   epoch: number | null;
+  /** The Desk as the Mac's window has it, once a Mac that has one has said (null: not yet, or a Mac without). */
+  desk: RemoteDesk | null;
+  /** The Mac's One project: Home lists only its chats (null: every project, or a Mac that doesn't say). */
+  single: RemoteSingle | null;
 }
 
 /** Keeps when each working chat was first seen working, and forgets the ones that are not working (their next time is a new start). */
@@ -90,14 +104,16 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null };
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, single: null };
 
-export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
+export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
 export type Action =
   | { type: "welcome"; epoch: number }
   | { type: "pushed"; msg: Pushed }
-  | { type: "waiting"; list: Waiting[] }
+  | { type: "waiting"; list: Waiting[]; /** Prompts visible before this pending-list request began; newer prompts are untouched. */ observedPrompts?: Record<string, string[]> }
+  /** The Desk, as the Mac answered when asked (it pushes it too, as it changes). */
+  | { type: "desk"; desk: RemoteDesk }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
   /** The chat's history was asked for (again), or the asking failed. */
@@ -187,15 +203,20 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "permission_withdrawn":
       return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: "withdrawn" } : p)) };
     case "permission_resolved":
-      return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" ? { ...p, state: event.allow ? "allowed" : "denied", by: event.by } : p)) };
+      return { ...view, items: updateById(items, "prompt", event.request_id, (p) => (p.state === "open" || p.state === "withdrawn" ? { ...p, state: event.allow ? "allowed" : "denied", by: event.by } : p)) };
+    case "hook_turn": {
+      // Named for the message that began the turn, like its end, so the same hook told twice is one.
+      const began = [...items].reverse().find((it) => it.kind === "user");
+      return { ...view, items: upsert(items, { kind: "hook", id: `hook-${began?.id ?? "start"}`, text: event.text }) };
+    }
     case "needs_desktop":
       return { ...view, items: upsert(items, { kind: "desktop", id: `desktop-${event.what}`, what: event.what }) };
     case "session_started":
     case "session_ended":
-      // A new claude, or none: nothing it was asking can be answered any more.
-      return { ...view, thinking: false, items: items.map((it) => (it.kind === "prompt" && it.state === "open" ? { ...it, state: "withdrawn" } : it)) };
+      // A new claude, or none: nothing it was asking can be answered any more, and nothing it ran goes on.
+      return { ...view, thinking: false, background: [], items: items.map((it) => (it.kind === "prompt" && it.state === "open" ? { ...it, state: "withdrawn" } : it)) };
     case "asleep":
-      return view;
+      return event.asleep ? { ...view, background: [] } : view;
     case "conversation_reset":
       return { ...view, items: [], todos: [], context: null, hidden: 0, thinking: false };
     case "commands":
@@ -204,6 +225,8 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, todos: event.items };
     case "context":
       return { ...view, context: { tokens: event.tokens, window: event.window ?? view.context?.window ?? null } };
+    case "background":
+      return { ...view, background: event.tasks };
     case "shell_started":
       return { ...view, items: upsert(items, { kind: "shell", id: event.id, command: event.command, output: "", status: "running", code: null, secret: false }, (old) => old) };
     case "shell_output":
@@ -230,11 +253,23 @@ function settleWaiting(waiting: Waiting[], slot: string, event: RemoteEvent): Wa
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "welcome":
+      // Each connection is told the One project afresh (when the Mac has one): until it is, every project shows.
+      if (state.epoch === action.epoch) return state.single === null ? state : { ...state, single: null };
       // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again.
-      if (state.epoch === action.epoch) return state;
-      return { ...state, epoch: action.epoch, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
-    case "waiting":
-      return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+      return { ...state, epoch: action.epoch, single: null, plan: null, providerUsage: {}, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
+    case "waiting": {
+      const views = { ...state.views };
+      for (const [slot, ids] of Object.entries(action.observedPrompts ?? {})) {
+        const view = views[slot];
+        if (!view) continue;
+        const observed = new Set(ids);
+        const pending = new Set(action.list.filter((w) => w.slot === slot).map((w) => w.request_id));
+        views[slot] = { ...view, items: view.items.map((it) => it.kind === "prompt" && it.state === "open" && observed.has(it.id) && !pending.has(it.id) ? { ...it, state: "withdrawn" } : it) };
+      }
+      return { ...state, views, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+    }
+    case "desk":
+      return { ...state, desk: action.desk };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
@@ -261,7 +296,11 @@ export function reducer(state: State, action: Action): State {
     }
     case "earlier": {
       const view = state.views[action.slot] ?? emptyView;
-      const earlier = applyAll({ ...emptyView }, action.events).items;
+      const earlier = applyAll({ ...emptyView }, action.events).items.map((it) => {
+        if (it.kind !== "prompt") return it;
+        const current = view.items.find((item) => item.kind === "prompt" && item.id === it.id);
+        return current?.kind === "prompt" && current.state !== "open" ? current : it;
+      });
       return { ...state, views: { ...state.views, [action.slot]: { ...view, hidden: action.hidden, items: [...earlier, ...view.items.filter((it) => !earlier.some((e) => e.kind === it.kind && e.id === it.id))] } } };
     }
     case "pushed": {
@@ -269,8 +308,14 @@ export function reducer(state: State, action: Action): State {
       switch (msg.type) {
         case "chats":
           return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
+        case "desk":
+          return { ...state, desk: msg.desk };
+        case "single":
+          return { ...state, single: msg.single };
+        case "provider_usage":
+          return { ...state, providerUsage: Object.fromEntries(msg.usage.map(p => [p.provider, p])) };
         case "plan":
-          return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status } };
+          return { ...state, plan: { ...(msg.updated_at ? { updatedAt: msg.updated_at } : {}), used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.
         default:
           return state;

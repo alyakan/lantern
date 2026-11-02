@@ -9,7 +9,7 @@
 mod clean;
 pub mod memory;
 pub mod phone;
-mod scan;
+pub(crate) mod scan;
 
 use serde::Serialize;
 use serde_json::{json, Value};

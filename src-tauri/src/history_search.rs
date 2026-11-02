@@ -177,6 +177,20 @@ fn fold(s: &str) -> String {
 }
 
 /// `text` as runs, the matches of `needle` (already folded) marked.
+pub(crate) fn highlight_text(text: &str, query: &str, excerpt: bool) -> Vec<Piece> {
+    let chars: Vec<char> = text.chars().collect();
+    let needle: Vec<char> = fold(query.trim()).chars().collect();
+    if needle.is_empty() { return vec![Piece { text: text.into(), hit: false }]; }
+    let folded: Vec<char> = chars.iter().copied().map(fold_char).collect();
+    if excerpt {
+        if let Some(at) = folded.windows(needle.len()).position(|w|w == needle.as_slice()) {
+            let start = at.saturating_sub(60);
+            return highlight(&chars[start..(at + needle.len() + 120).min(chars.len())], &needle);
+        }
+    }
+    highlight(&chars, &needle)
+}
+
 fn highlight(text: &[char], needle: &[char]) -> Vec<Piece> {
     let shown: Vec<char> = text.iter().map(|&c| if c.is_whitespace() { ' ' } else { c }).collect();
     let folded: Vec<char> = text.iter().map(|&c| fold_char(c)).collect();

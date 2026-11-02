@@ -71,10 +71,10 @@ describe("which action a keystroke names", () => {
     expect(availableActions().find((a) => a.id === "ship-it")).toMatchObject({ title: "Ship it…", shortcut: null });
   });
 
-  it("gives every shortcut to one action only", () => {
+  it("gives every shortcut to one action only, but for the canvas's own while it has focus", () => {
     const seen = new Map<string, string>();
     for (const def of ACTIONS) {
-      if (!def.key) continue;
+      if (!def.key || def.id.startsWith("canvas-")) continue;
       const k = `${def.ctrl ? "ctrl+" : ""}${def.shift ? "shift+" : ""}${def.key}`;
       expect(seen.get(k), `${def.id} and ${seen.get(k)} share ${k}`).toBeUndefined();
       seen.set(k, def.id);
@@ -239,5 +239,31 @@ describe("the menu bar and the registry", () => {
 
   it("keeps the shortcut-only actions out of the menu, so their keys stay with the webview", () => {
     for (const id of ["focus-input", "stop"]) expect(menuIds).not.toContain(id);
+  });
+});
+
+describe("a key two actions share", () => {
+  beforeEach(() => resetActionsForTest());
+
+  it("runs the canvas's ⌘[ while the canvas has it, and Back otherwise", () => {
+    const back = vi.fn();
+    const previous = vi.fn();
+    const { rerender } = render(
+      <>
+        <Owner id="go-back" run={back} />
+        <Owner id="canvas-previous-agent" run={previous} enabled={false} />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    expect(back).toHaveBeenCalledTimes(1);
+    rerender(
+      <>
+        <Owner id="go-back" run={back} />
+        <Owner id="canvas-previous-agent" run={previous} enabled />
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    expect(previous).toHaveBeenCalledTimes(1);
+    expect(back).toHaveBeenCalledTimes(1);
   });
 });

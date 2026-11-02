@@ -5,9 +5,9 @@ import { useTipJar, useTips } from "../shell/tipsContext";
 import { EMBER, EMBER_NIGHT } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, type SheetScroll } from "../ui/Sheet";
 import { Bar, Dots, Pulse } from "../ui/skeleton";
-import { radius, shadow, space, useColors } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 
 /** How long the thank-you stays before the sheet goes. */
 export const THANKS_MS = 2400;
@@ -22,7 +22,7 @@ const MARKS = ["☕", "💛", "✨"];
 function TipsSkeleton() {
   const colors = useColors();
   const row = (w: number, i: number) => (
-    <View key={`${w}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.paper, borderRadius: radius.inner + 2, padding: 14 }}>
+    <View key={`${w}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.wash, borderRadius: radius.inner + 2, padding: 14 }}>
       <Bar w={30} h={30} r={15} />
       <Bar w={`${w - i * 6}%`} h={14} />
       <View style={{ flex: 1 }} />
@@ -58,9 +58,10 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
+      {(close, scroll) => (
         <Content
           close={close}
+          scroll={scroll}
           bottom={Math.max(insets.bottom, 16) + 8}
           thanked={tips.phase === "thanked"}
           onThanksSeen={() => {
@@ -73,7 +74,7 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
+function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () => void; scroll: SheetScroll; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
   const colors = useColors();
   // Ember as words: lighter on Night, where the plain one is too dim to read.
   const ember = colors.isDark ? EMBER_NIGHT : EMBER;
@@ -90,7 +91,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
   }, [thanked, onThanksSeen]);
 
   return (
-    <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
+    <View style={[{ flexShrink: 1 }]}>
       {thanked ? (
         <View accessibilityRole="alert" style={{ alignItems: "center", gap: 10, paddingVertical: 28, paddingHorizontal: space.xl, paddingBottom: bottom + 8 }}>
           <PopIn>
@@ -110,7 +111,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
           </FadeSlideIn>
         </View>
       ) : (
-        <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: bottom, gap: 14 }}>
+        <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: bottom, gap: 14 }}>
           <Txt variant="title" accessibilityRole="header">
             Support development
           </Txt>
@@ -133,7 +134,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
             <View style={{ gap: 10 }}>
               {tips.tips.map((tip, i) => (
                 <FadeSlideIn key={tip.id} from={10} delay={i * 70}>
-                  <PressScale accessibilityRole="button" accessibilityLabel={`${tip.name}, ${tip.price}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => void jar.tip(tip.id)} scaleTo={0.97} haptic="select" opacity={busy ? 0.55 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.paper, borderRadius: radius.inner + 2, paddingHorizontal: 14, paddingVertical: 14, minHeight: 56 }}>
+                  <PressScale accessibilityRole="button" accessibilityLabel={`${tip.name}, ${tip.price}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => void jar.tip(tip.id)} scaleTo={0.97} haptic="select" opacity={busy ? 0.55 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.wash, borderRadius: radius.inner + 2, paddingHorizontal: 14, paddingVertical: 14, minHeight: 56 }}>
                     <Txt variant="heading" accessibilityElementsHidden style={{ width: 30, textAlign: "center" }}>
                       {MARKS[i % MARKS.length]}
                     </Txt>
@@ -154,7 +155,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
                   </Txt>
 
                   {tips.pledger ? (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.paper, borderRadius: radius.inner + 2, padding: 14 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.wash, borderRadius: radius.inner + 2, padding: 14 }}>
                       <Txt variant="heading" accessibilityElementsHidden>
                         🔥
                       </Txt>
@@ -170,7 +171,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
                   ) : (
                     <>
                       {tips.pledges.map((pledge) => (
-                        <PressScale key={pledge.id} accessibilityRole="button" accessibilityLabel={`${pledge.name}, ${pledge.price}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => void jar.pledge(pledge.id)} scaleTo={0.97} haptic="select" opacity={busy ? 0.55 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.paper, borderRadius: radius.inner + 2, paddingHorizontal: 14, paddingVertical: 14, minHeight: 56 }}>
+                        <PressScale key={pledge.id} accessibilityRole="button" accessibilityLabel={`${pledge.name}, ${pledge.price}`} accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => void jar.pledge(pledge.id)} scaleTo={0.97} haptic="select" opacity={busy ? 0.55 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.wash, borderRadius: radius.inner + 2, paddingHorizontal: 14, paddingVertical: 14, minHeight: 56 }}>
                           <Txt variant="heading" accessibilityElementsHidden style={{ width: 30, textAlign: "center" }}>
                             🔥
                           </Txt>

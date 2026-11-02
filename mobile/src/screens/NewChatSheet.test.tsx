@@ -2,6 +2,16 @@ import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { connectedWithControls, makeController, renderWith } from "../test/render";
 import { NewChatSheet } from "./NewChatSheet";
+import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
+
+// Ask or Auto as last used: Ask (nothing kept) unless a test says otherwise.
+jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadNewChatPermissions: jest.fn(async () => "ask"), saveNewChatPermissions: jest.fn(async () => {}) }));
+const loadPermissions = loadNewChatPermissions as jest.Mock;
+const savePermissions = saveNewChatPermissions as jest.Mock;
+beforeEach(() => {
+  loadPermissions.mockReset().mockImplementation(async () => "ask");
+  savePermissions.mockReset();
+});
 
 const projects = [
   { id: "/Users/me/lantern", name: "lantern" },
@@ -42,6 +52,7 @@ describe("while the projects are coming", () => {
 });
 
 describe("starting a chat from the phone", () => {
+
   it("says it starts on Ask, offers the projects, and starts in the first one by default", async () => {
     const { lastOf, onStarted } = await open();
     expect(screen.getByText(/starts on Ask/)).toBeTruthy();
@@ -63,6 +74,20 @@ describe("starting a chat from the phone", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", text: "Update the footer" });
+  });
+
+  it("starts in the project a chat belongs to when only its folder's name is known (the Done page's Start something new)", async () => {
+    const { lastOf, onStarted } = await open(undefined, { initialProjectName: "website" });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "website" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await write("Add a footer");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", text: "Add a footer" });
+  });
+
+  it("falls back to the first project when that name isn't one the Mac lists", async () => {
+    await open(undefined, { initialProjectName: "gone" });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" }).props.accessibilityState).toMatchObject({ selected: true }));
   });
 
   it("can't start without something written, or while it is starting", async () => {
@@ -193,6 +218,28 @@ describe("choosing what a new chat runs on", () => {
     expect(screen.getByText(/Let paired phones use Auto/)).toBeTruthy();
   });
 
+  it("starts on Ask or Auto as the last chat was started, whatever the project, and remembers what this one starts on", async () => {
+    loadPermissions.mockImplementation(async () => "auto");
+    const { lastOf } = await openWithControls(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Project's own" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("radio", { name: "website" }));
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", permissions: "auto" }));
+    expect(savePermissions).toHaveBeenCalledWith("auto");
+  });
+
+  it("starts a remembered Auto on Ask where the Mac doesn't let phones use Auto, and keeps remembering Auto", async () => {
+    loadPermissions.mockImplementation(async () => "auto");
+    const { lastOf } = await openWithControls(false);
+    await waitFor(() => expect(loadPermissions).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ permissions: "ask" }));
+    expect(savePermissions).not.toHaveBeenCalled();
+  });
+
   it("offers nothing to choose from a Mac that can't say, and starts as before", async () => {
     const { lastOf } = await open();
     await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
@@ -200,6 +247,92 @@ describe("choosing what a new chat runs on", () => {
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ op: "new_chat", permissions: null, preset: null, workflow: null }));
+  });
+});
+
+describe("choosing where a new chat runs", () => {
+  const claude = { id: "claude", name: "Claude", auto: true, presets: true };
+  const ollama = { id: "gateway:ollama", name: "Ollama", auto: false, presets: false };
+  const presets = [{ id: "balanced", name: "Balanced", summary: "Sonnet" }, { id: "max", name: "Max", summary: "Opus" }];
+  async function openWith(controls: Record<string, unknown>) {
+    const { controller } = makeController();
+    const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls }, ["controls", "workflow"]);
+    const onStarted = jest.fn();
+    await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={onStarted} />, { connection: connectedWithControls }, controller);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    return { onStarted, ...session };
+  }
+  const start = async (lastOf: (op: "new_chat") => unknown) => {
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toBeTruthy());
+    return lastOf("new_chat");
+  };
+
+  it("offers the providers beside the project's own when the Mac has more than Claude, and sends none unless one is chosen", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Ollama" })).toBeTruthy());
+    expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["As on your Mac", "Claude", "Ollama"]));
+    // Not the same name as the Models group's own, which a screen reader would read twice.
+    expect(screen.getAllByRole("radio", { name: "Project's own" })).toHaveLength(1);
+    expect(screen.getByText("As on your Mac uses this project’s selected provider.")).toBeTruthy();
+    const sent = (await start(lastOf)) as Record<string, unknown>;
+    expect("provider" in sent).toBe(false);
+  });
+
+  it("starts where it was told to, on Ask, and says Auto and the models don't apply there", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
+    await openOptions();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Ollama" }));
+    expect(screen.getByRole("button", { name: "Runs on: Ollama · Chat · Ask" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByText("Ollama has no Auto mode: it asks before it acts.")).toBeTruthy();
+    // The Mac's presets are Claude Code's models: not offered for a provider that runs its own.
+    expect(screen.queryByRole("radio", { name: "Max" })).toBeNull();
+    expect(await start(lastOf)).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "ask", preset: null, workflow: null, provider: "gateway:ollama" });
+  });
+
+  it("lets go of Auto and a preset chosen for Claude when the provider changes to one without them, and doesn't bring them back", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Max" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("radio", { name: "Ollama" }));
+    expect(screen.getByRole("button", { name: "Runs on: Ollama · Chat · Ask" })).toBeTruthy();
+    // Back to Claude: it is Ask and the project's own models, not the Auto and Max that were there before.
+    await fireEvent.press(screen.getByRole("radio", { name: "Claude" }));
+    expect(screen.getByRole("button", { name: "Runs on: Claude · Chat · Ask · Project's own" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Ask" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(await start(lastOf)).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "ask", preset: null, workflow: null, provider: "claude" });
+  });
+
+  it("sends neither Auto nor a preset to a provider without them, however the choices were made", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Ollama" }));
+    const sent = (await start(lastOf)) as Record<string, unknown>;
+    expect(sent).toMatchObject({ permissions: "ask", preset: null, provider: "gateway:ollama" });
+  });
+
+  it.each([
+    ["lists only Claude", { allow_auto: true, presets, providers: [claude] }],
+    ["lists none", { allow_auto: true, presets, providers: [] }],
+    ["is older and doesn't say", { allow_auto: true, presets }],
+  ])("offers no provider when the Mac %s", async (_, controls) => {
+    const { lastOf } = await openWith(controls);
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.queryByText("Provider")).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Ollama" })).toBeNull();
+    // Only the Models group's own "Project's own", as before.
+    expect(screen.getAllByRole("radio", { name: "Project's own" })).toHaveLength(1);
+    const sent = (await start(lastOf)) as Record<string, unknown>;
+    expect("provider" in sent).toBe(false);
   });
 });
 
