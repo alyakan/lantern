@@ -864,7 +864,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * is reopened as its worker once that main agent has finished opening (`parentReady`; the backend adopts a worker only
    * into a main agent it already knows). Resolves to whether the chat opened.
    */
-  const resumeIn = async (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole): Promise<boolean> => {
+  const resumeIn = async (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole, title?: string): Promise<boolean> => {
     if (!agentReady) return Promise.resolve(false);
     reopened.current = true;
     // The provider it ran on: Claude's unless it was saved as another's (a session from before there was a choice is Claude's).
@@ -882,7 +882,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // The preset it last ran with, else the folder's.
     const h = harnessFor(can, harnessBySession[sessionId] ?? harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
-    to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
+    to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder, ...(title ? { title } : {}) });
     if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
     if (!binary) {
@@ -895,7 +895,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     if (team?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: team.parent, name: team.name, brief: "", folder, branch: team.branch, base: team.base, isolation: team.isolation, ...(team.agentRole ? { role: team.agentRole } : {}), ...(team.hidden ? { hidden: true } : {}) } });
     // Trying again later doesn't wait on a main agent that has long since opened (or not).
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
-    relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
+    relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again, title);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     // An agent is told its Lead's notes (the app looks them up), not the notes of its worktree's folder.
     const notes = team?.role === "worker" ? "" : notesOf(notesBy, folder);
@@ -1138,7 +1138,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       if (!parent) return Promise.resolve(false);
       team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, agentRole: o.agentRole, hidden: o.hidden, model: o.model, parentReady: parent.ready };
     }
-    if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
+    if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team, c.title);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
     startIn(slot, c.folder, false, team?.role === "main", undefined, undefined, team?.role === "main" ? team.review : undefined);
     return Promise.resolve(true);
