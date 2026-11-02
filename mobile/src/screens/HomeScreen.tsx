@@ -31,6 +31,7 @@ import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
+import { ProviderStrip } from "./ChatExtras";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -509,12 +510,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: space.xl, paddingTop: 10 }}>
-          {["claude", "codex"].map(id => {
-            const windows = currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now);
-            const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
-            return <PressScale key={id} accessibilityRole="button" accessibilityLabel={`${id === "claude" ? "Claude" : "Codex"} usage, ${used === null ? "usage unavailable" : `${Math.round(used * 100)} percent used`}`} onPress={() => setUsageOpen(true)}><Txt variant="small" tone={used !== null && used >= .95 ? "stop" : "ink2"}>{id === "claude" ? "Claude" : "Codex"} · {used === null ? "Usage unavailable" : `${Math.round(used * 100)}% used`}</Txt></PressScale>;
-          })}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, paddingHorizontal: space.xl, paddingTop: 10 }}>
+          {["claude", "codex"].map(id => <ProviderStrip key={id} name={id === "claude" ? "Claude" : "Codex"} windows={currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now)} onPress={() => setUsageOpen(true)} />)}
         </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
