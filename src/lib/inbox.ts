@@ -36,6 +36,9 @@ export interface InboxItem {
   detail: string | null;
   /** It waits on an answer (the rest only finished unread). */
   needsYou: boolean;
+  /** The request it waits on (a permission, a plan, a question, a reproduction, an approval), whole: what the Desk opens in
+   * place, as the chat's own card, to answer it there. */
+  request?: Pending;
 }
 
 type Pending = Extract<ChatItem, { type: "permission" }>;
@@ -122,7 +125,7 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
           const whole = kind === "permission" ? wholeRequest(pending.item.toolName, pending.item.input) : null;
           // Allowed from the row only when the row shows all of it, in full: then it says what, and the request itself follows.
           const need = whole === null ? (said?.body ?? "Needs an answer") : `Wants to use ${pending.item.toolName}`;
-          out.push({ ...base, kind, need: `${need}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, canAllow: whole !== null, detail: whole, needsYou: true });
+          out.push({ ...base, kind, need: `${need}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, canAllow: whole !== null, detail: whole, needsYou: true, request: pending.item });
           continue;
         }
         const proposal = m.role === "agent" && lead ? (chats.slots[lead]?.proposals ?? []).find((p) => p.worker === m.slot && p.status === "open") : undefined;
@@ -184,4 +187,21 @@ export function checkItems(list: FailedChecks[]): InboxItem[] {
     detail: null,
     needsYou: true,
   }));
+}
+
+const lined = (mark: string, s: string) => s.split("\n").map((l) => `${mark} ${l}`).join("\n");
+
+/**
+ * All of a plain permission request, for the Desk to show before it can be allowed there: an edit as the lines it takes out and
+ * puts in, a write as what it writes, anything else as every field it carries. Nothing is cut.
+ */
+export function requestText(toolName: string, input: unknown): string {
+  const o = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+  if (!o) return JSON.stringify(input, null, 2) ?? "";
+  const str = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : "");
+  const edit = (e: Record<string, unknown>) => `${lined("-", typeof e.old_string === "string" ? e.old_string : "")}\n${lined("+", typeof e.new_string === "string" ? e.new_string : "")}`;
+  if (toolName === "Edit") return `${str("file_path")}${o.replace_all ? " (every match)" : ""}\n\n${edit(o)}`;
+  if (toolName === "MultiEdit" && Array.isArray(o.edits)) return `${str("file_path")}\n\n${o.edits.map((e) => edit((e ?? {}) as Record<string, unknown>)).join("\n\n")}`;
+  if (toolName === "Write") return `${str("file_path")}\n\n${str("content")}`;
+  return JSON.stringify(o, null, 2);
 }

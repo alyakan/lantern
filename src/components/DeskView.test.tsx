@@ -67,6 +67,29 @@ describe("the Desk", () => {
     expect(props.onDecide).toHaveBeenLastCalledWith(expect.objectContaining({ slot: "b" }), true);
   });
 
+  it("answers what it can't show on one line from the chat's own card, opened in place: never from the summary", () => {
+    const request = { type: "permission" as const, id: "r-e", toolName: "Edit", input: { file_path: "/p/a.ts", old_string: "a", new_string: "b" }, decision: null, at: Date.now() };
+    const onAnswer = vi.fn();
+    const { rerender } = setup({ needs: [item("e", { kind: "permission", canAllow: false, detail: null, need: "Wants to edit a.ts", request }), item("f", { request: { ...request, id: "r-f" }, canAllow: false, detail: null })], onAnswer });
+    expect(within(needs()).queryByRole("button", { name: /^Allow/ })).toBeNull();
+    fireEvent.click(within(needs()).getByRole("button", { name: "Review Chat e" }));
+    // The whole request, as the chat shows it.
+    expect(needs().querySelector(".desk-request-full")?.textContent).toBe("/p/a.ts\n\n- a\n+ b");
+    fireEvent.click(within(needs()).getByRole("button", { name: "Allow" }));
+    expect(onAnswer).toHaveBeenCalledWith("e", "r-e", true, undefined, undefined, undefined);
+    // The next one comes in closed: a second click can't allow what just came into view.
+    rerender({ needs: [item("f", { request: { ...request, id: "r-f" }, canAllow: false, detail: null })], onAnswer });
+    expect(within(needs()).queryByRole("button", { name: "Allow" })).toBeNull();
+  });
+
+  it("opens a plan, a question or an approval in place too", () => {
+    const plan = { type: "permission" as const, id: "r-p", toolName: "ExitPlanMode", input: { plan: "1. Cap the retry at 8s" }, decision: null, at: Date.now() };
+    const onAnswer = vi.fn();
+    setup({ needs: [item("p", { kind: "plan", requestId: null, canAllow: false, detail: null, need: "Has a plan for you", request: plan })], onAnswer });
+    fireEvent.click(within(needs()).getByRole("button", { name: "Review Chat p" }));
+    expect(within(needs()).getByText(/Cap the retry at 8s/)).toBeInTheDocument();
+  });
+
   it("lists the projects with what Lantern knows of each", () => {
     setup({ projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })] });
     expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type MergeProposal, type State } from "../store";
 import type { Chats } from "../sessions";
-import { checkItems, inboxItems, REQUEST_KINDS, wholeRequest } from "./inbox";
+import { checkItems, inboxItems, REQUEST_KINDS, requestText, wholeRequest } from "./inbox";
 import { openProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
@@ -220,5 +220,14 @@ describe("checkItems", () => {
     expect(row).toMatchObject({ key: "checks:/work/lantern", kind: "checks", slot: "s2", role: "chat", team: null, title: "Checks failed on feat/x", where: "lantern", need: "Pull request #57: 2 checks failed", needsYou: true, canAllow: false, requestId: null });
     expect(checkItems([{ folder: "/a", slot: "s", where: "a", branch: "b", number: 1, failed: 1 }])[0].need).toBe("Pull request #1: 1 check failed");
     expect(checkItems([])).toEqual([]);
+  });
+});
+
+describe("a request in full, for the Desk", () => {
+  it("shows an edit as the lines it takes out and puts in, a write as what it writes, and anything else whole", () => {
+    expect(requestText("Edit", { file_path: "/p/a.ts", old_string: "retry()\nwait(1)", new_string: "retry()\nwait(8)" })).toBe("/p/a.ts\n\n- retry()\n- wait(1)\n+ retry()\n+ wait(8)");
+    expect(requestText("MultiEdit", { file_path: "/p/a.ts", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] })).toBe("/p/a.ts\n\n- a\n+ b\n\n- c\n+ d");
+    expect(requestText("Write", { file_path: "/p/new.ts", content: "export {}" })).toBe("/p/new.ts\n\nexport {}");
+    expect(requestText("mcp__x__deploy", { env: "prod", force: true })).toBe('{\n  "env": "prod",\n  "force": true\n}');
   });
 });
