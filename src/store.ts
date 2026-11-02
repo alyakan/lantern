@@ -869,8 +869,11 @@ export function reducer(state: State, action: Action): State {
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
       // Its name stays until the history has the chat's own first prompt: a chat with no title of its own (another provider's)
       // is called what it was called, not "New chat" because the history has no prompt (or begins after it, on a later page).
+      // An open chat that starts again on the same session was called by its first message: that is its name, too.
+      const was = state.sessionId === action.sessionId ? state.items.find((it) => it.type === "user" && !it.auto) : undefined;
+      const name = state.asleepTitle ?? (was?.type === "user" ? was.text.split("\n")[0] || null : null);
       const first = !action.earlier && items.some((it) => it.type === "user" && !it.auto);
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : state.asleepTitle };
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : name };
     }
     case "earlier_loaded": {
       // A page for a chat that has moved on (another session, or loaded further since) is let go.

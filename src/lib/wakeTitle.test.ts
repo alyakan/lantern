@@ -40,6 +40,11 @@ describe("a chat that wakes with history that has no prompt of its own", () => {
     expect(woken.asleepTitle).toBeNull();
   });
 
+  it("keeps the name an open chat had when it starts again on a history that begins after its first prompt", () => {
+    const again = reducer(resting, { type: "history_loaded", sessionId: "sess-1", events: [{ kind: "user_text", text: "and then the logout" }] as never, earlier: 4 });
+    expect(chatTitle(again, {})).toBe("fix the login redirect");
+  });
+
   it("is called what it was saved as while it loads, when brought back at launch", () => {
     const opened = reducer({ ...initialState, status: "starting" }, { type: "folder_opened", folder: "/p", title: "Saved name" });
     expect(chatTitle(opened, {})).toBe("Saved name");
