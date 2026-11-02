@@ -275,7 +275,8 @@ describe("provider-neutral settings", () => {
 it("shows the chat provider's reported windows without assuming a five-hour session", async () => {
   await open({ chatOver: { provider: "Codex" }, providerUsage: { provider: "codex", updated_at: 1, windows: [{ label: "2 hours", minutes: 120, used: .2, resets_at: null }] } });
   await openSheet("Usage & context");
-  expect(screen.getByText("Codex · 2 hours: 20% used")).toBeTruthy();
+  expect(screen.getByText("Codex · 2 hours")).toBeTruthy();
+  expect(screen.getByLabelText(/^Codex · 2 hours: 20 percent used/)).toBeTruthy();
   expect(screen.queryByText(/five-hour/)).toBeNull();
 });
 

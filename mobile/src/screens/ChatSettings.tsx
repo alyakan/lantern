@@ -10,7 +10,7 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { PlanUsage } from "../sync/reducer";
 import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
-import { ContextRow, UsageRow, WeekRow } from "./ChatExtras";
+import { ContextRow, UsageRow, WeekRow, WindowRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -146,9 +146,10 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
                 {hasUsage && <SettingsLink title="Usage & context" value={context ? contextOf(context).label : "View usage"} expanded={expanded === "usage"} onPress={() => toggle("usage")} />}
                 {expanded === "usage" && <>
                   {context && <ContextRow context={context} />}
-                  {activeUsage.length ? activeUsage.map(w => <Txt key={w.label} variant="body">{chat.provider ?? "Claude"} · {w.label}: {Math.round(w.used * 100)}% used{w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}</Txt>) : !plan && <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
-                  {plan && <UsageRow plan={plan} />}
-                  {plan?.week && <WeekRow week={plan.week} />}
+                  {activeUsage.length ? activeUsage.map(w => <WindowRow key={w.label} window={w} provider={chat.provider ?? undefined} />) : plan ? <>
+                    <UsageRow plan={plan} />
+                    {plan.week && <WeekRow week={plan.week} />}
+                  </> : <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
                 </>}
                 {onAskClose && (
                   <PressScale accessibilityRole="button" accessibilityLabel="Close this chat" onPress={() => {
