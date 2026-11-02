@@ -378,13 +378,14 @@ export function ProviderStrip({ name, windows, onPress }: { name: string; window
   const fill = w?.tone === "stop" ? colors.stop : w?.tone === "warn" ? colors.hi : colors.go;
   const said = w === null ? "Usage unavailable" : w.tone === "stop" ? `${w.title} limit reached` : `${w.title} · ${w.percent}% used`;
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={`${name} usage, ${w === null ? "usage unavailable" : `${w.percent} percent used`}${w?.short ? `. ${w.short}` : ""}`} onPress={onPress} haptic="select" scaleTo={0.98} style={{ flexGrow: 1, flexBasis: 140, gap: 5 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${name} usage, ${w === null ? "usage unavailable" : `${w.percent} percent used`}${w?.short ? `. ${w.short}` : ""}`} onPress={onPress} haptic="select" scaleTo={0.98} style={{ gap: 5 }}>
+      {/* The words give way (cut with "…") before the reset does: side by side they ran over each other. */}
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-        <Txt variant="tiny" tone={w?.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }} numberOfLines={1}>
+        <Txt variant="tiny" tone={w?.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
           {name} · {said}
         </Txt>
         {!!w?.short && (
-          <Txt variant="tiny" tone="ink3" numberOfLines={1}>
+          <Txt variant="tiny" tone="ink3" style={{ flexShrink: 0 }} numberOfLines={1}>
             {w.short}
           </Txt>
         )}
