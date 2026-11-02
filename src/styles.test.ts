@@ -65,6 +65,10 @@ describe("text you can select and copy", () => {
       expect(selectable).toContain(cls);
     }
   });
+
+  it("includes what the agent said between its steps, folded with the work or in the messages line", () => {
+    expect(selectable).toContain(".step-note");
+  });
 });
 
 describe("colours", () => {

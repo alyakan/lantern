@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem, ToolItem } from "../store";
-import { describeStep, editsIn, failedCount, groupItems, runningStep, sameRow, stepLabel, summarize, type Row } from "./activity";
+import { describeStep, editsIn, failedCount, groupItems, important, runningStep, sameRow, stepLabel, summarize, type Row } from "./activity";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
   type: "tool", id, name, summary: "/p/src/a.ts", status: "done", output: null, edit: null, children: [], ...extra,
@@ -163,6 +163,37 @@ describe("groupItems", () => {
     expect(rows.map((r) => r.id)).toEqual(["u1", "a:t1", "ap-1", "end"]);
     expect(summarize((rows[1] as { steps: ToolItem[] }).steps)).toBe("Read 1 file, made 1 edit, asked for your approval");
     expect(describeStep(tool("t2", "mcp__lantern__request_approval", { summary: "Merge PR #144" }), "/p")).toBe("Waiting for your approval Merge PR #144");
+  });
+
+  it("keeps a message for the user said between steps in the conversation, with the work before and after it in blocks of their own", () => {
+    const status = `Here's where things stand. ${"The build passed, the draft is up and the tag is pushed. ".repeat(5)}`;
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "release it" },
+      tool("t1", "Bash"),
+      say("m1", "Checking the draft."),
+      tool("t2", "Bash"),
+      say("m2", status),
+      tool("t3", "Bash"),
+      say("m3", "Logged it."),
+      done,
+    ];
+    const rows = groupItems(items);
+    expect(rows.map((r) => r.id)).toEqual(["u1", "a:t1", "m2", "a:t3", "m3", "end"]);
+    // The short note still folds with the work it was about.
+    expect((rows[1] as { entries: ChatItem[] }).entries.map((e) => e.id)).toEqual(["t1", "m1", "t2"]);
+  });
+
+  it("keeps a short message that has a list or a heading, and folds a short note", () => {
+    const rows = groupItems([{ type: "user", id: "u1", text: "go" }, tool("t1", "Read"), say("m1", "Two things:\n- the tag\n- the draft"), tool("t2", "Read"), say("m2", "Now the tests."), tool("t3", "Bash"), say("m3", "Done."), done]);
+    expect(rows.map((r) => r.id)).toEqual(["u1", "a:t1", "m1", "a:t2", "m3", "end"]);
+    expect(important("## Result\nok")).toBe(true);
+    expect(important("Let me look at the release workflow.")).toBe(false);
+  });
+
+  it("makes only the last block of a running turn live when a kept message splits it", () => {
+    const items: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, tool("t1", "Read"), say("m1", "Found it:\n1. the cause\n2. the fix"), tool("t2", "Read"), say("m2", "Now the tests."), tool("t3", "Bash", { status: "running" })];
+    const blocks = groupItems(items, true).filter((r) => r.type === "activity");
+    expect(blocks.map((b) => [b.id, b.live])).toEqual([["a:t1", false], ["a:t2", true]]);
   });
 
   it("leaves a turn without tools alone", () => {
