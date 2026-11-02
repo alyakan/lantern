@@ -46,6 +46,7 @@ pub mod titles;
 pub mod desk;
 pub mod desk_agent;
 pub mod status;
+pub mod linear;
 pub mod trash;
 pub mod revert;
 pub mod checkpoint;
@@ -3121,6 +3122,29 @@ async fn desk_status(app: AppHandle, state: State<'_, AppState>, fresh: Option<b
     tauri::async_runtime::spawn_blocking(move || status::status(&folders, workers.as_deref(), path_env.as_deref())).await.map_err(|e| e.to_string())
 }
 
+/// The Keychain item for the Linear key: a dev run's own (LANTERN_REMOTE_FILE set), so trying things out never touches the real one.
+fn linear_service() -> &'static str {
+    if std::env::var_os("LANTERN_REMOTE_FILE").is_some() { linear::DEV_SERVICE } else { linear::SERVICE }
+}
+
+/// Checks a Linear API key and keeps it in the Keychain (see `linear.rs`); the key never comes back to the window.
+#[tauri::command]
+async fn linear_connect(key: String) -> Result<linear::LinearWork, String> {
+    linear::connect(linear_service(), &key).await
+}
+
+/// Forgets the Linear key.
+#[tauri::command]
+async fn linear_disconnect() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| linear::disconnect(linear_service())).await.map_err(|e| e.to_string())?
+}
+
+/// Your issues in Linear, for the Desk (read-only). `fresh`: the Desk's Refresh.
+#[tauri::command]
+async fn linear_work(fresh: Option<bool>) -> Result<linear::LinearWork, String> {
+    Ok(linear::work(linear_service(), fresh == Some(true)).await)
+}
+
 /// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call
 /// that failed for a reason that may pass; the window keeps what it knew.
 #[tauri::command]
@@ -4057,6 +4081,9 @@ pub fn run() {
             list_open_prs,
             pr_watch,
             desk_status,
+            linear_connect,
+            linear_disconnect,
+            linear_work,
             pr_failure_log,
             gh_access,
             set_subagents,
