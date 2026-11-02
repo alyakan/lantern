@@ -286,6 +286,21 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
   });
 
+  it("show a file a link names that the chat never changed in the pane too, even in a chat that changed nothing", async () => {
+    mockPinned = false;
+    const said = { kind: "assistant_text" as const, block_id: "x1", text: "It is in `src/app/Flow.swift:12`." };
+    const done = { kind: "turn_done" as const, is_error: false, result: "ok", duration_ms: 9000, context_window: null };
+    await open({ chats: two, events: { a: [edited[0], said, done] } });
+    await press(/Release 0.1.53/);
+    await settle();
+    expect(paneUp()).toBeNull();
+    await fireEvent.press(screen.getByRole("link", { name: "src/app/Flow.swift:12" }));
+    await settle();
+    expect(paneUp()).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Flow.swift, from a link" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+  });
+
   it("show the chat's to-dos in the pane from the chat bar's To-dos, even in a chat that changed nothing", async () => {
     mockPinned = false;
     const { controller } = makeController();

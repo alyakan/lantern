@@ -81,4 +81,14 @@ describe("the file's change", () => {
     await renderWith(<DiffView path="/p/a.ts" text="" />);
     expect(screen.getByText("Nothing to show.")).toBeTruthy();
   });
+
+  it("says a file with no change in it is shown as it is", async () => {
+    await renderWith(<DiffView path="/p/a.ts" text={"--- a\n+++ a\n@@ -1,2 +1,2 @@\n one\n two\n"} />);
+    expect(screen.getByText("No changes in this file here: it is shown as it is.")).toBeTruthy();
+  });
+
+  it("says nothing of the kind for a change", async () => {
+    await renderWith(<DiffView path="/p/a.ts" text={"--- a\n+++ a\n@@ -1 +1 @@\n+a\n"} />);
+    expect(screen.queryByText(/No changes in this file/)).toBeNull();
+  });
 });

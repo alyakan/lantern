@@ -13,7 +13,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK, PHONE_SINGLE];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE];
+
+/// The Changes pane's three views (Request::Changes, and Diff's `scope`): the feature that says a Mac answers them.
+pub const CHANGE_SCOPES: &str = "changescopes";
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -527,6 +530,37 @@ pub struct RemoteArtifact {
     pub size: u64,
 }
 
+/// Which changes the phone's Changes pane shows, as the Mac's Changes tab names them: "This chat", "Uncommitted", "This branch".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteChangeScope {
+    Chat,
+    Uncommitted,
+    Branch,
+}
+
+/// One changed file in a Changes view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteChangedFile {
+    /// Absolute, on the Mac.
+    pub path: String,
+    pub created: bool,
+    pub deleted: bool,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// The answer to Request::Changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteChanges {
+    pub files: Vec<RemoteChangedFile>,
+    /// With the branch: what it is compared with ("main", "origin/main").
+    pub base: Option<String>,
+}
+
 /// One item of the Mac's storage a phone may clear, as it is shown: no path, only what the user needs to decide. The phone sends
 /// the ids back to clear them, and the Mac clears only those it still finds safe (see storage/phone.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -883,8 +917,19 @@ pub enum Request {
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
-    /// One file's diff from the chat's start, as unified-diff text.
-    Diff { slot: String, path: String },
+    /// One file's diff, as unified-diff text: from the chat's start, or (`scope`, only to a Mac whose Welcome lists
+    /// "changescopes") against the last commit or where the branch left the default one. Without a scope: the chat's.
+    Diff {
+        slot: String,
+        path: String,
+        #[serde(default)]
+        #[ts(optional)]
+        scope: Option<RemoteChangeScope>,
+    },
+    /// The files changed in one of the Changes pane's views, as RemoteChanges: what the chat changed (its edits and what
+    /// changed beside them, as the Mac's Changes tab lists it), everything uncommitted, or the branch's commits. Only sent to a
+    /// Mac whose Welcome lists "changescopes".
+    Changes { slot: String, scope: RemoteChangeScope },
     /// A reviewed file's diff, as unified-diff text: in the pull request or branch the chat is reviewing (its last review_target
     /// call), or, when it isn't reviewing anything, the chat's own change to it (as Diff). `path` is as the review's page names
     /// it, relative to the repository or absolute in it. Only sent to a Mac whose Welcome lists "reviewdiff".

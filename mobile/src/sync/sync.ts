@@ -22,6 +22,8 @@ import type { RemoteTodoEdit } from "../protocol/generated/RemoteTodoEdit";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
+import type { RemoteChanges } from "../protocol/generated/RemoteChanges";
+import type { RemoteChangeScope } from "../protocol/generated/RemoteChangeScope";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { artifactList, type Artifact } from "../view/artifacts";
 import { newShellId } from "../view/shell";
@@ -398,8 +400,17 @@ export class Sync {
     return this.ask({ op: "set_preset", slot, preset });
   }
 
-  diff(slot: string, path: string) {
-    return this.ask<string>({ op: "diff", slot, path });
+  /** A file's diff: the chat's change to it, or (`scope`, only for a Mac that lists "changescopes") what is uncommitted or the branch's change. */
+  diff(slot: string, path: string, scope?: RemoteChangeScope) {
+    return this.ask<string>(scope && scope !== "chat" ? { op: "diff", slot, path, scope } : { op: "diff", slot, path });
+  }
+
+  /** The files changed in one of the Changes pane's views. Only for a Mac that lists "changescopes". */
+  async changes(slot: string, scope: RemoteChangeScope): Promise<RemoteChanges> {
+    const c = await this.ask<RemoteChanges | null>({ op: "changes", slot, scope });
+    if (!c || !Array.isArray(c.files)) throw new Error("The changes didn't come through.");
+    const files = c.files.filter((f) => f && typeof f.path === "string" && f.path.length > 0).map((f) => ({ path: f.path, created: f.created === true, deleted: f.deleted === true, added: Number(f.added) || 0, removed: Number(f.removed) || 0 }));
+    return { files, base: typeof c.base === "string" ? c.base : null };
   }
 
   /** A reviewed file's diff in what the chat reviews (or its own change, when it reviews nothing). Only for a Mac that lists "reviewdiff". */
