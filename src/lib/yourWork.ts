@@ -8,10 +8,12 @@
  * says (a title, someone else's branch) is shown on the Desk, never handed to Claude.
  */
 import type { InboxRow } from "./deskBoard";
-import type { RepoStatus } from "../types";
+import { ISSUE_ID, safeIssueId, safeIssueUrl } from "./linear";
+import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 
-export type Stage = "local" | "pr" | "checks" | "review" | "merge" | "release";
+export type Stage = "issue" | "local" | "pr" | "checks" | "review" | "merge" | "release";
 export const STAGES: { stage: Stage; label: string }[] = [
+  { stage: "issue", label: "Issue" },
   { stage: "local", label: "Local" },
   { stage: "pr", label: "PR" },
   { stage: "checks", label: "Checks" },
@@ -21,11 +23,11 @@ export const STAGES: { stage: Stage; label: string }[] = [
 ];
 
 /** bad: blocked (checks failing, conflicts, changes asked); wait: on its way (checks running, a review pending); you: your call;
- * local: on the Mac only; done: merged and released. */
-export type Tone = "bad" | "wait" | "you" | "local" | "done";
-export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", wait: "waiting", local: "local only", done: "done" };
+ * local: on the Mac only; todo: an issue in Linear not started (no branch or pull request); done: merged and released. */
+export type Tone = "bad" | "wait" | "you" | "local" | "todo" | "done";
+export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", wait: "waiting", local: "local only", todo: "not started", done: "done" };
 
-export type StepKind = "push" | "conflicts" | "checks" | "changes" | "update" | "merge" | "review" | "release" | "publish";
+export type StepKind = "push" | "conflicts" | "checks" | "changes" | "update" | "merge" | "review" | "release" | "publish" | "start";
 
 export interface Step {
   kind: StepKind;
@@ -65,6 +67,8 @@ export interface WorkItem {
   sig: string;
   /** Only a next step, not listed under where things stand (a release: its pull requests are listed each). */
   stepOnly?: boolean;
+  /** The Linear issue it is the work of, and the project (feature) that is in. */
+  issue?: { identifier: string; url: string; project: string | null };
 }
 
 /** A branch or tag that is only letters, digits and `._/-`, and never reads as an option: safe to name in a message. */
@@ -231,21 +235,21 @@ function ago(now: number, at: number | null): string {
   return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
-const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, wait: 3, done: 4 };
+const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, todo: 3, wait: 4, done: 5 };
 
 /** The repositories GitHub answered for without saying who you are: their pull requests can't be told apart, so none are shown. */
 export function unknownViewer(repos: RepoStatus[] | null): string[] {
   return (repos ?? []).filter((r) => r.gh === "ready" && !r.viewer).map(short);
 }
 
-/** What to do next, yours to decide first, then what is blocked, then branches to push. */
+/** What to do next, yours to decide first, then what is blocked, then branches to push, then issues to start. */
 export function nextSteps(items: WorkItem[]): WorkItem[] {
   return items.filter((i) => i.next).sort((a, b) => ORDER[a.tone] - ORDER[b.tone]);
 }
 
 /** Every item, blocked first, then yours, on its way, local and done: what's done and branches with nothing to do come last. */
 export function whereThingsStand(items: WorkItem[]): WorkItem[] {
-  const rank = (i: WorkItem) => ({ bad: 0, you: 1, wait: 2, local: 3, done: 4 })[i.tone] + (i.tone === "local" && !i.next ? 1 : 0);
+  const rank = (i: WorkItem) => ({ bad: 0, you: 1, wait: 2, local: 3, todo: 5, done: 6 })[i.tone] + (i.tone === "local" && !i.next ? 1 : 0);
   return items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0));
 }
 
@@ -282,4 +286,81 @@ export function stepMessage(item: WorkItem, target: Target): string {
   if (!step.onBranch || target.kind === "chat") return step.text;
   const branch = safeRef(item.branch) ? ` (${item.branch})` : "";
   return `${step.text}\n\nWork on its branch${branch} in a git worktree of your own, and leave the branch and files of this checkout as they are.`;
+}
+
+/** An issue not started is a next step when it is urgent or high, or due within this long (or overdue). */
+const SOON_MS = 3 * 86_400_000;
+
+/** Whether `issue` is the issue of `item`: a pull request Linear has linked, the branch Linear suggests, or its identifier in the
+ * branch or the title. */
+function isIssueOf(issue: LinearIssue, item: WorkItem): boolean {
+  if (item.number !== null && item.github && issue.links.includes(`https://github.com/${item.github}/pull/${item.number}`)) return true;
+  if (item.branch && issue.branch && item.branch.toLowerCase() === issue.branch.toLowerCase()) return true;
+  const named = (t: string | null) => !!t && [...t.matchAll(ISSUE_ID)].some((m) => `${m[1]}-${m[2]}`.toUpperCase() === issue.identifier);
+  // A pull request's title can name it; a release or a draft (no number, no branch) is no one issue's work.
+  return named(item.branch) || (item.number !== null && named(item.title));
+}
+
+const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
+
+/**
+ * Your work with Linear's: each item marked with the issue it is the work of, and an item for each of your issues that nothing
+ * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
+ * team no Desk project is in is listed without a step. The step names the issue by its identifier and link only.
+ */
+export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number): WorkItem[] {
+  if (!work?.connected || !work.issues.length) return items;
+  const started = new Set<string>();
+  const out = items.map((item) => {
+    const issue = work.issues.find((i) => isIssueOf(i, item));
+    if (!issue) return item;
+    started.add(issue.identifier);
+    const tag = issue.project ? `${issue.identifier} · ${issue.project}` : issue.identifier;
+    return { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project }, meta: `${tag} · ${item.meta}` };
+  });
+  const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
+  for (const issue of work.issues) {
+    if (started.has(issue.identifier)) continue;
+    const r = repoOfTeam(issue.team);
+    const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
+    const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
+    const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
+    const branch = safeRef(issue.branch) ? ` Name its branch ${issue.branch}, as Linear suggests.` : "";
+    const facts = [issue.project, PRIORITY[issue.priority], issue.due && `due ${issue.due}`, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · ");
+    out.push({
+      key: `linear:${issue.identifier}`,
+      repo: r?.repo ?? "",
+      name: r ? short(r) : issue.team,
+      github: r?.github ?? null,
+      number: null,
+      branch: null,
+      title: `${issue.identifier} ${issue.title}`,
+      stage: "issue",
+      tone: "todo",
+      word: issue.state || "Not started",
+      meta: facts,
+      at: Number.isFinite(due) ? due : null,
+      next:
+        ok && soon
+          ? { kind: "start", what: "Start", yours: false, button: "Do it", onBranch: false, text: `Start on the Linear issue ${issue.identifier} (${issue.url}). Read it with your Linear tools if you have them, or ask me what it says. Plan the work and show me the plan before you change any code.${branch} Work on that branch in a git worktree of your own, and leave this checkout as it is.` }
+          : null,
+      sig: `issue:${issue.state_type}`,
+      issue: { identifier: issue.identifier, url: issue.url, project: issue.project },
+    });
+  }
+  return out;
+}
+
+/** How your Linear issues stand in each project (feature) a repository's work is in: how many are being worked on, and how many
+ * not started. */
+export function projectsOf(items: WorkItem[], repo: string): { project: string; doing: number; todo: number }[] {
+  const by = new Map<string, { doing: Set<string>; todo: number }>();
+  for (const i of items) {
+    if (i.repo !== repo || !i.issue?.project) continue;
+    const p = by.get(i.issue.project) ?? { doing: new Set<string>(), todo: 0 };
+    if (i.tone === "todo") p.todo++;
+    else p.doing.add(i.issue.identifier);
+    by.set(i.issue.project, p);
+  }
+  return [...by.entries()].map(([project, p]) => ({ project, doing: p.doing.size, todo: p.todo }));
 }

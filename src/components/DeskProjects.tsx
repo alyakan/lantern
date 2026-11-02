@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
-import { toneCounts, yourWork, type WorkItem } from "../lib/yourWork";
+import { projectsOf, toneCounts, type WorkItem } from "../lib/yourWork";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
 import { useMenuInside } from "../lib/useMenuInside";
@@ -15,6 +15,8 @@ export interface DeskProjectsProps {
   chats: InboxRow[];
   /** How the projects' repositories stand; null until the Mac has said. */
   repos: RepoStatus[] | null;
+  /** Your work in them (see YourWork). */
+  items: WorkItem[];
   now: number;
   onOpen: (slot: string) => void;
   /** Opens a project's own page. */
@@ -142,9 +144,8 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
  * you among them), its branch, your work in it and its release (from git and gh), its to-dos, and when something last happened, one
  * under the other. A tile's Chats button drops its chats down over the Desk, each with its last message; its name opens its own page.
  */
-export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
+export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }: DeskProjectsProps) {
   if (!rows.length) return null;
-  const items = yourWork(repos, now);
   return (
     <section className="desk-projects" aria-label="Projects">
         {rows.map((r) => {
@@ -165,6 +166,22 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
                 <dd>{chatsLine(r)}</dd>
                 <dt>Your work</dt>
                 <Work s={s} repo={repo} items={items} />
+                {repo !== null && projectsOf(items, repo).length > 0 && (
+                  <>
+                    <dt>Linear</dt>
+                    <dd className="yw-projects">
+                      {projectsOf(items, repo).map((p) => (
+                        <span key={p.project} className="yw-project">
+                          {p.project}
+                          <span className="muted">
+                            {p.doing > 0 && ` · ${p.doing} doing`}
+                            {p.todo > 0 && ` · ${p.todo} to start`}
+                          </span>
+                        </span>
+                      ))}
+                    </dd>
+                  </>
+                )}
                 <dt>Release</dt>
                 <Release s={s} now={now} />
                 <dt>To-dos</dt>

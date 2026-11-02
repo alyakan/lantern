@@ -7,7 +7,8 @@ import type { NewRule, RepoStatus } from "../types";
 import { DeskProject } from "./DeskProject";
 import { DeskProjects } from "./DeskProjects";
 import { YourWork } from "./YourWork";
-import type { Target, WorkItem } from "../lib/yourWork";
+import { withLinear, yourWork, type Target, type WorkItem } from "../lib/yourWork";
+import type { LinearWork } from "../types";
 import { AllowButton } from "./Inbox";
 import { PermissionCard } from "./PermissionCard";
 
@@ -39,8 +40,10 @@ export interface DeskViewProps {
   onDecide: (item: InboxItem, allow: boolean) => void;
   /** Sends one of Your work's next steps: to its chat, or to a new chat in its project. */
   onStep: (item: WorkItem, target: Target) => boolean;
-  /** Asks git and GitHub again now (Your work's Refresh). */
+  /** Asks git, GitHub and Linear again now (Your work's Refresh). */
   onRefreshRepos: () => void;
+  /** What Linear says of your issues, and the Linear team each repository's work is in (by its main checkout). */
+  linear?: { work: LinearWork | null; teamOf: Record<string, string> };
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
   onAnswer?: (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 }
@@ -235,6 +238,8 @@ export function DeskView(props: DeskViewProps) {
   const waiting = needs.filter((n) => n.needsYou);
   // A project's page, while that project is still on the Desk.
   const pageRow = props.page === null ? undefined : props.projects.find((p) => p.folder === props.page);
+  const work = withLinear(yourWork(props.repos, now), props.linear?.work ?? null, props.linear?.teamOf ?? {}, props.repos, now);
+  const issues = !!props.linear?.work?.connected;
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
@@ -257,8 +262,8 @@ export function DeskView(props: DeskViewProps) {
         ) : (
           <div className="desk-bento">
             {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <Summary projects={props.projects} />}
-            <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} onPage={props.onPage} />
-            <YourWork repos={props.repos} chats={props.chats} now={now} onStep={props.onStep} onRefresh={props.onRefreshRepos} />
+            <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} items={work} now={now} onOpen={onOpen} onPage={props.onPage} />
+            <YourWork repos={props.repos} items={work} issues={issues} chats={props.chats} onStep={props.onStep} onRefresh={props.onRefreshRepos} />
           </div>
         )}
       </div>

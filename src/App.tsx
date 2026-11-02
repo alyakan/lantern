@@ -99,6 +99,7 @@ import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
 import { stepMessage } from "./lib/yourWork";
+import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2589,6 +2590,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
   const { repos: allRepos, refresh: refreshRepos } = useDeskStatus(deskShown, deskFolders);
+  // Linear's side of Your work, and the team each project's work is in (Settings → Linear).
+  const linear = useLinearWork(deskShown);
+  const [linearTeams, setLinearTeams] = useState<TeamChoice>(loadTeams);
   const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
   const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
@@ -3074,7 +3078,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     else return false;
                     return true;
                   }}
-                  onRefreshRepos={refreshRepos}
+                  onRefreshRepos={() => {
+                    refreshRepos();
+                    linear.refresh();
+                  }}
+                  linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
               </ErrorBoundary>
             ) : showCanvas ? (
@@ -3234,6 +3242,16 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           prChecks={{ folders: prFolders, saved: prSettings, onChange: (folder, setting) => setPrSettings({ ...prSettings, [folder]: setting }) }}
+          linear={{
+            folders: prFolders,
+            teams: linearTeams,
+            onTeams: (t) => {
+              setLinearTeams(t);
+              saveTeams(t);
+            },
+            work: linear.work,
+            onWork: linear.set,
+          }}
           hooks={{
             folders: prFolders,
             table: chatHooks,

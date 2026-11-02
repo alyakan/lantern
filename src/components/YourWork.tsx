@@ -1,18 +1,21 @@
 import { useState } from "react";
 import type { InboxRow } from "../lib/deskBoard";
-import { nextSteps, STAGES, targetFor, TONE_WORD, unknownViewer, whereThingsStand, yourWork, type Target, type WorkItem } from "../lib/yourWork";
+import { nextSteps, STAGES, targetFor, TONE_WORD, unknownViewer, whereThingsStand, type Target, type WorkItem } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
 import { Card, Row } from "./DeskCard";
 import { ExternalLink } from "./ExternalLink";
 
 export interface YourWorkProps {
   repos: RepoStatus[] | null;
+  /** Every piece of your work (yourWork, with Linear's issues when it is connected). */
+  items: WorkItem[];
+  /** Linear is connected: paths start at the issue. */
+  issues: boolean;
   /** Every chat on the Desk: a step goes to the one on its branch. */
   chats: InboxRow[];
-  now: number;
   /** Sends a step: to a chat, or to a new chat in a folder; false when it couldn't (no agent CLI ready). */
   onStep: (item: WorkItem, target: Target) => boolean;
-  /** Asks git and GitHub again now. */
+  /** Asks git, GitHub and Linear again now. */
   onRefresh: () => void;
 }
 
@@ -23,14 +26,17 @@ const SHOWN = 8;
  * leaving the Desk and coming back doesn't offer the same step again). */
 const sent = new Map<string, { sig: string; to: string }>();
 
-/** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. */
-function Nodes({ item }: { item: WorkItem }) {
-  const at = STAGES.findIndex((s) => s.stage === item.stage);
+/** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. With Linear, the path starts
+ * at the issue; work with no issue in Linear has that node dashed. */
+function Nodes({ item, issues }: { item: WorkItem; issues: boolean }) {
+  const stages = issues ? STAGES : STAGES.filter((s) => s.stage !== "issue");
+  const at = stages.findIndex((s) => s.stage === item.stage);
   const done = item.tone === "done";
+  const mark = (stage: string, i: number) => (stage === "issue" && i < at && !item.issue ? " yw-skip" : i < at || (done && i === at) ? " yw-past" : i === at ? " yw-now" : "");
   return (
-    <ol className="yw-nodes" aria-label={`At ${STAGES[at].label}, ${TONE_WORD[item.tone]}`}>
-      {STAGES.map((s, i) => (
-        <li key={s.stage} className={`yw-node${i < at || (done && i === at) ? " yw-past" : i === at ? " yw-now" : ""}`} aria-current={i === at ? "step" : undefined}>
+    <ol className="yw-nodes" aria-label={`At ${stages[at].label}, ${TONE_WORD[item.tone]}`}>
+      {stages.map((s, i) => (
+        <li key={s.stage} className={`yw-node${mark(s.stage, i)}`} aria-current={i === at ? "step" : undefined} title={s.stage === "issue" && i < at && !item.issue ? "No Linear issue" : undefined}>
           <i aria-hidden />
           {s.label}
         </li>
@@ -51,8 +57,14 @@ function Num({ item }: { item: WorkItem }) {
   );
 }
 
-/** Its number (a link to GitHub) and its title, or only its title. */
+/** Its number (a link to GitHub) and its title, or only its title; an issue not started links to Linear. */
 function Named({ item }: { item: WorkItem }) {
+  if (item.tone === "todo" && item.issue)
+    return (
+      <ExternalLink className="desk-pr-link" href={item.issue.url}>
+        {item.title}
+      </ExternalLink>
+    );
   return item.number === null ? (
     <>{item.title}</>
   ) : (
@@ -92,10 +104,9 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
  * push), and under it where each piece stands, from a branch never pushed to a release, as a row of nodes. Every state is what git
  * and gh said (status.rs); a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: YourWorkProps) {
   const [all, setAll] = useState(false);
   if (!repos || repos.length === 0) return null;
-  const items = yourWork(repos, now);
   const next = nextSteps(items);
   const stand = whereThingsStand(items);
   const shown = all ? stand : stand.slice(0, SHOWN);
@@ -119,7 +130,7 @@ export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps
         </p>
       )}
       {items.length === 0 ? (
-        <p className="dp-note">Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed.</p>
+        <p className="dp-note">Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed{issues ? ", no issues to start" : ""}.</p>
       ) : (
         <>
           {next.length > 0 && (
@@ -160,7 +171,7 @@ export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps
                     aside={<span className="yw-word">{i.word}</span>}
                     meta={i.meta}
                   />
-                  <Nodes item={i} />
+                  <Nodes item={i} issues={issues} />
                 </li>
               ))}
             </ul>
@@ -178,7 +189,7 @@ export function YourWork({ repos, chats, now, onStep, onRefresh }: YourWorkProps
 
 /** A project's work in a line on its tile: a coloured dot and a count for each state, blocked first. */
 export function WorkDots({ counts }: { counts: Partial<Record<WorkItem["tone"], number>> }) {
-  const order: WorkItem["tone"][] = ["bad", "you", "wait", "local"];
+  const order: WorkItem["tone"][] = ["bad", "you", "wait", "local", "todo"];
   const shown = order.filter((t) => counts[t]);
   if (!shown.length) return <span className="muted">nothing open</span>;
   return (

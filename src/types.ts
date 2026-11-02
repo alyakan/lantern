@@ -793,6 +793,33 @@ export interface OpenPr {
   draft: boolean;
 }
 
+/** One of your issues in Linear that isn't done (linear.rs). `state_type`: triage, backlog, unstarted or started; `priority`:
+ * 0 none, 1 urgent, 2 high, 3 medium, 4 low; `branch`: the name Linear suggests; `links`: what is attached (linked PRs). */
+export interface LinearIssue {
+  identifier: string;
+  title: string;
+  url: string;
+  priority: number;
+  due: string | null;
+  state: string;
+  state_type: string;
+  team: string;
+  project: string | null;
+  project_id: string | null;
+  branch: string | null;
+  links: string[];
+}
+
+/** What Linear says of your work (read-only); `connected`: a key is kept; `error`: why it couldn't be asked this time. */
+export interface LinearWork {
+  connected: boolean;
+  viewer: string | null;
+  org: string | null;
+  teams: { key: string; name: string }[];
+  issues: LinearIssue[];
+  error: string | null;
+}
+
 /** How a repository with a chat open stands, for the Desk's board (status.rs). */
 export interface RepoStatus {
   /** Its main checkout. */

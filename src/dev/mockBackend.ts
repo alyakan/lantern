@@ -137,6 +137,30 @@ const MODELS = [
  */
 /** How many times the mock's pull request has been looked at (?prchecks=1 moves on one step each time). */
 let prLooks = 0;
+// Linear, for the Desk's Your work: connected unless ?nolinear. Your issues in two teams, matched to the mock's pull requests
+// by a linked PR, by an identifier in a branch, and by the branch Linear suggests; three not started yet.
+let mockLinear = typeof location === "undefined" || !new URLSearchParams(location.search).has("nolinear");
+function mockLinearWork() {
+  const day = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const issue = (identifier: string, title: string, over: Record<string, unknown> = {}) => ({
+    identifier, title, url: `https://linear.app/acme/issue/${identifier}`, priority: 3, due: null, state: "Todo", state_type: "unstarted",
+    team: identifier.split("-")[0], project: null, project_id: null, branch: null, links: [] as string[], ...over,
+  });
+  return {
+    connected: true, viewer: "Ada", org: "Acme", error: null,
+    teams: [{ key: "ACME", name: "API" }, { key: "WEB", name: "Web" }],
+    issues: [
+      issue("ACME-11", "Retries for flaky upstreams", { state: "In Progress", state_type: "started", project: "Reliability", project_id: "p-rel", links: ["https://github.com/you/acme-api/pull/128"] }),
+      issue("ACME-12", "Settings load too often", { state: "In Review", state_type: "started", project: "Reliability", project_id: "p-rel" }),
+      issue("ACME-15", "Queue writes while offline", { state: "In Progress", state_type: "started", project: "Offline mode", project_id: "p-off", branch: "ada/acme-15-offline-queue" }),
+      issue("ACME-20", "Rate-limit the export endpoint", { priority: 2, due: day(1), project: "Reliability", project_id: "p-rel", branch: "ada/acme-20-rate-limit-export" }),
+      issue("ACME-21", "Audit log page", { state: "Backlog", state_type: "backlog", project: "Offline mode", project_id: "p-off" }),
+      issue("WEB-3", "Weekly digest email", { state: "In Progress", state_type: "started", project: "Dashboard polish", project_id: "p-dash" }),
+      issue("WEB-7", "Empty states for every chart", { priority: 1, project: "Dashboard polish", project_id: "p-dash" }),
+    ],
+  };
+}
+
 const showUsage = () => new URLSearchParams(location.search).has("usage");
 /** ?plan=95 (with ?usage): the plan reading the turns report, in percent, to try the pause at the plan's limit. */
 const planUsed = () => {
@@ -2145,12 +2169,12 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
               i === 0
                 ? [
                     pr(128, "Retry fetchJson with backoff", "feat/retry-fetch", { checks: "fail" }),
-                    pr(129, "Cache the user's settings for a minute", "feat/settings-cache"),
+                    pr(129, "Cache the user's settings for a minute", "ada/acme-12-settings-cache"),
                     pr(130, "Show usage bars on the account page", "feat/usage-bars", { checks: "pending", mergeable: "UNKNOWN", merge_state: "UNKNOWN" }),
                     pr(127, "Fix the crash saving a form with an empty title", "fix/empty-title", { author: "grace", checks: "pending", review: null, review_requests: ["ada"] }),
                   ]
                 : i === 1
-                  ? [pr(61, "Weekly digest email", "feat/digest", { review: "CHANGES_REQUESTED" })]
+                  ? [pr(61, "Weekly digest email", "ada/web-3-weekly-digest", { review: "CHANGES_REQUESTED" })]
                   : [],
             merged:
               i === 0
@@ -2164,10 +2188,18 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             release: i === 0 ? { tag: "v2.4.0", published_at: ago(20) } : i === 1 ? { tag: "v0.9.0", published_at: ago(48) } : null,
             drafts: i === 0 ? ["v2.4.1"] : [],
             viewer: "ada",
-            branches: i === 0 ? [{ name: "feat/offline-queue", ahead: 3, committed: Math.floor(Date.now() / 1000) - 7200 }] : [],
+            branches: i === 0 ? [{ name: "ada/acme-15-offline-queue", ahead: 3, committed: Math.floor(Date.now() / 1000) - 7200 }] : [],
             error: null,
           }));
         }
+        case "linear_connect":
+          mockLinear = true;
+          return mockLinearWork();
+        case "linear_disconnect":
+          mockLinear = false;
+          return null;
+        case "linear_work":
+          return mockLinear ? mockLinearWork() : { connected: false, viewer: null, org: null, teams: [], issues: [], error: null };
         case "list_open_prs":
           // ?prs=missing shows what the picker says when gh isn't installed.
           if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");
