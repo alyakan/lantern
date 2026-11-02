@@ -803,6 +803,16 @@
 
 /* Base */
 * { box-sizing: border-box; }
+/* Scrollbars are thin and quiet everywhere: no track, and a faint thumb that firms up while the pointer is over what scrolls
+   (posthog draws its own chunky ones). The standard properties are Chrome's and Firefox's; WebKit, the app's own webview,
+   reads the pseudo-elements. */
+:where(:root:not([data-theme="posthog"])) * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+:where(:root:not([data-theme="posthog"])) *:hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-track, :where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-corner { background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: transparent; background-clip: padding-box; }
+:where(:root:not([data-theme="posthog"])) :hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--muted) 45%, transparent); }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 /* Monaco sizes its completion list in content-box terms; under the reset above the last row is cut off. */
 .monaco-editor .suggest-widget, .monaco-editor .suggest-widget *, .monaco-editor .suggest-details, .monaco-editor .suggest-details * { box-sizing: content-box; }
 /* The app fills the window and scrolls inside its panes; the page around it never scrolls. */
