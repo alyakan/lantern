@@ -32,11 +32,13 @@ export function saveTeams(t: TeamChoice) {
   localStorage.setItem(TEAMS_KEY, JSON.stringify(t));
 }
 
-/** The team keys a repository's branches and pull requests name, most named first (only the workspace's own teams count). */
+/** The team keys your branches and pull requests in a repository name, most named first (only the workspace's own teams count,
+ * and only your own work: someone else's pull request can't move a project to another team). */
 export function teamsSeen(r: RepoStatus, teams: string[]): string[] {
   const known = new Set(teams.map((t) => t.toUpperCase()));
   const n = new Map<string, number>();
-  const texts = [...r.prs.flatMap((p) => [p.branch, p.title]), ...r.merged.flatMap((m) => [m.branch, m.title]), ...(r.branches ?? []).map((b) => b.name)];
+  const mine = (author: string) => !!r.viewer && author.toLowerCase() === r.viewer.toLowerCase();
+  const texts = [...r.prs.filter((p) => mine(p.author)).flatMap((p) => [p.branch, p.title]), ...r.merged.filter((m) => mine(m.author)).flatMap((m) => [m.branch, m.title]), ...(r.branches ?? []).map((b) => b.name)];
   for (const t of texts) for (const m of t.matchAll(ISSUE_ID)) {
     const key = m[1].toUpperCase();
     if (known.has(key)) n.set(key, (n.get(key) ?? 0) + 1);

@@ -325,7 +325,6 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
     const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
-    const branch = safeRef(issue.branch) ? ` Name its branch ${issue.branch}, as Linear suggests.` : "";
     const facts = [issue.project, PRIORITY[issue.priority], issue.due && `due ${issue.due}`, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · ");
     out.push({
       key: `linear:${issue.identifier}`,
@@ -342,7 +341,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
       at: Number.isFinite(due) ? due : null,
       next:
         ok && soon
-          ? { kind: "start", what: "Start", yours: false, button: "Do it", onBranch: false, text: `Start on the Linear issue ${issue.identifier} (${issue.url}). Read it with your Linear tools if you have them, or ask me what it says. Plan the work and show me the plan before you change any code.${branch} Work on that branch in a git worktree of your own, and leave this checkout as it is.` }
+          ? { kind: "start", what: "Start", yours: false, button: "Do it", onBranch: false, text: `Start on the Linear issue ${issue.identifier} (${issue.url}). Read it with your Linear tools if you have them, or ask me what it says. Plan the work and show me the plan before you change any code. Then work on a new branch with ${issue.identifier} in its name, in a git worktree of your own, and leave this checkout as it is.` }
           : null,
       sig: `issue:${issue.state_type}`,
       issue: { identifier: issue.identifier, url: issue.url, project: issue.project },

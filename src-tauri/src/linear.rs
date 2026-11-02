@@ -129,7 +129,8 @@ pub fn parse(body: &Value) -> Result<LinearWork, String> {
                         identifier: text(&i["identifier"])?,
                         title: i["title"].as_str().unwrap_or("").to_string(),
                         url: text(&i["url"]).filter(|u| u.starts_with("https://linear.app/"))?,
-                        priority: i["priority"].as_u64().and_then(|p| u8::try_from(p).ok()).unwrap_or(0),
+                        // A Float in Linear's schema: 2 or 2.0.
+                        priority: i["priority"].as_f64().filter(|p| (0.0..=4.0).contains(p)).map(|p| p as u8).unwrap_or(0),
                         due: text(&i["dueDate"]),
                         state: i["state"]["name"].as_str().unwrap_or("").to_string(),
                         state_type: i["state"]["type"].as_str().unwrap_or("").to_string(),
@@ -240,7 +241,7 @@ mod tests {
     fn reads_your_issues_and_the_teams() {
         let body = serde_json::json!({ "data": {
             "viewer": { "name": "Aly", "organization": { "name": "Acme" }, "assignedIssues": { "nodes": [
-                { "identifier": "ENG-142", "title": "Offline queue", "url": "https://linear.app/acme/issue/ENG-142/offline-queue", "priority": 2, "dueDate": "2026-11-05", "branchName": "aly/eng-142-offline-queue",
+                { "identifier": "ENG-142", "title": "Offline queue", "url": "https://linear.app/acme/issue/ENG-142/offline-queue", "priority": 2.0, "dueDate": "2026-11-05", "branchName": "aly/eng-142-offline-queue",
                   "state": { "name": "Todo", "type": "unstarted" }, "team": { "key": "ENG" }, "project": { "id": "p1", "name": "Offline mode" },
                   "attachments": { "nodes": [{ "url": "https://github.com/acme/api/pull/7" }] } },
                 { "identifier": "ENG-9", "title": "Not on linear.app", "url": "https://evil.example/x", "state": {}, "team": {} },
