@@ -8,8 +8,9 @@ import { DeskView, type DeskViewProps } from "./DeskView";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
-const repo = (folder: string, over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: folder, github: `aly/${folder.split("/").pop()}`, folders: [{ folder, branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], error: null, ...over });
-const pr = (number: number, checks: RepoStatus["prs"][number]["checks"]) => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks, review: null });
+const repo = (folder: string, over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: folder, github: `aly/${folder.split("/").pop()}`, folders: [{ folder, branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
+const pr = (number: number, checks: RepoStatus["prs"][number]["checks"], over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks, review: null, mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
+const merged = (number: number, merged_at: string, over: Partial<RepoStatus["merged"][number]> = {}): RepoStatus["merged"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `m${number}`, merged_at, ...over });
 const project = (folder: string, over: Partial<ProjectRow> = {}): ProjectRow => ({ folder, label: folder.split("/").pop()!, chats: 1, working: 0, waiting: 0, asleep: 0, unread: 0, needs: 0, at: null, todos: { open: 0, overdue: 0 }, ...over });
 
 function setup(over: Partial<DeskViewProps> = {}) {
@@ -25,6 +26,8 @@ function setup(over: Partial<DeskViewProps> = {}) {
     onOpen: vi.fn(),
     onGo: vi.fn(),
     onDecide: vi.fn(),
+    onStep: vi.fn(),
+    onRefreshRepos: vi.fn(),
     ...over,
   };
   const view = render(<DeskView {...props} />);
@@ -127,7 +130,7 @@ describe("the Desk", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("adds each project's branch, pull requests and release, and says why when GitHub can't be asked", () => {
+  it("adds each project's branch, your work and release, and says why when GitHub can't be asked", () => {
     const now = Date.now();
     const repos = [
       repo("/p/lantern", { folders: [{ folder: "/p/lantern", branch: "feat/desk", changed: 4 }], prs: [pr(7, "fail"), pr(8, "pending"), pr(9, "pass")], release: { tag: "v0.1.93", published_at: new Date(now - 3 * 3_600_000).toISOString() }, drafts: ["v0.1.94"] }),
@@ -140,8 +143,8 @@ describe("the Desk", () => {
     rerender({ repos });
     const [lantern, rayak, notes] = rows();
     expect(lantern).toHaveTextContent("feat/desk · 4 changed");
-    expect(lantern).toHaveTextContent("3 open · 1 failing");
-    expect(within(lantern).getByTitle("1 with checks still running")).toBeInTheDocument();
+    // A dot and a count for each state: #7 blocked, #9 yours to merge, #8 on its way.
+    expect(within(lantern).getByLabelText("1 blocked, 2 your call, 1 waiting")).toBeInTheDocument();
     expect(lantern).toHaveTextContent("v0.1.93 · 1 draft");
     expect(within(lantern).getByTitle("Published 3h ago")).toBeInTheDocument();
     expect(rayak).toHaveTextContent("gh isn't logged in");
@@ -149,40 +152,73 @@ describe("the Desk", () => {
     expect(notes).not.toHaveTextContent("…");
   });
 
-  it("lists what happened in the repositories today, what is left hanging first", () => {
+  it("puts your next steps first, yours to decide before what is blocked, and where each stands as nodes", () => {
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);
     const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
     setup({
       repos: [
-        repo("/p/lantern", { prs: [pr(7, "fail"), pr(8, "pass")], merged: [{ number: 6, title: "Merged today", merged_at: at(15) }, { number: 5, title: "Merged yesterday", merged_at: at(15, 30) }], release: { tag: "v0.1.93", published_at: at(17) }, drafts: ["v0.1.94"] }),
-        repo("/p/rayak"),
+        repo("/p/lantern", {
+          prs: [pr(7, "fail"), pr(8, "pass"), pr(9, "pending"), pr(10, "pending", { author: "sara", review_requests: ["aly"] }), pr(11, "pass", { author: "sara" })],
+          merged: [merged(6, at(15)), merged(5, at(9, 29))],
+          release: { tag: "v0.1.93", published_at: at(10, 30) },
+        }),
       ],
     });
-    const lines = within(screen.getByRole("region", { name: "Repos today" })).getAllByRole("listitem").map((l) => l.textContent);
-    expect(lines).toEqual([
-      expect.stringMatching(/^✕Checks failing: #7 PR 7lantern$/),
-      expect.stringMatching(/^◷Draft release waiting: v0\.1\.94lantern$/),
-      expect.stringMatching(/^↑Released: v0\.1\.93lantern1h ago$/),
-      expect.stringMatching(/^✓Merged: #6 Merged todaylantern3h ago$/),
+    const next = within(screen.getByRole("region", { name: "Next" })).getAllByRole("listitem").map((l) => l.textContent);
+    expect(next).toEqual([
+      expect.stringMatching(/^Merge #8 PR 8Your callMerge…Ready to merge/),
+      expect.stringMatching(/^Review #10 PR 10Do itYour review is asked · lantern · by @sara$/),
+      expect.stringMatching(/^Release 1 pull request since v0\.1\.93Your callRelease…/),
+      expect.stringMatching(/^Fix failing checks on #7 PR 7Do itChecks failing/),
     ]);
+    const stand = within(screen.getByRole("region", { name: "Where things stand" }));
+    // Someone else's pull request that doesn't ask for you isn't your work; one merged before the release is done.
+    expect(stand.queryByText(/PR 11/)).toBeNull();
+    expect(stand.queryByText(/PR 5/)).toBeNull();
+    const failing = stand.getByRole("list", { name: "At Checks, blocked" });
+    expect(within(failing).getAllByRole("listitem").map((n) => n.className)).toEqual(["yw-node yw-past", "yw-node yw-past", "yw-node yw-now", "yw-node", "yw-node", "yw-node"]);
   });
 
-  it("says a quiet day is quiet, and shows nothing before the Mac has said", () => {
-    const { rerender } = setup();
-    expect(screen.queryByRole("region", { name: "Repos today" })).toBeNull();
+  it("sends a step to the chat on its branch once, and to a new chat when none is on it", () => {
+    const onStep = vi.fn();
+    const repos = [repo("/p/lantern", { folders: [{ folder: "/p/lantern", branch: "b7", changed: 0 }], prs: [pr(7, "fail"), pr(8, "fail")] })];
+    setup({ repos, chats: [row(1, { folder: "/p/lantern" })], onStep });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    fireEvent.click(next.getByRole("button", { name: "Fix failing checks on #7" }));
+    expect(onStep).toHaveBeenLastCalledWith(expect.objectContaining({ number: 7 }), { kind: "chat", slot: "s1", title: "Chat 1" });
+    // Sent: it says so until #7 moves on, rather than offering the same step again.
+    expect(next.getByText('Sent to "Chat 1"')).toBeInTheDocument();
+    expect(next.queryByRole("button", { name: "Fix failing checks on #7" })).toBeNull();
+    fireEvent.click(next.getByRole("button", { name: "Fix failing checks on #8" }));
+    expect(onStep).toHaveBeenLastCalledWith(expect.objectContaining({ number: 8 }), { kind: "new", folder: "/p/lantern" });
+  });
+
+  it("doesn't send to a chat on the branch that is busy", () => {
+    const onStep = vi.fn();
+    const repos = [repo("/p/x", { folders: [{ folder: "/p/x", branch: "b3", changed: 0 }], prs: [pr(3, "fail")] })];
+    setup({ repos, chats: [row(1, { folder: "/p/x", state: "working" })], onStep });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    expect(next.getByText("Its chat is working")).toBeInTheDocument();
+    expect(next.queryByRole("button", { name: /Fix failing checks/ })).toBeNull();
+  });
+
+  it("says when there is no work open, asks again on Refresh, and shows nothing before the Mac has said", () => {
+    const { rerender, props } = setup();
+    expect(screen.queryByRole("region", { name: "Your work" })).toBeNull();
     rerender({ repos: [repo("/p/lantern")] });
-    expect(screen.getByRole("region", { name: "Repos today" })).toHaveTextContent("Nothing merged, released or failing today.");
+    const card = screen.getByRole("region", { name: "Your work" });
+    expect(card).toHaveTextContent("Nothing open");
+    fireEvent.click(within(card).getByRole("button", { name: "Refresh" }));
+    expect(props.onRefreshRepos).toHaveBeenCalled();
   });
 
-  it("shows five of a busy day's lines, and the rest on asking", () => {
-    const now = new Date(2026, 9, 31, 18, 0).getTime();
-    vi.setSystemTime(now);
-    const merged = Array.from({ length: 8 }, (_, i) => ({ number: i + 1, title: `PR ${i + 1}`, merged_at: new Date(2026, 9, 31, 9 + i).toISOString() }));
-    setup({ repos: [repo("/p/lantern", { merged })] });
-    const region = screen.getByRole("region", { name: "Repos today" });
-    expect(within(region).getAllByRole("listitem")).toHaveLength(5);
-    fireEvent.click(within(region).getByRole("button", { name: "Show 3 more" }));
-    expect(within(region).getAllByRole("listitem")).toHaveLength(8);
+  it("shows eight rows of where things stand, and the rest on asking", () => {
+    const prs = Array.from({ length: 11 }, (_, i) => pr(i + 1, "pending"));
+    setup({ repos: [repo("/p/lantern", { prs })] });
+    const region = screen.getByRole("region", { name: "Where things stand" });
+    expect(within(region).getAllByRole("list", { name: /^At / })).toHaveLength(8);
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }));
+    expect(within(screen.getByRole("region", { name: "Where things stand" })).getAllByRole("list", { name: /^At / })).toHaveLength(11);
   });
 });

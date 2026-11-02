@@ -12,7 +12,7 @@ The phone is a remote for the chats on your Mac, not a second Mac. It has run on
 | Permissions and models | Ask or Auto, any preset | Ask always; Auto only when the Mac's **Let paired phones use Auto** is on; presets the Mac lists |
 | Workflow | Chat, Step by step, Team | Chat and Step by step (a team is started and led on the Mac) |
 | Claude's questions | Cards in the chat, What needs you | Cards, swipe to allow, notifications with Allow and Deny, a lock-screen card |
-| The Desk | The board (Needs you, Projects with branch, pull requests, release and to-dos, Repos today), the sidebar's Timeline, Ask | Needs you, Just finished, and talking to the Desk; no projects table, Repos today or Timeline yet |
+| The Desk | The board (Needs you, Projects with branch, your work, release and to-dos, Your work), the sidebar's Timeline, Ask | Needs you, Just finished, and talking to the Desk; no projects table, Your work or Timeline yet |
 | Beside the chat | Changes, Files, Plan, Tests, Checks, Network, Dashboard, Artifacts, Todos | The Panels button: Changes, Artifacts and To-dos (on a wide iPad, a pane beside the chat) |
 | Disk space | The Storage tab: scan, and delete what you tick | Free space, a scan, and clearing only what the Mac's scan found safe (worktrees, build output, caches, simulators) |
 | Only here | Routines, Settings, the menu bar, project notes, the command palette | Read aloud, drawing on a photo, drafts kept per chat, app lock, the last-known chat list offline |

@@ -2122,8 +2122,10 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             { old: "/Users/you/projects/web-dashboard/.claude/worktrees/agent-a1b2c3", suggested: null },
           ].filter((m) => !/\/(io\.github\.alyakan\.lantern|\.claude)\/worktrees\//.test(m.old));
         case "desk_status": {
-          // The open chats' folders, each its own repository on GitHub, as status.rs would find them.
-          const today = (h: number) => new Date(new Date().setHours(h, 0, 0, 0)).toISOString();
+          // The open chats' folders, each its own repository on GitHub, as status.rs would find them. The first has your work at
+          // every stage the Desk's "Your work" tells apart; you are "ada".
+          const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+          const pr = (number: number, title: string, branch: string, more: Record<string, unknown> = {}) => ({ number, title, author: "ada", branch, draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...more });
           const folders = [...new Set(Object.values(slotFolder))];
           return folders.map((folder, i) => ({
             repo: folder,
@@ -2142,21 +2144,27 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             prs:
               i === 0
                 ? [
-                    { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false, checks: "fail", review: "REVIEW_REQUIRED" },
-                    { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false, checks: "pending", review: null },
+                    pr(128, "Retry fetchJson with backoff", "feat/retry-fetch", { checks: "fail" }),
+                    pr(129, "Cache the user's settings for a minute", "feat/settings-cache"),
+                    pr(130, "Show usage bars on the account page", "feat/usage-bars", { checks: "pending", mergeable: "UNKNOWN", merge_state: "UNKNOWN" }),
+                    pr(127, "Fix the crash saving a form with an empty title", "fix/empty-title", { author: "grace", checks: "pending", review: null, review_requests: ["ada"] }),
                   ]
-                : [],
+                : i === 1
+                  ? [pr(61, "Weekly digest email", "feat/digest", { review: "CHANGES_REQUESTED" })]
+                  : [],
             merged:
               i === 0
-                ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }]
+                ? [{ number: 126, title: "Log every retry with its delay", author: "ada", branch: "feat/retry-log", merged_at: ago(3) }]
                 : i === 1
                   ? [
-                      { number: 58, title: "Chart tooltips flip at the right edge", merged_at: today(0) },
-                      { number: 56, title: "Dark mode for the settings page", merged_at: today(0) },
+                      { number: 58, title: "Chart tooltips flip at the right edge", author: "ada", branch: "fix/tooltips", merged_at: ago(5) },
+                      { number: 56, title: "Dark mode for the settings page", author: "ada", branch: "feat/dark-settings", merged_at: ago(30) },
                     ]
                   : [],
-            release: i === 0 ? { tag: "v2.4.0", published_at: today(0) } : null,
+            release: i === 0 ? { tag: "v2.4.0", published_at: ago(20) } : i === 1 ? { tag: "v0.9.0", published_at: ago(48) } : null,
             drafts: i === 0 ? ["v2.4.1"] : [],
+            viewer: "ada",
+            branches: i === 0 ? [{ name: "feat/offline-queue", ahead: 3, committed: Math.floor(Date.now() / 1000) - 7200 }] : [],
             error: null,
           }));
         }

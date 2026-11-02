@@ -803,12 +803,18 @@ export interface RepoStatus {
   /** Linked worktrees, besides the main checkout, from git's list (`agent`: a worker's or a subagent's, the team's to clean up). */
   worktrees: { path: string; branch: string | null; locked: boolean; agent: boolean }[];
   gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
-  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
+  /** `mergeable`: MERGEABLE, CONFLICTING or UNKNOWN; `merge_state`: GitHub's mergeStateStatus (CLEAN, BEHIND, BLOCKED, DIRTY…);
+   * `review_requests`: the logins asked to review it. */
+  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null; mergeable: string | null; merge_state: string | null; review_requests: string[] }[];
   /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
-  merged: { number: number; title: string; merged_at: string }[];
+  merged: { number: number; title: string; author: string; branch: string; merged_at: string }[];
   release: { tag: string; published_at: string | null } | null;
   /** Releases waiting as drafts, by tag. */
   drafts: string[];
+  /** Who gh is logged in as. */
+  viewer: string | null;
+  /** Local branches never pushed, newest commit first; `committed` in seconds. */
+  branches: { name: string; ahead: number; committed: number }[];
   error: string | null;
 }
 
