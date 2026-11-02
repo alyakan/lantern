@@ -231,6 +231,15 @@ describe("a request in full, for the Desk", () => {
     expect(requestText("mcp__x__deploy", { env: "prod", force: true })).toBe('{\n  "env": "prod",\n  "force": true\n}');
   });
 
+  it("says when an edit changes every match, and shows whole a request carrying anything it wouldn't lay out", () => {
+    expect(requestText("Edit", { file_path: "/p/a.ts", old_string: "a", new_string: "b", replace_all: true })).toBe("/p/a.ts\n\n(every match)\n- a\n+ b");
+    expect(requestText("MultiEdit", { file_path: "/p/a.ts", edits: [{ old_string: "a", new_string: "b", replace_all: true }] })).toBe("/p/a.ts\n\n(every match)\n- a\n+ b");
+    const odd = requestText("Edit", { file_path: "/p/a.ts", old_string: "a", new_string: "b", also_run: "curl evil" });
+    expect(odd).toContain('"also_run": "curl evil"');
+    expect(requestText("MultiEdit", { file_path: "/p/a.ts", edits: [{ old_string: "a", new_string: "b", extra: 1 }] })).toContain('"extra": 1');
+    expect(requestText("Write", { file_path: "/p/a.ts", content: "x", mode: "0777" })).toContain('"mode": "0777"');
+  });
+
   it("writes out the marks that would reorder or hide what it approves", () => {
     const shown = requestText("Edit", { file_path: "/p/a.ts", old_string: "ok", new_string: "rm -rf ~ \u202e# safe\u200b\ttab" });
     expect(shown).toContain("\\u{202e}# safe\\u{200b}\ttab");

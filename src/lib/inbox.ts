@@ -205,13 +205,23 @@ export function requestText(toolName: string, input: unknown): string {
   return visible(rawRequestText(toolName, input));
 }
 
+/** The fields a write, a MultiEdit and each edit (an Edit's own, or one of a MultiEdit's) carry: laid out as lines only when they carry these and no other. */
+const WRITE_KEYS = ["file_path", "content"];
+const MULTI_KEYS = ["file_path", "edits"];
+const ONE_EDIT_KEYS = ["old_string", "new_string", "replace_all"];
+
+const only = (o: Record<string, unknown>, keys: string[]) => Object.keys(o).every((k) => keys.includes(k));
+const strings = (o: Record<string, unknown>, keys: string[]) => keys.every((k) => typeof o[k] === "string");
+
 function rawRequestText(toolName: string, input: unknown): string {
   const o = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
   if (!o) return JSON.stringify(input, null, 2) ?? "";
-  const str = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : "");
-  const edit = (e: Record<string, unknown>) => `${lined("-", typeof e.old_string === "string" ? e.old_string : "")}\n${lined("+", typeof e.new_string === "string" ? e.new_string : "")}`;
-  if (toolName === "Edit") return `${str("file_path")}${o.replace_all ? " (every match)" : ""}\n\n${edit(o)}`;
-  if (toolName === "MultiEdit" && Array.isArray(o.edits)) return `${str("file_path")}\n\n${o.edits.map((e) => edit((e ?? {}) as Record<string, unknown>)).join("\n\n")}`;
-  if (toolName === "Write") return `${str("file_path")}\n\n${str("content")}`;
+  const edit = (e: Record<string, unknown>) => `${e.replace_all ? "(every match)\n" : ""}${lined("-", e.old_string as string)}\n${lined("+", e.new_string as string)}`;
+  const anEdit = (e: unknown): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e) && only(e as Record<string, unknown>, ONE_EDIT_KEYS) && strings(e as Record<string, unknown>, ["old_string", "new_string"]);
+  // Anything else it carries would change what runs without showing: then it is shown whole, as it came.
+  const { file_path: path, ...rest } = o;
+  if (toolName === "Edit" && typeof path === "string" && anEdit(rest)) return `${path}\n\n${edit(rest)}`;
+  if (toolName === "MultiEdit" && only(o, MULTI_KEYS) && typeof o.file_path === "string" && Array.isArray(o.edits) && o.edits.every(anEdit)) return `${o.file_path}\n\n${o.edits.map(edit).join("\n\n")}`;
+  if (toolName === "Write" && only(o, WRITE_KEYS) && strings(o, WRITE_KEYS)) return `${o.file_path}\n\n${o.content}`;
   return JSON.stringify(o, null, 2);
 }

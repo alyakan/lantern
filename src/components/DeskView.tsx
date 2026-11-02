@@ -153,14 +153,6 @@ function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxIt
           </div>
           <p className="desk-ask">{it.need}</p>
           {it.detail !== null && <pre className="desk-detail">{it.detail}</pre>}
-          {/* All of it, as the chat shows it, with the chat's own buttons: answered here as it would be there. */}
-          {opened && request && (
-            <div className="desk-request">
-              {/* A plain tool's card names only what it touches: the Desk shows all of it first (a plan, a question or another agent's card shows its own whole). */}
-              {it.kind === "permission" && !request.provider && <pre className="desk-detail desk-request-full">{requestText(request.toolName, request.input)}</pre>}
-              <PermissionCard item={request} onDecide={(id, allow, note, answered, remember) => onAnswer?.(it.slot, id, allow, note, answered, remember)} />
-            </div>
-          )}
           <div className="desk-actions">
             {it.requestId && it.canAllow && <AllowButton key={it.key + (it.requestId ?? "")} title={it.title} onAllow={() => onDecide(it, true)} />}
             {request && !it.canAllow && (
@@ -168,7 +160,7 @@ function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxIt
                 {opened ? "Hide" : "Review"}
               </button>
             )}
-            {it.requestId && !opened && (
+            {it.requestId && (
               <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
                 Deny
               </button>
@@ -182,6 +174,15 @@ function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxIt
               </button>
             )}
           </div>
+          {/* All of it, as the chat shows it, with the chat's own buttons: answered here as it would be there. Under the buttons, so
+              opening it moves nothing under the pointer. */}
+          {opened && request && (
+            <div className="desk-request">
+              {/* A plain tool's card names only what it touches: the Desk shows all of it first (a plan, a question or another agent's card shows its own whole). */}
+              {it.kind === "permission" && !request.provider && <pre className="desk-detail desk-request-full">{requestText(request.toolName, request.input)}</pre>}
+              <PermissionCard item={request} onDecide={(id, allow, note, answered, remember) => onAnswer?.(it.slot, id, allow, note, answered, remember)} />
+            </div>
+          )}
         </article>
       </div>
     </section>
