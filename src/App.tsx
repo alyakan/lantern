@@ -2778,6 +2778,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const waiting = chats.slots[item.slot]?.items.some((it) => it.type === "permission" && it.id === item.requestId && it.decision === null);
     if (item.requestId && waiting) decideIn(item.slot, item.requestId, allow);
   };
+  // A request answered from its own card, opened on the Desk: only while that chat still waits on it.
+  const answerOnDesk = (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
+    const waiting = chats.slots[slot]?.items.some((it) => it.type === "permission" && it.id === id && it.decision === null);
+    if (waiting) decideIn(slot, id, allow, note, answered, remember);
+  };
   // The inbox's Go: the same place the sidebar's row for it goes to.
   const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
   // Starting something from the sidebar leaves the Desk for it.
@@ -3058,6 +3063,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onOpen={switchTo}
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
+                  onAnswer={answerOnDesk}
                 />
               </ErrorBoundary>
             ) : showCanvas ? (

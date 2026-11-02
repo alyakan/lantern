@@ -36,6 +36,9 @@ export interface InboxItem {
   detail: string | null;
   /** It waits on an answer (the rest only finished unread). */
   needsYou: boolean;
+  /** The request it waits on (a permission, a plan, a question, a reproduction, an approval), whole: what the Desk opens in
+   * place, as the chat's own card, to answer it there. */
+  request?: Pending;
 }
 
 type Pending = Extract<ChatItem, { type: "permission" }>;
@@ -122,7 +125,7 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
           const whole = kind === "permission" ? wholeRequest(pending.item.toolName, pending.item.input) : null;
           // Allowed from the row only when the row shows all of it, in full: then it says what, and the request itself follows.
           const need = whole === null ? (said?.body ?? "Needs an answer") : `Wants to use ${pending.item.toolName}`;
-          out.push({ ...base, kind, need: `${need}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, canAllow: whole !== null, detail: whole, needsYou: true });
+          out.push({ ...base, kind, need: `${need}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, canAllow: whole !== null, detail: whole, needsYou: true, request: pending.item });
           continue;
         }
         const proposal = m.role === "agent" && lead ? (chats.slots[lead]?.proposals ?? []).find((p) => p.worker === m.slot && p.status === "open") : undefined;
@@ -184,4 +187,41 @@ export function checkItems(list: FailedChecks[]): InboxItem[] {
     detail: null,
     needsYou: true,
   }));
+}
+
+/** The marks that reorder or hide text, and control characters other than a newline or tab, written out as `\u{202e}`: an
+ * approval never shows text that looks other than what it is. */
+const SHOWN_HIDING = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+const visible = (s: string) => s.replace(SHOWN_HIDING, (c) => `\\u{${c.codePointAt(0)!.toString(16).padStart(4, "0")}}`);
+
+const lined = (mark: string, s: string) => s.split("\n").map((l) => `${mark} ${l}`).join("\n");
+
+/**
+ * All of a plain permission request, for the Desk to show before it can be allowed there: an edit as the lines it takes out and
+ * puts in, a write as what it writes, anything else as every field it carries. Nothing is cut, and nothing is hidden: a mark
+ * that would reorder or hide text is written out.
+ */
+export function requestText(toolName: string, input: unknown): string {
+  return visible(rawRequestText(toolName, input));
+}
+
+/** The fields a write, a MultiEdit and each edit (an Edit's own, or one of a MultiEdit's) carry: laid out as lines only when they carry these and no other. */
+const WRITE_KEYS = ["file_path", "content"];
+const MULTI_KEYS = ["file_path", "edits"];
+const ONE_EDIT_KEYS = ["old_string", "new_string", "replace_all"];
+
+const only = (o: Record<string, unknown>, keys: string[]) => Object.keys(o).every((k) => keys.includes(k));
+const strings = (o: Record<string, unknown>, keys: string[]) => keys.every((k) => typeof o[k] === "string");
+
+function rawRequestText(toolName: string, input: unknown): string {
+  const o = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+  if (!o) return JSON.stringify(input, null, 2) ?? "";
+  const edit = (e: Record<string, unknown>) => `${e.replace_all ? "(every match)\n" : ""}${lined("-", e.old_string as string)}\n${lined("+", e.new_string as string)}`;
+  const anEdit = (e: unknown): e is Record<string, unknown> => !!e && typeof e === "object" && !Array.isArray(e) && only(e as Record<string, unknown>, ONE_EDIT_KEYS) && strings(e as Record<string, unknown>, ["old_string", "new_string"]);
+  // Anything else it carries would change what runs without showing: then it is shown whole, as it came.
+  const { file_path: path, ...rest } = o;
+  if (toolName === "Edit" && typeof path === "string" && anEdit(rest)) return `${path}\n\n${edit(rest)}`;
+  if (toolName === "MultiEdit" && only(o, MULTI_KEYS) && typeof o.file_path === "string" && Array.isArray(o.edits) && o.edits.every(anEdit)) return `${o.file_path}\n\n${o.edits.map(edit).join("\n\n")}`;
+  if (toolName === "Write" && only(o, WRITE_KEYS) && strings(o, WRITE_KEYS)) return `${o.file_path}\n\n${o.content}`;
+  return JSON.stringify(o, null, 2);
 }

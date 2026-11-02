@@ -1,13 +1,14 @@
 import { Fragment, useEffect, useState } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
-import type { InboxItem } from "../lib/inbox";
+import { requestText, type InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
-import type { RepoStatus } from "../types";
+import type { NewRule, RepoStatus } from "../types";
 import { DeskProject } from "./DeskProject";
 import { DeskProjects } from "./DeskProjects";
 import { ReposToday } from "./ReposToday";
 import { AllowButton } from "./Inbox";
+import { PermissionCard } from "./PermissionCard";
 
 export interface DeskViewProps {
   /** Every chat on this Desk, for the projects' rows to list. */
@@ -35,6 +36,8 @@ export interface DeskViewProps {
   onNewChat: (folder: string) => void;
   onGo: (item: InboxItem) => void;
   onDecide: (item: InboxItem, allow: boolean) => void;
+  /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
+  onAnswer?: (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 }
 
 /** How often the times are redrawn. */
@@ -123,11 +126,15 @@ function DeskTabs({ desks }: { desks: DeskViewProps["desks"] }) {
 }
 
 /** What waits on you, one thing at a time: the first, big, with what it asks; the rest a click away. */
-function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now: number } & Pick<DeskViewProps, "onGo" | "onDecide">) {
+function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxItem[]; now: number } & Pick<DeskViewProps, "onGo" | "onDecide" | "onAnswer">) {
   const [at, setAt] = useState(0);
+  // The request opened in place, by its id: the next one to come into view comes in closed.
+  const [open, setOpen] = useState<string | null>(null);
   const i = at < waiting.length ? at : 0;
   const it = waiting[i];
   if (!it) return null;
+  const request = it.request && onAnswer ? it.request : null;
+  const opened = request !== null && open === request.id;
   const more = waiting.length - 1;
   return (
     <section className="desk-needs" aria-label="Needs you">
@@ -148,12 +155,17 @@ function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now:
           {it.detail !== null && <pre className="desk-detail">{it.detail}</pre>}
           <div className="desk-actions">
             {it.requestId && it.canAllow && <AllowButton key={it.key + (it.requestId ?? "")} title={it.title} onAllow={() => onDecide(it, true)} />}
+            {request && !it.canAllow && (
+              <button className={opened ? undefined : "primary"} aria-expanded={opened} aria-label={`${opened ? "Hide" : "Review"} ${it.title}`} onClick={() => setOpen(opened ? null : request.id)}>
+                {opened ? "Hide" : "Review"}
+              </button>
+            )}
             {it.requestId && (
               <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
                 Deny
               </button>
             )}
-            <button className={it.requestId ? undefined : "primary"} aria-label={`Go to ${it.title}`} onClick={() => onGo(it)}>
+            <button className={it.requestId || request ? undefined : "primary"} aria-label={`Go to ${it.title}`} onClick={() => onGo(it)}>
               Open chat
             </button>
             {more > 0 && (
@@ -162,6 +174,15 @@ function NeedsYou({ waiting, now, onGo, onDecide }: { waiting: InboxItem[]; now:
               </button>
             )}
           </div>
+          {/* All of it, as the chat shows it, with the chat's own buttons: answered here as it would be there. Under the buttons, so
+              opening it moves nothing under the pointer. */}
+          {opened && request && (
+            <div className="desk-request">
+              {/* A plain tool's card names only what it touches: the Desk shows all of it first (a plan, a question or another agent's card shows its own whole). */}
+              {it.kind === "permission" && !request.provider && <pre className="desk-detail desk-request-full">{requestText(request.toolName, request.input)}</pre>}
+              <PermissionCard item={request} onDecide={(id, allow, note, answered, remember) => onAnswer?.(it.slot, id, allow, note, answered, remember)} />
+            </div>
+          )}
         </article>
       </div>
     </section>
@@ -217,7 +238,7 @@ export function DeskView(props: DeskViewProps) {
       <div className="desk-main">
         {pageRow ? (
           <>
-          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <div className="desk-clear">✓ Nothing needs you</div>}
+          {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <div className="desk-clear">✓ Nothing needs you</div>}
           <DeskProject
             row={pageRow}
             chats={props.chats.filter((c) => c.folder === pageRow.folder)}
@@ -230,7 +251,7 @@ export function DeskView(props: DeskViewProps) {
           </>
         ) : (
           <div className="desk-bento">
-            {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} /> : <Summary projects={props.projects} />}
+            {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <Summary projects={props.projects} />}
             <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} onPage={props.onPage} />
             <ReposToday repos={props.repos} now={now} />
           </div>
