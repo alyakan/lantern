@@ -7,6 +7,8 @@ import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type Compa
 import { lostText } from "../lib/orchestraView";
 import { ChevronIcon, ClockIcon, DeskIcon, FocusIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
+import { Timeline } from "./Timeline";
+import type { TimelineEvent } from "../lib/timeline";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
 import { useReorder } from "../lib/useReorder";
@@ -17,6 +19,8 @@ import { useMenuInside } from "../lib/useMenuInside";
 export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
+/** How wide the collapsed bar is (as styles.css draws it). */
+export const SIDEBAR_BAR = 56;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
 /** How long the pointer rests on the collapsed bar before it opens, so passing over it on the way to the chat doesn't. */
@@ -135,6 +139,8 @@ interface Props extends SidebarHandlers {
   noted?: string[];
   /** The Desk (every chat at once): its button at the top, pressed while it is on screen, with how many things need you. */
   desk?: { on: boolean; needs: number; onOpen: () => void };
+  /** The timeline's events (see timelineEvents), asked for only while it is shown: without it there is no Chats | Timeline switch. */
+  timeline?: () => TimelineEvent[];
 }
 
 /** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
@@ -756,7 +762,9 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], single, onSingle: setSingle, ...handlers } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], single, onSingle: setSingle, timeline, ...handlers } = props;
+  // The list it shows open: the chats by project, or the timeline of what happened in them.
+  const [view, setView] = usePersistentState<"chats" | "timeline">("sidebar.view", "chats");
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
@@ -1104,9 +1112,21 @@ export function Sidebar(props: Props) {
             </button>
           )}
         </div>
+        {full && timeline && (
+          <div className="sb-views" role="group" aria-label="Show">
+            <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
+              Chats
+            </button>
+            <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
+              Timeline
+            </button>
+          </div>
+        )}
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
           {single !== null && <SingleBanner choice={choiceOf(single)} full={full} onNewChat={() => opening(h.onNewChatIn)(single)} onShowAll={() => setSingle(null)} />}
-          {full ? (
+          {full && timeline && view === "timeline" ? (
+            <Timeline events={single === null ? timeline() : timeline().filter((e) => e.folder === single)} onOpen={(e) => (e.team ? h.onTeam(e.slot) : h.onChat(e.slot))} />
+          ) : full ? (
             <>
               {shown.map((g, i) => (
                 <Project

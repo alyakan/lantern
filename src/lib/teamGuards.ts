@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { providerIdOf } from "./provider";
 import type { Chats } from "../sessions";
 import { nodeStatus, orchestraNodes } from "./orchestraView";
 import { CONTINUE_MESSAGE, loadPauseMemory, pauseEndsAt, pauseStep, pausedLine, pauseWarning, savePauseMemory, usePauseAtPercent, windowKey, type PlanPause } from "./planPause";
-import { usePlanUsage } from "./planUsage";
+import { useProviderUsage, usePlanUsage, type PlanUsage } from "./planUsage";
 import type { State } from "../store";
 
 /** What the guards do to chats and to the user; the app's own functions. */
@@ -36,34 +37,33 @@ function stoppedAtRest(s: State): boolean {
  * window resets (nothing is told to continue: the agents stay stopped, and can be messaged), and `dismiss` ends it the same way
  * at once, for a user who doesn't want it on screen.
  */
-export function useTeamGuards(chats: Chats, actions: GuardActions) {
-  const plan = usePlanUsage();
+function useProviderGuard(chats: Chats, actions: GuardActions, provider: string, plan: PlanUsage | null) {
   const pauseAt = usePauseAtPercent();
   const [pause, setPause] = useState<PlanPause | null>(null);
-  const done = useRef(loadPauseMemory());
+  const done = useRef(loadPauseMemory(provider));
   // The effects and handlers below run later than the render that made them: they read what is current from here.
   const latest = useRef({ chats, actions, pause });
   latest.current = { chats, actions, pause };
 
-  // Each reading of the plan: pause the teams once per window when it reaches the limit, warn once 5 points before.
+  // Pause only this provider’s agents, once per reported window.
   useEffect(() => {
-    if (!plan) return;
+    if (!plan || (plan.resetsAt !== null && plan.resetsAt * 1000 <= Date.now())) return;
     const { chats: now, actions: act } = latest.current;
-    const working = teamAgentsWorking(now);
+    const working = teamAgentsWorking(now).filter(slot => providerIdOf(now.slots[slot].provider) === provider);
     const step = pauseStep(plan, pauseAt, working.length > 0, done.current);
     if (!step) return;
     const key = windowKey(plan);
     const percent = Math.round(plan.used * 100);
     if (step === "warn") {
       done.current = { ...done.current, warned: key };
-      savePauseMemory(done.current);
-      act.warn(pauseWarning(percent, pauseAt));
+      savePauseMemory(done.current, provider);
+      act.warn(`${provider === "claude" ? "Claude" : "Codex"}: ${pauseWarning(percent, pauseAt)}`);
       return;
     }
     done.current = { paused: key, warned: key };
-    savePauseMemory(done.current);
+    savePauseMemory(done.current, provider);
     for (const slot of working) act.stop(slot);
-    const next: PlanPause = { percent, resetsAt: plan.resetsAt, since: Date.now(), slots: working };
+    const next: PlanPause = { provider, percent, resetsAt: plan.resetsAt, since: Date.now(), slots: working };
     setPause((was) => (was ? { ...next, since: was.since, slots: [...new Set([...was.slots, ...working])] } : next));
     act.paused(pausedLine(next));
   }, [plan, pauseAt]);
@@ -97,4 +97,23 @@ export function useTeamGuards(chats: Chats, actions: GuardActions) {
   }, []);
 
   return { pause, resume, dismiss };
+}
+
+export function useTeamGuards(chats: Chats, actions: GuardActions) {
+  const fallback = usePlanUsage();
+  const providers = useProviderUsage();
+  const [claudePlan, codexPlan] = useMemo(() => {
+    const fullestPlan = (provider: string): PlanUsage | null => {
+      const windows = providers[provider]?.windows.filter(w => w.resets_at === null || w.resets_at * 1000 > Date.now()) ?? [];
+      const fullest = windows.reduce<(typeof windows)[number] | null>((best, w) => !best || w.used > best.used ? w : best, null);
+      return fullest ? { used: fullest.used, resetsAt: fullest.resets_at } : null;
+    };
+    return [fullestPlan("claude") ?? fallback, fullestPlan("codex")];
+  }, [providers, fallback]);
+  const claude = useProviderGuard(chats, actions, "claude", claudePlan);
+  const codex = useProviderGuard(chats, actions, "codex", codexPlan);
+  const first = claude.pause ? claude : codex;
+  const heldProviders = new Set([claude.pause?.provider, codex.pause?.provider].filter(Boolean));
+  const heldSlots = Object.entries(chats.slots).filter(([, state]) => heldProviders.has(providerIdOf(state.provider))).map(([slot]) => slot);
+  return { ...first, heldSlots, pausedSlots: [...(claude.pause?.slots ?? []), ...(codex.pause?.slots ?? [])] };
 }

@@ -42,15 +42,17 @@ interface Props {
   /** Orchestras: a main agent and the workers it runs. `exists`: there is one, so the canvas can be shown. */
   orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void };
   /** What the plan meter's popover lists: every open chat and team with what it has used (computed when it opens), and opening one. */
-  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void };
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void };
   /** The sidebar, while it is hidden: a button at the left to show it again, badged with how many chats and agents need you. */
   sidebar?: { needs: number; onShow: () => void };
   /** What waits on you in every project and team (see Inbox): a button at the right with a popover. */
   inbox?: InboxProps;
   /** The project's Run command (saved in its setup): a Run button beside the folder. Disabled while a run goes. */
   run?: { command: string; running: boolean; onRun: () => void };
-  /** Back to the chat shown before this one (⌘[): an arrow at the left. Left out when there is none to go back to. */
-  back?: () => void;
+  /** Back (⌘[): to the chat shown before this one, or to the Desk it was opened from. An arrow at the left; left out when there is nowhere to go back to. */
+  back?: { run: () => void; label: string };
+  /** How far from the window's left edge the main pane starts (the sidebar's width beside it): Back sits over the pane, not over the sidebar. */
+  inset?: number;
   /** Paired phones connected now (Remote control): a chip naming them, which opens Remote control's settings. */
   phones?: { names: string[]; onOpen: () => void };
 }
@@ -64,6 +66,11 @@ const sidebarShortcut = (() => {
   const label = def && shortcutLabel(def);
   return label ? ` (${label})` : "";
 })();
+
+/** The bar's left padding, room for the window's traffic lights (styles.css `.topbar`). */
+const TRAFFIC_LIGHTS = 84;
+/** The gap between the sidebar and the pane beside it. */
+const PANE_GAP = 8;
 
 /** How long a stopped task may stay listed before its Stop comes back. */
 const STOP_AGAIN_MS = 8000;
@@ -80,7 +87,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, storage, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run, phones, back }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, storage, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run, phones, back, inset = 0 }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -162,7 +169,8 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
 
   return (
     <header className="topbar" data-tauri-drag-region>
-      <div className="topbar-side" data-tauri-drag-region>
+      {/* The window's buttons take the first 84px (the bar's padding); past the sidebar, Back lines up with the pane's edge. */}
+      <div className="topbar-side" data-tauri-drag-region style={inset + PANE_GAP > TRAFFIC_LIGHTS ? { paddingLeft: inset + PANE_GAP - TRAFFIC_LIGHTS } : undefined}>
         {sidebar && (
           <div className="toolbar-group">
             <button className="icon sidebar-toggle" aria-label={showSidebarLabel(sidebar.needs)} title={`Show sidebar${sidebarShortcut}`} onClick={sidebar.onShow}>
@@ -177,7 +185,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         )}
         {back && (
           <div className="toolbar-group">
-            <button className="icon topbar-back" aria-label="Back to the previous chat" title="Back to the previous chat (⌘[)" onClick={back}>
+            <button className="icon topbar-back" aria-label={back.label} title={`${back.label} (⌘[)`} onClick={back.run}>
               <BackIcon />
             </button>
           </div>

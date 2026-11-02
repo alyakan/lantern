@@ -594,6 +594,13 @@ async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>, model: Option<S
         }
     }
 
+    if signed_in {
+        if let Ok(reading) = ctx.request("account/rateLimits/read", json!({}), Duration::from_secs(2)).await {
+            if let Some(usage) = super::codex_events::rate_limits(reading["rateLimitsByLimitId"].get("codex").unwrap_or(&reading["rateLimits"])) {
+                sink(UiEvent::ProviderUsage { usage });
+            }
+        }
+    }
     let mut params = json!({
         "cwd": ctx.cwd,
         "approvalPolicy": approval_policy(ctx.mode),
@@ -944,6 +951,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) reply "$id" '{{"userAgent":"lantern/{version} (Mac OS 26.4.1; arm64) unknown (lantern; 0)","codexHome":"/tmp/h","platformFamily":"unix","platformOs":"macos"}}' ;;
     *'"method":"account/read"'*) reply "$id" '{account}' ;;
+    *'"method":"account/rateLimits/read"'*) reply "$id" '{{}}' ;;
     *'"method":"model/list"'*) reply "$id" '{{"data":[{{"id":"gpt-x","model":"gpt-x","displayName":"GPT X","description":"d","hidden":false,"isDefault":true,"supportedReasoningEfforts":[{{"reasoningEffort":"low","description":""}},{{"reasoningEffort":"ultra","description":""}}]}}],"nextCursor":null}}' ;;
     *'"method":"thread/resume"'*) {resume} ;;
     *'"method":"thread/start"'*) reply "$id" '{{"thread":{{"id":"thr-1"}},"model":"gpt-x","cwd":"{dir}"}}' ;;
@@ -1106,9 +1114,9 @@ done
 
         let all = sent(dir.path());
         let methods: Vec<&str> = all.iter().filter_map(|m| m["method"].as_str()).collect();
-        assert_eq!(methods, ["initialize", "initialized", "account/read", "model/list", "thread/start"]);
+        assert_eq!(methods, ["initialize", "initialized", "account/read", "model/list", "account/rateLimits/read", "thread/start"]);
         assert_eq!(all[0]["params"]["clientInfo"]["name"], "lantern");
-        let start = &all[4]["params"];
+        let start = &all[5]["params"];
         assert_eq!((start["approvalPolicy"].as_str(), start["sandbox"].as_str(), start["approvalsReviewer"].as_str()), (Some("on-request"), Some("workspace-write"), Some("user")));
         assert_eq!(start["cwd"], dir.path().display().to_string());
         assert!(start["developerInstructions"].as_str().unwrap().contains("running inside Lantern, a macOS desktop app for coding agents"));

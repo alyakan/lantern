@@ -646,7 +646,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, desk, last_desk: None, single, last_single: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, provider_usage: said("provider_usage"), last_provider_usage: Vec::new(), desk, last_desk: None, single, last_single: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -749,6 +749,8 @@ struct Session<'a> {
     device: String,
     /// Whether the phone said it can read the extras events (see protocol::PHONE_EXTRAS).
     extras: bool,
+    provider_usage: bool,
+    last_provider_usage: Vec<crate::ui_event::ProviderUsage>,
     /// Whether it shows the Desk (protocol::PHONE_DESK), and the Desk's version it was last sent.
     desk: bool,
     last_desk: Option<u64>,
@@ -776,7 +778,7 @@ impl Drop for Session<'_> {
 }
 
 /// The five-hour window and the weekly one, as a phone was last told them.
-type PlanSent = ((f64, Option<u64>, String), Option<(f64, Option<u64>)>);
+type PlanSent = ((f64, Option<u64>, String), Option<(f64, Option<u64>)>, Option<u64>);
 
 /// The answer to request `id`, sealed and queued for the phone.
 fn respond(link: &Link, channel: &mut Channel, id: u64, answer: Result<serde_json::Value, String>) -> Result<(), String> {
@@ -894,12 +896,19 @@ impl<'a> Session<'a> {
 
     /// The subscription's usage, to a phone that can read it: when it has been said and differs from what this phone was told.
     fn send_plan(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
-        let sent: Option<PlanSent> = self.gw.hub.plan().map(|five| (five, self.gw.hub.week()));
+        if self.provider_usage {
+            let usage = self.gw.hub.provider_usage();
+            if usage != self.last_provider_usage {
+                send_message(link, channel, &ServerMessage::ProviderUsage { usage: usage.clone() })?;
+                self.last_provider_usage = usage;
+            }
+        }
+        let sent: Option<PlanSent> = self.gw.hub.plan().map(|five| (five, self.gw.hub.week(), self.gw.hub.plan_updated_at()));
         if !self.extras || sent.is_none() || sent == self.last_plan {
             return Ok(());
         }
-        if let Some(((used, resets_at, status), week)) = sent.clone() {
-            send_message(link, channel, &ServerMessage::Plan { used, resets_at, status, week_used: week.map(|w| w.0), week_resets_at: week.and_then(|w| w.1) })?;
+        if let Some(((used, resets_at, status), week, updated_at)) = sent.clone() {
+            send_message(link, channel, &ServerMessage::Plan { updated_at, used, resets_at, status, week_used: week.map(|w| w.0), week_resets_at: week.and_then(|w| w.1) })?;
         }
         self.last_plan = sent;
         Ok(())
@@ -1788,6 +1797,22 @@ pub(crate) mod tests {
         let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 1, epoch: EPOCH }).await;
         let caught: Vec<u64> = before.iter().filter_map(|m| if let ServerMessage::Event { seq, .. } = m { Some(*seq) } else { None }).collect();
         assert_eq!(caught, vec![2], "only what it missed, and only what a phone is sent");
+    }
+
+    #[tokio::test]
+    async fn provider_usage_is_sent_without_claude_only_to_capable_phones() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let usage = crate::ui_event::ProviderUsage { provider: "codex".into(), updated_at: 10, windows: vec![crate::ui_event::UsageWindow { label: "5 hours".into(), used: 0.2, resets_at: None, minutes: Some(300) }] };
+        r.bus.publish("a", UiEvent::ProviderUsage { usage: usage.clone() });
+        let key = generate_keypair().unwrap();
+        let mut old = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_EXTRAS]).await.unwrap();
+        let (_, _, before) = old.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(!before.iter().any(|m| matches!(m, ServerMessage::ProviderUsage { .. } | ServerMessage::Plan { .. })));
+        let key = generate_keypair().unwrap();
+        let mut new = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_EXTRAS, "provider_usage"]).await.unwrap();
+        let (_, _, before) = new.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(before.iter().any(|m| matches!(m, ServerMessage::ProviderUsage { usage: readings } if readings == &vec![usage.clone()])));
     }
 
     #[tokio::test]

@@ -41,7 +41,10 @@ impl Provider for GatewayProvider {
         if cfg.endpoint.is_none() || cfg.model.is_none() {
             return Err("This chat runs on an endpoint that isn't set up any more, so it won't start on Claude instead.".into());
         }
-        ClaudeSession::spawn(cfg, sink, on_edit).map(Session::Claude)
+        let forward: Sink = std::sync::Arc::new(move |event| {
+            if !matches!(event, crate::ui_event::UiEvent::PlanUsage { .. } | crate::ui_event::UiEvent::WeekUsage { .. }) { sink(event); }
+        });
+        ClaudeSession::spawn(cfg, forward, on_edit).map(Session::Claude)
     }
 }
 

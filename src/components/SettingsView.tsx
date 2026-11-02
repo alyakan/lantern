@@ -361,8 +361,8 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
         </label>
         <span className="settings-muted">Once you approve an agent's merge and it goes through, "Tidy up" on its merge card closes the agent and removes its worktree and branch. Ask me puts the question on the card; Automatically does it by itself when the agent has nothing left to lose.</span>
         <label className="general-option">
-          <span>Pause a team's work when my plan reaches</span>
-          <select aria-label="Pause a team's work when my plan reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
+          <span>Pause agents when their provider's usage reaches</span>
+          <select aria-label="Pause agents when their provider's usage reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
             {PAUSE_OPTIONS.map((n) => (
               <option key={n} value={n}>
                 {n === 0 ? "Off" : `${n}%`}
@@ -370,7 +370,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             ))}
           </select>
         </label>
-        <span className="settings-muted">Stops what every working agent of every team is doing (they stay on their teams) and tells you when the plan resets. Nothing starts again until you press Resume. You get a heads-up 5 points before, and it pauses once for each five-hour window.</span>
+        <span className="settings-muted">Pauses working team agents on the provider that reaches this percentage. Other providers keep working. Resume continues the paused agents; the hold also ends when that provider’s window resets. You get a heads-up 5 points before.</span>
         <label className="general-option">
           <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
           <span>Run tests when a merge is proposed</span>

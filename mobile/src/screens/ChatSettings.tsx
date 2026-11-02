@@ -1,3 +1,5 @@
+import { currentUsageWindows } from "../view/providerUsage";
+import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
 import type { ConversationSettings } from "../sync/sync";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
@@ -88,7 +90,7 @@ function SettingsLink({ title, value, expanded, onPress }: { title: string; valu
 }
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const [showOlder, setShowOlder] = useState(false);
@@ -111,7 +113,8 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
   if (pages) sections.push({ id: "show", title: "Show", value: pages.on ? "Pages" : "One list", selected: pages.on ? "pages" : "list", options: SHOW, onPick: (v) => pages.onChange(v === "pages") });
   sections.push({ id: "permissions", title: "Permissions", value: modeLabel(chat.permissions ?? "ask"), selected: chat.permissions ?? "", options: modes, onPick: onMode });
   if (presets.length) sections.push({ id: "presets", title: "Model preset", value: presets.find((p) => p.value === chat.preset)?.label ?? "Standard", selected: chat.preset ?? "", options: presets, onPick: onPreset });
-  const hasUsage = !!context || !!plan;
+  const activeUsage = currentUsageWindows(providerUsage);
+  const hasUsage = !!context || !!plan || !!providerUsage || !!chat.provider;
   return (
     <Sheet onClose={() => { onClose(); next.current?.(); }}>
       {(close, scroll) => (
@@ -128,6 +131,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
               <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}><Dots /></View>
             ) : (
               <>
+                {(activeUsage.some(w => w.used >= .95) || plan && Math.max(plan.used, plan.week?.used ?? 0) >= .95) && configuration?.provider === "claude" && !off && providers?.some(p => p.id === "codex") && onConfigure && <PressScale accessibilityRole="button" accessibilityLabel="Switch this chat to Codex" onPress={() => { onConfigure({ provider: "codex" }); close(); }} style={{ paddingVertical: 12 }}><Txt variant="body" tone="cobalt">Switch this chat to Codex</Txt></PressScale>}
                 {sections.map((section) => (
                   <Fragment key={section.id}>
                     <SettingsLink title={section.title} value={section.value} expanded={expanded === section.id} onPress={() => toggle(section.id)} />
@@ -142,6 +146,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
                 {hasUsage && <SettingsLink title="Usage & context" value={context ? contextOf(context).label : "View usage"} expanded={expanded === "usage"} onPress={() => toggle("usage")} />}
                 {expanded === "usage" && <>
                   {context && <ContextRow context={context} />}
+                  {activeUsage.length ? activeUsage.map(w => <Txt key={w.label} variant="body">{chat.provider ?? "Claude"} · {w.label}: {Math.round(w.used * 100)}% used{w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}</Txt>) : !plan && <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
                   {plan && <UsageRow plan={plan} />}
                   {plan?.week && <WeekRow week={plan.week} />}
                 </>}
@@ -170,7 +175,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
  * only offered while the chat is doing nothing; "Switching…" stays in the line until the chat says it changed.
  * `children` draws the title and what is under it, given the settings line (null when there is none).
  */
-export function ChatSettings({ slot, chat, plan, context, pages, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; /** For a Step by step chat: pages or one list. */ pages?: PagesChoice; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
+export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; /** For a Step by step chat: pages or one list. */ pages?: PagesChoice; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it: shown in the line and the sheet. */ context?: { tokens: number; window: number | null } | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
   const { sync } = useController();
   const { supported, controls, reload } = useControls();
   const [open, setOpen] = useState(false);
@@ -214,7 +219,8 @@ export function ChatSettings({ slot, chat, plan, context, pages, onProblem, onCl
   // Step by step is said; a plain chat is the usual, and isn't.
   const flow = switching?.kind === "workflow" ? "Switching…" : chat.workflow && chat.workflow !== "chat" ? workflowLabel(chat.workflow) : null;
   const usage = plan ? usageOf(plan) : null;
-  const low = usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
+  const providerPercent = providerUsage?.windows.filter(w => w.resets_at === null || w.resets_at * 1000 > Date.now()).reduce((n, w) => Math.max(n, Math.round(w.used * 100)), 0);
+  const low = providerPercent !== undefined && providerPercent >= 80 ? providerPercent >= 100 ? "Limit reached" : `${providerPercent}% used` : usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
   const held = context ? contextOf(context) : null;
   // What it runs on, said first when that isn't Claude Code ("Ollama · Ask · 12k tokens"); a Claude chat's line is as it always was.
   const provider = chat.provider ?? null;
@@ -240,6 +246,7 @@ export function ChatSettings({ slot, chat, plan, context, pages, onProblem, onCl
         <SettingsSheet
           chat={chat}
           plan={plan}
+          providerUsage={providerUsage}
           context={context}
           off={off}
           loading={!controls}

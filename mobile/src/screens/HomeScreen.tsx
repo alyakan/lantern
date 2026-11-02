@@ -1,3 +1,4 @@
+import { claudeUsage, currentUsageWindows } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
@@ -22,7 +23,7 @@ import { countsOf, diffPreviewOf } from "../view/diffPreview";
 import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { HomeSearch } from "./HomeSearch";
-import { UsageStrip } from "./ChatExtras";
+
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
@@ -30,7 +31,6 @@ import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 import { Suggestions } from "./Suggestions";
 import { UsageSheet } from "./UsageSheet";
-import { SettingsGlyph, SettingsSheet } from "./SettingsSheet";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -332,11 +332,10 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, single } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const chats = single ? allChats.filter((c) => c.project === single.name) : allChats;
   const waiting = single ? allWaiting.filter((w) => chats.some((c) => c.slot === w.slot)) : allWaiting;
   const loading = !chatsLoaded || !waitingLoaded;
@@ -459,9 +458,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             <PinGlyph pinned={pinned} />
           </PressScale>
         )}
-        <PressScale accessibilityRole="button" accessibilityLabel="Settings" onPress={() => setSettingsOpen(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-          <SettingsGlyph color={colors.ink2} />
-        </PressScale>
       </View>
     </View>
   );
@@ -482,7 +478,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           onReview={onReview}
         />
         {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
-        {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
       </>
     );
 
@@ -514,7 +509,13 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        {plan && <UsageStrip plan={plan} onPress={() => setUsageOpen(true)} />}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: space.xl, paddingTop: 10 }}>
+          {["claude", "codex"].map(id => {
+            const windows = currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now);
+            const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
+            return <PressScale key={id} accessibilityRole="button" accessibilityLabel={`${id === "claude" ? "Claude" : "Codex"} usage, ${used === null ? "usage unavailable" : `${Math.round(used * 100)} percent used`}`} onPress={() => setUsageOpen(true)}><Txt variant="small" tone={used !== null && used >= .95 ? "stop" : "ink2"}>{id === "claude" ? "Claude" : "Codex"} · {used === null ? "Usage unavailable" : `${Math.round(used * 100)}% used`}</Txt></PressScale>;
+          })}
+        </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -598,8 +599,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
       {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
-      {settingsOpen && <SettingsSheet onClose={() => setSettingsOpen(false)} />}
-      {usageOpen && plan && <UsageSheet plan={plan} onClose={() => setUsageOpen(false)} />}
+      {usageOpen && <UsageSheet plan={plan} providers={providerUsage} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet
           title={acting.title}

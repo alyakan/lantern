@@ -18,10 +18,10 @@ beforeEach(() => {
 describe("the usage sheet", () => {
   it("says where the windows stand and draws a bar for each of seven days", async () => {
     await render(<UsageSheet plan={{ used: 0.42, resetsAt: null, status: "allowed", week: { used: 0.3, resetsAt: null } }} onClose={jest.fn()} />);
-    expect(screen.getByText(/42% of the five-hour window is used/)).toBeTruthy();
-    expect(screen.getByText(/30% of the weekly limit used/)).toBeTruthy();
+    expect(screen.getByText(/Session: 42% used/)).toBeTruthy();
+    expect(screen.getByText(/Week: 30% used/)).toBeTruthy();
     expect(screen.getByTestId("usage-chart").props.accessibilityLabel).toMatch(/nothing seen/);
-    expect(screen.getByText(/has not seen enough yet/)).toBeTruthy();
+    expect(screen.getAllByText(/has not seen enough yet/)[0]).toBeTruthy();
   });
 
   it("shows what the phone has seen today", async () => {
@@ -41,4 +41,22 @@ describe("the usage sheet", () => {
     await new Promise((r) => setTimeout(r, 400));
     expect(onClose).toHaveBeenCalled();
   });
+});
+
+it("keeps Claude exhaustion separate from Codex usage", async () => {
+  await render(<UsageSheet plan={{ used: 1, resetsAt: null, status: "rejected" }} providers={{ codex: { provider: "codex", updated_at: 1, windows: [{ label: "5 hours", minutes: 300, used: .2, resets_at: null }] } }} onClose={jest.fn()} />);
+  expect(screen.getByText(/Session: 100% used · limit reached/)).toBeTruthy();
+  expect(screen.getByText(/5 hours: 20% used/)).toBeTruthy();
+});
+
+it("keeps each provider's history separate", async () => {
+  await act(async () => {
+    recordUsage({ used: .9, resetsAt: null, status: "allowed" });
+    recordUsage({ used: .2, resetsAt: null, status: "allowed" }, Date.now(), "codex");
+    await new Promise(r => setTimeout(r, 10));
+  });
+  await render(<UsageSheet plan={null} onClose={jest.fn()} />);
+  expect(screen.getByTestId("usage-chart").props.accessibilityLabel).toContain("90 percent");
+  expect(screen.getByTestId("usage-chart-codex").props.accessibilityLabel).toContain("20 percent");
+  expect(screen.getByTestId("usage-chart-codex").props.accessibilityLabel).not.toContain("90 percent");
 });

@@ -227,7 +227,7 @@ describe("Settings' Teams section: quiet agents and the plan's limit", () => {
 
   it("sets when a team's work is paused, Off until chosen", () => {
     view();
-    const select = screen.getByRole("combobox", { name: "Pause a team's work when my plan reaches" });
+    const select = screen.getByRole("combobox", { name: "Pause agents when their provider's usage reaches" });
     expect(select).toHaveValue("0");
     expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Off", "90%", "95%"]);
     fireEvent.change(select, { target: { value: "95" } });

@@ -123,7 +123,7 @@ impl Store {
             if c.id.is_empty() { c.id = session_id.clone(); }
             *session_id = c.id.clone();
         }
-        if matches!(event, UiEvent::TextDelta { .. } | UiEvent::Thinking { .. } | UiEvent::PlanUsage { .. } | UiEvent::WeekUsage { .. } | UiEvent::ShellOutput { .. } | UiEvent::ShellSecret { .. }) { return }
+        if matches!(event, UiEvent::TextDelta { .. } | UiEvent::Thinking { .. } | UiEvent::PlanUsage { .. } | UiEvent::WeekUsage { .. } | UiEvent::ProviderUsage { .. } | UiEvent::ShellOutput { .. } | UiEvent::ShellSecret { .. }) { return }
         c.updated_ms = crate::remote::now_ms();
         c.events.push(encode(event));
         if c.id.is_empty() { return; }

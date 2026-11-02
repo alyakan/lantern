@@ -10,14 +10,14 @@ const presets = [
 ];
 const controlsAnswer = (allow_auto: boolean) => ({ controls: { allow_auto, presets } });
 
-async function open(opts: { allowAuto?: boolean; features?: string[]; chatOver?: Parameters<typeof chat>[0]; answers?: Parameters<typeof attachSession>[1]; context?: { tokens: number; window: number | null }; waitMs?: number } = {}) {
+async function open(opts: { providerUsage?: Parameters<typeof ChatSettings>[0]["providerUsage"]; allowAuto?: boolean; features?: string[]; chatOver?: Parameters<typeof chat>[0]; answers?: Parameters<typeof attachSession>[1]; context?: { tokens: number; window: number | null }; waitMs?: number } = {}) {
   const { controller } = makeController();
   const session = attachSession(controller, { ...controlsAnswer(opts.allowAuto ?? false), ...opts.answers }, opts.features ?? ["controls", "close", "workflow"]);
   const onProblem = jest.fn();
   const onClosed = jest.fn();
   const c = chat({ permissions: "ask", preset: "balanced", ...opts.chatOver });
   const view = await renderWith(
-    <ChatSettings slot="a" chat={c} onProblem={onProblem} onClosed={onClosed} waitMs={opts.waitMs} context={opts.context}>
+    <ChatSettings slot="a" chat={c} onProblem={onProblem} onClosed={onClosed} waitMs={opts.waitMs} context={opts.context} providerUsage={opts.providerUsage}>
       {(line) => <Text>{`under the title: ${line ?? "nothing"}`}</Text>}
     </ChatSettings>,
     // The Mac the phone is connected to lists what `features` says (an older one, nothing).
@@ -270,4 +270,21 @@ describe("provider-neutral settings", () => {
     await fireEvent.press(await screen.findByRole("radio", { name: "Codex" }));
     expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { provider: "codex" } });
   });
+});
+
+it("shows the chat provider's reported windows without assuming a five-hour session", async () => {
+  await open({ chatOver: { provider: "Codex" }, providerUsage: { provider: "codex", updated_at: 1, windows: [{ label: "2 hours", minutes: 120, used: .2, resets_at: null }] } });
+  await openSheet("Usage & context");
+  expect(screen.getByText("Codex · 2 hours: 20% used")).toBeTruthy();
+  expect(screen.queryByText(/five-hour/)).toBeNull();
+});
+
+it("offers a direct conversation handoff when Claude is exhausted", async () => {
+  const { lastOf } = await open({ features: ["controls", "conversation"], providerUsage: { provider: "claude", updated_at: 1, windows: [{ label: "Session", minutes: 300, used: 1, resets_at: null }] }, answers: {
+    controls: { allow_auto: false, presets, providers: [{ id: "claude", name: "Claude", auto: true, presets: true }, { id: "codex", name: "Codex", auto: false, presets: false }] },
+    conversation_settings: { ...codexConfiguration, provider: "claude" },
+  } });
+  await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
+  await fireEvent.press(await screen.findByRole("button", { name: "Switch this chat to Codex" }));
+  expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { provider: "codex" } });
 });

@@ -302,6 +302,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::ReviewTarget { .. }
         | U::Todos { parent: Some(_), .. }
         // The account's usage goes to the phone as a message of its own (ServerMessage::Plan), not as a chat's event.
+        | U::ProviderUsage { .. }
         | U::PlanUsage { .. }
         | U::WeekUsage { .. }
         | U::Unknown { .. }
@@ -1110,10 +1111,15 @@ pub enum ServerMessage {
     },
     /// The chat list changed (a chat opened, closed, or moved on).
     Chats { chats: Vec<RemoteChat> },
+    /// Independent provider account snapshots. Only sent to a phone that advertised "provider_usage".
+    ProviderUsage { usage: Vec<crate::ui_event::ProviderUsage> },
     /// The subscription's five-hour window (and its weekly one, when known), for the whole account: `used` from 0 to 1, `resets_at` in unix seconds, and the
     /// CLI's status for it ("allowed", "allowed_warning", "rejected"). Sent when it first connects and when it changes, and
     /// only to a phone that said "extras".
     Plan {
+        #[serde(default)]
+        #[ts(optional, type = "number | null")]
+        updated_at: Option<u64>,
         used: f64,
         #[ts(type = "number | null")]
         resets_at: Option<u64>,

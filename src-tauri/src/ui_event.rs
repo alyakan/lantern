@@ -3,6 +3,26 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
+/// A provider-reported limit; durations are supplied by the provider, never assumed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct UsageWindow {
+    pub label: String,
+    pub used: f64,
+    #[ts(type = "number | null")]
+    pub resets_at: Option<u64>,
+    pub minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct ProviderUsage {
+    pub provider: String,
+    pub windows: Vec<UsageWindow>,
+    #[ts(type = "number")]
+    pub updated_at: u64,
+}
+
 /// Receives every event destined for the UI.
 pub type Sink = Arc<dyn Fn(UiEvent) + Send + Sync>;
 
@@ -240,6 +260,7 @@ pub enum UiEvent {
     /// The subscription's weekly (seven-day) window: `used` from 0 to 1 and when it resets (unix seconds). Said by the same
     /// `rate_limit_event` as the five-hour one, and for the whole account too.
     WeekUsage { used: f64, resets_at: Option<u64> },
+    ProviderUsage { usage: ProviderUsage },
     /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
     Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },

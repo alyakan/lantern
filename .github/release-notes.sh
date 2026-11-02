@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# What's new in the release tagged $1: every feat: and fix: merged since the previous tag, oldest first. A PR whose
+# What's new in the release tagged $1: feat/fix changes and user-facing PRs with a plain title merged since the previous tag, oldest first. A PR whose
 # description has a "## Changelog" section adds its bullets; any other adds its title. Version bumps, chores, docs and
 # Dependabot are left out. It is for the person using the app, so what only builds, signs or documents it is left out too: a
 # change that only touched mobile/fastlane, mobile/scripts, .github or docs, and a PR whose "## Changelog" says "- none" (an
@@ -12,8 +12,14 @@ prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
 
 notes=""
 while IFS= read -r subject; do
-  [[ "$subject" =~ ^(feat|fix)(\(.*\))?!?:\ (.*)$ ]] || continue
-  title="${BASH_REMATCH[3]}"
+  if [[ "$subject" =~ ^(feat|fix)(\(.*\))?!?:\ (.*)$ ]]; then
+    title="${BASH_REMATCH[3]}"
+  elif [[ "$subject" =~ ^.+\ \(#([0-9]+)\)$ ]] && [[ ! "$subject" =~ ^(chore|docs|ci|build|test|refactor|style)(\(|:) ]]; then
+    # A merged user-facing PR can have a plain title, as #378 does.
+    title="$subject"
+  else
+    continue
+  fi
   changelog=""
   if [[ "$title" =~ ^(.*)\ \(#([0-9]+)\)$ ]]; then
     title="${BASH_REMATCH[1]}"

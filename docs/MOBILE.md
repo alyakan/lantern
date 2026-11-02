@@ -2,6 +2,21 @@
 
 A paired phone (iOS or Android, one React Native app in `mobile/`) sees the chats you have open, answers Claude's cards, sends messages, stops a turn and wakes a sleeping chat. On the same Wi-Fi, or from anywhere over Tailscale (see "From anywhere" below); a hosted relay could be added later as another transport, because pairing, authentication and encryption sit above the transport.
 
+## What the Mac and the phone each do
+
+The phone is a remote for the chats on your Mac, not a second Mac. It has run on a real iPhone since the first TestFlight build; the notes below still say where something was only tested, not seen on a device.
+
+| | Mac | Phone and iPad |
+| --- | --- | --- |
+| Chats | Start, read, answer, stop, close, restore from History | The same for open chats; past chats in History are opened on the Mac |
+| Permissions and models | Ask or Auto, any preset | Ask always; Auto only when the Mac's **Let paired phones use Auto** is on; presets the Mac lists |
+| Workflow | Chat, Step by step, Team | Chat and Step by step (a team is started and led on the Mac) |
+| Claude's questions | Cards in the chat, What needs you | Cards, swipe to allow, notifications with Allow and Deny, a lock-screen card |
+| The Desk | The board (Needs you, Projects with branch, pull requests, release and to-dos, Repos today), the sidebar's Timeline, Ask | Needs you, Just finished, and talking to the Desk; no projects table, Repos today or Timeline yet |
+| Beside the chat | Changes, Files, Plan, Tests, Checks, Network, Dashboard, Artifacts, Todos | The Panels button: Changes, Artifacts and To-dos (on a wide iPad, a pane beside the chat) |
+| Disk space | The Storage tab: scan, and delete what you tick | Free space, a scan, and clearing only what the Mac's scan found safe (worktrees, build output, caches, simulators) |
+| Only here | Routines, Settings, the menu bar, project notes, the command palette | Read aloud, drawing on a photo, drafts kept per chat, app lock, the last-known chat list offline |
+
 ## Where things live
 
 | Layer | Desktop (Rust, `src-tauri/src/remote/`) | Phone (`mobile/src/`) |

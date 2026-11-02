@@ -408,3 +408,13 @@ describe("when each working chat started", () => {
     expect(again.workingSince).toBe(first.workingSince);
   });
 });
+
+it("keeps provider snapshots independent from Claude and clears them for a new Mac run", () => {
+  const usage = { provider: "codex", updated_at: 10, windows: [{ label: "5 hours", minutes: 300, used: .2, resets_at: null }] };
+  const before = run([{ type: "pushed", msg: { type: "plan", used: 1, resets_at: null, status: "rejected" } }, { type: "pushed", msg: { type: "provider_usage", usage: [usage] } }]);
+  expect(before.plan?.used).toBe(1);
+  expect(before.providerUsage.codex.windows[0].used).toBe(.2);
+  const after = reducer(before, { type: "welcome", epoch: 999 });
+  expect(after.plan).toBeNull();
+  expect(after.providerUsage).toEqual({});
+});

@@ -38,6 +38,7 @@ export type Item =
 
 /** The subscription's five-hour window, as the Mac last said it (the account's, the same in every chat). */
 export interface PlanUsage {
+  updatedAt?: number;
   /** 0 to 1. */
   used: number;
   /** Unix seconds. */
@@ -86,6 +87,7 @@ export interface State {
   views: Record<string, ChatView>;
   /** The subscription's usage, once a Mac that can say has said it. */
   plan: PlanUsage | null;
+  providerUsage: Record<string, import("../protocol/generated/ProviderUsage").ProviderUsage>;
   /** The Mac's run the numbers in `views` belong to (its Welcome's). */
   epoch: number | null;
   /** The Desk as the Mac's window has it, once a Mac that has one has said (null: not yet, or a Mac without). */
@@ -102,7 +104,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null, desk: null, single: null };
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, single: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -254,7 +256,7 @@ export function reducer(state: State, action: Action): State {
       // Each connection is told the One project afresh (when the Mac has one): until it is, every project shows.
       if (state.epoch === action.epoch) return state.single === null ? state : { ...state, single: null };
       // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again.
-      return { ...state, epoch: action.epoch, single: null, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
+      return { ...state, epoch: action.epoch, single: null, plan: null, providerUsage: {}, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
     case "waiting": {
       const views = { ...state.views };
       for (const [slot, ids] of Object.entries(action.observedPrompts ?? {})) {
@@ -310,8 +312,10 @@ export function reducer(state: State, action: Action): State {
           return { ...state, desk: msg.desk };
         case "single":
           return { ...state, single: msg.single };
+        case "provider_usage":
+          return { ...state, providerUsage: Object.fromEntries(msg.usage.map(p => [p.provider, p])) };
         case "plan":
-          return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
+          return { ...state, plan: { ...(msg.updated_at ? { updatedAt: msg.updated_at } : {}), used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.
         default:
           return state;

@@ -1079,7 +1079,7 @@ impl LiveActivities {
             // A Stop hook keeping Claude going is the same turn, still on its clock.
             UiEvent::UserText { text, .. } if text.starts_with(crate::hooks::STOP_PREFIX) => None,
             UiEvent::UserText { .. } => Some(Next::Restart),
-            UiEvent::Todos { parent: None, .. } | UiEvent::PlanUsage { .. } => Some(Next::Detail),
+            UiEvent::Todos { parent: None, .. } | UiEvent::PlanUsage { .. } | UiEvent::ProviderUsage { .. } => Some(Next::Detail),
             UiEvent::TurnDone { is_error: false, .. } => Some(Next::End(Status::Done)),
             UiEvent::TurnDone { is_error: true, .. } => Some(Next::End(Status::Failed)),
             UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => Some(Next::End(Status::Failed)),
@@ -1124,7 +1124,18 @@ impl LiveActivities {
             title: self.hub.real_title(&card.slot).and_then(|t| clean_title(&t)),
             steps: self.hub.steps(&card.slot),
             needs: if status == Status::NeedsYou { card.needs } else { None },
-            plan: self.hub.plan().map(|(used, _, _)| (used * 100.0).round().clamp(0.0, 100.0) as u8),
+            plan: {
+                let provider = self.hub.chat(&card.slot).and_then(|c| c.provider);
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                let used = if provider.as_deref() == Some("Codex") {
+                    self.hub.provider_usage().into_iter().find(|p| p.provider == "codex").and_then(|p| p.windows.into_iter().filter(|w| w.resets_at.is_none_or(|at| at > now)).map(|w| w.used).reduce(f64::max))
+                } else if provider.is_some() || self.hub.is_off_claude(&card.slot) {
+                    None
+                } else {
+                    self.hub.plan().filter(|(_, at, _)| at.is_none_or(|at| at > now)).map(|(used, _, _)| used)
+                };
+                used.map(|used| (used * 100.0).round().clamp(0.0, 100.0) as u8)
+            },
         }
     }
 
@@ -1862,6 +1873,21 @@ pub(crate) mod tests {
         r.hub.titled("a", "  Cut the\nrelease  ");
         r.event("a", resolved()).await;
         assert_eq!(props(&r.sent().last().unwrap().1)["title"], "Cut the release");
+    }
+
+    #[tokio::test]
+    async fn a_codex_live_card_never_shows_claudes_quota() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.hub.set_provider("a", Some("Codex"));
+        r.card_aged("phone-1", "a", 60_000);
+        r.event("a", usage(1.0)).await;
+        let card = r.store.live.cards().remove(0).1;
+        assert_eq!(r.service.detail_for(&card, Status::Working).plan, None);
+        r.event("a", UiEvent::ProviderUsage { usage: crate::ui_event::ProviderUsage { provider: "codex".into(), updated_at: 10, windows: vec![crate::ui_event::UsageWindow { label: "5 hours".into(), used: 0.2, resets_at: None, minutes: Some(300) }] } }).await;
+        assert_eq!(r.service.detail_for(&card, Status::Working).plan, Some(20));
+        r.hub.set_provider("a", Some("Other endpoint"));
+        assert_eq!(r.service.detail_for(&card, Status::Working).plan, None);
     }
 
     #[tokio::test]
