@@ -3098,9 +3098,13 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
 }
 
 /// How the projects with a chat open stand, for the Desk's board (read-only: see `status.rs`). The folders are the hub's
-/// open chats', less the workers' and other agents' worktrees.
+/// open chats', less the workers' and other agents' worktrees. `fresh`: the Desk's Refresh, which asks GitHub again rather
+/// than use what it said in the last 90 s (at most every 15 s).
 #[tauri::command]
-async fn desk_status(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<status::RepoStatus>, String> {
+async fn desk_status(app: AppHandle, state: State<'_, AppState>, fresh: Option<bool>) -> Result<Vec<status::RepoStatus>, String> {
+    if fresh == Some(true) {
+        status::forget_github();
+    }
     let path_env = login_path(&state).await;
     let workers = app.path().app_local_data_dir().ok().map(|d| d.join("worktrees"));
     let mut folders: Vec<String> = state

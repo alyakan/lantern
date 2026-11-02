@@ -98,6 +98,7 @@ import { DeskAsk } from "./components/DeskAsk";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
+import { stepMessage } from "./lib/yourWork";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2587,7 +2588,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
-  const allRepos = useDeskStatus(deskShown, deskFolders);
+  const { repos: allRepos, refresh: refreshRepos } = useDeskStatus(deskShown, deskFolders);
   const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
   const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
@@ -3064,6 +3065,16 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
                   onAnswer={answerOnDesk}
+                  onStep={(item, target) => {
+                    const text = stepMessage(item, target);
+                    // Sent by Lantern from a click, not typed: never the typed go-ahead a merge, push or publish needs (each
+                    // step asks for it with request_approval).
+                    if (target.kind === "chat") sendIn(target.slot, text, undefined, true);
+                    else if (target.kind === "new" && agentReady) startFresh(target.folder, false, false, text);
+                    else return false;
+                    return true;
+                  }}
+                  onRefreshRepos={refreshRepos}
                 />
               </ErrorBoundary>
             ) : showCanvas ? (

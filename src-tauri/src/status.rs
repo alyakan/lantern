@@ -5,7 +5,8 @@
 //! repositories they are in are looked at once each, however many worktrees of one have a chat. git runs hardened
 //! (`git::run`), takes no optional locks (a chat committing at that moment must not find the index locked) and doesn't go
 //! into submodules; `gh` is told which repository with `--repo` and runs outside it, so nothing in a project's config is
-//! read or run by it. What comes back from GitHub (titles, branch names) is shown, never handed to a model.
+//! read or run by it. What comes back from GitHub (titles, branch names) is shown, never handed to a model: the Desk's
+//! "Your work" messages name a pull request by its repository and number only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,12 @@ const GH_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_FRESH: Duration = Duration::from_secs(90);
 /// The open pull requests and the merged ones listed, at most.
 const OPEN_MAX: &str = "30";
-const MERGED_MAX: &str = "10";
+const OPEN_FIELDS: &str = "number,title,author,headRefName,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus,reviewRequests";
+const MERGED_MAX: &str = "30";
+/// The local branches looked at, newest commit first, at most (each costs one `git rev-list`).
+const BRANCHES_MAX: &str = "20";
+/// Asked for fresh at most this often (the Desk's Refresh), so a held-down button can't hammer GitHub.
+const FRESH_MIN: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct FolderStatus {
@@ -53,12 +59,20 @@ pub struct PrStatus {
     pub checks: &'static str,
     /// GitHub's review decision: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED; None when there is none.
     pub review: Option<String>,
+    /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still working it out).
+    pub mergeable: Option<String>,
+    /// GitHub's mergeStateStatus: CLEAN, BEHIND, BLOCKED, DIRTY, DRAFT, HAS_HOOKS, UNSTABLE or UNKNOWN.
+    pub merge_state: Option<String>,
+    /// The people asked to review it, by login (teams asked aren't counted).
+    pub review_requests: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct MergedPr {
     pub number: u32,
     pub title: String,
+    pub author: String,
+    pub branch: String,
     /// As GitHub has it (ISO 8601, UTC).
     pub merged_at: String,
 }
@@ -68,6 +82,17 @@ pub struct Release {
     pub tag: String,
     /// None for a draft.
     pub published_at: Option<String>,
+}
+
+/// A local branch with commits on it that were never pushed: there is no branch of its name on origin, and what it tracked
+/// wasn't deleted there (a branch pushed, merged and deleted reads `[gone]`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct LocalBranch {
+    pub name: String,
+    /// Its commits not on origin's default branch.
+    pub ahead: u32,
+    /// Its last commit, in seconds since 1970.
+    pub committed: i64,
 }
 
 /// Whether GitHub could be asked about the repository.
@@ -101,6 +126,10 @@ pub struct RepoStatus {
     pub release: Option<Release>,
     /// Releases waiting as drafts.
     pub drafts: Vec<String>,
+    /// Who gh is logged in as, so the Desk can tell your pull requests from others'.
+    pub viewer: Option<String>,
+    /// Local branches never pushed, newest commit first (agents' are left out).
+    pub branches: Vec<LocalBranch>,
     pub error: Option<String>,
 }
 
@@ -116,6 +145,8 @@ struct FromGh {
 }
 
 static CACHE: Mutex<Option<HashMap<String, (Instant, FromGh)>>> = Mutex::new(None);
+/// Who gh is logged in as, asked once while Lantern runs (a failure is asked again next time).
+static VIEWER: Mutex<Option<String>> = Mutex::new(None);
 
 /// Whether `folder` is an agent's worktree: a Lantern worker's (under `workers`, Lantern's own worktrees folder) or one
 /// Claude Code made for a subagent (`.claude/worktrees/…`).
@@ -178,7 +209,7 @@ fn number(v: &serde_json::Value) -> Option<u32> {
     u32::try_from(v["number"].as_u64()?).ok()
 }
 
-/// What `gh pr list --json number,title,author,headRefName,isDraft,statusCheckRollup,reviewDecision` printed.
+/// What `gh pr list --json` with `OPEN_FIELDS` printed.
 pub fn parse_open(json: &[u8]) -> Result<Vec<PrStatus>, String> {
     let list: Vec<serde_json::Value> = serde_json::from_slice(json).map_err(|e| format!("gh pr list: {e}"))?;
     Ok(list
@@ -192,17 +223,28 @@ pub fn parse_open(json: &[u8]) -> Result<Vec<PrStatus>, String> {
                 draft: pr["isDraft"].as_bool().unwrap_or(false),
                 checks: rollup(&pr["statusCheckRollup"]),
                 review: pr["reviewDecision"].as_str().filter(|s| !s.is_empty()).map(String::from),
+                mergeable: pr["mergeable"].as_str().filter(|s| !s.is_empty()).map(String::from),
+                merge_state: pr["mergeStateStatus"].as_str().filter(|s| !s.is_empty()).map(String::from),
+                review_requests: pr["reviewRequests"].as_array().map(|l| l.iter().filter_map(|r| r["login"].as_str().map(String::from)).collect()).unwrap_or_default(),
             })
         })
         .collect())
 }
 
-/// What `gh pr list --state merged --json number,title,mergedAt` printed, newest first.
+/// What `gh pr list --state merged --json number,title,author,headRefName,mergedAt` printed, newest first.
 pub fn parse_merged(json: &[u8]) -> Result<Vec<MergedPr>, String> {
     let list: Vec<serde_json::Value> = serde_json::from_slice(json).map_err(|e| format!("gh pr list: {e}"))?;
     let mut out: Vec<MergedPr> = list
         .iter()
-        .filter_map(|pr| Some(MergedPr { number: number(pr)?, title: pr["title"].as_str().unwrap_or("").to_string(), merged_at: pr["mergedAt"].as_str()?.to_string() }))
+        .filter_map(|pr| {
+            Some(MergedPr {
+                number: number(pr)?,
+                title: pr["title"].as_str().unwrap_or("").to_string(),
+                author: pr["author"]["login"].as_str().unwrap_or("").to_string(),
+                branch: pr["headRefName"].as_str().unwrap_or("").to_string(),
+                merged_at: pr["mergedAt"].as_str()?.to_string(),
+            })
+        })
         .collect();
     // ISO 8601 in UTC sorts as text.
     out.sort_by(|a, b| b.merged_at.cmp(&a.merged_at));
@@ -261,7 +303,7 @@ fn ask_github(github: &str, path_env: Option<&str>) -> FromGh {
         got.gh = gh;
         got.error = Some(why);
     };
-    match call(&["pr", "list", "--repo", github, "--state", "open", "--limit", OPEN_MAX, "--json", "number,title,author,headRefName,isDraft,statusCheckRollup,reviewDecision"]) {
+    match call(&["pr", "list", "--repo", github, "--state", "open", "--limit", OPEN_MAX, "--json", OPEN_FIELDS]) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             got.gh = Gh::Missing;
             return got;
@@ -280,7 +322,7 @@ fn ask_github(github: &str, path_env: Option<&str>) -> FromGh {
         },
     }
     // The other two only add to what is known: one failing leaves the rest.
-    if let Ok(out) = call(&["pr", "list", "--repo", github, "--state", "merged", "--limit", MERGED_MAX, "--json", "number,title,mergedAt"]) {
+    if let Ok(out) = call(&["pr", "list", "--repo", github, "--state", "merged", "--limit", MERGED_MAX, "--json", "number,title,author,headRefName,mergedAt"]) {
         if out.success {
             got.merged = parse_merged(&out.stdout).unwrap_or_default();
         }
@@ -291,6 +333,76 @@ fn ask_github(github: &str, path_env: Option<&str>) -> FromGh {
         }
     }
     got
+}
+
+/// Who gh is logged in as: one `gh api user`, run outside any checkout, kept while Lantern runs.
+fn viewer(path_env: Option<&str>) -> Option<String> {
+    if let Some(v) = VIEWER.lock().ok().and_then(|v| v.clone()) {
+        return Some(v);
+    }
+    let out = run_program("gh", &std::env::temp_dir(), &["api", "user", "--jq", ".login"], path_env, GH_TIMEOUT, Keep::Head).ok().filter(|o| o.success)?;
+    let login = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    // A GitHub login: letters, digits and hyphens, at most 39.
+    if login.is_empty() || login.len() > 39 || !login.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return None;
+    }
+    if let Ok(mut v) = VIEWER.lock() {
+        *v = Some(login.clone());
+    }
+    Some(login)
+}
+
+/// Lets the next ask go to GitHub again (the Desk's Refresh), unless what is kept was asked within `FRESH_MIN`.
+pub fn forget_github() {
+    if let Ok(mut cache) = CACHE.lock() {
+        if let Some(map) = cache.as_mut() {
+            map.retain(|_, (at, _)| at.elapsed() < FRESH_MIN);
+        }
+    }
+}
+
+/// The never-pushed branches in `for-each-ref`'s lines (`name<TAB>upstream:track<TAB>committerdate:unix<TAB>upstream:remotename`):
+/// less `base`, a branch origin has (`pushed`), one whose upstream is `[gone]`, one tracking a remote other than origin (a fork's
+/// pull request checked out: not yours to push), an agent's (`skip`) and a Lantern worker's; with each one's commits not on base
+/// from `ahead` (None: git couldn't say, and 0: nothing new, are both left out).
+pub fn local_branches(lines: &str, base: &str, pushed: &[&str], skip: &[&str], ahead: impl Fn(&str) -> Option<u32>) -> Vec<LocalBranch> {
+    lines
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let name = parts.next()?.trim();
+            let track = parts.next().unwrap_or("");
+            let committed = parts.next().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+            let remote = parts.next().unwrap_or("").trim();
+            let elsewhere = !remote.is_empty() && remote != "origin";
+            if name.is_empty() || name == base || track.contains("gone") || elsewhere || pushed.contains(&name) || skip.contains(&name) || git::is_workers_branch(name) {
+                return None;
+            }
+            let ahead = ahead(name).filter(|n| *n > 0)?;
+            Some(LocalBranch { name: name.to_string(), ahead, committed })
+        })
+        .collect()
+}
+
+/// The repository's never-pushed branches, read from its refs at `at` (nothing is checked out, and no worktree is read).
+fn branches_in(at: &Path, skip: &[&str], path_env: Option<&str>) -> Vec<LocalBranch> {
+    let raw = |args: &[&str]| git::run_raw(at, args, path_env).ok();
+    // origin's default branch (`origin/main`); without one there is nothing to compare with.
+    let base = raw(&["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]).map(|b| b.trim().to_string()).filter(|b| !b.is_empty()).or_else(|| {
+        ["origin/main", "origin/master"].into_iter().find(|b| raw(&["rev-parse", "--verify", "-q", &format!("refs/remotes/{b}")]).is_some()).map(String::from)
+    });
+    let Some(base) = base else { return Vec::new() };
+    let base_name = base.strip_prefix("origin/").unwrap_or(&base).to_string();
+    let pushed = raw(&["for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"]).unwrap_or_default();
+    let pushed: Vec<&str> = pushed.lines().map(str::trim).collect();
+    let count = format!("--count={BRANCHES_MAX}");
+    let Some(lines) = raw(&["for-each-ref", "--sort=-committerdate", &count, "--format=%(refname:short)%09%(upstream:track)%09%(committerdate:unix)%09%(upstream:remotename)", "refs/heads"]) else {
+        return Vec::new();
+    };
+    local_branches(&lines, &base_name, &pushed, skip, |name| {
+        // As `refs/heads/<name>`, so a branch named like an option or a range is only ever a ref.
+        raw(&["rev-list", "--count", &format!("refs/remotes/{base}..refs/heads/{name}"), "--"]).and_then(|n| n.trim().parse().ok())
+    })
 }
 
 fn from_github(key: &str, github: Option<&str>, path_env: Option<&str>) -> FromGh {
@@ -351,6 +463,9 @@ fn repo_status(common: &Path, folders: &[String], workers: Option<&Path>, path_e
         })
         .collect();
     let got = from_github(&common.to_string_lossy(), github.as_deref(), path_env);
+    let agents: Vec<&str> = worktrees.iter().filter(|w| w.agent).filter_map(|w| w.branch.as_deref()).collect();
+    let branches = branches_in(at, &agents, path_env);
+    let viewer = if got.gh == Gh::Ready { viewer(path_env) } else { None };
     RepoStatus {
         repo: main.to_string_lossy().into_owned(),
         github,
@@ -361,6 +476,8 @@ fn repo_status(common: &Path, folders: &[String], workers: Option<&Path>, path_e
         merged: got.merged,
         release: got.release,
         drafts: got.drafts,
+        viewer,
+        branches,
         error: got.error,
     }
 }
@@ -407,12 +524,16 @@ mod tests {
 
     #[test]
     fn parses_open_and_merged_pull_requests() {
-        let open = br#"[{"number":7,"title":"feat: x","author":{"login":"aly"},"headRefName":"feat/x","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":""},{"title":"no number"}]"#;
+        let open = br#"[{"number":7,"title":"feat: x","author":{"login":"aly"},"headRefName":"feat/x","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":"","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","reviewRequests":[{"login":"sara"},{"name":"core-team"}]},{"title":"no number"}]"#;
         let prs = parse_open(open).unwrap();
         assert_eq!(prs.len(), 1);
         assert_eq!((prs[0].number, prs[0].checks, prs[0].review.clone()), (7, "fail", None));
-        let merged = br#"[{"number":1,"title":"a","mergedAt":"2026-10-30T10:00:00Z"},{"number":2,"title":"b","mergedAt":"2026-10-31T09:00:00Z"},{"number":3,"title":"c"}]"#;
-        assert_eq!(parse_merged(merged).unwrap().iter().map(|m| m.number).collect::<Vec<_>>(), vec![2, 1]);
+        assert_eq!((prs[0].mergeable.as_deref(), prs[0].merge_state.as_deref()), (Some("CONFLICTING"), Some("DIRTY")));
+        assert_eq!(prs[0].review_requests, vec!["sara"]);
+        let merged = br#"[{"number":1,"title":"a","author":{"login":"aly"},"headRefName":"feat/a","mergedAt":"2026-10-30T10:00:00Z"},{"number":2,"title":"b","mergedAt":"2026-10-31T09:00:00Z"},{"number":3,"title":"c"}]"#;
+        let merged = parse_merged(merged).unwrap();
+        assert_eq!(merged.iter().map(|m| m.number).collect::<Vec<_>>(), vec![2, 1]);
+        assert_eq!((merged[1].author.as_str(), merged[1].branch.as_str()), ("aly", "feat/a"));
         assert!(parse_open(b"not json").is_err());
     }
 
@@ -423,6 +544,45 @@ mod tests {
         assert_eq!(latest.unwrap().tag, "v0.1.93");
         assert_eq!(drafts, vec!["v0.1.94"]);
         assert_eq!(parse_releases(b"[]").unwrap(), (None, vec![]));
+    }
+
+    #[test]
+    fn keeps_only_branches_never_pushed_with_commits_of_their_own() {
+        let lines = "feat/new\t\t1700000300\t\nmain\t[ahead 1]\t1700000200\torigin\nfeat/merged\t[gone]\t1700000100\torigin\nfeat/pushed\t\t1700000050\t\nlantern/w-123\t\t1700000040\t\nagent-branch\t\t1700000030\t\nfeat/empty\t\t1700000020\t\nfork-fix\t\t1700000010\tsara\n";
+        let asked = std::cell::RefCell::new(Vec::new());
+        let list = local_branches(lines, "main", &["main", "feat/pushed"], &["agent-branch"], |name| {
+            asked.borrow_mut().push(name.to_string());
+            Some(if name == "feat/empty" { 0 } else { 3 })
+        });
+        assert_eq!(list, vec![LocalBranch { name: "feat/new".into(), ahead: 3, committed: 1_700_000_300 }]);
+        // Only what could still be a branch never pushed costs a `rev-list`.
+        assert_eq!(asked.into_inner(), vec!["feat/new", "feat/empty"]);
+        assert!(local_branches("", "main", &[], &[], |_| Some(1)).is_empty());
+    }
+
+    #[test]
+    fn finds_a_branch_never_pushed_in_a_real_repository() {
+        let base = std::env::temp_dir().join(format!("lantern-branches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (origin, repo) = (base.join("origin.git"), base.join("repo"));
+        std::fs::create_dir_all(&base).unwrap();
+        let git = |dir: &Path, args: &[&str]| git::run(dir, args, None).unwrap();
+        let commit = |dir: &Path, m: &str| git(dir, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", m]);
+        git(&base, &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
+        git(&base, &["clone", "-q", origin.to_str().unwrap(), repo.to_str().unwrap()]);
+        git(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        commit(&repo, "one");
+        git(&repo, &["push", "-q", "-u", "origin", "main"]);
+        git(&repo, &["remote", "set-head", "origin", "main"]);
+        git(&repo, &["checkout", "-q", "-b", "feat/local"]);
+        commit(&repo, "two");
+        commit(&repo, "three");
+        git(&repo, &["checkout", "-q", "-b", "feat/shared", "main"]);
+        commit(&repo, "four");
+        git(&repo, &["push", "-q", "-u", "origin", "feat/shared"]);
+        let list = branches_in(&repo, &[], None);
+        assert_eq!(list.iter().map(|b| (b.name.as_str(), b.ahead)).collect::<Vec<_>>(), vec![("feat/local", 2)]);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Asks GitHub for real: `cargo test --lib real_status -- --ignored --nocapture` (needs gh logged in).

@@ -12,7 +12,7 @@ A Mac app for the `claude` CLI you already have: see what Claude is doing as car
 
 | | |
 | --- | --- |
-| **The Desk: every chat at a glance** | One board for all your projects: what needs you now (with Allow and Deny right there), each project's chats, branch, pull requests and checks, release and to-dos, and what merged, released or failed today. The sidebar's Timeline lists what happened in every chat as it happened, unread answers marked. Ask across projects how something stands, or say what to do and it goes to the right chat. |
+| **The Desk: every chat at a glance** | One board for all your projects: what needs you now (with Allow and Deny right there), each project's chats, branch, release and to-dos, and Your work: where each of your pull requests and unpushed branches stands, as colour-coded nodes from Local to Release, with the next step a click away. The sidebar's Timeline lists what happened in every chat as it happened, unread answers marked. Ask across projects how something stands, or say what to do and it goes to the right chat. |
 | **On your phone** | An iPhone and iPad app pairs with your Mac (on your Wi-Fi, or anywhere over Tailscale): your chats, Claude's questions to swipe to allow, messages, a lock-screen card of what is working, and notifications when a chat needs you. See [docs/MOBILE.md](docs/MOBILE.md). |
 | **A chat you can read** | Every tool call is a card, edits and new files are diffs, and Allow / Deny prompts show up in the conversation instead of scrolling past. |
 | **Step by step** | Claude works one page at a time and stops after each. Build, review a pull request file by file, debug from evidence, or review a design as a map. You approve a page, ask about it, or change it. |

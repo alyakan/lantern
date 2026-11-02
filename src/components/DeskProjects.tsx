@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
+import { toneCounts, yourWork, type WorkItem } from "../lib/yourWork";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
 import { useMenuInside } from "../lib/useMenuInside";
 import { Row } from "./DeskCard";
+import { WorkDots } from "./YourWork";
 import { useMenuKeys } from "./useMenuKeys";
 
 export interface DeskProjectsProps {
@@ -51,17 +53,16 @@ function Branch({ s }: { s: ProjectStatus | null | undefined }) {
   );
 }
 
-/** Its repository's open pull requests, and how many have checks failing or still running. */
-function Prs({ s }: { s: ProjectStatus | null | undefined }) {
+/** Your work in its repository (see YourWork): a coloured dot and a count for each state. */
+function Work({ s, repo, items }: { s: ProjectStatus | null | undefined; repo: string | null; items: WorkItem[] }) {
   if (s === undefined) return <dd className="muted">…</dd>;
-  if (s === null) return <dd className="muted">—</dd>;
+  if (s === null || repo === null) return <dd className="muted">—</dd>;
+  const counts = toneCounts(items, repo);
   const why = NO_GH[s.gh];
-  if (why) return <dd className="muted" title={s.error ?? why}>{why}</dd>;
-  if (!s.open) return <dd className="muted">none open</dd>;
+  if (why && !Object.keys(counts).length) return <dd className="muted" title={s.error ?? why}>{why}</dd>;
   return (
-    <dd title={s.running > 0 ? `${s.running} with checks still running` : undefined}>
-      {s.open} open
-      {s.failing > 0 && <span className="desk-bad"> · {s.failing} failing</span>}
+    <dd>
+      <WorkDots counts={counts} />
     </dd>
   );
 }
@@ -138,15 +139,17 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
 
 /**
  * Every project on the Desk, a tile each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
- * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened, one
+ * you among them), its branch, your work in it and its release (from git and gh), its to-dos, and when something last happened, one
  * under the other. A tile's Chats button drops its chats down over the Desk, each with its last message; its name opens its own page.
  */
 export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
   if (!rows.length) return null;
+  const items = yourWork(repos, now);
   return (
     <section className="desk-projects" aria-label="Projects">
         {rows.map((r) => {
           const s = statusFor(r.folder, repos);
+          const repo = repos?.find((x) => x.folders.some((f) => f.folder === r.folder))?.repo ?? null;
           return (
             <article key={r.folder} className="desk-tile" aria-label={r.label}>
               <header className="desk-tile-head">
@@ -160,8 +163,8 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
               <dl className="desk-facts">
                 <dt>Chats</dt>
                 <dd>{chatsLine(r)}</dd>
-                <dt>Pull requests</dt>
-                <Prs s={s} />
+                <dt>Your work</dt>
+                <Work s={s} repo={repo} items={items} />
                 <dt>Release</dt>
                 <Release s={s} now={now} />
                 <dt>To-dos</dt>

@@ -255,7 +255,8 @@ export const api = {
   /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
   openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
   /** How the repositories with a chat open stand (branches, pull requests and checks, merges, releases), for the Desk. */
-  deskStatus: () => invoke<RepoStatus[]>("desk_status"),
+  /** `fresh`: ask GitHub again rather than use what it said in the last 90 s (the Mac allows it every 15 s). */
+  deskStatus: (fresh = false) => invoke<RepoStatus[]>("desk_status", { fresh }),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */

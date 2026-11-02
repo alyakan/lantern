@@ -803,6 +803,16 @@
 
 /* Base */
 * { box-sizing: border-box; }
+/* Scrollbars are thin and quiet everywhere: no track, and a faint thumb that firms up while the pointer is over what scrolls
+   (posthog draws its own chunky ones). The standard properties are Chrome's and Firefox's; WebKit, the app's own webview,
+   reads the pseudo-elements. */
+:where(:root:not([data-theme="posthog"])) * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+:where(:root:not([data-theme="posthog"])) *:hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-track, :where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-corner { background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: transparent; background-clip: padding-box; }
+:where(:root:not([data-theme="posthog"])) :hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--muted) 45%, transparent); }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 /* Monaco sizes its completion list in content-box terms; under the reset above the last row is cut off. */
 .monaco-editor .suggest-widget, .monaco-editor .suggest-widget *, .monaco-editor .suggest-details, .monaco-editor .suggest-details * { box-sizing: content-box; }
 /* The app fills the window and scrolls inside its panes; the page around it never scrolls. */
@@ -3805,13 +3815,13 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-tone-blocked { color: var(--del); }
 .desk-pr-link { color: var(--text); text-decoration: none; }
 .desk-pr-link:hover { text-decoration: underline; }
-/* The Desk's main page: one grid of tiles that lock together. What waits on you takes a whole row; Repos today two columns when
-   the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
+/* The Desk's main page: one grid of tiles that lock together. What waits on you and Your work take a whole row each; a wide tile
+   two columns when the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
    project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. */
 .desk-main { container-type: inline-size; }
 .desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 10px; }
 .desk-projects { display: contents; }
-.desk-bento > .desk-needs { grid-column: 1 / -1; }
+.desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
 .desk-summary .desk-clear { margin: -2px -4px 2px; }
 .desk-summary .desk-facts { border-top: none; padding-top: 0; }
@@ -3838,17 +3848,36 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-changed { white-space: nowrap; }
 .desk-branch { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--mono); }
 
-/* Repos today: a line per merge, release, failing check or waiting draft. */
-.desk-repo-list { margin: 0; padding: 0; list-style: none; }
-.desk-repo-event:last-child { border-bottom: none; }
-.desk-repo-event { display: flex; align-items: baseline; gap: 8px; padding: 7px 12px; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
-.desk-repo-mark { flex: none; width: 14px; text-align: center; font-weight: 700; color: var(--muted-text); }
-.desk-repo-event.merged .desk-repo-mark, .desk-repo-event.released .desk-repo-mark { color: var(--add); }
-.desk-repo-event.failing .desk-repo-mark { color: var(--del); }
-.desk-repo-event.draft .desk-repo-mark { color: var(--attn-text); }
-.desk-repo-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-repo-num { color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.desk-repo-name { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+
+/* Your work: next steps, then where each piece stands as a row of nodes (Local › PR › Checks › Review › Merge › Release). A state
+   has one colour, in its dot, its word and its node: blocked red, your call blue, on its way amber, local only purple, done green. */
+.yw-tone-bad { --yw: var(--del); }
+.yw-tone-you { --yw: var(--yw-you); }
+.yw-tone-wait { --yw: var(--yw-wait); }
+.yw-tone-local { --yw: var(--yw-local); }
+.yw-tone-done { --yw: var(--add); }
+/* Blue and purple from the chart palette every theme sets for its own pane. */
+.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: var(--attn-text); --yw-local: var(--storage-4); }
+.yw-sub { margin: 0; padding: 8px 12px 2px; font: 600 calc(10.5px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
+.yw-sub + .dp-list { border-top: none; }
+.yw-card section + section { border-top: 0.5px solid var(--line); }
+.yw-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--yw); vertical-align: middle; }
+.yw-word { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--yw); white-space: nowrap; }
+.yw-num { color: var(--muted-text); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+.yw-sent { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+.dp-aside button.yw-yours { border: 1px solid var(--yw); background: none; color: var(--yw); }
+.yw-nodes { display: flex; margin: 4px 0 2px; padding: 0; list-style: none; }
+.yw-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 1 64px; min-width: 0; font-size: calc(10.5px * var(--font-scale)); color: var(--muted-text); }
+.yw-node > i { z-index: 1; box-sizing: border-box; width: 11px; height: 11px; border: 2px solid var(--line); border-radius: 50%; background: var(--pane); }
+.yw-node + .yw-node::before { content: ""; position: absolute; top: 4.5px; right: 50%; width: 100%; height: 2px; background: var(--line); }
+.yw-node.yw-past > i { border-color: var(--add); background: var(--add); }
+.yw-node.yw-past + .yw-node::before { background: var(--add); }
+.yw-node.yw-now { color: var(--yw); font-weight: 650; }
+.yw-node.yw-now > i { width: 15px; height: 15px; margin-top: -2px; border: 3px solid var(--yw); background: color-mix(in srgb, var(--yw) 25%, var(--pane)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yw) 18%, transparent); }
+.yw-dots { display: inline-flex; flex-wrap: wrap; gap: 10px; }
+.yw-chip { display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.yw-chip .yw-dot { width: 7px; height: 7px; margin-right: 4px; }
 .desk-chat { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: none; color: var(--text); font-size: calc(13px * var(--font-scale)); font-weight: 650; text-align: left; }
 .desk-chat:hover { text-decoration: underline; }
 .desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }

@@ -6,7 +6,8 @@ import { elapsed } from "../lib/time";
 import type { NewRule, RepoStatus } from "../types";
 import { DeskProject } from "./DeskProject";
 import { DeskProjects } from "./DeskProjects";
-import { ReposToday } from "./ReposToday";
+import { YourWork } from "./YourWork";
+import type { Target, WorkItem } from "../lib/yourWork";
 import { AllowButton } from "./Inbox";
 import { PermissionCard } from "./PermissionCard";
 
@@ -36,6 +37,10 @@ export interface DeskViewProps {
   onNewChat: (folder: string) => void;
   onGo: (item: InboxItem) => void;
   onDecide: (item: InboxItem, allow: boolean) => void;
+  /** Sends one of Your work's next steps: to its chat, or to a new chat in its project. */
+  onStep: (item: WorkItem, target: Target) => boolean;
+  /** Asks git and GitHub again now (Your work's Refresh). */
+  onRefreshRepos: () => void;
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
   onAnswer?: (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 }
@@ -216,8 +221,8 @@ function Summary({ projects }: { projects: ProjectRow[] }) {
 
 /**
  * The Desk, as a dashboard of tiles in one grid: what waits on you, one thing at a time (or, when nothing does, the Desk in a few
- * numbers), a tile per project with only what Lantern knows for sure (a tile opens to list its chats), and what happened in its
- * repositories today. What happened in the chats, as
+ * numbers), a tile per project with only what Lantern knows for sure (a tile opens to list its chats), and your work in its
+ * repositories: what to do next, and where each pull request and branch stands. What happened in the chats, as
  * it happened, is the sidebar's Timeline; asking and telling is the right pane's Ask.
  */
 export function DeskView(props: DeskViewProps) {
@@ -253,7 +258,7 @@ export function DeskView(props: DeskViewProps) {
           <div className="desk-bento">
             {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <Summary projects={props.projects} />}
             <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} now={now} onOpen={onOpen} onPage={props.onPage} />
-            <ReposToday repos={props.repos} now={now} />
+            <YourWork repos={props.repos} chats={props.chats} now={now} onStep={props.onStep} onRefresh={props.onRefreshRepos} />
           </div>
         )}
       </div>
