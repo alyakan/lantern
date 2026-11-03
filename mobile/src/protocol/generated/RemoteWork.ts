@@ -11,6 +11,15 @@ export type RemoteWork = {
  */
 issues: boolean, 
 /**
+ * The window has read the repositories it shows: before that (its first answer isn't in, or no project is open) "nothing open" would
+ * only be a guess.
+ */
+looked: boolean, 
+/**
+ * Repositories GitHub answered for without saying whose account is the user's: their pull requests can't be told apart, so none is listed.
+ */
+blind: Array<string>, 
+/**
  * Blocked first, then what is yours, then the rest, as the Desk lists them.
  */
 items: Array<RemoteWorkItem>, };

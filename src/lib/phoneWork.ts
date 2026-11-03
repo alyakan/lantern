@@ -26,6 +26,10 @@ export interface WindowWorkItem {
 
 export interface WindowWork {
   issues: boolean;
+  /** The Mac has read the repositories (its first answer is in and a project is open): before that, "nothing open" would be a guess. */
+  looked: boolean;
+  /** The repositories GitHub answered for without saying whose account is yours: none of their pull requests is listed. */
+  blind: string[];
   items: WindowWorkItem[];
 }
 
@@ -43,11 +47,13 @@ function linkOf(item: WorkItem): string | null {
 }
 
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
-export function phoneWork(items: WorkItem[], issues: boolean): WindowWork {
+export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
   const listed = whereThingsStand(items);
   const rest = nextSteps(items).filter((i) => i.stepOnly);
   return {
     issues,
+    looked,
+    blind,
     items: [...listed, ...rest].map((i) => ({
       key: i.key,
       repo: i.name,

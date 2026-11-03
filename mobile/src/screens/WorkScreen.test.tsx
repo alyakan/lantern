@@ -41,6 +41,8 @@ const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWo
 
 const work: RemoteWork = {
   issues: true,
+  looked: true,
+  blind: [],
   items: [
     item("pr7", { number: 7, title: "Retry fetchJson", tone: "bad", word: "Checks failing", feature: "Reliability", issue: "ENG-1", meta: "ENG-1 · Reliability · lantern", url: "https://github.com/aly/lantern/pull/7", sig: "checks:fail", next: step() }),
     item("pr8", { number: 8, title: "Cache settings", tone: "you", stage: "merge", word: "Ready to merge", feature: "Reliability", issue: "ENG-2", next: step("Merge", { yours: true, button: "Merge…" }) }),
@@ -164,8 +166,20 @@ describe("Your work on the phone", () => {
   });
 
   it("says when nothing is open", async () => {
-    await open({ work: { issues: false, items: [] } });
+    await open({ work: { issues: false, looked: true, blind: [], items: [] } });
     expect(card("Next").getByText(/Nothing open/)).toBeTruthy();
     expect(screen.queryByLabelText("Where things stand")).toBeNull();
+  });
+
+  it("doesn't say nothing is open before the Mac has looked, or when it couldn't tell whose pull requests are yours", async () => {
+    await open({ work: { issues: false, looked: false, blind: [], items: [] } });
+    expect(card("Next").getByText(/Your Mac hasn't looked yet/)).toBeTruthy();
+    expect(card("Next").queryByText(/Nothing open/)).toBeNull();
+  });
+
+  it("says which repositories it couldn't tell the owner of, with the work it could list", async () => {
+    await open({ work: { ...work, blind: ["lantern", "web"] } });
+    expect(card("Next").getByText(/Couldn't tell which GitHub account is yours in lantern, web/)).toBeTruthy();
+    expect(card("Next").getByText(/Merge .*Cache settings/)).toBeTruthy();
   });
 });

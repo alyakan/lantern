@@ -449,20 +449,35 @@ impl Remote {
         self.claude.lock().unwrap().clone()
     }
 
-    /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
-    pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+    /// An id for the window to answer with, and what that answer will be. Used once. A chat's ids start with "n-" and a step's with
+    /// "w-", so the window's answer to one can't be taken for the other's (they share a table).
+    fn expect(&self, prefix: &str) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
         let mut raw = [0u8; 12];
         let _ = getrandom::fill(&mut raw);
-        let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let id: String = format!("{prefix}{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>());
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.new_chats.lock().unwrap().insert(id.clone(), tx);
         (id, rx)
     }
 
-    /// The window's answer to a started chat: the slot it made, or why not. False for an id nobody waits for (unknown,
-    /// already answered, or given up on), which does nothing.
-    pub fn new_chat_done(&self, id: &str, result: Result<String, String>) -> bool {
+    /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
+    pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+        self.expect("n-")
+    }
+
+    /// A phone asked for a step of the user's work: an id for the window to answer with, and what that answer will be. Used once.
+    pub fn expect_work_step(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+        self.expect("w-")
+    }
+
+    fn answer(&self, id: &str, result: Result<String, String>) -> bool {
         self.new_chats.lock().unwrap().remove(id).is_some_and(|tx| tx.send(result).is_ok())
+    }
+
+    /// The window's answer to a started chat: the slot it made, or why not. False for an id nobody waits for (unknown,
+    /// already answered, given up on, or a step's), which does nothing.
+    pub fn new_chat_done(&self, id: &str, result: Result<String, String>) -> bool {
+        id.starts_with("n-") && self.answer(id, result)
     }
 
     /// Stops waiting for the window's answer (it took too long).
@@ -481,9 +496,9 @@ impl Remote {
     }
 
     /// The window's answer to a step a phone asked for: what it did ("sent" to a chat, or "started" one, and where), or why not. False
-    /// for an id nobody waits for. Shares the table of `expect_new_chat`: an id is one or the other.
+    /// for an id nobody waits for, or a chat's.
     pub fn work_step_done(&self, id: &str, result: Result<(String, String), String>) -> bool {
-        self.new_chat_done(id, result.map(|(kind, to)| format!("{kind}\u{1f}{to}")))
+        id.starts_with("w-") && self.answer(id, result.map(|(kind, to)| format!("{kind}\u{1f}{to}")))
     }
 
     /// Takes in the window's One project (see single.rs): None when it shows every project.
@@ -628,10 +643,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_windows_answer_to_a_chat_cannot_be_taken_for_a_steps_or_the_other_way_round() {
+        let remote = Remote::default();
+        let (chat, _chat_rx) = remote.expect_new_chat();
+        let (step, step_rx) = remote.expect_work_step();
+        assert!(chat.starts_with("n-") && step.starts_with("w-"));
+        assert!(!remote.work_step_done(&chat, Ok(("sent".into(), "x".into()))), "a chat's id isn't a step's");
+        assert!(!remote.new_chat_done(&step, Ok("s7".into())), "a step's id isn't a chat's");
+        assert!(remote.work_step_done(&step, Ok(("sent".into(), "Chat one".into()))));
+        assert_eq!(step_rx.await.unwrap(), Ok("sent\u{1f}Chat one".to_string()));
+    }
+
+    #[tokio::test]
     async fn the_windows_answer_to_a_started_chat_reaches_the_one_waiting_once() {
         let remote = Remote::default();
         let (id, rx) = remote.expect_new_chat();
-        assert_eq!(id.len(), 24);
+        assert_eq!(id.len(), 26, "n- and 24 hex digits");
         assert!(remote.new_chat_done(&id, Ok("s7".into())));
         assert_eq!(rx.await.unwrap(), Ok("s7".to_string()));
         assert!(!remote.new_chat_done(&id, Ok("s8".into())), "an id is used once");

@@ -728,6 +728,11 @@ pub struct Waiting {
 pub struct RemoteWork {
     /// Linear is connected: paths start at the issue.
     pub issues: bool,
+    /// The window has read the repositories it shows: before that (its first answer isn't in, or no project is open) "nothing open" would
+    /// only be a guess.
+    pub looked: bool,
+    /// Repositories GitHub answered for without saying whose account is the user's: their pull requests can't be told apart, so none is listed.
+    pub blind: Vec<String>,
     /// Blocked first, then what is yours, then the rest, as the Desk lists them.
     pub items: Vec<RemoteWorkItem>,
 }

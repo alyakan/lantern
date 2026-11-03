@@ -176,6 +176,8 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   const now = Date.now();
   const items = work?.items ?? [];
   const issues = work?.issues === true;
+  const looked = work?.looked === true;
+  const blind = work?.blind ?? [];
   const by = groupingFor(chosen, issues);
   const next = nextSteps(items);
   const nextShown = allNext ? next : next.slice(0, NEXT_SHOWN);
@@ -247,9 +249,19 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
 
   const nextCard = (
     <Card title="Next" count={next.length} edge={colors.cobalt} action={<Link label="Refresh" onPress={refresh} />}>
+      {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
+      {blind.length > 0 && (
+        <Txt variant="small" tone="ink2" style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
+          Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
+        </Txt>
+      )}
       {next.length === 0 ? (
         <Txt variant="small" tone="ink2" style={{ paddingHorizontal: 14, paddingBottom: 12 }}>
-          {items.length === 0 ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.` : "Nothing to do right now: everything open is on its way."}
+          {!looked
+            ? "Your Mac hasn't looked yet: open a project on it to see its work."
+            : items.length === 0
+              ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.`
+              : "Nothing to do right now: everything open is on its way."}
         </Txt>
       ) : (
         <>

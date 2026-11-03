@@ -11,6 +11,8 @@ use std::sync::Mutex;
 /// The most items kept, and the longest key.
 const ITEMS_MAX: usize = 150;
 const KEY_MAX: usize = 240;
+/// The most repositories named as ones whose owner GitHub didn't say.
+const BLIND_MAX: usize = 5;
 
 const STAGES: &[&str] = &["issue", "local", "pr", "checks", "review", "merge", "release"];
 const TONES: &[&str] = &["bad", "wait", "you", "local", "todo", "done"];
@@ -19,6 +21,10 @@ const TONES: &[&str] = &["bad", "wait", "you", "local", "todo", "done"];
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowWork {
     pub issues: bool,
+    #[serde(default)]
+    pub looked: bool,
+    #[serde(default)]
+    pub blind: Vec<String>,
     pub items: Vec<RemoteWorkItem>,
 }
 
@@ -87,7 +93,8 @@ impl WorkBoard {
     pub fn set(&self, w: WindowWork) {
         let mut seen = std::collections::HashSet::new();
         let items: Vec<RemoteWorkItem> = w.items.into_iter().filter_map(tidy).filter(|i| seen.insert(i.key.clone())).take(ITEMS_MAX).collect();
-        let work = RemoteWork { issues: w.issues, items };
+        let blind: Vec<String> = w.blind.iter().map(|r| cut(r, 60)).filter(|r| !r.is_empty()).take(BLIND_MAX).collect();
+        let work = RemoteWork { issues: w.issues, looked: w.looked, blind, items };
         let mut held = self.held.lock().unwrap();
         if held.work != work {
             held.version += 1;
@@ -146,7 +153,7 @@ mod tests {
         long.title = "x".repeat(400);
         let mut items = vec![item("k1"), item("k1"), item(""), bad_stage, bad_tone, long];
         items.extend((0..200).map(|i| item(&format!("n{i}"))));
-        b.set(WindowWork { issues: true, items });
+        b.set(WindowWork { issues: true, looked: true, blind: vec![], items });
         let (work, version) = b.phone();
         assert_eq!(version, 1);
         assert!(work.issues);
@@ -182,19 +189,33 @@ mod tests {
         let mut i = item("k");
         i.url = Some("https://evil.example/x".into());
         let b = WorkBoard::default();
-        b.set(WindowWork { issues: false, items: vec![i] });
+        b.set(WindowWork { issues: false, looked: true, blind: vec![], items: vec![i] });
         assert_eq!(b.phone().0.items[0].url, None);
+    }
+
+    #[test]
+    fn says_whether_the_window_looked_and_which_repositories_it_could_not_tell_the_owner_of_cut_small() {
+        let b = WorkBoard::default();
+        assert!(!b.phone().0.looked, "nothing is known before the window says");
+        b.set(WindowWork { issues: false, looked: true, blind: (0..9).map(|i| format!("repo-{i}\n{}", "x".repeat(100))).collect(), items: vec![] });
+        let (work, _) = b.phone();
+        assert!(work.looked);
+        assert_eq!(work.blind.len(), BLIND_MAX);
+        assert!(work.blind.iter().all(|r| r.chars().count() <= 60 && !r.contains('\n')));
+        let from_an_older_window: WindowWork = serde_json::from_str(r#"{"issues":false,"items":[]}"#).unwrap();
+        b.set(from_an_older_window);
+        assert!(!b.phone().0.looked, "a window that doesn't say hasn't looked");
     }
 
     #[test]
     fn moves_on_only_when_what_a_phone_sees_changed() {
         let b = WorkBoard::default();
-        b.set(WindowWork { issues: false, items: vec![item("k1")] });
-        b.set(WindowWork { issues: false, items: vec![item("k1")] });
+        b.set(WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("k1")] });
+        b.set(WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("k1")] });
         assert_eq!(b.version(), 1);
-        b.set(WindowWork { issues: false, items: vec![item("k1"), item("k2")] });
+        b.set(WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("k1"), item("k2")] });
         assert_eq!(b.version(), 2);
-        b.set(WindowWork { issues: true, items: vec![item("k1"), item("k2")] });
+        b.set(WindowWork { issues: true, looked: true, blind: vec![], items: vec![item("k1"), item("k2")] });
         assert_eq!(b.version(), 3);
     }
 }

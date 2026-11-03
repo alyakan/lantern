@@ -3055,7 +3055,7 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, permiss
 /// answers with what it did, as ("sent" or "started", where), or why not.
 async fn request_work_step(app: &AppHandle, key: String, sig: String) -> Result<(String, String), String> {
     let state = app.state::<AppState>();
-    let (id, answer) = state.remote.expect_new_chat();
+    let (id, answer) = state.remote.expect_work_step();
     if let Err(e) = app.emit("remote-work-step", &remote::WorkStepRequest { id: id.clone(), key, sig }) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());

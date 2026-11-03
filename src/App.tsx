@@ -100,7 +100,7 @@ import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
 import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
 import { phoneWork } from "./lib/phoneWork";
-import { stepMessage, targetFor, withLinear, yourWork } from "./lib/yourWork";
+import { stepMessage, targetFor, unknownViewer, withLinear, yourWork } from "./lib/yourWork";
 import { markStepSent, stepSentTo } from "./components/YourWork";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
@@ -2603,7 +2603,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // names and states, never the message a step sends.
   const workNow = Date.now();
   const workItems = withLinear(yourWork(deskRepos, workNow), linear.work, teamOfRepo(deskRepos, linear.work, linearTeams), deskRepos, workNow);
-  const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected);
+  const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected, !!deskRepos && deskRepos.length > 0, unknownViewer(deskRepos));
   const phoneWorkKey = JSON.stringify(phoneWorkNow);
   useEffect(() => {
     void api.remoteWindowWork(phoneWorkNow).catch(() => {});
