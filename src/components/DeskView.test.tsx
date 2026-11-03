@@ -284,4 +284,41 @@ describe("the Desk", () => {
     fireEvent.click(next.getByRole("button", { name: "Show 2 more" }));
     expect(next.getAllByRole("button", { name: /^Fix failing checks/ })).toHaveLength(7);
   });
+
+  it("hides its scrollbar while its width changes (the sidebar opening or closing) and a moment after, so the system's flash of one isn't seen", () => {
+    let width = 900;
+    let resized: () => void = () => {};
+    const widthOf = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(() => width);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      setup();
+      const main = document.querySelector(".desk-main")!;
+      expect(main).not.toHaveClass("resizing");
+      // Only what changes the width counts: a change of what scrolls inside it doesn't hide the bar.
+      act(() => resized());
+      expect(main).not.toHaveClass("resizing");
+      width = 1040;
+      act(() => resized());
+      expect(main).toHaveClass("resizing");
+      act(() => void vi.advanceTimersByTime(300));
+      width = 1100;
+      act(() => resized());
+      act(() => void vi.advanceTimersByTime(300));
+      expect(main).toHaveClass("resizing");
+      act(() => void vi.advanceTimersByTime(200));
+      expect(main).not.toHaveClass("resizing");
+    } finally {
+      widthOf.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });

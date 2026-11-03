@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import { requestText, type InboxItem } from "../lib/inbox";
@@ -222,6 +222,36 @@ function Summary({ projects }: { projects: ProjectRow[] }) {
   );
 }
 
+/** How long after its last change of width the pane's scrollbar stays hidden: past the sidebar's own 220 ms animation. */
+const QUIET_MS = 450;
+
+/**
+ * Hides the pane's scrollbar while its width changes (the sidebar opening or closing beside it) and a moment after: the system
+ * flashes a scrollbar whenever the size of what scrolls changes, and the Desk reflows as the pane moves. Done on the element, not
+ * in state, so nothing re-renders at every step. The pane's own width is what is compared, not its inner width, which the
+ * scrollbar being hidden would change in turn.
+ */
+function useQuietWhileResized(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.offsetWidth;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const watch = new ResizeObserver(() => {
+      if (el.offsetWidth === width) return;
+      width = el.offsetWidth;
+      el.classList.add("resizing");
+      clearTimeout(timer);
+      timer = setTimeout(() => el.classList.remove("resizing"), QUIET_MS);
+    });
+    watch.observe(el);
+    return () => {
+      watch.disconnect();
+      clearTimeout(timer);
+    };
+  }, [ref]);
+}
+
 /**
  * The Desk, as a dashboard of tiles in one grid: what waits on you, one thing at a time (or, when nothing does, the Desk in a few
  * numbers), a tile per project with only what Lantern knows for sure (a tile opens to list its chats), and your work in its
@@ -231,6 +261,8 @@ function Summary({ projects }: { projects: ProjectRow[] }) {
 export function DeskView(props: DeskViewProps) {
   const { needs, onOpen, onGo, onDecide } = props;
   const [now, setNow] = useState(Date.now);
+  const main = useRef<HTMLDivElement>(null);
+  useQuietWhileResized(main);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
@@ -245,7 +277,7 @@ export function DeskView(props: DeskViewProps) {
       <header className="desk-head">
         <DeskTabs desks={props.desks} />
       </header>
-      <div className="desk-main">
+      <div className="desk-main" ref={main}>
         {pageRow ? (
           <>
           {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <div className="desk-clear">✓ Nothing needs you</div>}
