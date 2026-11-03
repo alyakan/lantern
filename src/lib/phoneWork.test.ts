@@ -56,6 +56,20 @@ describe("Your work for a phone", () => {
     expect(told.find((i) => i.key === "linear:ENG-3")).toMatchObject({ tone: "done", fold: "done", number: null, url: "https://linear.app/a/issue/ENG-3" });
   });
 
+  it("puts what is done after the steps with no row of their own, so a long list cut short loses it first", () => {
+    const at = (d: number) => new Date(2026, 10, d, 12).toISOString();
+    const r = repo({ merged: [{ number: 9, title: "m", author: "aly", branch: "m9", merged_at: at(2) }], release: { tag: "v1.2.0", published_at: new Date(2026, 10, 1, 18).toISOString() } });
+    const done = { state: "Done", state_type: "completed", project: "Sync", project_id: "p" };
+    const items = withLinear(yourWork([r], NOW), linearWork([issue("ENG-1", { state: "In Progress", state_type: "started" }), issue("ENG-2", done)]), { "/p/lantern": "ENG" }, [r], NOW);
+    const told = phoneWork(items, true, true, []).items;
+    expect(told.map((i) => [i.key.split(":").slice(1).join(":"), i.step_only, i.tone])).toEqual([
+      ["merged:9", false, "you"],
+      ["ENG-1", false, "todo"],
+      ["release", true, "you"],
+      ["ENG-2", false, "done"],
+    ]);
+  });
+
   it("lists what stands first, blocked before the rest, then the steps with no row of their own", () => {
     const at = (d: number) => new Date(2026, 10, d, 12).toISOString();
     const r = repo({ prs: [pr(1), pr(2, { checks: "fail" })], merged: [{ number: 9, title: "m", author: "aly", branch: "m9", merged_at: at(2) }], release: { tag: "v1.2.0", published_at: new Date(2026, 10, 1, 18).toISOString() } });

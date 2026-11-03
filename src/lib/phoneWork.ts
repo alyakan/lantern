@@ -50,13 +50,16 @@ function linkOf(item: WorkItem): string | null {
 
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
 export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
-  const listed = whereThingsStand(items);
+  const standing = whereThingsStand(items);
+  // The phone is told only so many items: what is done (a feature's finished issues can be many) goes last, after the steps with no row of their own.
+  const listed = standing.filter((i) => i.tone !== "done");
+  const finished = standing.filter((i) => i.tone === "done");
   const rest = nextSteps(items).filter((i) => i.stepOnly);
   return {
     issues,
     looked,
     blind,
-    items: [...listed, ...rest].map((i) => ({
+    items: [...listed, ...rest, ...finished].map((i) => ({
       key: i.key,
       repo: i.name,
       title: i.title,
