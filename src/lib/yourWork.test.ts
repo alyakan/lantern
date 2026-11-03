@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
-import { byFeature, filterWork, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
+import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
@@ -80,6 +80,23 @@ describe("Your work", () => {
     ]);
     // A repository that never released has nothing waiting for one.
     expect(yourWork([repo({ merged })], NOW)).toEqual([]);
+  });
+
+  it("folds what is merged and waiting for a release into one row, two or more together, wherever they stand in the list", () => {
+    const at = (d: number) => new Date(2026, 10, d, 12).toISOString();
+    const release = { tag: "v1.2.0", published_at: new Date(2026, 10, 1, 18).toISOString() };
+    const m = (n: number) => ({ number: n, title: `merged ${n}`, author: "aly", branch: `m${n}`, merged_at: at(2) });
+    const listed = (merged: ReturnType<typeof m>[], prs: RepoStatus["prs"] = []) => whereThingsStand(yourWork([repo({ merged, release, prs })], NOW));
+    const kinds = (items: WorkItem[]) => foldRows(items).map((r) => (r.kind === "item" ? `item:${r.item.number}` : `${r.fold}:${r.items.map((i) => i.number).join(",")}`));
+    expect(listed([m(7), m(8)]).every((i) => i.fold === "ready")).toBe(true);
+    expect(kinds(listed([m(7), m(8)]))).toEqual(["ready:7,8"]);
+    // Something between them doesn't keep them apart: they are gathered into one row, where the first of them stood.
+    const [a, b] = listed([m(7), m(8)]);
+    const between = one(pr(1));
+    expect(kinds([between, a, between, b])).toEqual(["item:1", "ready:7,8", "item:1"]);
+    // One alone is a row of its own.
+    expect(kinds(listed([m(7)]))).toEqual(["item:7"]);
+    expect(foldWord("ready", 2)).toBe("2 Ready · merged, waiting for a release");
   });
 
   it("offers to push a branch never pushed while it is fresh, and only lists an old one", () => {
@@ -184,12 +201,12 @@ describe("Your work with Linear", () => {
     expect(projectsOf(items, "/p/lantern").map((p) => p.todo)).toEqual([0]);
   });
 
-  it("can hide the work of Ready issues, the pull request of one too, and leaves the rest", () => {
-    const issues = [issue("ENG-1", review), issue("ENG-2", { ...ready, links: ["https://github.com/aly/lantern/pull/8"] }), issue("ENG-6", ready)];
-    const items = withLinear(yourWork([r], NOW), work(issues), { "/p/lantern": "ENG" }, [r], NOW, true);
-    expect(items.map((i) => i.issue?.identifier ?? i.key)).not.toContain("ENG-2");
-    expect(items.map((i) => i.issue?.identifier)).not.toContain("ENG-6");
-    expect(items.find((i) => i.key.endsWith("pr:7"))?.issue?.identifier).toBe("ENG-1");
+  it("marks the Ready issues to fold, and not the ones In Review, and hides none of them", () => {
+    const issues = [issue("ENG-1", review), issue("ENG-2", { ...ready, links: ["https://github.com/aly/lantern/pull/8"] }), issue("ENG-6", ready), issue("ENG-7", ready)];
+    const items = withLinear(yourWork([r], NOW), work(issues), { "/p/lantern": "ENG" }, [r], NOW);
+    expect(items.map((i) => i.issue?.identifier)).toEqual(expect.arrayContaining(["ENG-1", "ENG-2", "ENG-6", "ENG-7"]));
+    expect(items.filter((i) => i.fold === "ready").map((i) => i.issue?.identifier)).toEqual(["ENG-6", "ENG-7"]);
+    expect(foldRows(items.filter((i) => i.fold === "ready")).map((r) => r.kind)).toEqual(["fold"]);
   });
 
   it("never hands Claude an issue's title, and offers nothing for one that doesn't read as Linear's", () => {

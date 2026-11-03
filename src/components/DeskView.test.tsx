@@ -168,6 +168,21 @@ describe("the Desk", () => {
     expect(merge.closest("li")).not.toHaveClass("yw-warn");
   });
 
+  it("folds what is merged and waiting for a release into one line, which opens to a row each", () => {
+    const now = new Date(2026, 9, 31, 18, 0).getTime();
+    vi.setSystemTime(now);
+    const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
+    setup({ repos: [repo("/p/lantern", { merged: [merged(6, at(15)), merged(5, at(14))], release: { tag: "v0.1.93", published_at: at(10, 30) } })] });
+    const stand = within(screen.getByRole("region", { name: "Where things stand" }));
+    const line = stand.getByRole("button", { name: /2 Ready · merged, waiting for a release/ });
+    expect(line).toHaveAttribute("aria-expanded", "false");
+    expect(stand.queryByText(/PR 6/)).toBeNull();
+    fireEvent.click(line);
+    expect(line).toHaveAttribute("aria-expanded", "true");
+    expect(stand.getByText(/PR 6/)).toBeInTheDocument();
+    expect(stand.getByText(/PR 5/)).toBeInTheDocument();
+  });
+
   it("puts your next steps first, yours to decide before what is blocked, and where each stands as nodes", () => {
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);

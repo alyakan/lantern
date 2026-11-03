@@ -44,4 +44,8 @@ sig: string,
 /**
  * Only a next step, not listed under where things stand.
  */
-step_only: boolean, next: RemoteWorkNext | null, };
+step_only: boolean, 
+/**
+ * ready (merged, waiting for a release) or done: several of a kind in one list fold into one line.
+ */
+fold: string | null, next: RemoteWorkNext | null, };

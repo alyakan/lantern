@@ -31,6 +31,8 @@ describe("Your work for a phone", () => {
     const now = phoneWork(yourWork([r], NOW), false, true, []).items.find((i) => i.number === 9)!;
     const later = phoneWork(yourWork([r], NOW + 3 * 60_000), false, true, []).items.find((i) => i.number === 9)!;
     expect(now.meta).toBe("lantern · merged {ago}");
+    // What waits for a release folds with its kind on the phone, which is told so (it can't tell Ready from the words).
+    expect(now.fold).toBe("ready");
     expect(later).toEqual(now);
     expect(now.at).toBe(at.getTime());
   });

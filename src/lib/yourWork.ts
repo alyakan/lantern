@@ -73,7 +73,12 @@ export interface WorkItem {
   issue?: { identifier: string; url: string; project: string | null; title: string };
   /** `meta` without the issue's part, which the Mac draws as a line of its own (the phone is sent `meta` whole). */
   bare?: string;
+  /** What is quiet enough to fold with its kind in a list (see `foldRows`): work merged and waiting for a release, or done. */
+  fold?: Fold;
 }
+
+/** ready: merged, waiting for a release (a Ready issue, or a pull request merged since the last release); done: finished. */
+export type Fold = "ready" | "done";
 
 /** A branch or tag that is only letters, digits and `._/-`, and never reads as an option: safe to name in a message. */
 export const safeRef = (s: string | null | undefined): s is string => !!s && s.length <= 200 && /^[A-Za-z0-9._/-]+$/.test(s) && !s.startsWith("-") && !s.includes("..");
@@ -174,7 +179,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
     const released = time(r.release?.published_at);
     const waiting = released === null ? [] : r.merged.filter((m) => mine(m.author) && (time(m.merged_at) ?? 0) > released);
     for (const m of waiting) {
-      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "you", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged" });
+      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "you", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged", fold: "ready" });
     }
     for (const tag of r.drafts) {
       const ok = safeRef(tag);
@@ -212,7 +217,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
       });
     }
     if (released !== null && sameDay(released, now) && r.release) {
-      out.push({ ...base, key: `${r.repo}:released:${r.release.tag}`, number: null, branch: null, title: `Released ${r.release.tag}`, stage: "release", tone: "done", word: "Released", meta: `${name} · ${ago(now, released)}`, at: released, next: null, sig: "released" });
+      out.push({ ...base, key: `${r.repo}:released:${r.release.tag}`, number: null, branch: null, title: `Released ${r.release.tag}`, stage: "release", tone: "done", word: "Released", meta: `${name} · ${ago(now, released)}`, at: released, next: null, sig: "released", fold: "done" });
     }
     // A branch that was merged under its name isn't work left, even if it never had an upstream.
     const known = new Set([...r.prs.map((p) => p.branch), ...r.merged.map((m) => m.branch)]);
@@ -274,6 +279,32 @@ export function whereThingsStand(items: WorkItem[]): WorkItem[] {
   return items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0));
 }
 
+/** A row of a list of work: an item, or several quiet ones (`fold`) in one line that opens to them. */
+export type WorkRow = { kind: "item"; item: WorkItem } | { kind: "fold"; fold: Fold; items: WorkItem[] };
+
+/**
+ * A list of work as rows, in its order. Two or more items of one kind (`fold`: Ready, or done) are one row, at the place of the
+ * first of them, that opens to them; a single one stays a row of its own. The items are gathered whatever the order between them.
+ */
+export function foldRows(items: WorkItem[]): WorkRow[] {
+  const of = new Map<Fold, WorkItem[]>();
+  for (const i of items) if (i.fold) of.set(i.fold, [...(of.get(i.fold) ?? []), i]);
+  const rows: WorkRow[] = [];
+  const placed = new Set<Fold>();
+  for (const i of items) {
+    const members = i.fold ? of.get(i.fold)! : [];
+    if (!i.fold || members.length < 2) rows.push({ kind: "item", item: i });
+    else if (!placed.has(i.fold)) {
+      placed.add(i.fold);
+      rows.push({ kind: "fold", fold: i.fold, items: members });
+    }
+  }
+  return rows;
+}
+
+/** What a folded row says: how many, and what they are. */
+export const foldWord = (fold: Fold, n: number): string => (fold === "ready" ? `${n} Ready · merged, waiting for a release` : `${n} Done`);
+
 /** How many of a repository's items are in each state (done left out), for a project's tile. */
 export function toneCounts(items: WorkItem[], repo: string): Partial<Record<Tone, number>> {
   const n: Partial<Record<Tone, number>> = {};
@@ -332,15 +363,13 @@ export const isReady = (issue: LinearIssue) => issue.state.trim().toLowerCase() 
  * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
  * team no Desk project is in is listed without a step. The step names the issue by its identifier and link only.
  */
-export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number, hideReady = false): WorkItem[] {
+export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number): WorkItem[] {
   if (!work?.connected || !work.issues.length) return items;
   const started = new Set<string>();
   const out = items.flatMap((item): WorkItem[] => {
     const issue = work.issues.find((i) => isIssueOf(i, item));
     if (!issue) return [item];
     started.add(issue.identifier);
-    // Settings → Linear can hide the work of Ready issues (merged, waiting for a release).
-    if (hideReady && isReady(issue)) return [];
     // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
     const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
     const tag = issue.project ? `${named} · ${issue.project}` : named;
@@ -348,7 +377,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
   for (const issue of work.issues) {
-    if (started.has(issue.identifier) || (hideReady && isReady(issue))) continue;
+    if (started.has(issue.identifier)) continue;
     const r = repoOfTeam(issue.team);
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
@@ -373,6 +402,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
         next: null,
         sig: `issue:${issue.state}`,
         issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+        ...(ready ? { fold: "ready" as const } : {}),
       });
       continue;
     }

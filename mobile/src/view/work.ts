@@ -94,6 +94,37 @@ export function groupItems(items: RemoteWorkItem[], by: GroupBy): WorkGroup[] {
     .sort((a, b) => Number(a.plain) - Number(b.plain) || items.indexOf(a.items[0]) - items.indexOf(b.items[0]) || a.label.localeCompare(b.label));
 }
 
+export type Fold = "ready" | "done";
+/** A row of a list: an item, or several quiet ones in one line that opens to them. */
+export type WorkRow = { kind: "item"; item: RemoteWorkItem } | { kind: "fold"; fold: Fold; items: RemoteWorkItem[] };
+
+/** What an item folds with: what the Mac says, or nothing for a kind this app doesn't know (a newer Mac's) or an older Mac's silence. */
+const foldOf = (item: RemoteWorkItem): Fold | null => (item.fold === "ready" || item.fold === "done" ? item.fold : null);
+
+/** The same as the Mac's: two or more items of one kind are one row, at the place of the first of them; a single one stays a row. */
+export function foldRows(items: RemoteWorkItem[]): WorkRow[] {
+  const of = new Map<Fold, RemoteWorkItem[]>();
+  for (const i of items) {
+    const f = foldOf(i);
+    if (f) of.set(f, [...(of.get(f) ?? []), i]);
+  }
+  const rows: WorkRow[] = [];
+  const placed = new Set<Fold>();
+  for (const i of items) {
+    const f = foldOf(i);
+    const members = f ? of.get(f)! : [];
+    if (!f || members.length < 2) rows.push({ kind: "item", item: i });
+    else if (!placed.has(f)) {
+      placed.add(f);
+      rows.push({ kind: "fold", fold: f, items: members });
+    }
+  }
+  return rows;
+}
+
+/** What a folded row says: how many, and what they are. */
+export const foldWord = (fold: Fold, n: number): string => (fold === "ready" ? `${n} Ready · merged, waiting for a release` : `${n} Done`);
+
 /** How many items are in each state. */
 export function stateCounts(items: RemoteWorkItem[]): Partial<Record<Tone, number>> {
   const n: Partial<Record<Tone, number>> = {};

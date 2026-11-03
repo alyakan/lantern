@@ -10,7 +10,7 @@ import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, space, useColors, type Palette } from "../ui/theme";
-import { FILTER_TONES, filterItems, groupingFor, groupItems, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup } from "../view/work";
+import { FILTER_TONES, filterItems, foldRows, foldWord, groupingFor, groupItems, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup, type WorkRow } from "../view/work";
 
 export interface WorkProps {
   /** Above the page: Home's top on a phone (the Mac's name, the Desk, Work and Chats switch), the page's own header on a tablet. */
@@ -167,6 +167,8 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   const [only, setOnly] = useState<Tone[]>([]);
   const [folded, setFolded] = useState<string[]>([]);
   const [open, setOpen] = useState<string[]>([]);
+  // The folded lines (Ready, or done) that were opened.
+  const [openFolds, setOpenFolds] = useState<string[]>([]);
   const [nextOpen, setNextOpen] = useState(false);
   // How tall the bar over the list is (with the status bar's room above it): the list starts below it.
   const [barHeight, setBarHeight] = useState(0);
@@ -351,11 +353,34 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     </View>
   );
 
+  /** Several quiet pieces of work (Ready, or done) in one line that opens to a row for each. */
+  const foldRow = (r: Extract<WorkRow, { kind: "fold" }>, scope: string, heading: string | null, n: number) => {
+    const key = `${scope}|${r.fold}`;
+    const isOpen = openFolds.includes(key);
+    return (
+      <View key={key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
+        <PressScale accessibilityRole="button" accessibilityLabel={foldWord(r.fold, r.items.length)} accessibilityState={{ expanded: isOpen }} onPress={() => toggle(openFolds, setOpenFolds, key)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 }}>
+          <Txt variant="small" tone="ink3" style={{ width: 10 }}>
+            {isOpen ? "▾" : "▸"}
+          </Txt>
+          <Txt variant="small" tone="ink2" style={{ fontWeight: "600" }}>
+            {foldWord(r.fold, r.items.length)}
+          </Txt>
+        </PressScale>
+        {isOpen && r.items.map((i, k) => row(i, heading, k + 1))}
+      </View>
+    );
+  };
+  /** A list as rows: Ready and done pieces fold into a line each, unless a state was chosen to be looked at. */
+  const rowsOf = (items: RemoteWorkItem[]): WorkRow[] => (only.length === 0 ? foldRows(items) : items.map((item) => ({ kind: "item" as const, item })));
+  const drawRow = (r: WorkRow, scope: string, heading: string | null, n: number) => (r.kind === "item" ? row(r.item, heading, n) : foldRow(r, scope, heading, n));
+
   const group = (g: WorkGroup) => {
     const key = `${by}:${g.key}`;
     const isFolded = folded.includes(key);
     const all = open.includes(key);
-    const shown = all ? g.items : g.items.slice(0, GROUP_SHOWN);
+    const rows = rowsOf(g.items);
+    const shown = all ? rows : rows.slice(0, GROUP_SHOWN);
     return (
       <View key={key} style={{ borderTopWidth: 1, borderTopColor: colors.rule }}>
         <PressScale accessibilityRole="button" accessibilityLabel={g.label} accessibilityState={{ expanded: !isFolded }} onPress={() => toggle(folded, setFolded, key)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.wash }}>
@@ -374,10 +399,10 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
         </PressScale>
         {!isFolded && (
           <>
-            {shown.map((i, n) => row(i, g.plain ? null : g.label, n))}
-            {g.items.length > shown.length && (
+            {shown.map((r, n) => drawRow(r, key, g.plain ? null : g.label, n))}
+            {rows.length > shown.length && (
               <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-                <Link label={`Show ${g.items.length - shown.length} more`} onPress={() => setOpen([...open, key])} />
+                <Link label={`Show ${rows.length - shown.length} more`} onPress={() => setOpen([...open, key])} />
               </View>
             )}
           </>
@@ -386,8 +411,8 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     );
   };
 
-  const flatItems = flat ? (groups[0]?.items ?? []) : [];
-  const flatShown = open.includes("all") ? flatItems : flatItems.slice(0, LIST_SHOWN);
+  const flatRows = flat ? rowsOf(groups[0]?.items ?? []) : [];
+  const flatShown = open.includes("all") ? flatRows : flatRows.slice(0, LIST_SHOWN);
   const standCard = (
     <Card title="Where things stand" count={listed.length}>
       {bar}
@@ -397,10 +422,10 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
         </Txt>
       ) : flat ? (
         <>
-          {flatShown.map((i, n) => row(i, null, n))}
-          {flatItems.length > flatShown.length && (
+          {flatShown.map((r, n) => drawRow(r, "all", null, n))}
+          {flatRows.length > flatShown.length && (
             <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-              <Link label={`Show ${flatItems.length - flatShown.length} more`} onPress={() => setOpen([...open, "all"])} />
+              <Link label={`Show ${flatRows.length - flatShown.length} more`} onPress={() => setOpen([...open, "all"])} />
             </View>
           )}
         </>

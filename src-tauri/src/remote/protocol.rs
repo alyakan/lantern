@@ -767,6 +767,9 @@ pub struct RemoteWorkItem {
     pub sig: String,
     /// Only a next step, not listed under where things stand.
     pub step_only: bool,
+    /// ready (merged, waiting for a release) or done: several of a kind in one list fold into one line.
+    #[serde(default)]
+    pub fold: Option<String>,
     pub next: Option<RemoteWorkNext>,
 }
 

@@ -3889,6 +3889,11 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-tone-local { --yw: var(--yw-local); }
 .yw-tone-done { --yw: var(--add); }
 .yw-tone-todo { --yw: var(--muted-text); }
+/* Several quiet pieces of work (Ready, or done) in one line that opens to them. */
+.yw-foldrow { padding-top: 7px; padding-bottom: 7px; }
+.yw-foldrow > .yw-fold { font: 600 calc(12px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.yw-foldrow > .yw-fold:hover { color: var(--text); }
+.yw-folded { margin: 8px -12px 0; border-top: 0.5px solid var(--line); }
 /* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
 .yw-row.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */

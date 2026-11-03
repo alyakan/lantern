@@ -1,10 +1,23 @@
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
-import { filterItems, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
+import { filterItems, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
 
-const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, next: null, ...over });
+const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, ...over });
 const step = { what: "Fix", yours: false, button: "Do it", warn: false };
 
 describe("Your work on the phone", () => {
+  it("folds two or more Ready items into one line at the place of the first, gathering them whatever the order, and leaves a lone one alone", () => {
+    const items = [item("a"), item("r1", { fold: "ready" }), item("b"), item("d1", { fold: "done" }), item("r2", { fold: "ready" }), item("r3", { fold: "ready" })];
+    const rows = foldRows(items);
+    expect(rows.map((r) => (r.kind === "item" ? r.item.key : `${r.fold}:${r.items.map((i) => i.key).join(",")}`))).toEqual(["a", "ready:r1,r2,r3", "b", "d1"]);
+    expect(foldWord("ready", 3)).toBe("3 Ready · merged, waiting for a release");
+    expect(foldWord("done", 2)).toBe("2 Done");
+  });
+
+  it("treats a kind of fold it doesn't know, or none at all, as a plain item", () => {
+    const items = [item("a", { fold: "loud" }), item("b", { fold: "loud" }), item("c", { fold: undefined as unknown as null })];
+    expect(foldRows(items).map((r) => r.kind)).toEqual(["item", "item", "item"]);
+  });
+
   it("lists what to do next with what is yours first, then what is blocked, then local work and issues to start", () => {
     const items = [item("wait", { tone: "wait", next: step }), item("todo", { tone: "todo", next: step }), item("bad", { next: step }), item("none"), item("you", { tone: "you", next: step }), item("local", { tone: "local", next: step })];
     expect(nextSteps(items).map((i) => i.key)).toEqual(["you", "bad", "local", "todo", "wait"]);

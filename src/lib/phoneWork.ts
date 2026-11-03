@@ -21,6 +21,8 @@ export interface WindowWorkItem {
   url: string | null;
   sig: string;
   step_only: boolean;
+  /** ready or done: quiet enough to fold with its kind in a list. */
+  fold: string | null;
   next: { what: string; yours: boolean; button: string; warn: boolean } | null;
 }
 
@@ -69,6 +71,7 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       url: linkOf(i),
       sig: i.sig,
       step_only: !!i.stepOnly,
+      fold: i.fold ?? null,
       next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button, warn: !!i.next.warn } : null,
     })),
   };
