@@ -42,10 +42,10 @@ const reducedMotion = () => typeof window.matchMedia === "function" && window.ma
  * Part of the open pane the collapsed bar doesn't have. As the pane opens it unfolds and fades in, and as it closes it fades and folds away (its height, or its width
  * with `across`) while the bar narrows, so what stays moves to its place in the bar instead of jumping when the bar takes over.
  */
-function Away({ across, children }: { across?: boolean; children: ReactNode }) {
+function Away({ across, className, children }: { across?: boolean; className?: string; children: ReactNode }) {
   const Tag = across ? "span" : "div";
   return (
-    <Tag className={across ? "sb-away-x" : "sb-away-y"}>
+    <Tag className={`${across ? "sb-away-x" : "sb-away-y"}${className ? ` ${className}` : ""}`}>
       <Tag className="sb-away-in">{children}</Tag>
     </Tag>
   );
@@ -783,7 +783,9 @@ export function Sidebar(props: Props) {
   const rest = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const floating = mode === "collapsed" && (hovered || focused);
-  const expanded = mode !== "collapsed" || floating;
+  // Collapsing the pinned sidebar: its new pane is drawn open for one frame (stage 1) and then closes like the open bar does.
+  const [collapsing, setCollapsing] = useState(false);
+  const expanded = mode !== "collapsed" || floating || collapsing;
   // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
   const full = expanded || closingBar;
   const closingNow = closingBar && !expanded;
@@ -801,10 +803,37 @@ export function Sidebar(props: Props) {
   const aside = useRef<HTMLElement>(null);
   const lastMode = useRef(mode);
   const collapsedUnderPointer = useRef(0);
+  // Pinning the open bar swaps its pane for the pinned one, which is the same on screen: the labels' fade-in on a new pane isn't
+  // replayed (they would go and come back), for as long as the sidebar's width takes to grow.
+  const wasFull = useRef(false);
+  const carriedUntil = useRef(0);
+  const [, settleCarried] = useState(0);
+  if (mode === "pinned" && lastMode.current === "collapsed" && wasFull.current) carriedUntil.current = Date.now() + CLOSE_MS + 120;
+  const carried = Date.now() < carriedUntil.current;
+  useEffect(() => {
+    if (!carried) return;
+    const timer = setTimeout(() => settleCarried((n) => n + 1), CLOSE_MS + 140);
+    return () => clearTimeout(timer);
+  }, [carried]);
   useLayoutEffect(() => {
-    if (mode === "collapsed" && lastMode.current === "pinned" && aside.current?.matches(":hover")) collapsedUnderPointer.current = Date.now();
+    wasFull.current = full;
+  });
+  useLayoutEffect(() => {
+    if (mode === "collapsed" && lastMode.current === "pinned") {
+      if (aside.current?.matches(":hover")) collapsedUnderPointer.current = Date.now();
+      if (!reducedMotion()) setCollapsing(true);
+    }
     lastMode.current = mode;
   }, [mode]);
+  useLayoutEffect(() => {
+    if (!collapsing) return;
+    // Reading the layout makes the browser compute the open look first, so closing is a change it animates.
+    panel.current?.getBoundingClientRect();
+    setCollapsing(false);
+    setClosingBar(true);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(stopClosing, CLOSE_MS);
+  }, [collapsing]);
 
   useLayoutEffect(() => {
     if (settle.current) clearTimeout(settle.current);
@@ -1086,7 +1115,7 @@ export function Sidebar(props: Props) {
       <div
         ref={panel}
         key={mode === "pinned" ? "pinned" : "floating"}
-        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}`}
+        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}${collapsing ? " was-pinned" : ""}${carried ? " carried" : ""}`}
         style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
         onTransitionEnd={(e) => e.target === e.currentTarget && e.propertyName === "width" && stopClosing()}
         onPointerEnter={mode === "collapsed" ? enter : undefined}
@@ -1125,14 +1154,16 @@ export function Sidebar(props: Props) {
           )}
         </div>
         {full && timeline && (
-          <div className="sb-views" role="group" aria-label="Show">
-            <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
-              Chats
-            </button>
-            <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
-              Timeline
-            </button>
-          </div>
+          <Away className="sb-views-away">
+            <div className="sb-views" role="group" aria-label="Show">
+              <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
+                Chats
+              </button>
+              <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
+                Timeline
+              </button>
+            </div>
+          </Away>
         )}
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
           {single !== null && <SingleBanner choice={choiceOf(single)} full={full} onNewChat={() => opening(h.onNewChatIn)(single)} onShowAll={() => setSingle(null)} />}

@@ -3339,16 +3339,24 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
    they are and the names coming out beside them. Pinned, the panel is open at the saved width beside the chat, its edge a drag
    handle (its width never takes the room the chat and the side panel need: the window's minimum width is the sum of the three).
    A peek is the same open panel, slid in over the chat from the window's edge while the sidebar is hidden. */
-.sidebar { position: relative; z-index: 15; flex: none; width: 56px; }
+/* Its width is animated when it is pinned or collapsed (the same time and easing as the pane inside it), so the chat or Desk beside
+   it glides to its place instead of jumping; not while its edge is being dragged. */
+.sidebar { position: relative; z-index: 15; flex: none; width: 56px; min-width: 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), min-width var(--sb-close); }
 .sidebar.pinned { min-width: 200px; max-width: max(200px, calc(100vw - 840px)); }
-.sidebar.dragging { user-select: none; cursor: col-resize; }
+.sidebar.dragging { user-select: none; cursor: col-resize; transition: none; }
 .sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), box-shadow 0.22s; }
 .sb-panel.expanded { width: var(--sb-open, 260px); box-shadow: var(--panel-shadow); }
 /* Closing, the border (the shadow's ring) is kept at full strength while the width narrows, so it follows the edge in, and only
    fades once the pane is the bar, where it has no border. */
 .sb-panel.closing { box-shadow: var(--panel-shadow); }
 .sb-panel:not(.expanded):not(.closing) { transition: width var(--sb-close), box-shadow 0.12s; }
-.sidebar.pinned .sb-panel { width: 100%; box-shadow: none; transition: none; }
+/* Pinned, the pane is as wide as the sidebar is to be, from the first frame: the sidebar's width grows under it as the chat beside it
+   slides out from under, rather than the pane's contents being squeezed as it widens. */
+.sidebar.pinned .sb-panel { width: max(100%, min(var(--sb-open, 100%), max(200px, calc(100vw - 840px)))); box-shadow: none; transition: none; }
+/* Collapsing it, the pane is drawn open for a frame in the pinned look (no shadow), then closes like the open bar does. */
+.sb-panel.was-pinned.expanded { box-shadow: none; }
+/* Pinning the open bar: the pinned pane is the same on screen, so its labels aren't faded in again as on a pane opening. */
+.sb-panel.carried.expanded :is(.sb-text, .sb-project-name, .sb-new, .sb-unfold, .sb-side-glyph) { animation: none; }
 .sidebar.peek .sb-panel { transition: none; }
 .sb-head { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 6px 8px; }
 .sb-head button.sb-button { position: relative; width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
@@ -3526,7 +3534,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
 .sb-panel:is(.closing, .opening) .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
 /* Between a team's square and the next, the list's own gap goes with the line that folds its agents. */
-.sb-panel:is(.closing, .opening) .sb-agents-wrap { margin-top: -6px; }
+.sb-panel:is(.closing, .opening) .sb-agents-wrap, .sb-panel:is(.closing, .opening) .sb-views-away { margin-top: -6px; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle > :not(.sb-project-initials), .sb-panel:is(.closing, .opening) .sb-note { opacity: 0; transition: opacity 0.12s; }
 .sb-header-toggle .sb-project-initials { transition: background 0.12s; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle .sb-project-initials { background: transparent; }
@@ -3537,7 +3545,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
-  .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
+  .sidebar, .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
   .sb-unfold, .sb-side-glyph, .sb-side-glyph.leaving { animation: none; }
   .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new { animation: none; }
   .sb-section { transition: none; }

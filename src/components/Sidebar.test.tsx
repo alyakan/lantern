@@ -874,6 +874,42 @@ describe("the collapsed sidebar", () => {
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
   });
 
+  it("shrinks to the bar when it is collapsed, as the open bar does when it closes, instead of being swapped for it at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, props } = setup({ mode: "pinned" });
+      await act(async () => {});
+      expect(panel()).not.toHaveClass("closing");
+      rerender(<Kept {...props} mode="collapsed" />);
+      // Drawn as the open pane that lets go of its look (the Chats | Timeline switch and the labels fold away with it), then the bar.
+      expect(panel()).toHaveClass("closing");
+      expect(panel()).not.toHaveClass("expanded");
+      expect(screen.getByRole("button", { name: "Keep sidebar open" })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(500));
+      expect(panel()).not.toHaveClass("closing");
+      expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't fade its labels in again when the open bar is pinned: the pinned pane is the same on screen", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, props } = setup({ mode: "collapsed" });
+      await act(async () => {});
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS + 20));
+      expect(panel()).toHaveClass("expanded");
+      rerender(<Kept {...props} mode="pinned" />);
+      expect(panel()).toHaveClass("carried");
+      act(() => vi.advanceTimersByTime(800));
+      expect(panel()).not.toHaveClass("carried");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("doesn't open again over the chat when it was collapsed with the pointer on it, only when the pointer comes back to it", async () => {
     vi.useFakeTimers();
     const matches = Element.prototype.matches;
