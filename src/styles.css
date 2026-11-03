@@ -3736,9 +3736,10 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
 /* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
 :where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
-/* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. */
-.desk-main.resizing { scrollbar-width: none; }
-.desk-main.resizing::-webkit-scrollbar { display: none; }
+/* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. Not in
+   the theme whose bar is always there: hiding it would be the flash, and move the pane's edge twice. */
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing { scrollbar-width: none; }
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing::-webkit-scrollbar { display: none; }
 .desk-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 16px 0 0; }
 .desk-side > .desk-h { padding: 0 16px; }
 .desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 18px; }

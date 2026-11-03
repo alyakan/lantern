@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
+import { AFTER_COLLAPSE_MS, OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import { PROJECT_COLORS } from "../lib/projectColors";
 import { usePersistentState } from "../lib/layout";
 import type { CloseCheck } from "../types";
@@ -872,6 +872,32 @@ describe("the collapsed sidebar", () => {
     first.unmount();
     bar({ canNew: false });
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
+  });
+
+  it("doesn't open again over the chat when it was collapsed with the pointer on it, only when the pointer comes back to it", async () => {
+    vi.useFakeTimers();
+    const matches = Element.prototype.matches;
+    const hover = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) {
+      return selector === ":hover" ? true : matches.call(this, selector);
+    });
+    try {
+      const { rerender, props } = setup({ mode: "pinned" });
+      await act(async () => {});
+      // Collapsed from the button in it: the pointer is still on the bar it became.
+      rerender(<Kept {...props} mode="collapsed" />);
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS * 3));
+      expect(panel()).not.toHaveClass("expanded");
+      // Leaving it and coming back later is asking for it.
+      fireEvent.pointerLeave(panel());
+      act(() => vi.advanceTimersByTime(AFTER_COLLAPSE_MS));
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS));
+      expect(panel()).toHaveClass("expanded");
+    } finally {
+      hover.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("opens over the chat once the pointer rests on it, not as it passes, and closes when it leaves or a chat is picked", async () => {

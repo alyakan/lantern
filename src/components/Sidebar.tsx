@@ -27,6 +27,9 @@ const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Ma
 export const OPEN_AFTER_MS = 220;
 /** How long the bar may take to close again: its pane stays drawn until the width transition ends (the stylesheet's 0.22s), or until this if that never reports. */
 const CLOSE_MS = 300;
+/** After the sidebar is collapsed with the pointer on it (the button that collapses it is in it), the pointer resting on the bar it
+ * became isn't asking for it to open again: for this long its resting doesn't open it. */
+export const AFTER_COLLAPSE_MS = 1200;
 /** How long "Closed 3 finished chats" stays under a project's header. */
 const NOTICE_MS = 4000;
 
@@ -793,6 +796,15 @@ export function Sidebar(props: Props) {
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasFloating = useRef(false);
   wasFloating.current = floating;
+  // Collapsing it from the button in it leaves the pointer on the bar it becomes: that rest isn't asking for it to open again,
+  // over the chat, with the border it has there (the pinned sidebar's is another, so it would go and flash back).
+  const aside = useRef<HTMLElement>(null);
+  const lastMode = useRef(mode);
+  const collapsedUnderPointer = useRef(0);
+  useLayoutEffect(() => {
+    if (mode === "collapsed" && lastMode.current === "pinned" && aside.current?.matches(":hover")) collapsedUnderPointer.current = Date.now();
+    lastMode.current = mode;
+  }, [mode]);
 
   useLayoutEffect(() => {
     if (settle.current) clearTimeout(settle.current);
@@ -941,8 +953,8 @@ export function Sidebar(props: Props) {
   };
   const enter = (e: { buttons: number }) => {
     inside.current = true;
-    // Not while dragging something across it.
-    if (e.buttons || rest.current) return;
+    // Not while dragging something across it, nor as the pointer is still where the sidebar was collapsed from.
+    if (e.buttons || rest.current || Date.now() - collapsedUnderPointer.current < AFTER_COLLAPSE_MS) return;
     rest.current = setTimeout(() => {
       rest.current = null;
       stopClosing();
@@ -1069,7 +1081,7 @@ export function Sidebar(props: Props) {
   );
 
   return (
-    <aside className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
+    <aside ref={aside} className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
       {/* Pinned and floating are different elements, so pinning or collapsing is at once, not a width transition. */}
       <div
         ref={panel}
