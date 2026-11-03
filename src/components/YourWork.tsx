@@ -4,6 +4,7 @@ import { usePersistentState } from "../lib/layout";
 import { filterWork, FILTER_TONES, groupWork, nextSteps, STAGES, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
 import { Card, Row } from "./DeskCard";
+import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
 
 export interface YourWorkProps {
@@ -113,13 +114,42 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
   );
 }
 
-/** One item where it stands: its name and state, a quiet line, and its path as nodes. */
+/** The Linear issue a pull request or branch is the work of, as a chip of its own under its name: what it joins its feature by. */
+function IssueChip({ item, feature }: { item: WorkItem; feature: string | null }) {
+  const issue = item.issue!;
+  const chip = (
+    <>
+      <b className="yw-issue-id">{issue.identifier}</b>
+      {issue.title && <span className="yw-issue-title">{issue.title}</span>}
+      {/* Outside a feature's heading, the feature is said here. */}
+      {feature === null && issue.project && <span className="yw-issue-in">in {issue.project}</span>}
+    </>
+  );
+  return safeIssueUrl(issue.url) ? (
+    <ExternalLink className="yw-issue" href={issue.url}>
+      {chip}
+    </ExternalLink>
+  ) : (
+    <span className="yw-issue">{chip}</span>
+  );
+}
+
+/** One item where it stands: a bar in its state's colour, its name and state, the issue it is the work of, a quiet line, and its
+ * path as nodes. */
 function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: boolean; feature?: string | null }) {
-  // Under its feature's heading, the feature isn't said again.
-  const meta = feature === null ? item.meta : item.meta.split(" · ").filter((part) => part !== feature).join(" · ");
+  // An issue not started is named by its title already. Under its feature's heading, the feature isn't said again.
+  const chip = !!item.issue && item.tone !== "todo";
+  const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature).join(" · ");
   return (
-    <li className={`dp-row yw-tone-${item.tone}`}>
-      <Row title={<Named item={item} />} aside={<span className="yw-word">{item.word}</span>} meta={meta} />
+    <li className={`dp-row yw-row yw-tone-${item.tone}`}>
+      <span className="dp-row-top">
+        <span className="dp-title yw-name">
+          <Named item={item} />
+        </span>
+        <span className="dp-aside yw-word">{item.word}</span>
+      </span>
+      {chip && <IssueChip item={item} feature={feature} />}
+      {meta && <span className="dp-meta">{meta}</span>}
       <Nodes item={item} issues={issues} />
     </li>
   );
@@ -127,7 +157,7 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
 
 /** A group of work (a feature, or a project): its name, a dot and a count for each state, how many issues are in work and to start,
  * then its rows. Its name folds it. */
-function Group({ group, issues, folded, onFold }: { group: WorkGroup; issues: boolean; folded: boolean; onFold: () => void }) {
+function Group({ group, by, issues, folded, onFold }: { group: WorkGroup; by: GroupBy; issues: boolean; folded: boolean; onFold: () => void }) {
   const [all, setAll] = useState(false);
   const shown = all ? group.items : group.items.slice(0, SHOWN_IN_GROUP);
   const more = group.items.length - shown.length;
@@ -139,7 +169,11 @@ function Group({ group, issues, folded, onFold }: { group: WorkGroup; issues: bo
           <span className="yw-chev" aria-hidden>
             {folded ? "▸" : "▾"}
           </span>
-          <h3>{group.label}</h3>
+          <span className="yw-head-text">
+            {/* What a group is, said once on its heading: a Linear project (a feature) or a repository. */}
+            {!group.plain && by !== "none" && <span className="yw-kicker" aria-hidden>{by === "feature" ? "Feature · Linear project" : "Project"}</span>}
+            <h3>{group.label}</h3>
+          </span>
         </button>
         <WorkDots counts={counts} />
         {(group.doing > 0 || group.todo > 0) && (
@@ -304,7 +338,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
               )}
             </>
           ) : (
-            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} issues={issues} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
+            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
           )}
         </Card>
       )}

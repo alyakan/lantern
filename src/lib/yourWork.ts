@@ -67,8 +67,10 @@ export interface WorkItem {
   sig: string;
   /** Only a next step, not listed under where things stand (a release: its pull requests are listed each). */
   stepOnly?: boolean;
-  /** The Linear issue it is the work of, and the project (feature) that is in. */
-  issue?: { identifier: string; url: string; project: string | null };
+  /** The Linear issue it is the work of (named by its title too), and the project (feature) that is in. */
+  issue?: { identifier: string; url: string; project: string | null; title: string };
+  /** `meta` without the issue's part, which the Mac draws as a line of its own (the phone is sent `meta` whole). */
+  bare?: string;
 }
 
 /** A branch or tag that is only letters, digits and `._/-`, and never reads as an option: safe to name in a message. */
@@ -318,7 +320,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
     const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
     const tag = issue.project ? `${named} · ${issue.project}` : named;
-    return { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project }, meta: `${tag} · ${item.meta}` };
+    return { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` };
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
   for (const issue of work.issues) {
@@ -346,7 +348,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
           ? { kind: "start", what: "Start", yours: false, button: "Do it", onBranch: false, text: `Start on the Linear issue ${issue.identifier} (${issue.url}). Read it with your Linear tools if you have them, or ask me what it says. Plan the work and show me the plan before you change any code. Then work on a new branch with ${issue.identifier} in its name, in a git worktree of your own, and leave this checkout as it is.` }
           : null,
       sig: `issue:${issue.state_type}`,
-      issue: { identifier: issue.identifier, url: issue.url, project: issue.project },
+      issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
     });
   }
   return out;

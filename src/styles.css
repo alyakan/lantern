@@ -3865,11 +3865,25 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
-.yw-feature + .yw-feature { border-top: 0.5px solid var(--line); }
-.yw-feature-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px 3px; }
-.yw-feature-head h3 { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
+/* A group (a feature, or a project) is a box of its own on the card: a header band, then its work, each piece with a bar in its state's colour. */
+.yw-feature { margin: 10px 12px 0; border: 0.5px solid var(--line); border-radius: var(--radius-inner); overflow: hidden; }
+.yw-feature:last-of-type { margin-bottom: 12px; }
+.yw-feature-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--text) 6%, var(--pane)); border-bottom: 0.5px solid var(--line); }
+.yw-head-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.yw-kicker { font: 600 calc(9.5px * var(--font-scale)) var(--ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-text); }
+.yw-feature-head h3 { margin: 0; font: 700 calc(14.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .yw-feature-sum { margin-left: auto; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .yw-feature-head + .dp-list { border-top: none; }
+.yw-feature > .desk-more { margin: 0; }
+.yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+.yw-row .dp-title { white-space: normal; font-weight: 600; font-size: calc(13.5px * var(--font-scale)); }
+.yw-row .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
+.yw-issue { display: inline-flex; align-items: baseline; align-self: flex-start; gap: 7px; max-width: 100%; padding: 2px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--text) 7%, var(--pane)); font-size: calc(12px * var(--font-scale)); color: var(--text-2); text-decoration: none; }
+a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane)); }
+.yw-issue-id { flex: none; font-family: var(--mono); font-weight: 650; color: var(--text); }
+.yw-issue-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yw-issue-in { flex: none; color: var(--muted-text); }
+.yw-kicker + h3 { margin-top: 0; }
 /* Where things stand: what groups it and which states it shows, then groups that fold. */
 .yw-bar { display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 8px; border-bottom: 0.5px solid var(--line); }
 .yw-group { display: flex; align-items: center; gap: 2px; }
