@@ -98,8 +98,10 @@ import { DeskAsk } from "./components/DeskAsk";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
-import { stepMessage } from "./lib/yourWork";
 import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
+import { phoneWork } from "./lib/phoneWork";
+import { stepMessage, targetFor, unknownViewer, withLinear, yourWork } from "./lib/yourWork";
+import { markStepSent, stepSentTo } from "./components/YourWork";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2589,12 +2591,65 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
-  const { repos: allRepos, refresh: refreshRepos } = useDeskStatus(deskShown, deskFolders);
+  // A paired phone with the Work tab asks for the same, so it is read while one is connected too, not only while the Desk is on screen.
+  const workWanted = !!deskShown || phonesOn.length > 0;
+  const { repos: allRepos, refresh: refreshRepos } = useDeskStatus(workWanted, deskFolders);
   // Linear's side of Your work, and the team each project's work is in (Settings → Linear).
-  const linear = useLinearWork(deskShown);
+  const linear = useLinearWork(workWanted);
   const [linearTeams, setLinearTeams] = useState<TeamChoice>(loadTeams);
   const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
+  // Your work for a phone's Work tab: the same items the Desk shows, told to the backend when they change. The phone is sent their
+  // names and states, never the message a step sends.
+  const workNow = Date.now();
+  const workItems = withLinear(yourWork(deskRepos, workNow), linear.work, teamOfRepo(deskRepos, linear.work, linearTeams), deskRepos, workNow);
+  const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected, !!deskRepos && deskRepos.length > 0, unknownViewer(deskRepos));
+  const phoneWorkKey = JSON.stringify(phoneWorkNow);
+  useEffect(() => {
+    void api.remoteWindowWork(phoneWorkNow).catch(() => {});
+  }, [phoneWorkKey]);
+  // A paired phone asked for a step of the user's work (the backend checked the item is listed and as the phone saw it). It is done
+  // as the Desk's button does it, with the phone's rules for a chat it starts: on Ask, on a provider that can reach a phone. The ref is
+  // read when it happens, so it sees the work and the chats as they are then.
+  const workStepRef = useRef<(r: { id: string; key: string; sig: string }) => void>(() => {});
+  workStepRef.current = (r) => {
+    const fail = (why: string) => void api.remoteWorkStepDone(r.id, null, null, why).catch(() => {});
+    const item = workItems.find((i) => i.key === r.key);
+    if (!item || !item.next) return fail("That isn't on your list any more. Look again.");
+    if (item.sig !== r.sig) return fail("That moved on since you looked. Look again.");
+    const was = stepSentTo(item.key, item.sig);
+    if (was) return fail(`That was already sent to ${was}.`);
+    if (!agentReady) return fail("No agent provider is set up on your Mac yet.");
+    const target = targetFor(item, deskInbox(chats, openByProject), deskRepos);
+    if (!target) return fail("There is no project to do that in.");
+    if (target.kind === "busy") return fail(`Its chat ${target.why}: try again when it's idle.`);
+    const text = stepMessage(item, target);
+    if (target.kind === "chat") {
+      sendIn(target.slot, text, undefined, true);
+      markStepSent(item.key, item.sig, `"${target.title}"`);
+      return void api.remoteWorkStepDone(r.id, "sent", target.title, null).catch(() => {});
+    }
+    const slot = `s${++slotSeq.current}`;
+    dispatchChats({ type: "add", slot });
+    const own = providerFor(target.folder);
+    const providerId = capabilitiesOf(infoOf(own)).phone_approvals ? own : CLAUDE;
+    startIn(slot, target.folder, false, false, text, undefined, undefined, { permissions: "ask", preset: null, workflow: "chat" }, providerId);
+    markStepSent(item.key, item.sig, "a new chat");
+    void api.remoteWorkStepDone(r.id, "started", item.name, null).catch(() => {});
+  };
+  const workRefreshRef = useRef(() => {});
+  workRefreshRef.current = () => {
+    refreshRepos();
+    linear.refresh();
+  };
+  useEffect(() => {
+    const unlistenStep = api.onRemoteWorkStep((r) => workStepRef.current(r)).catch(() => null);
+    const unlistenRefresh = api.onRemoteWorkRefresh(() => workRefreshRef.current()).catch(() => null);
+    return () => {
+      unlistenStep.then((f) => f?.());
+      unlistenRefresh.then((f) => f?.());
+    };
+  }, []);
   const deskNeeds = inbox.filter((it) => onThisDesk(it.slot));
   const deskEdit = (id: string, change: (e: DeskEntry) => DeskEntry) => setDeskLog((all) => all.map((e) => (e.id === id ? change(e) : e)));
   // A message goes to a chat as if typed there: now when the chat is free, queued behind its turn when it's working.

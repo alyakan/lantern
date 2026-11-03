@@ -53,10 +53,20 @@ describe("the Desk's projects", () => {
     const o = open(c);
     const rows = deskProjects(deskInbox(c, o), o, ["/work/nahar"], { "/work/lantern": { open: 3, overdue: 1 } }, { "/work/site": 1 });
     expect(rows.map((r) => [r.label, r.chats, r.working, r.needs, r.at, r.todos])).toEqual([
-      ["site", 1, 0, 1, 10, null],
       ["lantern", 2, 1, 0, 90, { open: 3, overdue: 1 }],
       ["nahar", 0, 0, 0, null, null],
+      ["site", 1, 0, 1, 10, null],
     ]);
+  });
+
+  it("keeps the projects in the same order when something happens in them: one asks, one finishes, one is newly busy", () => {
+    const quiet = chats({ s1: idle({ activityAt: 10 }), s2: idle({ folder: "/work/site", activityAt: 20 }), s3: idle({ folder: "/work/api", activityAt: 30 }) });
+    const o = open(quiet);
+    const before = deskProjects(deskInbox(quiet, o), o, [], {}).map((r) => r.label);
+    const busy = chats({ s1: idle({ activityAt: 99 }), s2: idle({ folder: "/work/site", status: "running", activityAt: 20 }), s3: idle({ folder: "/work/api", activityAt: 30 }) });
+    const after = deskProjects(deskInbox(busy, open(busy)), open(busy), [], {}, { "/work/api": 2 }).map((r) => r.label);
+    expect(before).toEqual(["api", "lantern", "site"]);
+    expect(after).toEqual(before);
   });
 
   it("counts a chat that finished unread as unread, not as needing you", () => {

@@ -3,7 +3,7 @@ import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadFolded, loadGrouping, loadHomeMode, saveFolded, saveGrouping, saveHomeMode } from "../prefs";
+import { loadFolded, loadGrouping, loadHomeMode, saveFolded, saveGrouping, saveHomeMode, type HomeMode } from "../prefs";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
 import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
@@ -27,6 +27,9 @@ import { HomeSearch } from "./HomeSearch";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
+import { ModeSwitch } from "./ModeSwitch";
+import { WorkScreen } from "./WorkScreen";
+import { nextSteps } from "../view/work";
 import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 import { Suggestions } from "./Suggestions";
@@ -62,22 +65,6 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 24, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: pinned ? colors.ink : colors.ink3, flexDirection: "row", overflow: "hidden" }}>
       <View style={{ width: 8, backgroundColor: pinned ? colors.ink : "transparent", borderRightWidth: 1.5, borderRightColor: pinned ? colors.ink : colors.ink3 }} />
-    </View>
-  );
-}
-
-/** Home as the Desk (every chat at once, and a box that finds the chat) or as the list of chats. */
-function ModeSwitch({ value, onChange }: { value: "desk" | "chats"; onChange: (m: "desk" | "chats") => void }) {
-  const colors = useColors();
-  return (
-    <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: colors.card, borderRadius: radius.pill, padding: 3, borderWidth: 1, borderColor: colors.rule }}>
-      {(["desk", "chats"] as const).map((m) => (
-        <PressScale key={m} accessibilityRole="tab" accessibilityState={{ selected: value === m }} onPress={() => onChange(m)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: value === m ? colors.ink : "transparent" }}>
-          <Txt variant="small" tone={value === m ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
-            {m === "desk" ? "Desk" : "Chats"}
-          </Txt>
-        </PressScale>
-      ))}
     </View>
   );
 }
@@ -333,7 +320,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, work } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
@@ -362,8 +349,12 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const scrollY = useRef(new Animated.Value(0)).current;
   // The Desk, for a Mac that has one (remembered on this phone; the Desk unless the list was chosen).
   const canDesk = useMacCan("desk");
-  const [mode, setMode] = useState<"desk" | "chats">("desk");
-  const pickMode = (m: "desk" | "chats") => {
+  // Your work, for a Mac that has it: a third switch beside the Desk and the chats, with how many steps wait on you.
+  const canWork = useMacCan("work");
+  const [chosenMode, setMode] = useState<HomeMode>("desk");
+  const mode: HomeMode = chosenMode === "work" && !canWork ? "desk" : chosenMode;
+  const modes: { id: HomeMode; label: string; badge?: number }[] = [{ id: "desk", label: "Desk" }, ...(canWork ? [{ id: "work" as const, label: "Work", badge: work ? nextSteps(work.items).length : 0 }] : []), { id: "chats", label: "Chats" }];
+  const pickMode = (m: HomeMode) => {
     setMode(m);
     void saveHomeMode(m);
   };
@@ -447,7 +438,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             <Dots />
           </View>
         )}
-        {canDesk && !onOpenDesk && <ModeSwitch value={mode} onChange={pickMode} />}
+        {canDesk && !onOpenDesk && <ModeSwitch value={mode} modes={modes} onChange={pickMode} />}
         {canSingle && !single && (
           <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
             <FocusGlyph color={colors.ink2} />
@@ -465,6 +456,20 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
   const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
+  if (canDesk && canWork && mode === "work" && !onOpenDesk)
+    return (
+      <>
+        <WorkScreen
+          top={
+            <>
+              {top}
+              {banner}
+            </>
+          }
+        />
+        {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+      </>
+    );
   if (canDesk && mode === "desk" && !onOpenDesk)
     return (
       <>

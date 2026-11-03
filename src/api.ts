@@ -10,6 +10,7 @@ import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
+import type { WindowWork } from "./lib/phoneWork";
 import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
@@ -423,6 +424,14 @@ export const api = {
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
   /** Tells the backend what the Desks hold, for a phone's Desk (see lib/desk.ts windowDesk). */
   remoteWindowDesk: (desk: WindowDesk) => invoke<void>("remote_window_desk", { desk }),
+  /** Tells the backend where the user's work stands, for a phone's Work tab (see lib/phoneWork.ts). */
+  remoteWindowWork: (work: WindowWork) => invoke<void>("remote_window_work", { work }),
+  /** A paired phone asked for a step of the user's work (the backend checked the item is listed and as the phone saw it): answered with remoteWorkStepDone. */
+  onRemoteWorkStep: (cb: (r: { id: string; key: string; sig: string }) => void): Promise<UnlistenFn> => listen<{ id: string; key: string; sig: string }>("remote-work-step", (e) => cb(e.payload)),
+  /** A paired phone asked the Mac to look at git, GitHub and Linear again. */
+  onRemoteWorkRefresh: (cb: () => void): Promise<UnlistenFn> => listen("remote-work-refresh", () => cb()),
+  /** The window's answer to a phone's step: "sent" to a chat or "started" one (and where), or why it didn't. */
+  remoteWorkStepDone: (id: string, kind: "sent" | "started" | null, to: string | null, error: string | null) => invoke<void>("remote_work_step_done", { id, kind, to, error }),
   /** The sidebar's One project (null: every project), for the phones that follow it. */
   remoteWindowSingle: (single: WindowSingle | null) => invoke<void>("remote_window_single", { single }),
   /** A phone connected or went: ask remoteSettings who is connected now. */

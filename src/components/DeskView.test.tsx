@@ -41,6 +41,7 @@ const needs = () => screen.getByRole("region", { name: "Needs you" });
 describe("the Desk", () => {
   beforeEach(() => {
     forgetSent();
+    localStorage.clear();
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -170,9 +171,10 @@ describe("the Desk", () => {
     const next = within(screen.getByRole("region", { name: "Next" })).getAllByRole("listitem").map((l) => l.textContent);
     expect(next).toEqual([
       expect.stringMatching(/^Merge #8 PR 8Your callMerge…Ready to merge/),
-      expect.stringMatching(/^Review #10 PR 10Do itYour review is asked · lantern · by @sara$/),
+      // Yours to decide says so on its pill; the others say where they stand there.
+      expect.stringMatching(/^Review #10 PR 10Your review is askedDo itlantern · by @sara$/),
       expect.stringMatching(/^Release 1 pull request since v0\.1\.93Your callRelease…/),
-      expect.stringMatching(/^Fix failing checks on #7 PR 7Do itChecks failing/),
+      expect.stringMatching(/^Fix failing checks on #7 PR 7Checks failingDo it/),
     ]);
     const stand = within(screen.getByRole("region", { name: "Where things stand" }));
     // Someone else's pull request that doesn't ask for you isn't your work; one merged before the release is done.
@@ -213,8 +215,12 @@ describe("the Desk", () => {
     const stand = screen.getByRole("region", { name: "Where things stand" });
     const sync = within(stand).getByRole("region", { name: "Sync" });
     expect(sync).toHaveTextContent("1 doing");
-    // Under its feature's heading, a row doesn't name the feature again.
-    expect(within(sync).getByText(/^ENG-1 · lantern · aly\/eng-1-a$/)).toBeInTheDocument();
+    // Under its feature's heading, a row doesn't name the feature again, but names the issue it is the work of, as a chip that links to it.
+    expect(within(sync).getByText("lantern · aly/eng-1-a")).toBeInTheDocument();
+    const chip = within(sync).getByRole("link", { name: /ENG-1\s*Sync it/ });
+    expect(chip).toHaveAttribute("href", "https://linear.app/a/issue/ENG-1");
+    expect(chip).not.toHaveTextContent("in Sync");
+    expect(sync).toHaveTextContent("Feature · Linear project");
     expect(within(stand).getByRole("region", { name: "No feature" })).toHaveTextContent("PR 8");
   });
 
@@ -235,5 +241,84 @@ describe("the Desk", () => {
     expect(within(region).getAllByRole("list", { name: /^At / })).toHaveLength(8);
     fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getAllByRole("list", { name: /^At / })).toHaveLength(11);
+  });
+
+  it("groups where things stand by project without Linear, folds a group, and lets you group by none", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] }), repo("/p/web", { prs: [pr(1, "fail")] })];
+    setup({ repos });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    // Blocked first: the project with a failing check comes before the other.
+    expect(stand().getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["web", "lantern"]);
+    // Feature needs Linear.
+    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
+    expect(stand().getByRole("radio", { name: "Project" })).toBeChecked();
+    // A row doesn't name its project again under the project's heading.
+    expect(within(stand().getByRole("region", { name: "lantern" })).getByText("b7")).toBeInTheDocument();
+    fireEvent.click(stand().getByRole("button", { name: "lantern" }));
+    expect(within(stand().getByRole("region", { name: "lantern" })).queryByText("PR 7")).toBeNull();
+    expect(stand().getByRole("button", { name: "lantern" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(stand().getByRole("radio", { name: "None" }));
+    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("filters where things stand by state, and says when nothing is in the states chosen", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "fail"), pr(9, "pass")] })];
+    setup({ repos });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+    fireEvent.click(stand().getByRole("button", { name: /^blocked 1/ }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(1);
+    expect(stand().getByText("PR 8")).toBeInTheDocument();
+    fireEvent.click(stand().getByRole("button", { name: /^waiting 1/ }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
+    fireEvent.click(stand().getByRole("button", { name: "Show all" }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("shows five of Next's steps, the rest on asking", () => {
+    const prs = Array.from({ length: 7 }, (_, i) => pr(i + 1, "fail"));
+    setup({ repos: [repo("/p/lantern", { prs })] });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    expect(next.getAllByRole("button", { name: /^Fix failing checks/ })).toHaveLength(5);
+    fireEvent.click(next.getByRole("button", { name: "Show 2 more" }));
+    expect(next.getAllByRole("button", { name: /^Fix failing checks/ })).toHaveLength(7);
+  });
+
+  it("hides its scrollbar while its width changes (the sidebar opening or closing) and a moment after, so the system's flash of one isn't seen", () => {
+    let width = 900;
+    let resized: () => void = () => {};
+    const widthOf = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(() => width);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      setup();
+      const main = document.querySelector(".desk-main")!;
+      expect(main).not.toHaveClass("resizing");
+      // Only what changes the width counts: a change of what scrolls inside it doesn't hide the bar.
+      act(() => resized());
+      expect(main).not.toHaveClass("resizing");
+      width = 1040;
+      act(() => resized());
+      expect(main).toHaveClass("resizing");
+      act(() => void vi.advanceTimersByTime(300));
+      width = 1100;
+      act(() => resized());
+      act(() => void vi.advanceTimersByTime(300));
+      expect(main).toHaveClass("resizing");
+      act(() => void vi.advanceTimersByTime(200));
+      expect(main).not.toHaveClass("resizing");
+    } finally {
+      widthOf.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

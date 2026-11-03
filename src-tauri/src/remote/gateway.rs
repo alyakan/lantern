@@ -43,6 +43,9 @@ pub const NEW_CHATS_PER_WINDOW: usize = 5;
 pub const NEW_CHAT_WINDOW_MS: u64 = 10 * 60 * 1000;
 
 /// Whether a phone's request to start a chat is well formed (whether the project is one is for the gateway to decide).
+/// What a Mac without a window to ask says of the user's work.
+const NO_WORK: &str = "This Mac can't do that step.";
+
 fn check_new_chat(project: &str, text: &str) -> Result<(), String> {
     if !project.starts_with('/') || project.len() > 4096 || project.contains('\0') {
         Err("That isn't a project folder.".into())
@@ -134,6 +137,16 @@ pub trait Host: Send + Sync + 'static {
     /// `provider` (one of the providers listed, or None for the project's own) is where it runs.
     #[allow(clippy::too_many_arguments)]
     fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>>;
+    /// Does the step `key` of the user's work, as the Desk's button does (the gateway has checked it is listed and `sig` is how it was
+    /// shown): the window sends the chat on the item's branch a message it wrote, or starts a chat on Ask. Says what it did, as
+    /// ("sent" or "started", where), or why not.
+    fn work_step(&self, _key: String, _sig: String) -> BoxFut<Result<(String, String), String>> {
+        Box::pin(async { Err(NO_WORK.to_string()) })
+    }
+    /// Asks the window to look at git, GitHub and Linear again.
+    fn work_refresh(&self) -> Result<(), String> {
+        Err(NO_WORK.into())
+    }
     /// Puts an open chat on Chat or Step by step: its claude restarts on the same session (the gateway has checked it may; never a team).
     fn set_workflow(&self, slot: &str, workflow: protocol::RemoteWorkflow) -> Result<(), String>;
     /// Puts an open chat on Ask or Auto: its claude restarts on the same session (the gateway has checked it may).
@@ -523,6 +536,25 @@ impl Gateway {
         serde_json::to_value(protocol::StartedChat { slot }).map_err(|e| e.to_string())
     }
 
+    /// Does a step of the user's work for `device` (Request::WorkStep). The phone names the item and the state it saw it in, nothing
+    /// else: what is sent is written on the Mac. A step that moved on since, an item with no step, and too many lately are refused;
+    /// each counts against the same limit as a chat the phone starts, since a step may start one.
+    async fn work_step(&self, device: &str, key: String, sig: String) -> Result<serde_json::Value, String> {
+        let item = self.hub.work.find(&key).ok_or("That isn't on your Mac's list any more. Look again.")?;
+        if item.sig != sig {
+            return Err("That moved on since you looked. Look again.".into());
+        }
+        if item.next.is_none() {
+            return Err("There is nothing to do for that.".into());
+        }
+        self.allow_new_chat(device)?;
+        let (kind, to) = self.host.work_step(key, sig).await?;
+        if !matches!(kind.as_str(), "sent" | "started") {
+            return Err("Your Mac answered in a way this phone doesn't know.".into());
+        }
+        serde_json::to_value(protocol::RemoteWorkStep { kind, to: to.chars().take(120).collect() }).map_err(|e| e.to_string())
+    }
+
     /// Whether a phone may start a chat where it asks to: only on a provider the window listed (never a name the phone made up),
     /// and not on Auto or a Claude preset where that provider has none: the phone's sheet doesn't offer them, and a request that
     /// does is refused in words rather than quietly run as something else. None is the project's own, whatever that is.
@@ -659,7 +691,7 @@ impl Gateway {
         let permit = self.handshakes.clone().try_acquire_owned().map_err(|_| Refused::Busy)?;
         let (device, mut channel, features) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
         let said = |name: &str| features.iter().any(|f| f == name);
-        let (extras, desk, single) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK), said(protocol::PHONE_SINGLE));
+        let (extras, desk, single, work) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK), said(protocol::PHONE_SINGLE), said(protocol::PHONE_WORK));
         drop(permit);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
@@ -671,7 +703,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, provider_usage: said("provider_usage"), last_provider_usage: Vec::new(), desk, last_desk: None, single, last_single: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, provider_usage: said("provider_usage"), last_provider_usage: Vec::new(), desk, last_desk: None, single, last_single: None, work, last_work: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -782,6 +814,9 @@ struct Session<'a> {
     /// Whether it follows the Mac's One project (protocol::PHONE_SINGLE), and the version it was last sent.
     single: bool,
     last_single: Option<u64>,
+    /// Whether it shows Your work (protocol::PHONE_WORK), and the version it was last sent.
+    work: bool,
+    last_work: Option<u64>,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
@@ -854,6 +889,7 @@ impl<'a> Session<'a> {
         self.send_plan(link, channel)?;
         self.send_desk(link, channel)?;
         self.send_single(link, channel)?;
+        self.send_work(link, channel)?;
         loop {
             tokio::select! {
                 _ = killed.changed() => return Ok(()),
@@ -863,7 +899,7 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } | Request::WorkStep { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
@@ -873,6 +909,10 @@ impl<'a> Session<'a> {
                         Request::ReviewDiff { slot, path } => slow.push(Box::pin(async move { (id, gw.review_diff(slot, path).await) })),
                         Request::Diff { slot, path, scope } => slow.push(Box::pin(async move { (id, gw.file_diff(slot, path, scope).await) })),
                         Request::Changes { slot, scope } => slow.push(Box::pin(async move { (id, gw.changes(slot, scope).await) })),
+                        Request::WorkStep { key, sig } => {
+                            let device = self.device.clone();
+                            slow.push(Box::pin(async move { (id, gw.work_step(&device, key, sig).await) }));
+                        }
                         Request::NewChat { project, text, permissions, preset, workflow, provider } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider).await) }));
@@ -899,6 +939,7 @@ impl<'a> Session<'a> {
                     self.send_plan(link, channel)?;
                     self.send_desk(link, channel)?;
                     self.send_single(link, channel)?;
+                    self.send_work(link, channel)?;
                     for slot in self.named_since_reset() {
                         self.reset(link, channel, &slot).await?;
                     }
@@ -949,6 +990,18 @@ impl<'a> Session<'a> {
         let (desk, version) = self.gw.hub.desk.phone();
         send_message(link, channel, &ServerMessage::Desk { desk })?;
         self.last_desk = Some(version);
+        Ok(())
+    }
+
+    /// Your work, to a phone that shows it: once the window has said it, and when it changed since this phone was sent it.
+    fn send_work(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
+        let version = self.gw.hub.work.version();
+        if !self.work || version == 0 || self.last_work == Some(version) {
+            return Ok(());
+        }
+        let (work, version) = self.gw.hub.work.phone();
+        send_message(link, channel, &ServerMessage::Work { work })?;
+        self.last_work = Some(version);
         Ok(())
     }
 
@@ -1266,6 +1319,9 @@ impl<'a> Session<'a> {
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::Desk => Ok(json(&self.gw.hub.desk.phone().0)),
+            Request::Work => Ok(json(&self.gw.hub.work.phone().0)),
+            Request::WorkStep { key, sig } => self.gw.work_step(&self.device, key, sig).await,
+            Request::WorkRefresh => host.work_refresh().map(|()| serde_json::Value::Null),
             Request::DeskRoute { desk, text } => self.gw.desk_route(desk, text).await,
             Request::DeskTalk { desk, text, history } => self.gw.desk_talk(desk, text, history).await,
             Request::DeskReply { desk, slot, text, after } => self.gw.desk_reply(desk, slot, text, after).await,
@@ -1428,6 +1484,10 @@ pub(crate) mod tests {
         /// How long the model takes to answer, and a chat started from a phone takes to open.
         pub suggest_delay: Mutex<Duration>,
         pub new_chat_delay: Mutex<Duration>,
+        /// The steps of the user's work it was asked to do (key, sig), what it answers to them, and how often it was asked to look again.
+        pub work_steps: Mutex<Vec<(String, String)>>,
+        pub work_answer: Mutex<Option<Result<(String, String), String>>>,
+        pub work_refreshed: Mutex<u32>,
         /// How long a reviewed file's diff takes (a pull request fetched the first time).
         pub review_delay: Mutex<Duration>,
         /// What the Desk's router answers, and what it was shown each time (the chats and the projects); what History's search finds.
@@ -1535,6 +1595,15 @@ pub(crate) mod tests {
                 tokio::time::sleep(delay).await;
                 Ok("s9".to_string())
             })
+        }
+        fn work_step(&self, key: String, sig: String) -> BoxFut<Result<(String, String), String>> {
+            self.work_steps.lock().unwrap().push((key, sig));
+            let answer = self.work_answer.lock().unwrap().clone().unwrap_or(Ok(("sent".into(), "Chat one".into())));
+            Box::pin(async move { answer })
+        }
+        fn work_refresh(&self) -> Result<(), String> {
+            *self.work_refreshed.lock().unwrap() += 1;
+            Ok(())
         }
         fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Route> {
             self.desk_shown.lock().unwrap().push((chats, projects));
@@ -3172,6 +3241,101 @@ pub(crate) mod tests {
         let (ok, _, before) = old.ask(Request::Desk).await;
         assert!(!before.iter().any(|m| matches!(m, ServerMessage::Desk { .. })));
         assert_eq!(ok.unwrap()["desks"][1]["name"], "Work");
+    }
+
+    fn work_said(sig: &str) -> crate::remote::work::WindowWork {
+        use protocol::{RemoteWorkItem, RemoteWorkNext};
+        let item = |key: &str, next: bool| RemoteWorkItem {
+            key: key.into(),
+            repo: "app".into(),
+            title: "Fix it".into(),
+            stage: "checks".into(),
+            tone: "bad".into(),
+            word: "Checks failing".into(),
+            meta: "app · {ago}".into(),
+            at: Some(5),
+            number: Some(7),
+            feature: None,
+            issue: None,
+            url: None,
+            sig: sig.into(),
+            step_only: false,
+            next: next.then(|| RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into() }),
+        };
+        crate::remote::work::WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("/p/app:pr:7", true), item("/p/app:pr:8", false)] }
+    }
+
+    #[tokio::test]
+    async fn your_work_goes_to_a_phone_that_shows_it_when_it_changes_and_not_to_one_that_doesnt() {
+        let r = rig();
+        r.hub.work.set(work_said("a"));
+        let key = generate_keypair().unwrap();
+        let mut p = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_WORK]).await.unwrap();
+        let work = loop {
+            if let Some(ServerMessage::Work { work }) = p.next().await {
+                break work;
+            }
+        };
+        assert_eq!(work.items.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(), ["/p/app:pr:7", "/p/app:pr:8"]);
+        // What the phone is sent has no words of a message: only what the step is called.
+        assert!(!serde_json::to_string(&work).unwrap().contains("request_approval"));
+        r.hub.work.set(work_said("b"));
+        let again = loop {
+            if let Some(ServerMessage::Work { work }) = p.next().await {
+                break work;
+            }
+        };
+        assert_eq!(again.items[0].sig, "b");
+        // A phone that didn't say "work" is never pushed it, but may ask.
+        let (_, mut old) = paired(&r).await;
+        let (ok, _, before) = old.ask(Request::Work).await;
+        assert!(!before.iter().any(|m| matches!(m, ServerMessage::Work { .. })));
+        assert_eq!(ok.unwrap()["items"][0]["key"], "/p/app:pr:7");
+    }
+
+    #[tokio::test]
+    async fn a_step_is_done_only_for_an_item_the_phone_saw_as_it_is_and_counts_against_the_limit_on_new_chats() {
+        let r = rig();
+        r.hub.work.set(work_said("a"));
+        let (_, mut p) = paired(&r).await;
+        let step = |key: &str, sig: &str| Request::WorkStep { key: key.into(), sig: sig.into() };
+        // Not on the list, moved on, or nothing to do for it: refused, and the Mac isn't asked.
+        let (ok, err, _) = p.ask(step("/p/app:pr:99", "a")).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("isn't on your Mac's list")));
+        let (_, err, _) = p.ask(step("/p/app:pr:7", "old")).await;
+        assert!(err.is_some_and(|e| e.contains("moved on")));
+        let (_, err, _) = p.ask(step("/p/app:pr:8", "a")).await;
+        assert!(err.is_some_and(|e| e.contains("nothing to do")));
+        assert!(r.host.work_steps.lock().unwrap().is_empty());
+        // As it was shown: the Mac is asked, with the key and the sig only, and says what it did.
+        let (ok, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(ok.unwrap(), json!({"kind": "sent", "to": "Chat one"}));
+        assert_eq!(*r.host.work_steps.lock().unwrap(), vec![("/p/app:pr:7".to_string(), "a".to_string())]);
+        // The window's refusal comes back in its words; an answer that isn't a kind it knows is not passed on.
+        *r.host.work_answer.lock().unwrap() = Some(Err("Its chat is working.".into()));
+        let (_, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
+        assert_eq!(err.as_deref(), Some("Its chat is working."));
+        *r.host.work_answer.lock().unwrap() = Some(Ok(("rm -rf".into(), "x".into())));
+        let (_, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
+        assert!(err.is_some_and(|e| e.contains("doesn't know")));
+        // Each step the Mac was asked for counts against the phone's chats in a while: three so far (the refusals before the Mac was
+        // asked didn't count).
+        *r.host.work_answer.lock().unwrap() = None;
+        for _ in 3..NEW_CHATS_PER_WINDOW {
+            assert!(p.ask(step("/p/app:pr:7", "a")).await.1.is_none());
+        }
+        let (ok, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
+    }
+
+    #[tokio::test]
+    async fn a_phone_can_ask_the_mac_to_look_again() {
+        let r = rig();
+        let (_, mut p) = paired(&r).await;
+        let (_, err, _) = p.ask(Request::WorkRefresh).await;
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(*r.host.work_refreshed.lock().unwrap(), 1);
     }
 
     #[tokio::test]

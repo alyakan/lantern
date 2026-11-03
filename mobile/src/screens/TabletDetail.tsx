@@ -20,6 +20,9 @@ import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 import { DeskScreen } from "./DeskScreen";
+import { ModeSwitch } from "./ModeSwitch";
+import { WorkScreen } from "./WorkScreen";
+import { nextSteps } from "../view/work";
 
 /** The widest a decision goes: it is a card to read and swipe, not a page. */
 const DECISION_MAX = 560;
@@ -54,7 +57,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
-  const { views, chats } = useSyncState();
+  const { views, chats, work } = useSyncState();
   // With the chats away and the window wide enough, the files the chat has changed are beside it, and the chat's Changes button
   // shows or hides them. Otherwise that button opens them in a sheet over the chat.
   const [changesOpen, setChangesOpen] = useState(true);
@@ -65,6 +68,9 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const canArtifacts = useMacCan("artifacts");
   const canTodos = useMacCan("todos");
   const canDesk = useMacCan("desk");
+  // Where no chat is open: the Desk, or (a Mac that lists "work") Your work, picked at the top.
+  const canWork = useMacCan("work");
+  const [page, setPage] = useState<"desk" | "work">("desk");
   // Each chat's own: the one picked in it the last time it was on screen.
   const [picked, setPicked] = useState<{ slot: string | null; panel: Panel }>(() => ({ slot, panel: panelOf(slot) }));
   const panel = picked.slot === slot ? picked.panel : panelOf(slot);
@@ -144,17 +150,16 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
       <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={wide ? { shown: mode !== "hidden", onToggle: togglePane, onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
   ) : canDesk ? (
-    <DeskScreen
-      wide
-      onOpenChat={onOpenChat}
-      onReview={onReview}
-      top={
+    (() => {
+      const showingWork = canWork && page === "work";
+      const top = (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.xl, minHeight: 32 }}>
-          <Txt variant="title">Desk</Txt>
+          {canWork ? <ModeSwitch value={showingWork ? "work" : "desk"} modes={[{ id: "desk", label: "Desk" }, { id: "work", label: "Work", badge: work ? nextSteps(work.items).length : 0 }]} onChange={(m) => setPage(m === "work" ? "work" : "desk")} /> : <Txt variant="title">Desk</Txt>}
           {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
         </View>
-      }
-    />
+      );
+      return showingWork ? <WorkScreen wide top={top} /> : <DeskScreen wide onOpenChat={onOpenChat} onReview={onReview} top={top} />;
+    })()
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
       <Txt variant="heading">Pick a chat</Txt>

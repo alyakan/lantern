@@ -10,6 +10,8 @@ import type { RemotePermissions } from "../protocol/generated/RemotePermissions"
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteWork } from "../protocol/generated/RemoteWork";
+import type { RemoteWorkStep } from "../protocol/generated/RemoteWorkStep";
 import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import type { RemoteDeskExchange } from "../protocol/generated/RemoteDeskExchange";
 import type { RemoteDeskReply } from "../protocol/generated/RemoteDeskReply";
@@ -123,6 +125,7 @@ export class Sync {
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
     void this.refreshDesk();
+    void this.refreshWork();
     this.onConnected?.();
   };
 
@@ -182,6 +185,32 @@ export class Sync {
     } catch {
       // What was known stays: the Mac pushes the Desk again when it changes.
     }
+  }
+
+  /** Asks for Your work, from a Mac that has it (it pushes it as it changes; this is for the first time). */
+  async refreshWork() {
+    if (!this.has("work")) return;
+    try {
+      const work = await this.ask<RemoteWork>({ op: "work" });
+      if (work && Array.isArray(work.items)) this.apply({ type: "work", work });
+    } catch {
+      // What was known stays: the Mac pushes it again when it changes.
+    }
+  }
+
+  /**
+   * Asks the Mac to do the step of the item `key`, as it was shown (`sig`): the Mac sends a message it wrote to the chat on the item's
+   * branch, or starts a chat on Ask. Nothing is typed here. Says what the Mac did; rejects with why it didn't.
+   */
+  workStep(key: string, sig: string) {
+    if (!this.has("work")) return Promise.reject(new Error("Update Lantern on your Mac to do that from here."));
+    return this.ask<RemoteWorkStep>({ op: "work_step", key, sig }, DESK_WAIT);
+  }
+
+  /** Asks the Mac to look at git, GitHub and Linear again; what it finds comes as Your work changes. */
+  workRefresh() {
+    if (!this.has("work")) return Promise.resolve(null);
+    return this.ask<null>({ op: "work_refresh" });
   }
 
   /**

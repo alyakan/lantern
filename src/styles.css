@@ -48,6 +48,7 @@
   --lift-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--line-strong);   /* a project row while it's dragged */
   --hud-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   --panel-shadow: 0 0 0 0.5px var(--line-strong), 8px 0 28px rgba(0, 0, 0, 0.14);   /* the collapsed sidebar opened over the chat, and the peek */
+  --panel-shadow-gone: 0 0 0 0.5px transparent, 8px 0 28px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --overlay: rgba(0, 0, 0, 0.28);   /* behind a dialog */
   --overlay-strong: rgba(0, 0, 0, 0.35);
   --on-color: #ffffff;     /* text on a project's own colour, or a severity's */
@@ -305,6 +306,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(1, 4, 9, 0.6);
   --overlay-strong: rgba(1, 4, 9, 0.7);
@@ -413,6 +415,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(0, 4, 1, 0.65);
   --overlay-strong: rgba(0, 4, 1, 0.75);
@@ -631,6 +634,8 @@
   --lift-shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
   --hud-shadow: 0 0 0 0 transparent;
   --panel-shadow: inset -2px 0 0 var(--ph-ink), 4px 0 0 var(--ph-ink);
+  --panel-shadow-gone: inset -2px 0 0 transparent, 4px 0 0 transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
+  --panel-shadow-pinned: inset -2px 0 0 var(--ph-ink);   /* the pinned sidebar's edge, which a pane closing from pinned keeps */
   --md-link: #1d4aff;
   --md-link-line: #1d4aff;
   --md-quote-bar: #f54e00;
@@ -3339,16 +3344,30 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
    they are and the names coming out beside them. Pinned, the panel is open at the saved width beside the chat, its edge a drag
    handle (its width never takes the room the chat and the side panel need: the window's minimum width is the sum of the three).
    A peek is the same open panel, slid in over the chat from the window's edge while the sidebar is hidden. */
-.sidebar { position: relative; z-index: 15; flex: none; width: 56px; }
+/* Its width is animated when it is pinned or collapsed (the same time and easing as the pane inside it), so the chat or Desk beside
+   it glides to its place instead of jumping; not while its edge is being dragged. */
+.sidebar { position: relative; z-index: 15; flex: none; width: 56px; min-width: 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), min-width var(--sb-close); }
 .sidebar.pinned { min-width: 200px; max-width: max(200px, calc(100vw - 840px)); }
-.sidebar.dragging { user-select: none; cursor: col-resize; }
+.sidebar.dragging { user-select: none; cursor: col-resize; transition: none; }
 .sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), box-shadow 0.22s; }
 .sb-panel.expanded { width: var(--sb-open, 260px); box-shadow: var(--panel-shadow); }
 /* Closing, the border (the shadow's ring) is kept at full strength while the width narrows, so it follows the edge in, and only
    fades once the pane is the bar, where it has no border. */
 .sb-panel.closing { box-shadow: var(--panel-shadow); }
 .sb-panel:not(.expanded):not(.closing) { transition: width var(--sb-close), box-shadow 0.12s; }
-.sidebar.pinned .sb-panel { width: 100%; box-shadow: none; transition: none; }
+/* Pinned, the pane is as wide as the sidebar is to be, from the first frame: the sidebar's width grows under it as the chat beside it
+   slides out from under, rather than the pane's contents being squeezed as it widens. */
+.sidebar.pinned .sb-panel { width: max(100%, min(var(--sb-open, 100%), max(200px, calc(100vw - 840px)))); box-shadow: none; transition: none; }
+/* Collapsing it, the pane is drawn open for a frame in the pinned look, then closes like the open bar does; it keeps the pinned
+   sidebar's edge (none, or the theme's own) all the way in, and the edge goes with the pane at the end, instead of one that isn't
+   there when it starts, grows as it shrinks and then goes. */
+.sb-panel.from-pinned:is(.expanded, .closing) { box-shadow: var(--panel-shadow-pinned, none); }
+/* Closing, the edge fades out while the pane settles into the bar (it is slowest at the end), instead of hanging on for the last
+   few pixels and then going in one frame. */
+@keyframes sb-edge-out { to { box-shadow: var(--panel-shadow-gone, 0 0 0 0 transparent); } }
+.sb-panel.closing { animation: sb-edge-out var(--sb-close) forwards; }
+/* Pinning the open bar: the pinned pane is the same on screen, so its labels aren't faded in again as on a pane opening. */
+.sb-panel.carried.expanded :is(.sb-text, .sb-project-name, .sb-new, .sb-unfold, .sb-side-glyph) { animation: none; }
 .sidebar.peek .sb-panel { transition: none; }
 .sb-head { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 6px 8px; }
 .sb-head button.sb-button { position: relative; width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
@@ -3526,7 +3545,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
 .sb-panel:is(.closing, .opening) .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
 /* Between a team's square and the next, the list's own gap goes with the line that folds its agents. */
-.sb-panel:is(.closing, .opening) .sb-agents-wrap { margin-top: -6px; }
+.sb-panel:is(.closing, .opening) .sb-agents-wrap, .sb-panel:is(.closing, .opening) .sb-views-away { margin-top: -6px; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle > :not(.sb-project-initials), .sb-panel:is(.closing, .opening) .sb-note { opacity: 0; transition: opacity 0.12s; }
 .sb-header-toggle .sb-project-initials { transition: background 0.12s; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle .sb-project-initials { background: transparent; }
@@ -3537,7 +3556,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
-  .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
+  .sidebar, .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
   .sb-unfold, .sb-side-glyph, .sb-side-glyph.leaving { animation: none; }
   .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new { animation: none; }
   .sb-section { transition: none; }
@@ -3732,7 +3751,14 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 980px; margin: 0 auto; padding: 16px 24px 24px; box-sizing: border-box; }
+/* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
+/* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
+:where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
+/* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. Not in
+   the theme whose bar is always there: hiding it would be the flash, and move the pane's edge twice. */
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing { scrollbar-width: none; }
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing::-webkit-scrollbar { display: none; }
 .desk-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 16px 0 0; }
 .desk-side > .desk-h { padding: 0 16px; }
 .desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 18px; }
@@ -3865,11 +3891,42 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
-.yw-feature + .yw-feature { border-top: 0.5px solid var(--line); }
-.yw-feature-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px 3px; }
-.yw-feature-head h3 { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
+/* A group (a feature, or a project) is a box of its own on the card: a header band, then its work, each piece with a bar in its state's colour. */
+.yw-feature { margin: 10px 12px 0; border: 0.5px solid var(--line); border-radius: var(--radius-inner); overflow: hidden; }
+.yw-feature:last-of-type { margin-bottom: 12px; }
+.yw-feature-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--text) 6%, var(--pane)); border-bottom: 0.5px solid var(--line); }
+.yw-head-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.yw-kicker { font: 600 calc(9.5px * var(--font-scale)) var(--ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-text); }
+.yw-feature-head h3 { margin: 0; font: 700 calc(14.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .yw-feature-sum { margin-left: auto; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .yw-feature-head + .dp-list { border-top: none; }
+.yw-feature > .desk-more { margin: 0; }
+.yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+.yw-row .dp-title { white-space: normal; font-weight: 600; font-size: calc(13.5px * var(--font-scale)); }
+.yw-row .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
+.yw-issue { display: inline-flex; align-items: baseline; align-self: flex-start; gap: 7px; max-width: 100%; padding: 2px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--text) 7%, var(--pane)); font-size: calc(12px * var(--font-scale)); color: var(--text-2); text-decoration: none; }
+a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane)); }
+.yw-issue-id { flex: none; font-family: var(--mono); font-weight: 650; color: var(--text); }
+.yw-issue-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yw-issue-in { flex: none; color: var(--muted-text); }
+.yw-kicker + h3 { margin-top: 0; }
+/* Where things stand: what groups it and which states it shows, then groups that fold. */
+.yw-bar { display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 8px; border-bottom: 0.5px solid var(--line); }
+.yw-group { display: flex; align-items: center; gap: 2px; }
+.yw-bar-label { margin-right: 6px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+.yw-group button { padding: 2px 9px; border: 0.5px solid var(--line); background: none; color: var(--muted-text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-group button:first-of-type { border-radius: var(--radius-inner) 0 0 var(--radius-inner); }
+.yw-group button:last-of-type { border-radius: 0 var(--radius-inner) var(--radius-inner) 0; }
+.yw-group button.on { background: var(--text); border-color: var(--text); color: var(--pane); }
+.yw-group button:disabled { opacity: 0.4; cursor: default; }
+.yw-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.yw-pill { display: inline-flex; align-items: center; padding: 2px 9px 2px 7px; border: 0.5px solid var(--line); border-radius: var(--radius-inner); background: none; color: var(--text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; font-variant-numeric: tabular-nums; }
+.yw-pill .yw-dot { width: 7px; height: 7px; margin-right: 5px; }
+.yw-pill.on { border-color: var(--yw); background: color-mix(in srgb, var(--yw) 14%, var(--pane)); }
+.yw-fold { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; }
+.yw-chev { width: 10px; font-size: calc(10px * var(--font-scale)); color: var(--muted-text); }
+/* A row's path is quiet: only the node it is at is named (the rest say their stage on hover). */
+.yw-node:not(.yw-now) { font-size: 0; gap: 0; }
 .yw-sub { margin: 0; padding: 8px 12px 2px; font: 600 calc(10.5px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
 .yw-sub + .dp-list { border-top: none; }
 .yw-card section + section { border-top: 0.5px solid var(--line); }

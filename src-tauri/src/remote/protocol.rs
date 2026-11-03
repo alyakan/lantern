@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// The Changes pane's three views (Request::Changes, and Diff's `scope`): the feature that says a Mac answers them.
 pub const CHANGE_SCOPES: &str = "changescopes";
@@ -105,6 +105,9 @@ pub const PHONE_EXTRAS: &str = "extras";
 pub const PHONE_DESK: &str = "desk";
 /// A Mac whose Desk talks back (Request::DeskTalk) and sums up what came back (Request::DeskReply).
 pub const DESK_TALK: &str = "desktalk";
+/// A phone that shows Your work (the Work tab): it is pushed ServerMessage::Work, may ask for it (Request::Work), run one of its steps
+/// (Request::WorkStep) and ask the Mac to look again (Request::WorkRefresh).
+pub const PHONE_WORK: &str = "work";
 /// A phone that follows the Mac's One project: it is pushed ServerMessage::Single, and may pick one (Request::SetSingle).
 pub const PHONE_SINGLE: &str = "single";
 
@@ -718,6 +721,77 @@ pub struct Waiting {
     pub at: u64,
 }
 
+/// Your work as the Mac's window has it (see remote/work.rs): every piece of the user's work, from an issue or branch to its release, and
+/// the step each waits on. The window works it out (git, GitHub and Linear are asked on the Mac); the phone only shows it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWork {
+    /// Linear is connected: paths start at the issue.
+    pub issues: bool,
+    /// The window has read the repositories it shows: before that (its first answer isn't in, or no project is open) "nothing open" would
+    /// only be a guess.
+    pub looked: bool,
+    /// Repositories GitHub answered for without saying whose account is the user's: their pull requests can't be told apart, so none is listed.
+    pub blind: Vec<String>,
+    /// Blocked first, then what is yours, then the rest, as the Desk lists them.
+    pub items: Vec<RemoteWorkItem>,
+}
+
+/// One piece of work. Every word is what git, GitHub or Linear said, cut short; the phone shows it and never sends it anywhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkItem {
+    /// What Request::WorkStep names.
+    pub key: String,
+    /// The repository's short name.
+    pub repo: String,
+    pub title: String,
+    /// issue, local, pr, checks, review, merge or release: where its path is.
+    pub stage: String,
+    /// bad, wait, you, local, todo or done: its colour.
+    pub tone: String,
+    /// Where it is, in a few words ("Checks failing").
+    pub word: String,
+    /// One quiet line. A time in it is `{ago}`, which the phone fills from `at` (so a line doesn't change every minute).
+    pub meta: String,
+    #[ts(type = "number | null")]
+    pub at: Option<u64>,
+    #[ts(type = "number | null")]
+    pub number: Option<u64>,
+    /// The Linear project it is the work of (the feature), and its issue's identifier.
+    pub feature: Option<String>,
+    pub issue: Option<String>,
+    /// The pull request's or issue's page: an https link on github.com or linear.app, nothing else.
+    pub url: Option<String>,
+    /// Changes when it moves on: a step is asked for with the sig it was shown with, and refused if it moved.
+    pub sig: String,
+    /// Only a next step, not listed under where things stand.
+    pub step_only: bool,
+    pub next: Option<RemoteWorkNext>,
+}
+
+/// What an item waits on. The words of the message a chat is sent stay on the Mac.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkNext {
+    /// What to do, before the item's name ("Fix failing checks on").
+    pub what: String,
+    /// Yours to decide (a merge, a publish, a release): the chat prepares it and asks on an approval card.
+    pub yours: bool,
+    /// The button's word.
+    pub button: String,
+}
+
+/// The answer to Request::WorkStep: what the Mac did with the step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkStep {
+    /// "sent" (to a chat already open) or "started" (a new chat).
+    pub kind: String,
+    /// The chat's title, or the project's name for a new chat.
+    pub to: String,
+}
+
 /// The Desk as the Mac's window has it (see remote/desk.rs): its Desks, and a card for each answer that finished in their chats.
 /// What each chat is doing now is the chat list's (`RemoteChat`), and what waits on the user is ListWaiting's.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
@@ -1013,6 +1087,15 @@ pub enum Request {
     /// Shows only `project` (one of Request::Projects' ids) on the Mac's sidebar and on every phone that follows it, or every project
     /// again (None). The window does it, and says so back as ServerMessage::Single. Only sent to a Mac whose Welcome lists "single".
     SetSingle { project: Option<String> },
+    /// Your work as the Mac's window has it, as RemoteWork (also pushed as ServerMessage::Work when it changes, to a phone that said
+    /// "work"). Only sent to a Mac whose Welcome lists "work" in `features`.
+    Work,
+    /// Does the step of the item `key` as the Desk's button does (RemoteWorkStep): the Mac sends a message it wrote to the chat on the
+    /// item's branch, or starts a chat on Ask. The phone sends no words, only the `sig` it was shown the item with: a step that
+    /// moved on since, or was sent already, is refused. Counts against the phone's limit on new chats.
+    WorkStep { key: String, sig: String },
+    /// Asks the Mac to look at git, GitHub and Linear again (it won't more than every 15 seconds).
+    WorkRefresh,
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
@@ -1182,6 +1265,8 @@ pub enum ServerMessage {
     /// The Mac's One project (None: every project), when it first connects once the window has said one, and when it changes.
     /// Only sent to a phone that said "single".
     Single { single: Option<RemoteSingle> },
+    /// Your work changed (see Request::Work). Only sent to a phone that said "work".
+    Work { work: RemoteWork },
 }
 
 #[cfg(test)]
@@ -1317,6 +1402,8 @@ mod tests {
         assert!(FEATURES.contains(&"shell"));
         // The phone shows its Desk only to a Mac that lists it: without it the Desk stays hidden on every phone.
         assert!(FEATURES.contains(&PHONE_DESK));
+        // Your work: the phone shows its tab only to a Mac that lists it.
+        assert!(FEATURES.contains(&PHONE_WORK));
         // The Desk that talks: a phone only asks a Mac that lists it (its own tests mock the list, so it is checked here).
         assert!(FEATURES.contains(&DESK_TALK));
         // One project: a phone follows the Mac's only when the Mac lists it.
