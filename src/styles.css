@@ -3889,6 +3889,13 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-tone-local { --yw: var(--yw-local); }
 .yw-tone-done { --yw: var(--add); }
 .yw-tone-todo { --yw: var(--muted-text); }
+/* Several quiet pieces of work (Ready, or done) in one line that opens to them. */
+.yw-foldrow { padding-top: 7px; padding-bottom: 7px; }
+.yw-foldrow > .yw-fold { font: 600 calc(12px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.yw-foldrow > .yw-fold:hover { color: var(--text); }
+.yw-folded { margin: 8px -12px 0; border-top: 0.5px solid var(--line); }
+/* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
+.yw-row.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */
 .yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: var(--attn-text); --yw-local: var(--storage-4); }
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
@@ -3938,6 +3945,7 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-num { color: var(--muted-text); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
 .yw-sent { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
 .dp-aside button.yw-yours { border: 1px solid var(--yw); background: none; color: var(--yw); }
+.dp-aside button.yw-bypass { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 14%, var(--pane)); color: var(--warn); font-weight: 600; }
 .yw-nodes { display: flex; margin: 4px 0 2px; padding: 0; list-style: none; }
 .yw-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 1 64px; min-width: 0; font-size: calc(10.5px * var(--font-scale)); color: var(--muted-text); }
 .yw-node > i { z-index: 1; box-sizing: border-box; width: 11px; height: 11px; border: 2px solid var(--line); border-radius: 50%; background: var(--pane); }

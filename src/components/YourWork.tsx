@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
-import { filterWork, FILTER_TONES, groupWork, nextSteps, STAGES, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem } from "../lib/yourWork";
+import { filterWork, FILTER_TONES, foldRows, foldWord, groupWork, nextSteps, STAGES, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
 import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
@@ -100,8 +100,8 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
   const to = target.kind === "chat" ? `"${target.title}"` : "a new chat";
   return (
     <button
-      className={step.yours ? "yw-yours" : "primary"}
-      title={step.yours ? `Asks ${to} to get it ready; it asks you on an approval card before anything happens` : `Sends this to ${to}`}
+      className={step.warn ? "yw-bypass" : step.yours ? "yw-yours" : "primary"}
+      title={step.warn ? `Asks ${to} to merge it past the required review; it asks you on an approval card that says so, before anything happens` : step.yours ? `Asks ${to} to get it ready; it asks you on an approval card before anything happens` : `Sends this to ${to}`}
       aria-label={`${step.what} ${item.number !== null ? `#${item.number}` : item.title}`}
       onClick={() => {
         if (!onStep(item, target)) return;
@@ -141,7 +141,7 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
   const chip = !!item.issue && item.tone !== "todo";
   const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature).join(" · ");
   return (
-    <li className={`dp-row yw-row yw-tone-${item.tone}`}>
+    <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}`}>
       <span className="dp-row-top">
         <span className="dp-title yw-name">
           <Named item={item} />
@@ -155,12 +155,45 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
   );
 }
 
+/** Several quiet pieces of work in one line (Ready, or done): it opens to a row for each. */
+function FoldRow({ fold, items, issues, feature }: { fold: Fold; items: WorkItem[]; issues: boolean; feature: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className={`dp-row yw-row yw-foldrow yw-tone-${fold === "done" ? "done" : "wait"}`}>
+      <button className="yw-fold" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? "Fold them away" : "Show them"}>
+        <span className="yw-chev" aria-hidden>
+          {open ? "▾" : "▸"}
+        </span>
+        <span className="yw-name">{foldWord(fold, items.length)}</span>
+      </button>
+      {open && (
+        <ul className="dp-list yw-folded">
+          {items.map((i) => (
+            <StandRow key={i.key} item={i} issues={issues} feature={feature} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** A list's rows: each item, and a folded line for several quiet ones. */
+function Rows({ rows, issues, feature }: { rows: WorkRow[]; issues: boolean; feature: string | null }) {
+  return (
+    <>
+      {rows.map((r) => (r.kind === "item" ? <StandRow key={r.item.key} item={r.item} issues={issues} feature={feature} /> : <FoldRow key={`fold:${r.fold}`} fold={r.fold} items={r.items} issues={issues} feature={feature} />))}
+    </>
+  );
+}
+
 /** A group of work (a feature, or a project): its name, a dot and a count for each state, how many issues are in work and to start,
  * then its rows. Its name folds it. */
-function Group({ group, by, issues, folded, onFold }: { group: WorkGroup; by: GroupBy; issues: boolean; folded: boolean; onFold: () => void }) {
+function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; by: GroupBy; issues: boolean; fold: boolean; folded: boolean; onFold: () => void }) {
   const [all, setAll] = useState(false);
-  const shown = all ? group.items : group.items.slice(0, SHOWN_IN_GROUP);
-  const more = group.items.length - shown.length;
+  // Ready and done pieces fold into a line each, unless a state was chosen to be looked at.
+  const rows: WorkRow[] = fold ? foldRows(group.items) : group.items.map((item) => ({ kind: "item", item }));
+  const shown = all ? rows : rows.slice(0, SHOWN_IN_GROUP);
+  const more = rows.length - shown.length;
   const counts = toneCounts(group.items.map((i) => ({ ...i, repo: "" })), "");
   return (
     <section className="yw-feature" aria-label={group.label}>
@@ -183,9 +216,7 @@ function Group({ group, by, issues, folded, onFold }: { group: WorkGroup; by: Gr
       {!folded && (
         <>
           <ul className="dp-list">
-            {shown.map((i) => (
-              <StandRow key={i.key} item={i} issues={issues} feature={group.plain ? null : group.label} />
-            ))}
+            <Rows rows={shown} issues={issues} feature={group.plain ? null : group.label} />
           </ul>
           {more > 0 && (
             <button className="desk-more dp-foot" onClick={() => setAll(true)}>
@@ -261,7 +292,9 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
   const groups = groupWork(filterWork(items, only), by);
   // One group, or the work in no feature, needs no heading: it is a list.
   const flat = by === "none" || (groups.length === 1 && (by === "project" || groups[0].plain));
-  const stand = flat ? (groups[0]?.items ?? []) : [];
+  const foldThem = only.length === 0;
+  const standItems = flat ? (groups[0]?.items ?? []) : [];
+  const stand: WorkRow[] = foldThem ? foldRows(standItems) : standItems.map((item) => ({ kind: "item", item }));
   const shown = all ? stand : stand.slice(0, SHOWN);
   const more = stand.length - shown.length;
   const blind = unknownViewer(repos);
@@ -292,14 +325,14 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
           <>
             <ul className="dp-list">
               {nextShown.map((i) => (
-                <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}`}>
+                <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}${i.next!.warn ? " yw-warn" : ""}`}>
                   <span className="dp-row-top">
                     <span className="dp-title yw-name">
                       {i.next!.what} <Named item={i} />
                     </span>
                     <span className="dp-aside">
-                      {/* Yours to decide is said outright; otherwise the pill is where it stands, in its state's colour. */}
-                      <span className="yw-word">{i.next!.yours ? "Your call" : i.word}</span>
+                      {/* Yours to decide is said outright (a step that goes around a rule says so); otherwise the pill is where it stands, in its state's colour. */}
+                      <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
                       <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
                     </span>
                   </span>
@@ -324,9 +357,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
           ) : flat ? (
             <>
               <ul className="dp-list">
-                {shown.map((i) => (
-                  <StandRow key={i.key} item={i} issues={issues} />
-                ))}
+                <Rows rows={shown} issues={issues} feature={null} />
               </ul>
               {more > 0 && (
                 <button className="desk-more dp-foot" onClick={() => setAll(true)}>
@@ -335,7 +366,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
               )}
             </>
           ) : (
-            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
+            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
           )}
         </Card>
       )}

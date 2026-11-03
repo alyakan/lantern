@@ -1,5 +1,6 @@
 //! Linear, for the Desk's Your work: the issues assigned to you that aren't done (Ready, In Review and Testing, which this
-//! workflow files as completed, count as not done), with their team, project, the branch name
+//! workflow files as completed, count as not done), and the latest ones that are Done or Closed (the Desk lists those only in a
+//! feature that is still going), with their team, project, the branch name
 //! Linear suggests and the pull requests linked to them, and the workspace's teams. Read-only: one GraphQL query to
 //! api.linear.app, nothing is ever written there. The personal API key is kept in the login Keychain (never in a file, and
 //! never sent to the window: it only hears whether one is set). What Linear says (titles, names) is shown on the Desk, never
@@ -24,19 +25,21 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// The issues asked for, at most.
 const ISSUES_MAX: usize = 100;
 
-/// The "completed" issues asked for, at most.
+/// The "completed" issues asked for, at most (those that aren't Done or Closed), and the Done and Closed ones (the latest).
 const FINISHED_MAX: usize = 100;
+const DONE_MAX: usize = 50;
 
-/// The query asks for your open issues, and for the issues in a state of the "completed" kind that isn't Done or Closed. A
-/// workflow may file work that is still going under that kind (this one's In Review and Testing, and Ready: merged, not yet
-/// released), and a pull request is open for it: without the issue the pull request has no feature. Done, Closed, Canceled and
-/// duplicates are gone from the Desk.
+/// The query asks for your open issues, for the issues in a state of the "completed" kind that isn't Done or Closed, and for the
+/// latest Done and Closed ones. A workflow may file work that is still going under that kind (this one's In Review and Testing,
+/// and Ready: merged, not yet released), and a pull request is open for it: without the issue the pull request has no feature.
+/// Done and Closed ones are for a feature that is still going to list them; Canceled and duplicates are gone from the Desk.
 const QUERY: &str = r#"query DeskWork {
   viewer {
     name
     organization { name }
     assignedIssues(first: 100, orderBy: updatedAt, filter: { state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { nodes { ...Work } }
     finished: assignedIssues(first: 100, orderBy: updatedAt, filter: { state: { type: { eq: "completed" }, name: { nin: ["Done", "Closed"] } } }) { nodes { ...Work } }
+    done: assignedIssues(first: 50, orderBy: updatedAt, filter: { state: { type: { eq: "completed" }, name: { in: ["Done", "Closed"] } } }) { nodes { ...Work } }
   }
   teams(first: 100) { nodes { key name } }
 }
@@ -147,9 +150,9 @@ pub fn parse(body: &Value) -> Result<LinearWork, String> {
     };
     let listed = |key: &str, max: usize| -> Vec<LinearIssue> { viewer[key]["nodes"].as_array().map(|list| list.iter().take(max).filter_map(issue_of).collect()).unwrap_or_default() };
     let mut issues = listed("assignedIssues", ISSUES_MAX);
-    for done in listed("finished", FINISHED_MAX) {
-        if !issues.iter().any(|i| i.identifier == done.identifier) {
-            issues.push(done);
+    for more in listed("finished", FINISHED_MAX).into_iter().chain(listed("done", DONE_MAX)) {
+        if !issues.iter().any(|i| i.identifier == more.identifier) {
+            issues.push(more);
         }
     }
     let teams = body["data"]["teams"]["nodes"]
@@ -279,9 +282,26 @@ mod tests {
     }
 
     #[test]
-    fn the_query_leaves_out_done_closed_canceled_and_duplicate_by_state() {
+    fn done_and_closed_issues_are_read_after_the_others_and_each_issue_is_kept_once() {
+        let issue = |id: &str, name: &str| serde_json::json!({ "identifier": id, "title": id, "url": format!("https://linear.app/acme/issue/{id}"), "state": { "name": name, "type": "completed" }, "team": { "key": "LUM" }, "project": { "id": "p", "name": "Testo integration" } });
+        let body = serde_json::json!({ "data": { "viewer": {
+            "assignedIssues": { "nodes": [] },
+            "finished": { "nodes": [issue("LUM-2", "Ready")] },
+            "done": { "nodes": [issue("LUM-3", "Done"), issue("LUM-2", "Done"), issue("LUM-4", "Closed")] }
+        }, "teams": { "nodes": [] } } });
+        let got: Vec<_> = parse(&body).unwrap().issues.iter().map(|i| (i.identifier.clone(), i.state.clone())).collect();
+        assert_eq!(got, vec![("LUM-2".into(), "Ready".into()), ("LUM-3".into(), "Done".into()), ("LUM-4".into(), "Closed".into())]);
+        // An answer from before the query asked for Done ones has none.
+        let older = serde_json::json!({ "data": { "viewer": { "assignedIssues": { "nodes": [] } }, "teams": { "nodes": [] } } });
+        assert!(parse(&older).unwrap().issues.is_empty());
+    }
+
+    #[test]
+    fn the_query_asks_for_open_work_and_the_latest_done_and_closed_by_state_and_leaves_out_canceled_and_duplicates() {
         assert!(QUERY.contains(r#"type: { nin: ["completed", "canceled", "duplicate"] }"#));
         assert!(QUERY.contains(r#"name: { nin: ["Done", "Closed"] }"#));
+        assert!(QUERY.contains(r#"done: assignedIssues(first: 50, orderBy: updatedAt, filter: { state: { type: { eq: "completed" }, name: { in: ["Done", "Closed"] } } })"#));
+        assert!(QUERY.contains(&format!("first: {DONE_MAX}")));
     }
 
     #[test]

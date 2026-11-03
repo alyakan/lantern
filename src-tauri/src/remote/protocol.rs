@@ -767,6 +767,9 @@ pub struct RemoteWorkItem {
     pub sig: String,
     /// Only a next step, not listed under where things stand.
     pub step_only: bool,
+    /// ready (merged, waiting for a release) or done: several of a kind in one list fold into one line.
+    #[serde(default)]
+    pub fold: Option<String>,
     pub next: Option<RemoteWorkNext>,
 }
 
@@ -780,6 +783,9 @@ pub struct RemoteWorkNext {
     pub yours: bool,
     /// The button's word.
     pub button: String,
+    /// Goes around a rule (merging a pull request nobody approved): the button is drawn in a warning colour.
+    #[serde(default)]
+    pub warn: bool,
 }
 
 /// The answer to Request::WorkStep: what the Mac did with the step.

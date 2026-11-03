@@ -43,7 +43,7 @@ export interface DeskViewProps {
   /** Asks git, GitHub and Linear again now (Your work's Refresh). */
   onRefreshRepos: () => void;
   /** What Linear says of your issues, and the Linear team each repository's work is in (by its main checkout). */
-  linear?: { work: LinearWork | null; teamOf: Record<string, string>; hideReady?: boolean };
+  linear?: { work: LinearWork | null; teamOf: Record<string, string> };
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
   onAnswer?: (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 }
@@ -270,7 +270,7 @@ export function DeskView(props: DeskViewProps) {
   const waiting = needs.filter((n) => n.needsYou);
   // A project's page, while that project is still on the Desk.
   const pageRow = props.page === null ? undefined : props.projects.find((p) => p.folder === props.page);
-  const work = withLinear(yourWork(props.repos, now), props.linear?.work ?? null, props.linear?.teamOf ?? {}, props.repos, now, props.linear?.hideReady);
+  const work = withLinear(yourWork(props.repos, now), props.linear?.work ?? null, props.linear?.teamOf ?? {}, props.repos, now);
   const issues = !!props.linear?.work?.connected;
   return (
     <section className="chat-pane desk" aria-label="Desk">

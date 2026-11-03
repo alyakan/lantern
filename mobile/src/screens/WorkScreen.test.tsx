@@ -36,8 +36,8 @@ beforeEach(() => {
   mockSaveGrouping.mockClear();
 });
 
-const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, next: null, ...over });
-const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWorkItem["next"]>> = {}) => ({ what, yours: false, button: "Do it", ...over });
+const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, ...over });
+const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWorkItem["next"]>> = {}) => ({ what, yours: false, button: "Do it", warn: false, ...over });
 
 const work: RemoteWork = {
   issues: true,
@@ -78,6 +78,35 @@ describe("Your work on the phone", () => {
     });
     expect(start()).toBe(132);
     expect(before).not.toBe(132);
+  });
+
+  it("draws a merge that goes around the required review as Bypass & merge, outlined, and says what it does", async () => {
+    const bypass = item("pr10", { number: 10, title: "Unreviewed", tone: "you", stage: "review", word: "Not approved", next: step("Bypass review and merge", { yours: true, warn: true, button: "Bypass & merge…" }) });
+    await open({ work: { ...work, items: [...work.items, bypass] } });
+    const button = card("Next").getByRole("button", { name: "Bypass review and merge #10" });
+    expect(button.props.accessibilityHint).toMatch(/past the required review/);
+    expect(StyleSheet.flatten(button.props.style)).toMatchObject({ borderWidth: 1 });
+    // The plain merge keeps its usual look.
+    const plain = card("Next").getByRole("button", { name: "Merge #8" });
+    expect(StyleSheet.flatten(plain.props.style).borderWidth).toBeUndefined();
+  });
+
+  it("folds Ready items into one line that opens to them, and a feature's Done ones too", async () => {
+    const ready = (key: string) => item(key, { title: `Ready ${key}`, tone: "wait", stage: "release", word: "Ready", feature: "Reliability", issue: key.toUpperCase(), fold: "ready" });
+    const done = (key: string) => item(key, { title: `Finished ${key}`, tone: "done", stage: "release", word: "Done", feature: "Reliability", issue: key.toUpperCase(), fold: "done" });
+    await open({ work: { ...work, items: [...work.items, ready("r1"), ready("r2"), done("d1"), done("d2")] } });
+    const stand = () => card("Where things stand");
+    expect(stand().getByRole("button", { name: "2 Ready · merged, waiting for a release" })).toBeTruthy();
+    expect(stand().getByRole("button", { name: "2 Done" })).toBeTruthy();
+    expect(stand().queryByText(/Ready r1/)).toBeNull();
+    await fireEvent.press(stand().getByRole("button", { name: "2 Ready · merged, waiting for a release" }));
+    expect(stand().getByText(/Ready r1/)).toBeTruthy();
+    expect(stand().getByText(/Ready r2/)).toBeTruthy();
+    // The Done ones stay folded until they are asked for.
+    expect(stand().queryByText(/Finished d1/)).toBeNull();
+    // Looking at a state (done) shows its rows, not a fold.
+    await fireEvent.press(stand().getByRole("button", { name: "done 3" }));
+    expect(stand().getByText(/Finished d1/)).toBeTruthy();
   });
 
   it("is not offered by a Mac that lists no work, which keeps the Desk", async () => {

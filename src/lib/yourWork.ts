@@ -41,6 +41,8 @@ export interface Step {
   text: string;
   /** It changes code on the branch, so a chat that isn't on it is told to use a worktree of its own. */
   onBranch: boolean;
+  /** Yours to decide, and it goes around a rule (merging a pull request nobody approved): drawn in a warning colour. */
+  warn?: boolean;
 }
 
 export interface WorkItem {
@@ -71,7 +73,12 @@ export interface WorkItem {
   issue?: { identifier: string; url: string; project: string | null; title: string };
   /** `meta` without the issue's part, which the Mac draws as a line of its own (the phone is sent `meta` whole). */
   bare?: string;
+  /** What is quiet enough to fold with its kind in a list (see `foldRows`): work merged and waiting for a release, or done. */
+  fold?: Fold;
 }
+
+/** ready: merged, waiting for a release (a Ready issue, or a pull request merged since the last release); done: finished. */
+export type Fold = "ready" | "done";
 
 /** A branch or tag that is only letters, digits and `._/-`, and never reads as an option: safe to name in a message. */
 export const safeRef = (s: string | null | undefined): s is string => !!s && s.length <= 200 && /^[A-Za-z0-9._/-]+$/.test(s) && !s.startsWith("-") && !s.includes("..");
@@ -95,11 +102,12 @@ function prRef(r: RepoStatus, n: number) {
 type Pr = RepoStatus["prs"][number];
 
 /** Where one of your open pull requests stands, and what comes next. Conflicts come before checks: GitHub runs no checks on a
- * pull request that conflicts. Your own pull request needs no approval to be yours to merge: a repository you merge alone
- * stays "review required" for good. */
+ * pull request that conflicts. One that is approved, or whose repository asks for no review, is merged. One whose review is
+ * required and missing can still be merged by an admin (a repository you merge alone stays "review required" for good), but that
+ * is **Bypass & merge**, in a warning colour: it goes around the rule. */
 function openStage(r: RepoStatus, p: Pr): Pick<WorkItem, "stage" | "tone" | "word" | "next"> {
   const ref = prRef(r, p.number);
-  const step = (kind: StepKind, what: string, text: string, yours = false, button = "Do it", onBranch = !yours): Step => ({ kind, what, text, yours, button, onBranch });
+  const step = (kind: StepKind, what: string, text: string, yours = false, button = "Do it", onBranch = !yours, warn = false): Step => ({ kind, what, text, yours, button, onBranch, ...(warn ? { warn } : {}) });
   if (p.draft) return { stage: "pr", tone: "wait", word: "Draft", next: null };
   if (p.mergeable === "CONFLICTING" || p.merge_state === "DIRTY")
     return { stage: "merge", tone: "bad", word: "Conflicts with its base", next: step("conflicts", "Resolve conflicts on", `${cap(ref)} has merge conflicts with its base branch. Read it with gh, resolve the conflicts on its branch and run the tests. ${ASK_PUSH}`) };
@@ -111,6 +119,22 @@ function openStage(r: RepoStatus, p: Pr): Pick<WorkItem, "stage" | "tone" | "wor
   if (p.merge_state === "BEHIND")
     return { stage: "merge", tone: "bad", word: "Behind its base", next: step("update", "Bring up to date", `${cap(ref)} is behind its base branch. Bring its branch up to date with the base and run the tests. ${ASK_PUSH}`) };
   if (p.mergeable === "UNKNOWN" || p.merge_state === "UNKNOWN") return { stage: "merge", tone: "wait", word: "GitHub is checking it", next: null };
+  // Nobody approved it and a review is required: merging is a decision to go around the rule, and the chat is told to say so.
+  if (p.review === "REVIEW_REQUIRED")
+    return {
+      stage: "review",
+      tone: "you",
+      word: "Not approved",
+      next: step(
+        "merge",
+        "Bypass review and merge",
+        `${cap(ref)} has no approval, and its repository requires a review. Its checks pass and it has no conflicts. Check it once more with gh. Merging it goes around the review rule (gh pr merge --admin), so ask me with request_approval, and say on the card that it bypasses the required review. Merge it only if I say yes.`,
+        true,
+        "Bypass & merge…",
+        false,
+        true,
+      ),
+    };
   return {
     stage: "merge",
     tone: "you",
@@ -155,7 +179,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
     const released = time(r.release?.published_at);
     const waiting = released === null ? [] : r.merged.filter((m) => mine(m.author) && (time(m.merged_at) ?? 0) > released);
     for (const m of waiting) {
-      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "you", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged" });
+      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "you", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged", fold: "ready" });
     }
     for (const tag of r.drafts) {
       const ok = safeRef(tag);
@@ -193,7 +217,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
       });
     }
     if (released !== null && sameDay(released, now) && r.release) {
-      out.push({ ...base, key: `${r.repo}:released:${r.release.tag}`, number: null, branch: null, title: `Released ${r.release.tag}`, stage: "release", tone: "done", word: "Released", meta: `${name} · ${ago(now, released)}`, at: released, next: null, sig: "released" });
+      out.push({ ...base, key: `${r.repo}:released:${r.release.tag}`, number: null, branch: null, title: `Released ${r.release.tag}`, stage: "release", tone: "done", word: "Released", meta: `${name} · ${ago(now, released)}`, at: released, next: null, sig: "released", fold: "done" });
     }
     // A branch that was merged under its name isn't work left, even if it never had an upstream.
     const known = new Set([...r.prs.map((p) => p.branch), ...r.merged.map((m) => m.branch)]);
@@ -255,6 +279,32 @@ export function whereThingsStand(items: WorkItem[]): WorkItem[] {
   return items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0));
 }
 
+/** A row of a list of work: an item, or several quiet ones (`fold`) in one line that opens to them. */
+export type WorkRow = { kind: "item"; item: WorkItem } | { kind: "fold"; fold: Fold; items: WorkItem[] };
+
+/**
+ * A list of work as rows, in its order. Two or more items of one kind (`fold`: Ready, or done) are one row, at the place of the
+ * first of them, that opens to them; a single one stays a row of its own. The items are gathered whatever the order between them.
+ */
+export function foldRows(items: WorkItem[]): WorkRow[] {
+  const of = new Map<Fold, WorkItem[]>();
+  for (const i of items) if (i.fold) of.set(i.fold, [...(of.get(i.fold) ?? []), i]);
+  const rows: WorkRow[] = [];
+  const placed = new Set<Fold>();
+  for (const i of items) {
+    const members = i.fold ? of.get(i.fold)! : [];
+    if (!i.fold || members.length < 2) rows.push({ kind: "item", item: i });
+    else if (!placed.has(i.fold)) {
+      placed.add(i.fold);
+      rows.push({ kind: "fold", fold: i.fold, items: members });
+    }
+  }
+  return rows;
+}
+
+/** What a folded row says: how many, and what they are. */
+export const foldWord = (fold: Fold, n: number): string => (fold === "ready" ? `${n} Ready · merged, waiting for a release` : `${n} Done`);
+
 /** How many of a repository's items are in each state (done left out), for a project's tile. */
 export function toneCounts(items: WorkItem[], repo: string): Partial<Record<Tone, number>> {
   const n: Partial<Record<Tone, number>> = {};
@@ -308,29 +358,65 @@ const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
 /** Ready: merged, not yet released. */
 export const isReady = (issue: LinearIssue) => issue.state.trim().toLowerCase() === "ready";
 
+/** Done or Closed: finished. Linear says an issue is done only by its state's name here (Ready and In Review are "completed" too). */
+export const isFinished = (issue: LinearIssue) => issue.state_type === "completed" && ["done", "closed"].includes(issue.state.trim().toLowerCase());
+
+/** The pull request Linear has linked to `issue` in this repository, when it has one. */
+function linkedPull(issue: LinearIssue, github: string | null): number | null {
+  if (!github) return null;
+  const prefix = `https://github.com/${github}/pull/`;
+  const link = issue.links.find((l) => l.startsWith(prefix) && /^\d{1,7}$/.test(l.slice(prefix.length)));
+  return link ? Number(link.slice(prefix.length)) : null;
+}
+
 /**
  * Your work with Linear's: each item marked with the issue it is the work of, and an item for each of your issues that nothing
  * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
  * team no Desk project is in is listed without a step. The step names the issue by its identifier and link only.
  */
-export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number, hideReady = false): WorkItem[] {
+export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number): WorkItem[] {
   if (!work?.connected || !work.issues.length) return items;
   const started = new Set<string>();
   const out = items.flatMap((item): WorkItem[] => {
     const issue = work.issues.find((i) => isIssueOf(i, item));
     if (!issue) return [item];
     started.add(issue.identifier);
-    // Settings → Linear can hide the work of Ready issues (merged, waiting for a release).
-    if (hideReady && isReady(issue)) return [];
     // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
     const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
     const tag = issue.project ? `${named} · ${issue.project}` : named;
     return [{ ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` }];
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
+  // A feature (Linear project) is going while any issue of yours in it isn't finished: only then its finished issues are listed.
+  const featureOf = (i: LinearIssue) => (i.project ? (i.project_id ?? i.project) : null);
+  const going = new Set(work.issues.filter((i) => !isFinished(i)).map(featureOf));
   for (const issue of work.issues) {
-    if (started.has(issue.identifier) || (hideReady && isReady(issue))) continue;
+    if (started.has(issue.identifier)) continue;
     const r = repoOfTeam(issue.team);
+    if (isFinished(issue)) {
+      const feature = featureOf(issue);
+      if (feature === null || !going.has(feature)) continue;
+      const pull = linkedPull(issue, r?.github ?? null);
+      out.push({
+        key: `linear:${issue.identifier}`,
+        repo: r?.repo ?? "",
+        name: r ? short(r) : issue.team,
+        github: r?.github ?? null,
+        number: pull,
+        branch: null,
+        title: `${issue.identifier} ${issue.title}`,
+        stage: "release",
+        tone: "done",
+        word: issue.state,
+        meta: [issue.project, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
+        at: null,
+        next: null,
+        sig: `issue:${issue.state}`,
+        issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+        fold: "done",
+      });
+      continue;
+    }
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
     const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
@@ -354,6 +440,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
         next: null,
         sig: `issue:${issue.state}`,
         issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+        ...(ready ? { fold: "ready" as const } : {}),
       });
       continue;
     }
@@ -389,6 +476,7 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
   for (const i of items) {
     if (i.repo !== repo || !i.issue?.project) continue;
     const p = by.get(i.issue.project) ?? { doing: new Set<string>(), todo: 0 };
+    if (i.tone === "done") continue;
     if (i.tone === "todo") p.todo++;
     else p.doing.add(i.issue.identifier);
     by.set(i.issue.project, p);
@@ -439,7 +527,7 @@ export function groupWork(items: WorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.issue).map((i) => i.issue!.identifier)).size,
+      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.tone !== "done" && i.issue).map((i) => i.issue!.identifier)).size,
       todo: g.items.filter((i) => i.tone === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || ordered.indexOf(a.items[0]) - ordered.indexOf(b.items[0]) || a.label.localeCompare(b.label));

@@ -16,6 +16,7 @@ const BLIND_MAX: usize = 5;
 
 const STAGES: &[&str] = &["issue", "local", "pr", "checks", "review", "merge", "release"];
 const TONES: &[&str] = &["bad", "wait", "you", "local", "todo", "done"];
+const FOLDS: &[&str] = &["ready", "done"];
 
 /// What the window says of the user's work: the shape the phone is sent, checked and cut here.
 #[derive(Debug, Clone, Deserialize)]
@@ -84,7 +85,8 @@ fn tidy(item: RemoteWorkItem) -> Option<RemoteWorkItem> {
         url: item.url.filter(|u| link_ok(u)),
         sig: cut(&item.sig, 80),
         step_only: item.step_only,
-        next: item.next.map(|n| RemoteWorkNext { what: cut(&n.what, 80), yours: n.yours, button: cut(&n.button, 20) }),
+        fold: item.fold.filter(|f| FOLDS.contains(&f.as_str())),
+        next: item.next.map(|n| RemoteWorkNext { what: cut(&n.what, 80), yours: n.yours, button: cut(&n.button, 20), warn: n.warn }),
     })
 }
 
@@ -138,8 +140,28 @@ mod tests {
             url: Some("https://github.com/aly/lantern/pull/7".into()),
             sig: "checks:Checks failing".into(),
             step_only: false,
-            next: Some(RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into() }),
+            fold: None,
+            next: Some(RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into(), warn: false }),
         }
+    }
+
+    #[test]
+    fn keeps_only_the_folds_a_phone_draws_and_reads_a_window_that_does_not_say_them() {
+        let b = WorkBoard::default();
+        let mut ready = item("k-ready");
+        ready.fold = Some("ready".into());
+        let mut odd = item("k-odd");
+        odd.fold = Some("loud".into());
+        b.set(WindowWork { issues: true, looked: true, blind: vec![], items: vec![ready, odd] });
+        let items = b.phone().0.items;
+        assert_eq!(items[0].fold.as_deref(), Some("ready"));
+        assert_eq!(items[1].fold, None, "a kind of fold this phone doesn't know is left plain");
+        // An older window says neither a fold nor whether a step goes around a rule.
+        let older: WindowWork = serde_json::from_str(r#"{"issues":true,"items":[{"key":"k","repo":"r","title":"t","stage":"merge","tone":"you","word":"w","meta":"m","at":null,"number":null,"feature":null,"issue":null,"url":null,"sig":"s","step_only":false,"next":{"what":"Merge","yours":true,"button":"Merge…"}}]}"#).unwrap();
+        b.set(older);
+        let item = &b.phone().0.items[0];
+        assert_eq!(item.fold, None);
+        assert!(!item.next.as_ref().unwrap().warn);
     }
 
     #[test]

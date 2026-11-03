@@ -98,7 +98,7 @@ import { DeskAsk } from "./components/DeskAsk";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
-import { loadHideReady, loadTeams, saveHideReady, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
+import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
 import { phoneWork } from "./lib/phoneWork";
 import { stepMessage, targetFor, unknownViewer, withLinear, yourWork } from "./lib/yourWork";
 import { markStepSent, stepSentTo } from "./components/YourWork";
@@ -2597,13 +2597,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // Linear's side of Your work, and the team each project's work is in (Settings → Linear).
   const linear = useLinearWork(workWanted);
   const [linearTeams, setLinearTeams] = useState<TeamChoice>(loadTeams);
-  const [hideReady, setHideReady] = useState(loadHideReady);
   const deskRepos = allRepos && allRepos.filter((r) => r.folders.some((f) => deskFolders.includes(f.folder)));
   const deskRows = deskShown ? deskInbox(chats, deskOpen) : [];
   // Your work for a phone's Work tab: the same items the Desk shows, told to the backend when they change. The phone is sent their
   // names and states, never the message a step sends.
   const workNow = Date.now();
-  const workItems = withLinear(yourWork(deskRepos, workNow), linear.work, teamOfRepo(deskRepos, linear.work, linearTeams), deskRepos, workNow, hideReady);
+  const workItems = withLinear(yourWork(deskRepos, workNow), linear.work, teamOfRepo(deskRepos, linear.work, linearTeams), deskRepos, workNow);
   const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected, !!deskRepos && deskRepos.length > 0, unknownViewer(deskRepos));
   const phoneWorkKey = JSON.stringify(phoneWorkNow);
   useEffect(() => {
@@ -3138,7 +3137,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     refreshRepos();
                     linear.refresh();
                   }}
-                  linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams), hideReady }}
+                  linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
               </ErrorBoundary>
             ) : showCanvas ? (
@@ -3307,11 +3306,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             },
             work: linear.work,
             onWork: linear.set,
-            hideReady,
-            onHideReady: (on) => {
-              setHideReady(on);
-              saveHideReady(on);
-            },
           }}
           hooks={{
             folders: prFolders,

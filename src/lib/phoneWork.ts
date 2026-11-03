@@ -21,7 +21,9 @@ export interface WindowWorkItem {
   url: string | null;
   sig: string;
   step_only: boolean;
-  next: { what: string; yours: boolean; button: string } | null;
+  /** ready or done: quiet enough to fold with its kind in a list. */
+  fold: string | null;
+  next: { what: string; yours: boolean; button: string; warn: boolean } | null;
 }
 
 export interface WindowWork {
@@ -40,21 +42,24 @@ const RELATIVE = /\b(?:just now|\d+[mhd] ago)\b/;
 /** `owner/name`, as GitHub names a repository. */
 const SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
-/** The page of an item: its pull request on GitHub, or its Linear issue when it is only that. */
+/** The page of an item: its pull request on GitHub, or its Linear issue when it is only that (not started, on its way, or done). */
 function linkOf(item: WorkItem): string | null {
-  if (item.tone === "todo" && item.issue) return safeIssueUrl(item.issue.url) ? item.issue.url : null;
+  if (item.number === null && item.issue) return safeIssueUrl(item.issue.url) ? item.issue.url : null;
   return item.number !== null && item.github && SLUG.test(item.github) ? `https://github.com/${item.github}/pull/${item.number}` : null;
 }
 
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
 export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
-  const listed = whereThingsStand(items);
+  const standing = whereThingsStand(items);
+  // The phone is told only so many items: what is done (a feature's finished issues can be many) goes last, after the steps with no row of their own.
+  const listed = standing.filter((i) => i.tone !== "done");
+  const finished = standing.filter((i) => i.tone === "done");
   const rest = nextSteps(items).filter((i) => i.stepOnly);
   return {
     issues,
     looked,
     blind,
-    items: [...listed, ...rest].map((i) => ({
+    items: [...listed, ...rest, ...finished].map((i) => ({
       key: i.key,
       repo: i.name,
       title: i.title,
@@ -69,7 +74,8 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       url: linkOf(i),
       sig: i.sig,
       step_only: !!i.stepOnly,
-      next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button } : null,
+      fold: i.fold ?? null,
+      next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button, warn: !!i.next.warn } : null,
     })),
   };
 }
