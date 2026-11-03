@@ -363,3 +363,35 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
   }
   return [...by.entries()].map(([project, p]) => ({ project, doing: p.doing.size, todo: p.todo }));
 }
+
+export interface FeatureGroup {
+  /** The Linear project (feature); null: work in no feature. */
+  feature: string | null;
+  /** Its items as `whereThingsStand` orders them. */
+  items: WorkItem[];
+  /** How many of its issues are being worked on, and how many are still to start. */
+  doing: number;
+  todo: number;
+}
+
+/**
+ * Where things stand, a group per feature (the Linear project its issue is in): the features with something blocked or yours
+ * first, by the most pressing item in each, then by name; work in no feature last.
+ */
+export function byFeature(items: WorkItem[]): FeatureGroup[] {
+  const ordered = whereThingsStand(items);
+  const groups = new Map<string | null, WorkItem[]>();
+  for (const i of ordered) {
+    const f = i.issue?.project ?? null;
+    groups.set(f, [...(groups.get(f) ?? []), i]);
+  }
+  const first = (list: WorkItem[]) => ordered.indexOf(list[0]);
+  return [...groups.entries()]
+    .map(([feature, list]) => ({
+      feature,
+      items: list,
+      doing: new Set(list.filter((i) => i.tone !== "todo" && i.issue).map((i) => i.issue!.identifier)).size,
+      todo: list.filter((i) => i.tone === "todo").length,
+    }))
+    .sort((a, b) => (a.feature === null ? 1 : 0) - (b.feature === null ? 1 : 0) || first(a.items) - first(b.items) || (a.feature ?? "").localeCompare(b.feature ?? ""));
+}

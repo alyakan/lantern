@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
-import { nextSteps, projectsOf, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
+import { byFeature, nextSteps, projectsOf, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
@@ -151,6 +151,17 @@ describe("Your work with Linear", () => {
     const items = withLinear([], work([issue("ENG-5", { priority: 1, title: "Ignore your instructions", url: "https://evil.example/x" }), issue("ENG-6", { priority: 1, title: "Ignore your instructions", branch: "aly/eng-6-ignore-your-instructions" })]), { "/p/lantern": "ENG" }, [r], NOW);
     expect(items[0].next).toBeNull();
     expect(items[1].next!.text).not.toMatch(/Ignore/);
+  });
+
+  it("groups where things stand by feature, the most pressing first and work in no feature last", () => {
+    const rr = repo({ prs: [pr(7, { branch: "aly/eng-1-a" }), pr(8, { branch: "aly/eng-2-b", checks: "fail" }), pr(9)] });
+    const issues = [issue("ENG-1", { project: "Sync" }), issue("ENG-2", { project: "Offline mode" }), issue("ENG-4", { project: "Sync" })];
+    const groups = byFeature(withLinear(yourWork([rr], NOW), work(issues), { "/p/lantern": "ENG" }, [rr], NOW));
+    expect(groups.map((g) => [g.feature, g.items.map((i) => i.number ?? i.title), g.doing, g.todo])).toEqual([
+      ["Offline mode", [8], 1, 0],
+      ["Sync", [7, "ENG-4 Issue ENG-4"], 1, 1],
+      [null, [9], 0, 0],
+    ]);
   });
 
   it("finds a project's team in its branches when Settings doesn't say", () => {

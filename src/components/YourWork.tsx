@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { InboxRow } from "../lib/deskBoard";
-import { nextSteps, STAGES, targetFor, TONE_WORD, unknownViewer, whereThingsStand, type Target, type WorkItem } from "../lib/yourWork";
+import { byFeature, nextSteps, STAGES, targetFor, toneCounts, TONE_WORD, unknownViewer, type FeatureGroup, type Target, type WorkItem } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
 import { Card, Row } from "./DeskCard";
 import { ExternalLink } from "./ExternalLink";
@@ -19,12 +19,16 @@ export interface YourWorkProps {
   onRefresh: () => void;
 }
 
-/** The rows of "Where things stand" shown before "Show N more". */
+/** The rows of "Where things stand" shown before "Show N more": all of it in one list, or each feature's. */
 const SHOWN = 8;
+const SHOWN_IN_FEATURE = 4;
 
 /** Steps sent, by item, with the state the item was in: marked as sent until it moves on (kept while the window is open, so
  * leaving the Desk and coming back doesn't offer the same step again). */
 const sent = new Map<string, { sig: string; to: string }>();
+
+/** Forgets every step sent (for tests: each starts with none). */
+export const forgetSent = () => sent.clear();
 
 /** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. With Linear, the path starts
  * at the issue; work with no issue in Linear has that node dashed. */
@@ -99,91 +103,131 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
   );
 }
 
+/** One item where it stands: its name and state, a quiet line, and its path as nodes. */
+function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: boolean; feature?: string | null }) {
+  // Under its feature's heading, the feature isn't said again.
+  const meta = feature === null ? item.meta : item.meta.split(" · ").filter((part) => part !== feature).join(" · ");
+  return (
+    <li className={`dp-row yw-tone-${item.tone}`}>
+      <Row title={<Named item={item} />} aside={<span className="yw-word">{item.word}</span>} meta={meta} />
+      <Nodes item={item} issues={issues} />
+    </li>
+  );
+}
+
+/** A feature's work: its name, a dot and a count for each state, how many issues are in work and to start, then its rows. */
+function Feature({ group, issues }: { group: FeatureGroup; issues: boolean }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? group.items : group.items.slice(0, SHOWN_IN_FEATURE);
+  const more = group.items.length - shown.length;
+  const name = group.feature ?? "No feature";
+  const counts = toneCounts(group.items.map((i) => ({ ...i, repo: "" })), "");
+  return (
+    <section className="yw-feature" aria-label={name}>
+      <header className="yw-feature-head">
+        <h3>{name}</h3>
+        <WorkDots counts={counts} />
+        {(group.doing > 0 || group.todo > 0) && (
+          <span className="yw-feature-sum">{[group.doing > 0 && `${group.doing} doing`, group.todo > 0 && `${group.todo} to start`].filter(Boolean).join(" · ")}</span>
+        )}
+      </header>
+      <ul className="dp-list">
+        {shown.map((i) => (
+          <StandRow key={i.key} item={i} issues={issues} feature={group.feature} />
+        ))}
+      </ul>
+      {more > 0 && (
+        <button className="desk-more dp-foot" onClick={() => setAll(true)}>
+          Show {more} more
+        </button>
+      )}
+    </section>
+  );
+}
+
 /**
- * Your work in the Desk's repositories: what to do next on top (yours to decide first, then what is blocked, then branches to
- * push), and under it where each piece stands, from a branch never pushed to a release, as a row of nodes. Every state is what git
- * and gh said (status.rs); a step goes to a chat only when you click it.
+ * Your work in the Desk's repositories, as two cards: Next, what to do now (yours to decide first, then what is blocked, then
+ * branches to push and issues to start), set apart; and Where things stand, each piece from its issue or branch to its release
+ * as a row of nodes, a group per feature (its Linear project) when Linear is connected. Every state is what git, gh and Linear
+ * said; a step goes to a chat only when you click it.
  */
 export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: YourWorkProps) {
   const [all, setAll] = useState(false);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
-  const stand = whereThingsStand(items);
+  const groups = byFeature(items);
+  const flat = groups.length === 1 && groups[0].feature === null;
+  const stand = flat ? groups[0].items : [];
   const shown = all ? stand : stand.slice(0, SHOWN);
   const more = stand.length - shown.length;
   const blind = unknownViewer(repos);
   return (
-    <Card
-      title="Your work"
-      count={next.length}
-      heading="h2"
-      className="yw-card"
-      action={
-        <button className="desk-more" onClick={onRefresh} title="Ask git and GitHub again">
-          Refresh
-        </button>
-      }
-    >
-      {blind.length > 0 && (
-        <p className="dp-note">
-          Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
-        </p>
-      )}
-      {items.length === 0 ? (
-        <p className="dp-note">Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed{issues ? ", no issues to start" : ""}.</p>
-      ) : (
-        <>
-          {next.length > 0 && (
-            <section aria-label="Next">
-              <h3 className="yw-sub">Next</h3>
+    <>
+      <Card
+        title="Next"
+        count={next.length}
+        heading="h2"
+        className="yw-card yw-next"
+        action={
+          <button className="desk-more" onClick={onRefresh} title={issues ? "Ask git, GitHub and Linear again" : "Ask git and GitHub again"}>
+            Refresh
+          </button>
+        }
+      >
+        {blind.length > 0 && (
+          <p className="dp-note">
+            Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
+          </p>
+        )}
+        {items.length === 0 ? (
+          <p className="dp-note">Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed{issues ? ", no issues to start" : ""}.</p>
+        ) : next.length === 0 ? (
+          <p className="dp-note">Nothing to do right now: everything open is on its way.</p>
+        ) : (
+          <ul className="dp-list">
+            {next.map((i) => (
+              <li key={i.key} className={`dp-row yw-tone-${i.tone}`}>
+                <Row
+                  title={
+                    <>
+                      <span className="yw-dot" aria-hidden />
+                      {i.next!.what} <Named item={i} />
+                    </>
+                  }
+                  aside={
+                    <>
+                      {i.next!.yours && <span className="yw-word">Your call</span>}
+                      <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
+                    </>
+                  }
+                  meta={`${i.word} · ${i.meta}`}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      {items.length > 0 && (
+        <Card title="Where things stand" count={items.filter((i) => !i.stepOnly).length} heading="h2" className="yw-card yw-stand">
+          {flat ? (
+            <>
               <ul className="dp-list">
-                {next.map((i) => (
-                  <li key={i.key} className={`dp-row yw-tone-${i.tone}`}>
-                    <Row
-                      title={
-                        <>
-                          <span className="yw-dot" aria-hidden />
-                          {i.next!.what} <Named item={i} />
-                        </>
-                      }
-                      aside={
-                        <>
-                          {i.next!.yours && <span className="yw-word">Your call</span>}
-                          <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
-                        </>
-                      }
-                      meta={`${i.word} · ${i.meta}`}
-                    />
-                  </li>
+                {shown.map((i) => (
+                  <StandRow key={i.key} item={i} issues={issues} />
                 ))}
               </ul>
-            </section>
+              {more > 0 && (
+                <button className="desk-more dp-foot" onClick={() => setAll(true)}>
+                  Show {more} more
+                </button>
+              )}
+            </>
+          ) : (
+            groups.map((g) => <Feature key={g.feature ?? ""} group={g} issues={issues} />)
           )}
-          <section aria-label="Where things stand">
-            <h3 className="yw-sub">Where things stand</h3>
-            <ul className="dp-list">
-              {shown.map((i) => (
-                <li key={i.key} className={`dp-row yw-tone-${i.tone}`}>
-                  <Row
-                    title={
-                      <Named item={i} />
-                    }
-                    aside={<span className="yw-word">{i.word}</span>}
-                    meta={i.meta}
-                  />
-                  <Nodes item={i} issues={issues} />
-                </li>
-              ))}
-            </ul>
-          </section>
-          {more > 0 && (
-            <button className="desk-more dp-foot" onClick={() => setAll(true)}>
-              Show {more} more
-            </button>
-          )}
-        </>
+        </Card>
       )}
-    </Card>
+    </>
   );
 }
 
