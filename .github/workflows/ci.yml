@@ -12,9 +12,38 @@ permissions:
 # that person's own Mac, which keeps its build caches between runs; everything else stays GitHub-hosted. A pull request
 # from a fork never does, whoever opened it: the repo is public, and that Mac is someone's own computer. Both variables
 # must be valid JSON: a typo fails every run of this workflow before any job starts.
+#
+# `pick` asks when the run starts whether that Mac is online and idle (.github/pick-runner.sh, with the repo secret
+# RUNNER_STATUS_TOKEN): if not, `test` goes to GitHub's runner instead of waiting for it. Another run can take the Mac
+# between that answer and the job starting; the job then waits its turn. Without the secret the Mac is always used. The
+# phone job is about a minute of work and always runs on GitHub's runner, so it never holds the Mac.
 jobs:
+  pick:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      USE_MAC: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) }}
+    outputs:
+      mac: ${{ steps.pick.outputs.mac || 'false' }}
+    steps:
+      # Only for a run that could use the Mac at all: a pull request from a fork gets neither the checkout nor the token.
+      - if: env.USE_MAC == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+
+      - id: pick
+        if: env.USE_MAC == 'true'
+        env:
+          RUNNER_LABELS: ${{ vars.CI_RUNNER }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: bash .github/pick-runner.sh
+
   test:
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"macos-latest"') || 'macos-latest' }}
+    needs: pick
+    runs-on: ${{ needs.pick.outputs.mac == 'true' && fromJSON(vars.CI_RUNNER || '"macos-latest"') || 'macos-latest' }}
     env:
       # A self-hosted runner's background service sets no locale.
       LANG: en_US.UTF-8
@@ -77,7 +106,7 @@ jobs:
   # The phone app (mobile/): its tests (Noise against the Mac's transcripts and the published vectors, the sync, the
   # connection) and its types.
   mobile:
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON(vars.CI_RUNNER_USERS || '[]'), github.actor) && fromJSON(vars.CI_RUNNER || '"ubuntu-latest"') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mobile
@@ -87,7 +116,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
-          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+          cache: npm
           cache-dependency-path: mobile/package-lock.json
 
       - run: npm ci
