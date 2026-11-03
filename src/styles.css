@@ -3733,9 +3733,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
 /* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; scrollbar-width: thin; }
-.desk-main::-webkit-scrollbar { width: 6px; }
-.desk-main::-webkit-scrollbar-thumb { border-width: 1px; }
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
+/* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
+:where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
 .desk-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 16px 0 0; }
 .desk-side > .desk-h { padding: 0 16px; }
 .desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 18px; }
