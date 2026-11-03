@@ -3,7 +3,7 @@ import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
 import { filterWork, FILTER_TONES, groupWork, nextSteps, STAGES, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem } from "../lib/yourWork";
 import type { RepoStatus } from "../types";
-import { Card, Row } from "./DeskCard";
+import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
 
@@ -292,22 +292,19 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
           <>
             <ul className="dp-list">
               {nextShown.map((i) => (
-                <li key={i.key} className={`dp-row yw-tone-${i.tone}`}>
-                  <Row
-                    title={
-                      <>
-                        <span className="yw-dot" aria-hidden />
-                        {i.next!.what} <Named item={i} />
-                      </>
-                    }
-                    aside={
-                      <>
-                        {i.next!.yours && <span className="yw-word">Your call</span>}
-                        <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
-                      </>
-                    }
-                    meta={`${i.word} · ${i.meta}`}
-                  />
+                <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}`}>
+                  <span className="dp-row-top">
+                    <span className="dp-title yw-name">
+                      {i.next!.what} <Named item={i} />
+                    </span>
+                    <span className="dp-aside">
+                      {/* Yours to decide is said outright; otherwise the pill is where it stands, in its state's colour. */}
+                      <span className="yw-word">{i.next!.yours ? "Your call" : i.word}</span>
+                      <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
+                    </span>
+                  </span>
+                  {i.issue && i.tone !== "todo" && <IssueChip item={i} feature={null} />}
+                  <span className="dp-meta">{i.next!.yours ? `${i.word} · ${i.bare ?? i.meta}` : (i.bare ?? i.meta)}</span>
                 </li>
               ))}
             </ul>
