@@ -47,16 +47,19 @@ export async function saveSuggestionPrefs(p: SuggestionPrefs): Promise<void> {
 
 const MODE_KEY = "lantern.home-mode";
 
-/** Whether Home is the Desk or the list of chats; the Desk when nothing was chosen or it can't be read. */
-export async function loadHomeMode(): Promise<"desk" | "chats"> {
+export type HomeMode = "desk" | "work" | "chats";
+
+/** Whether Home is the Desk, Your work or the list of chats; the Desk when nothing was chosen or it can't be read. */
+export async function loadHomeMode(): Promise<HomeMode> {
   try {
-    return (await SecureStore.getItemAsync(MODE_KEY, OPTIONS)) === "chats" ? "chats" : "desk";
+    const mode = await SecureStore.getItemAsync(MODE_KEY, OPTIONS);
+    return mode === "chats" || mode === "work" ? mode : "desk";
   } catch {
     return "desk";
   }
 }
 
-export async function saveHomeMode(mode: "desk" | "chats"): Promise<void> {
+export async function saveHomeMode(mode: HomeMode): Promise<void> {
   try {
     await SecureStore.setItemAsync(MODE_KEY, mode, OPTIONS);
   } catch {
@@ -69,6 +72,26 @@ export async function saveGrouping(g: Grouping): Promise<void> {
     await SecureStore.setItemAsync(KEY, g, OPTIONS);
   } catch {
     // Not remembered: Home is as it was chosen until the app closes.
+  }
+}
+
+const WORK_GROUP_KEY = "lantern.work-grouping";
+
+/** How the Work tab groups where things stand: by feature, by project or not at all; "auto" (feature with Linear, else project) until chosen. */
+export async function loadWorkGrouping(): Promise<"auto" | "feature" | "project" | "none"> {
+  try {
+    const g = await SecureStore.getItemAsync(WORK_GROUP_KEY, OPTIONS);
+    return g === "feature" || g === "project" || g === "none" ? g : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+export async function saveWorkGrouping(g: "feature" | "project" | "none"): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(WORK_GROUP_KEY, g, OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
   }
 }
 
