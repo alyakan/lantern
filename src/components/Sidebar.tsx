@@ -785,6 +785,8 @@ export function Sidebar(props: Props) {
   const floating = mode === "collapsed" && (hovered || focused);
   // Collapsing the pinned sidebar: its new pane is drawn open for one frame (stage 1) and then closes like the open bar does.
   const [collapsing, setCollapsing] = useState(false);
+  // And until the bar has taken its place: the pane keeps the pinned sidebar's edge, not the open bar's.
+  const [fromPinned, setFromPinned] = useState(false);
   const expanded = mode !== "collapsed" || floating || collapsing;
   // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
   const full = expanded || closingBar;
@@ -821,7 +823,10 @@ export function Sidebar(props: Props) {
   useLayoutEffect(() => {
     if (mode === "collapsed" && lastMode.current === "pinned") {
       if (aside.current?.matches(":hover")) collapsedUnderPointer.current = Date.now();
-      if (!reducedMotion()) setCollapsing(true);
+      if (!reducedMotion()) {
+        setCollapsing(true);
+        setFromPinned(true);
+      }
     }
     lastMode.current = mode;
   }, [mode]);
@@ -979,6 +984,7 @@ export function Sidebar(props: Props) {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = null;
     setClosingBar(false);
+    setFromPinned(false);
   };
   const enter = (e: { buttons: number }) => {
     inside.current = true;
@@ -1115,7 +1121,7 @@ export function Sidebar(props: Props) {
       <div
         ref={panel}
         key={mode === "pinned" ? "pinned" : "floating"}
-        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}${collapsing ? " was-pinned" : ""}${carried ? " carried" : ""}`}
+        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}${fromPinned ? " from-pinned" : ""}${carried ? " carried" : ""}`}
         style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
         onTransitionEnd={(e) => e.target === e.currentTarget && e.propertyName === "width" && stopClosing()}
         onPointerEnter={mode === "collapsed" ? enter : undefined}

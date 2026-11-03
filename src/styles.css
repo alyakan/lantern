@@ -48,6 +48,7 @@
   --lift-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--line-strong);   /* a project row while it's dragged */
   --hud-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   --panel-shadow: 0 0 0 0.5px var(--line-strong), 8px 0 28px rgba(0, 0, 0, 0.14);   /* the collapsed sidebar opened over the chat, and the peek */
+  --panel-shadow-gone: 0 0 0 0.5px transparent, 8px 0 28px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --overlay: rgba(0, 0, 0, 0.28);   /* behind a dialog */
   --overlay-strong: rgba(0, 0, 0, 0.35);
   --on-color: #ffffff;     /* text on a project's own colour, or a severity's */
@@ -305,6 +306,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(1, 4, 9, 0.6);
   --overlay-strong: rgba(1, 4, 9, 0.7);
@@ -413,6 +415,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(0, 4, 1, 0.65);
   --overlay-strong: rgba(0, 4, 1, 0.75);
@@ -631,6 +634,8 @@
   --lift-shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
   --hud-shadow: 0 0 0 0 transparent;
   --panel-shadow: inset -2px 0 0 var(--ph-ink), 4px 0 0 var(--ph-ink);
+  --panel-shadow-gone: inset -2px 0 0 transparent, 4px 0 0 transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
+  --panel-shadow-pinned: inset -2px 0 0 var(--ph-ink);   /* the pinned sidebar's edge, which a pane closing from pinned keeps */
   --md-link: #1d4aff;
   --md-link-line: #1d4aff;
   --md-quote-bar: #f54e00;
@@ -3353,8 +3358,14 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 /* Pinned, the pane is as wide as the sidebar is to be, from the first frame: the sidebar's width grows under it as the chat beside it
    slides out from under, rather than the pane's contents being squeezed as it widens. */
 .sidebar.pinned .sb-panel { width: max(100%, min(var(--sb-open, 100%), max(200px, calc(100vw - 840px)))); box-shadow: none; transition: none; }
-/* Collapsing it, the pane is drawn open for a frame in the pinned look (no shadow), then closes like the open bar does. */
-.sb-panel.was-pinned.expanded { box-shadow: none; }
+/* Collapsing it, the pane is drawn open for a frame in the pinned look, then closes like the open bar does; it keeps the pinned
+   sidebar's edge (none, or the theme's own) all the way in, and the edge goes with the pane at the end, instead of one that isn't
+   there when it starts, grows as it shrinks and then goes. */
+.sb-panel.from-pinned:is(.expanded, .closing) { box-shadow: var(--panel-shadow-pinned, none); }
+/* Closing, the edge fades out while the pane settles into the bar (it is slowest at the end), instead of hanging on for the last
+   few pixels and then going in one frame. */
+@keyframes sb-edge-out { to { box-shadow: var(--panel-shadow-gone, 0 0 0 0 transparent); } }
+.sb-panel.closing { animation: sb-edge-out var(--sb-close) forwards; }
 /* Pinning the open bar: the pinned pane is the same on screen, so its labels aren't faded in again as on a pane opening. */
 .sb-panel.carried.expanded :is(.sb-text, .sb-project-name, .sb-new, .sb-unfold, .sb-side-glyph) { animation: none; }
 .sidebar.peek .sb-panel { transition: none; }
