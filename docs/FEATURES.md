@@ -410,6 +410,8 @@ A few things to know:
 - The traffic itself isn't per project: Claude in any chat can search everything Network Monitor captured, not just what a project's watches match.
 - Until there's a watch, the tab explains Network Monitor and how to add one.
 
+**Artifacts.** Pages Claude writes into `.lantern/artifacts/` to show you something while it works: an architecture map, a flow, a chart, a report. HTML and SVG run in a sandbox with no network; Markdown and Mermaid are drawn by the app. When you ask for an artifact to keep or share (a presentation, a diagram, a report), Claude publishes it with Claude Code's Artifact tool instead, as it would in a terminal, and gives you its claude.ai link. That's only for a provider that has such a tool (Claude Code does, a gateway chat and Codex don't); the others write the file here.
+
 ## Storage
 
 The **disk button** in the title bar, just before the Settings gear, opens **Storage**: a panel like Settings (the same size, over the window, closed with **Close**, Esc or a click outside) that scans your Mac for what can be cleared to get disk space back. It is for the whole app, not for one chat or project. It used to be a tab in the side panel. A small dot on the button means Claude has suggested deletions (hover it for how many). The command palette (⇧⌘P) lists it as **Storage**.

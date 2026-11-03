@@ -448,7 +448,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     cfg.auto_approve = auto;
     cfg.resume = running.or(cfg.resume);
     cfg.path_env = login_path(state).await;
-    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
+    if let Ok(helper) = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
     // Its claude restarts on Ask: it hears so with its next message, as a chat whose user switched does.
@@ -1017,7 +1017,7 @@ impl orchestra::Host for AppHost {
             }
             // The worker's folder is a worktree, but it belongs to its Lead's project: it gets the notes the Lead started with.
             let notes = cfg.helper.project_notes.clone();
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
+            cfg.helper = helper_config(&s, cfg.provider, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
@@ -1476,9 +1476,10 @@ async fn storage_delete(state: State<'_, AppState>, ids: Vec<String>) -> Result<
 }
 
 /// `project_notes`: what the chat was started with (a restart passes its own on, a new chat the user's notes as they are now).
-fn helper_config(slot: &Slot, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
+fn helper_config(slot: &Slot, provider: ProviderId, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes })
+    let publish_artifacts = capabilities_of(provider).publishes_artifacts;
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes, publish_artifacts })
 }
 
 /// Where the git tool answers for a chat started with `cfg`: only for a read-only agent, and decided here from the role
@@ -1692,6 +1693,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         subagent_model: if gateway { None } else { checked_model(settings.subagent_model)? },
         helper: helper_config(
             slot,
+            settings.provider,
             match (settings.orchestrator, settings.worker) {
                 (true, _) => Role::Main,
                 (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared || w.read_only },
@@ -2031,7 +2033,7 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, role.clone(), cfg.helper.project_notes.clone())?;
+    cfg.helper = helper_config(&s, cfg.provider, role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
@@ -2074,7 +2076,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
+    cfg.helper = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     launch(&app, &slot, &s, cfg, false).await?;
@@ -4197,7 +4199,7 @@ mod hooks_flow_tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         };
@@ -4430,7 +4432,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         }

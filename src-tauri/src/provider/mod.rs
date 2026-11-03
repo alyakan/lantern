@@ -100,6 +100,10 @@ pub struct Capabilities {
     pub supports_images: bool,
     pub supports_compact: bool,
     pub supports_clear: bool,
+    /// It can publish an artifact (a presentation, a diagram, a page) to a link the user can open and share, with a tool of
+    /// its own: Claude Code's Artifact tool, which Lantern turns on for its chats (`claude -p` leaves it off).
+    #[serde(default)]
+    pub publishes_artifacts: bool,
 }
 
 /// A provider and what it can do, as the window is told.
@@ -142,7 +146,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false, supports_images: false, supports_compact: false, supports_clear: true }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false, supports_images: false, supports_compact: false, supports_clear: true, publishes_artifacts: false }
     }
 
     fn models(&self) -> &'static [&'static str] {

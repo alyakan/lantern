@@ -230,7 +230,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         };
