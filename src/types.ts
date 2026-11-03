@@ -55,6 +55,8 @@ export interface Capabilities {
   supports_images?: boolean;
   supports_compact?: boolean;
   supports_clear?: boolean;
+  /** It can publish an artifact to a link the user can open and share (Claude Code's Artifact tool). */
+  publishes_artifacts?: boolean;
 }
 
 export interface ProviderInfo {

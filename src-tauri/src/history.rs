@@ -1120,7 +1120,7 @@ mod tests {
         // The moved note and a revert note can both come first.
         assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
         // A Workflow switch's note repeats the whole prompt, blank lines and all: the title is still what was typed.
-        let settings = crate::args::settings_note(crate::args::Mode::Steps, false, &crate::args::HelperConfig { exe: "/x".into(), socket: "/s".into(), role: crate::args::Role::Normal, providers: vec![], project_notes: None });
+        let settings = crate::args::settings_note(crate::args::Mode::Steps, false, &crate::args::HelperConfig { exe: "/x".into(), socket: "/s".into(), role: crate::args::Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false });
         assert_eq!(typed(&format!("{settings}\n\nbuild the login page")), Some("build the login page".into()));
         assert_eq!(typed(&format!("{settings}\n\n[Lantern note: since your last message.]\n\nwhy?")), Some("why?".into()));
     }

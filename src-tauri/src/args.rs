@@ -23,7 +23,8 @@ pub enum Mode {
 /// What Claude should know about the app it's running in, appended to Claude Code's system prompt in every chat: without
 /// it a chat started in another project has no idea Lantern, its settings or its `!` commands exist. A chat has two
 /// settings: Permissions (Ask or Auto) and Workflow (Chat, Step by step or Team), told as the user sees them.
-fn lantern_prompt(mode: Mode, auto_approve: bool, role: &Role) -> String {
+/// `publish`: the provider publishes artifacts (Capabilities::publishes_artifacts), so an asked-for artifact goes to a link.
+fn lantern_prompt(mode: Mode, auto_approve: bool, role: &Role, publish: bool) -> String {
     let permissions = if is_auto(mode, auto_approve) { "Auto" } else { "Ask" };
     let workflow = match (mode, role) {
         (Mode::Steps, _) => "Step by step",
@@ -31,6 +32,7 @@ fn lantern_prompt(mode: Mode, auto_approve: bool, role: &Role) -> String {
         (_, Role::Worker { .. }) => "Team, and you are one of its agents",
         _ => "Chat",
     };
+    let artifacts = if publish { PUBLISH_PROMPT } else { "" };
     format!(
         "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Activity (you, your advisor and your subagents as a graph), Tests, Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries) and Artifacts. They pick the settings and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change any of them. Every chat has two settings that work independently:
 Permissions, which means the same in every workflow:
@@ -40,12 +42,15 @@ Workflow:
 - Chat: you work as usual.
 - Step by step: one page per message, in a flavour (Build, Review, Debug or Design), and Build and Debug have an Explain as you go option.
 - Team: a Lead runs a team of agents, each with a chat of its own on a canvas. An agent never has more freedom than its Lead: a Lead on Ask means every agent asks.
-This chat's Permissions are {permissions} and its Workflow is {workflow}. To show the user something visual (an architecture map, a flow, a chart, a report), write it with the Write tool as a self-contained file in .lantern/artifacts/ in this folder: .html, .svg, .md or .mmd (Mermaid). Lantern opens it in the Artifacts tab. HTML runs sandboxed with no network: inline your scripts and styles, load nothing from a CDN, and draw charts with SVG or canvas. Link lantern.css (<link rel=\"stylesheet\" href=\"lantern.css\">, beside the page) for the app's colours and fonts as CSS variables (--text, --pane, --line, --accent, --add, --del, --ui, --mono…), so it matches the app in light and dark.
+This chat's Permissions are {permissions} and its Workflow is {workflow}. {artifacts}To show the user something visual (an architecture map, a flow, a chart, a report), write it with the Write tool as a self-contained file in .lantern/artifacts/ in this folder: .html, .svg, .md or .mmd (Mermaid). Lantern opens it in the Artifacts tab. HTML runs sandboxed with no network: inline your scripts and styles, load nothing from a CDN, and draw charts with SVG or canvas. Link lantern.css (<link rel=\"stylesheet\" href=\"lantern.css\">, beside the page) for the app's colours and fonts as CSS variables (--text, --pane, --line, --accent, --add, --del, --ui, --mono…), so it matches the app in light and dark.
 A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
 Lantern's own tools are on its MCP server (mcp__lantern__…), whose instructions say what each is for. Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one.
 Before an action the user must approve that is hard to reverse or outward-facing (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside your own worktree), call mcp__lantern__request_approval instead of asking in the chat. A yes covers exactly the action you named and nothing more."
     )
 }
+
+/// Where an asked-for artifact goes when the provider can publish one: to a link, as the same request would outside Lantern.
+const PUBLISH_PROMPT: &str = "When the user asks for an artifact (a presentation or slides, a diagram, a page or a report to keep or share), publish it with your Artifact tool, as you would outside Lantern, and give them its link; Lantern's Artifacts tab is for what you show them while you work. ";
 
 /// Whether a chat is on Auto: its mode, or Step by step with auto-approve (which is Auto's permissions with pages).
 pub fn is_auto(mode: Mode, auto_approve: bool) -> bool {
@@ -226,6 +231,8 @@ pub struct HelperConfig {
     /// The user's notes for the project, as the chat started with them (see `project_notes_block`). A restart keeps them: the
     /// conversation it resumes was started with these, whatever the notes say by then.
     pub project_notes: Option<String>,
+    /// Its provider publishes artifacts to a shareable link (Capabilities::publishes_artifacts): the prompt tells it when to.
+    pub publish_artifacts: bool,
 }
 
 /// The most characters of a project's notes a chat is started with. The window stops typing at the same number; this is the
@@ -261,7 +268,7 @@ pub fn valid_effort(e: &str) -> bool {
 /// How the chat works, as its appended system prompt says it: Lantern's prompt with its Permissions and Workflow, then the
 /// Workflow's own instructions (Step by step's pages, a Lead's, an agent's). The project's notes are added after it.
 pub fn workflow_prompt(mode: Mode, auto_approve: bool, helper: &HelperConfig) -> String {
-    let mut prompt = lantern_prompt(mode, auto_approve, &helper.role);
+    let mut prompt = lantern_prompt(mode, auto_approve, &helper.role, helper.publish_artifacts);
     if mode == Mode::Steps {
         prompt.push_str("\n\n");
         prompt.push_str(STEPS_PROMPT);
@@ -558,7 +565,7 @@ mod tests {
     }
 
     fn helper() -> HelperConfig {
-        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, providers: vec![], project_notes: None }
+        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false }
     }
 
     #[test]
@@ -695,7 +702,7 @@ mod tests {
     fn a_main_agent_with_no_list_of_providers_gets_the_orchestra_prompt_as_it_was() {
         let main = HelperConfig { role: Role::Main, ..helper() };
         let a = build_args(Mode::Ask, false, None, None, None, &main);
-        assert_eq!(value_after(&a, "--append-system-prompt").unwrap(), format!("{}\n\n{ORCHESTRATOR_PROMPT}", lantern_prompt(Mode::Ask, false, &Role::Main)));
+        assert_eq!(value_after(&a, "--append-system-prompt").unwrap(), format!("{}\n\n{ORCHESTRATOR_PROMPT}", lantern_prompt(Mode::Ask, false, &Role::Main, false)));
     }
 
     #[test]
@@ -725,7 +732,7 @@ mod tests {
         expected.extend(strs(&["acceptEdits", "--mcp-config"]));
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
-        expected.push(lantern_prompt(Mode::Ask, false, &Role::Normal));
+        expected.push(lantern_prompt(Mode::Ask, false, &Role::Normal, false));
         expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
         let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
         got.extend(harness_args(None));
@@ -740,7 +747,7 @@ mod tests {
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--settings", r#"{"permissions":{"ask":["Agent","Task"]}}"#, "--append-system-prompt"]));
         expected.push(format!(
             "{}\n\n{STEPS_PROMPT}\n\n{ORCHESTRATOR_PROMPT}\n\nProviders you can start agents on (only the ones listed are available): claude (models: opus, sonnet, haiku).",
-            lantern_prompt(Mode::Steps, true, &Role::Main)
+            lantern_prompt(Mode::Steps, true, &Role::Main, false)
         ));
         expected.push("--allowedTools".into());
         expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
@@ -755,7 +762,7 @@ mod tests {
         expected.extend(strs(&["auto", "--mcp-config"]));
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
-        expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto, false, &worker.role), worker_prompt("w")));
+        expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto, false, &worker.role, false), worker_prompt("w")));
         expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
         assert_eq!(build_args(Mode::Auto, false, None, None, None, &worker), expected);
     }
