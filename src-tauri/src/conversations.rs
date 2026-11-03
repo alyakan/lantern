@@ -261,6 +261,27 @@ mod regression_tests {
     }
 
     #[test]
+    fn what_the_user_sent_reads_back_from_the_archive_with_or_without_pictures() {
+        // A message with no pictures is saved without `images`, and must still read back: a chat that woke or reopened from its archive
+        // lost every one of the user's messages (the replies came back, the prompts did not).
+        let store = Store::load(None);
+        store.attach("s1", chat("aaaa"));
+        store.observe("s1", &mut UiEvent::UserText { text: "plain".into(), at: Some(5), sent_by: Some("desktop".into()), images: 0 });
+        store.observe("s1", &mut UiEvent::UserText { text: "with photos".into(), at: None, sent_by: Some("phone-x".into()), images: 2 });
+        store.observe("s1", &mut UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "ok".into() });
+        let saved = store.get("aaaa");
+        let events = saved.as_ref().map(|c| c.events.clone()).unwrap_or_default();
+        assert!(events.iter().any(|e| e["kind"] == "user_text" && e.get("images").is_none()), "a message with no pictures is saved without `images`: {events:?}");
+        let mut c = chat("aaaa");
+        c.events = events;
+        let said: Vec<(String, u32)> = c.replay().into_iter().filter_map(|e| if let UiEvent::UserText { text, images, .. } = e { Some((text, images)) } else { None }).collect();
+        assert_eq!(said, vec![("plain".to_string(), 0), ("with photos".to_string(), 2)]);
+        // Archives written before this fix (no `images` on a plain message) read back too.
+        c.events = vec![json!({"kind":"user_text","text":"old","sent_by":"desktop"})];
+        assert_eq!(c.replay().len(), 1);
+    }
+
+    #[test]
     fn approval_outcomes_are_durable_before_the_turn_finishes() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::load(Some(dir.path().into()));
