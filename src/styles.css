@@ -1622,8 +1622,11 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .run-dot.passed { background: var(--add); }
 .run-dot.failed { background: var(--del); }
-/* The chip under a turn's activity that ran tests; it opens the Tests tab. */
+/* The line under a turn's activity for its test runs: one collapsed line that expands to a line per run, each opening the Tests tab. */
 .test-chip svg { flex: none; width: 12px; height: 12px; }
+.test-runs .test-chip { max-width: 100%; }
+.test-run-command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.test-run-summary { flex: none; color: var(--muted); }
 .test-chip.failed { color: var(--del); }
 .test-chip.failed:hover:not(:disabled) { color: var(--del); }
 

@@ -521,7 +521,7 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
   if (wide) {
     return (
       <AboveKeyboard style={{ backgroundColor: colors.paper }}>
-        <View style={{ paddingTop: insets.top + 8 }}>{top}</View>
+        <View style={{ paddingTop: insets.top + 8, paddingBottom: 4 }}>{top}</View>
         {tabs}
         <View style={{ flex: 1, flexDirection: "row" }}>
           <View style={{ flex: 1, alignItems: "center" }}>
@@ -547,7 +547,7 @@ export function DeskScreen({ top, onOpenChat, onReview, wide = false }: DeskProp
 
   return (
     <AboveKeyboard style={{ backgroundColor: colors.paper }}>
-      <View style={{ paddingTop: insets.top + 8 }}>{top}</View>
+      <View style={{ paddingTop: insets.top + 8, paddingBottom: 4 }}>{top}</View>
       {tabs}
       {needsArea}
       {talk}

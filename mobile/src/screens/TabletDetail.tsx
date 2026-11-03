@@ -21,6 +21,7 @@ import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 import { DeskScreen } from "./DeskScreen";
 import { ModeSwitch } from "./ModeSwitch";
+import { TopBar } from "../ui/TopBar";
 import { WorkScreen } from "./WorkScreen";
 import { nextSteps } from "../view/work";
 
@@ -153,10 +154,12 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     (() => {
       const showingWork = canWork && page === "work";
       const top = (
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space.xl, minHeight: 32 }}>
-          {canWork ? <ModeSwitch value={showingWork ? "work" : "desk"} modes={[{ id: "desk", label: "Desk" }, { id: "work", label: "Work", badge: work ? nextSteps(work.items).length : 0 }]} onChange={(m) => setPage(m === "work" ? "work" : "desk")} /> : <Txt variant="title">Desk</Txt>}
-          {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
-        </View>
+        <TopBar>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 32 }}>
+            {canWork ? <ModeSwitch value={showingWork ? "work" : "desk"} modes={[{ id: "desk", label: "Desk" }, { id: "work", label: "Work", badge: work ? nextSteps(work.items).length : 0 }]} onChange={(m) => setPage(m === "work" ? "work" : "desk")} /> : <Txt variant="title">Desk</Txt>}
+            {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
+          </View>
+        </TopBar>
       );
       return showingWork ? <WorkScreen wide top={top} /> : <DeskScreen wide onOpenChat={onOpenChat} onReview={onReview} top={top} />;
     })()

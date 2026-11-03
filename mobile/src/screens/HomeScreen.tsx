@@ -28,6 +28,7 @@ import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
 import { ModeSwitch } from "./ModeSwitch";
+import { TopBar } from "../ui/TopBar";
 import { WorkScreen } from "./WorkScreen";
 import { nextSteps } from "../view/work";
 import { Deck } from "./NeedsDeck";
@@ -425,33 +426,35 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   };
 
   const top = (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, gap: 10 }}>
-      <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, flexShrink: 1 }}>
-        {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
-        <Txt variant="small" tone="ink2" numberOfLines={1}>
-          {macName ?? "Your Mac"}
-        </Txt>
-      </PressScale>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-        {refreshing && (
-          <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
-            <Dots />
-          </View>
-        )}
-        {canDesk && !onOpenDesk && <ModeSwitch value={mode} modes={modes} onChange={pickMode} />}
-        {canSingle && !single && (
-          <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-            <FocusGlyph color={colors.ink2} />
-          </PressScale>
-        )}
-        {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
-        {onTogglePin && (
-          <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-            <PinGlyph pinned={pinned} />
-          </PressScale>
-        )}
+    <TopBar>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, flexShrink: 1 }}>
+          {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
+          <Txt variant="small" tone="ink2" numberOfLines={1}>
+            {macName ?? "Your Mac"}
+          </Txt>
+        </PressScale>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          {refreshing && (
+            <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+              <Dots />
+            </View>
+          )}
+          {canDesk && !onOpenDesk && <ModeSwitch value={mode} modes={modes} onChange={pickMode} />}
+          {canSingle && !single && (
+            <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+              <FocusGlyph color={colors.ink2} />
+            </PressScale>
+          )}
+          {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
+          {onTogglePin && (
+            <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+              <PinGlyph pinned={pinned} />
+            </PressScale>
+          )}
+        </View>
       </View>
-    </View>
+    </TopBar>
   );
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.

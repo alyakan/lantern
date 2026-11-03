@@ -6,7 +6,9 @@ import { loadWorkGrouping, saveWorkGrouping } from "../prefs";
 import { useController, useSyncState } from "../shell/hooks";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
+import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, space, useColors, type Palette } from "../ui/theme";
 import { FILTER_TONES, filterItems, groupingFor, groupItems, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup } from "../view/work";
 
@@ -17,7 +19,7 @@ export interface WorkProps {
   wide?: boolean;
 }
 
-/** How many of Next's steps show before "Show N more", and how many rows of a group (all of it when there is one list). */
+/** How many of Next's steps show before "Show N more" (which opens them all in a sheet), and how many rows of a group (all of it when there is one list). */
 const NEXT_SHOWN = 3;
 const GROUP_SHOWN = 4;
 const LIST_SHOWN = 8;
@@ -162,7 +164,9 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   const [only, setOnly] = useState<Tone[]>([]);
   const [folded, setFolded] = useState<string[]>([]);
   const [open, setOpen] = useState<string[]>([]);
-  const [allNext, setAllNext] = useState(false);
+  const [nextOpen, setNextOpen] = useState(false);
+  // How tall the bar over the list is (with the status bar's room above it): the list starts below it.
+  const [barHeight, setBarHeight] = useState(0);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -180,7 +184,7 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   const blind = work?.blind ?? [];
   const by = groupingFor(chosen, issues);
   const next = nextSteps(items);
-  const nextShown = allNext ? next : next.slice(0, NEXT_SHOWN);
+  const nextShown = next.slice(0, NEXT_SHOWN);
   const listed = standing(items);
   const groups = groupItems(filterItems(listed, only), by);
   const flat = by === "none" || (groups.length === 1 && (by === "project" || groups[0].plain));
@@ -247,6 +251,15 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     );
   };
 
+  /** One of Next's steps, in the card and in the sheet that lists them all (its outcome and busy state are this screen's, so they carry across). */
+  const nextRow = (i: RemoteWorkItem, n: number) => (
+    <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
+      <Item item={i} lead={i.next?.what} meta={`${i.word} · ${metaUnder(i, now, null)}`}>
+        {step(i)}
+      </Item>
+    </View>
+  );
+
   const nextCard = (
     <Card title="Next" count={next.length} edge={colors.cobalt} action={<Link label="Refresh" onPress={refresh} />}>
       {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
@@ -265,16 +278,10 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
         </Txt>
       ) : (
         <>
-          {nextShown.map((i, n) => (
-            <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
-              <Item item={i} lead={i.next?.what} meta={`${i.word} · ${metaUnder(i, now, null)}`}>
-                {step(i)}
-              </Item>
-            </View>
-          ))}
+          {nextShown.map(nextRow)}
           {next.length > nextShown.length && (
             <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-              <Link label={`Show ${next.length - nextShown.length} more`} onPress={() => setAllNext(true)} />
+              <Link label={`Show ${next.length - nextShown.length} more`} onPress={() => setNextOpen(true)} />
             </View>
           )}
         </>
@@ -392,11 +399,10 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <View style={{ paddingTop: insets.top + 8 }}>{top}</View>
       <ScrollView
         accessibilityLabel="Your work"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) }}
+        contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
         {work === null ? (
@@ -410,6 +416,30 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
           </>
         )}
       </ScrollView>
+      {/* The bar floats over the list, which scrolls under it. The status bar's own strip is paper, so words don't run under the clock. */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
+      <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
+        {top}
+      </View>
+      {/* All of Next's steps, which can be many, in a sheet of their own. A step is asked from it as from the card. */}
+      {nextOpen && (
+        <Sheet size="large" onClose={() => setNextOpen(false)}>
+          {(close, scroll) => (
+            <ScrollView ref={scroll} accessibilityLabel="All next steps" contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                <Txt variant="heading">Next</Txt>
+                <Txt variant="small" tone="ink3">
+                  {next.length}
+                </Txt>
+                <View style={{ marginLeft: "auto" }}>
+                  <Link label="Done" onPress={close} />
+                </View>
+              </View>
+              <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: colors.rule, overflow: "hidden" }}>{next.map(nextRow)}</View>
+            </ScrollView>
+          )}
+        </Sheet>
+      )}
     </View>
   );
 }

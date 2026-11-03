@@ -13,6 +13,9 @@ export interface LinearSettingsProps {
   /** What Linear said, shared with the Desk (connecting and disconnecting change it). */
   work: LinearWork | null;
   onWork: (w: LinearWork | null) => void;
+  /** Leave out the work of Ready issues (merged, waiting for a release) from Your work. */
+  hideReady: boolean;
+  onHideReady: (on: boolean) => void;
 }
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
@@ -22,7 +25,7 @@ const AUTO = "auto";
  * Settings → Linear: connect a workspace with a personal API key (kept in the Keychain, never shown again), and which team each
  * project's work is in. Lantern only reads from Linear: your issues that aren't done, for the Desk's Your work.
  */
-export function LinearSettings({ folders, teams, onTeams, work, onWork }: LinearSettingsProps) {
+export function LinearSettings({ folders, teams, onTeams, work, onWork, hideReady, onHideReady }: LinearSettingsProps) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +59,7 @@ export function LinearSettings({ folders, teams, onTeams, work, onWork }: Linear
         <div>
           <h2 className="mode-guide-title">Linear</h2>
           <p className="mode-guide-summary">
-            Your issues in Linear that aren't done show on the Desk's Your work: each pull request with its issue and project, and what you haven't started. Lantern only reads from Linear; it never changes anything there.
+            Your issues in Linear show on the Desk's Your work until they are Done, Closed or Canceled: each pull request with its issue and project, and what you haven't started. Lantern only reads from Linear; it never changes anything there.
           </p>
         </div>
       </div>
@@ -94,6 +97,11 @@ export function LinearSettings({ folders, teams, onTeams, work, onWork }: Linear
       )}
       {work?.connected && (
         <>
+          <label className="settings-row linear-hide-ready">
+            <input type="checkbox" checked={hideReady} onChange={(e) => onHideReady(e.target.checked)} />
+            <span className="settings-row-name">Hide Ready issues</span>
+            <span className="settings-row-sub">Ready means merged and waiting for a release. Hidden, an issue and its pull requests leave Your work on the Desk and the phone until it moves on.</span>
+          </label>
           <h3 className="linear-teams-title">Teams</h3>
           {folders.length === 0 ? (
             <div className="settings-muted">No projects yet.</div>

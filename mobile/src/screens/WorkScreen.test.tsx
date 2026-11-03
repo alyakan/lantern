@@ -1,4 +1,4 @@
-import { Linking } from "react-native";
+import { Linking, StyleSheet } from "react-native";
 import { act, fireEvent, screen, within } from "@testing-library/react-native";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -66,6 +66,18 @@ describe("Your work on the phone", () => {
     await open();
     expect(screen.getByRole("tab", { name: "Work, 3 to do" })).toBeTruthy();
     expect(screen.getByLabelText("Your work")).toBeTruthy();
+  });
+
+  it("has its bar float over the list, which starts below the bar once it is measured", async () => {
+    await open();
+    const start = () => StyleSheet.flatten(screen.getByLabelText("Your work").props.contentContainerStyle).paddingTop;
+    const before = start();
+    // The bar takes no touches itself (it only passes them to what is in it), so the event goes to its handler directly.
+    await act(async () => {
+      screen.getByTestId("work-bar").props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 120 } } });
+    });
+    expect(start()).toBe(132);
+    expect(before).not.toBe(132);
   });
 
   it("is not offered by a Mac that lists no work, which keeps the Desk", async () => {
@@ -147,6 +159,20 @@ describe("Your work on the phone", () => {
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(card("Next").getByText("That moved on since you looked. Look again.")).toBeTruthy();
     expect(card("Next").getByRole("button", { name: "Fix failing checks on #7" })).toBeTruthy();
+  });
+
+  it("lists every step of Next in a sheet from Show more, and a step is asked from it as from the card", async () => {
+    const more = ["a", "b", "c"].map((k, n) => item(`more-${k}`, { number: 20 + n, title: `More ${k}`, tone: "bad", sig: `m${n}`, next: step("Fix failing checks on") }));
+    const { session } = await open({ work: { ...work, items: [...work.items, ...more] }, work_step: { kind: "sent", to: "Fix the checks" } });
+    expect(card("Next").queryByText(/More c/)).toBeNull();
+    await fireEvent.press(card("Next").getByRole("button", { name: "Show 3 more" }));
+    const all = within(screen.getByLabelText("All next steps"));
+    expect(all.getByText(/More c/)).toBeTruthy();
+    expect(all.getAllByRole("button", { name: /^(Fix failing checks on|Merge|Start)/ })).toHaveLength(6);
+    await fireEvent.press(all.getByRole("button", { name: "Fix failing checks on #22" }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    expect(session.lastOf("work_step")).toEqual({ op: "work_step", key: "more-c", sig: "m2" });
+    expect(all.getByText("Sent to “Fix the checks”")).toBeTruthy();
   });
 
   it("asks the Mac to look again on Refresh", async () => {

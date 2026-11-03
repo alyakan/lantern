@@ -795,7 +795,8 @@ export interface OpenPr {
   draft: boolean;
 }
 
-/** One of your issues in Linear that isn't done (linear.rs). `state_type`: triage, backlog, unstarted or started; `priority`:
+/** One of your issues in Linear that isn't Done, Closed or Canceled (linear.rs). `state_type`: triage, backlog, unstarted, started,
+ * or completed for a state of that kind that isn't Done or Closed (Ready, In Review, Testing); `priority`:
  * 0 none, 1 urgent, 2 high, 3 medium, 4 low; `branch`: the name Linear suggests; `links`: what is attached (linked PRs). */
 export interface LinearIssue {
   identifier: string;

@@ -1,4 +1,5 @@
-//! Linear, for the Desk's Your work: the issues assigned to you that aren't done, with their team, project, the branch name
+//! Linear, for the Desk's Your work: the issues assigned to you that aren't done (Ready, In Review and Testing, which this
+//! workflow files as completed, count as not done), with their team, project, the branch name
 //! Linear suggests and the pull requests linked to them, and the workspace's teams. Read-only: one GraphQL query to
 //! api.linear.app, nothing is ever written there. The personal API key is kept in the login Keychain (never in a file, and
 //! never sent to the window: it only hears whether one is set). What Linear says (titles, names) is shown on the Desk, never
@@ -23,21 +24,28 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// The issues asked for, at most.
 const ISSUES_MAX: usize = 100;
 
+/// The "completed" issues asked for, at most.
+const FINISHED_MAX: usize = 100;
+
+/// The query asks for your open issues, and for the issues in a state of the "completed" kind that isn't Done or Closed. A
+/// workflow may file work that is still going under that kind (this one's In Review and Testing, and Ready: merged, not yet
+/// released), and a pull request is open for it: without the issue the pull request has no feature. Done, Closed, Canceled and
+/// duplicates are gone from the Desk.
 const QUERY: &str = r#"query DeskWork {
   viewer {
     name
     organization { name }
-    assignedIssues(first: 100, orderBy: updatedAt, filter: { state: { type: { nin: ["completed", "canceled"] } } }) {
-      nodes {
-        identifier title url priority dueDate branchName
-        state { name type }
-        team { key }
-        project { id name }
-        attachments { nodes { url } }
-      }
-    }
+    assignedIssues(first: 100, orderBy: updatedAt, filter: { state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { nodes { ...Work } }
+    finished: assignedIssues(first: 100, orderBy: updatedAt, filter: { state: { type: { eq: "completed" }, name: { nin: ["Done", "Closed"] } } }) { nodes { ...Work } }
   }
   teams(first: 100) { nodes { key name } }
+}
+fragment Work on Issue {
+  identifier title url priority dueDate branchName
+  state { name type }
+  team { key }
+  project { id name }
+  attachments { nodes { url } }
 }"#;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -50,7 +58,8 @@ pub struct LinearIssue {
     pub priority: u8,
     /// "2026-11-05", when it has a due date.
     pub due: Option<String>,
-    /// Its state's name ("In Progress") and type: triage, backlog, unstarted or started.
+    /// Its state's name ("In Progress") and type: triage, backlog, unstarted or started, or completed for a state of that kind
+    /// that isn't Done or Closed (Ready, In Review, Testing).
     pub state: String,
     pub state_type: String,
     /// Its team's key ("ENG").
@@ -119,31 +128,30 @@ pub fn parse(body: &Value) -> Result<LinearWork, String> {
     }
     let viewer = &body["data"]["viewer"];
     let text = |v: &Value| v.as_str().filter(|s| !s.is_empty()).map(String::from);
-    let issues = viewer["assignedIssues"]["nodes"]
-        .as_array()
-        .map(|list| {
-            list.iter()
-                .take(ISSUES_MAX)
-                .filter_map(|i| {
-                    Some(LinearIssue {
-                        identifier: text(&i["identifier"])?,
-                        title: i["title"].as_str().unwrap_or("").to_string(),
-                        url: text(&i["url"]).filter(|u| u.starts_with("https://linear.app/"))?,
-                        // A Float in Linear's schema: 2 or 2.0.
-                        priority: i["priority"].as_f64().filter(|p| (0.0..=4.0).contains(p)).map(|p| p as u8).unwrap_or(0),
-                        due: text(&i["dueDate"]),
-                        state: i["state"]["name"].as_str().unwrap_or("").to_string(),
-                        state_type: i["state"]["type"].as_str().unwrap_or("").to_string(),
-                        team: i["team"]["key"].as_str().unwrap_or("").to_string(),
-                        project: text(&i["project"]["name"]),
-                        project_id: text(&i["project"]["id"]),
-                        branch: text(&i["branchName"]),
-                        links: i["attachments"]["nodes"].as_array().map(|a| a.iter().filter_map(|n| text(&n["url"])).collect()).unwrap_or_default(),
-                    })
-                })
-                .collect()
+    let issue_of = |i: &Value| {
+        Some(LinearIssue {
+            identifier: text(&i["identifier"])?,
+            title: i["title"].as_str().unwrap_or("").to_string(),
+            url: text(&i["url"]).filter(|u| u.starts_with("https://linear.app/"))?,
+            // A Float in Linear's schema: 2 or 2.0.
+            priority: i["priority"].as_f64().filter(|p| (0.0..=4.0).contains(p)).map(|p| p as u8).unwrap_or(0),
+            due: text(&i["dueDate"]),
+            state: i["state"]["name"].as_str().unwrap_or("").to_string(),
+            state_type: i["state"]["type"].as_str().unwrap_or("").to_string(),
+            team: i["team"]["key"].as_str().unwrap_or("").to_string(),
+            project: text(&i["project"]["name"]),
+            project_id: text(&i["project"]["id"]),
+            branch: text(&i["branchName"]),
+            links: i["attachments"]["nodes"].as_array().map(|a| a.iter().filter_map(|n| text(&n["url"])).collect()).unwrap_or_default(),
         })
-        .unwrap_or_default();
+    };
+    let listed = |key: &str, max: usize| -> Vec<LinearIssue> { viewer[key]["nodes"].as_array().map(|list| list.iter().take(max).filter_map(issue_of).collect()).unwrap_or_default() };
+    let mut issues = listed("assignedIssues", ISSUES_MAX);
+    for done in listed("finished", FINISHED_MAX) {
+        if !issues.iter().any(|i| i.identifier == done.identifier) {
+            issues.push(done);
+        }
+    }
     let teams = body["data"]["teams"]["nodes"]
         .as_array()
         .map(|list| list.iter().filter_map(|t| Some(LinearTeam { key: text(&t["key"])?, name: t["name"].as_str().unwrap_or("").to_string() })).collect())
@@ -256,6 +264,24 @@ mod tests {
         assert_eq!((i.identifier.as_str(), i.priority, i.due.as_deref(), i.state_type.as_str(), i.project.as_deref()), ("ENG-142", 2, Some("2026-11-05"), "unstarted", Some("Offline mode")));
         assert_eq!(i.links, vec!["https://github.com/acme/api/pull/7"]);
         assert_eq!(w.teams, vec![LinearTeam { key: "ENG".into(), name: "Engineering".into() }]);
+    }
+
+    #[test]
+    fn issues_in_a_completed_kind_of_state_are_kept_once_beside_the_open_ones() {
+        let issue = |id: &str, name: &str, kind: &str| serde_json::json!({ "identifier": id, "title": id, "url": format!("https://linear.app/acme/issue/{id}"), "state": { "name": name, "type": kind }, "team": { "key": "LUM" }, "project": { "id": "p", "name": "Testo integration" } });
+        let body = serde_json::json!({ "data": { "viewer": {
+            "assignedIssues": { "nodes": [issue("LUM-1", "In Progress", "started")] },
+            "finished": { "nodes": [issue("LUM-1", "In Progress", "started"), issue("LUM-2", "Ready", "completed")] }
+        }, "teams": { "nodes": [] } } });
+        let w = parse(&body).unwrap();
+        let got: Vec<_> = w.issues.iter().map(|i| (i.identifier.as_str(), i.state.as_str(), i.state_type.as_str(), i.project.as_deref())).collect();
+        assert_eq!(got, vec![("LUM-1", "In Progress", "started", Some("Testo integration")), ("LUM-2", "Ready", "completed", Some("Testo integration"))]);
+    }
+
+    #[test]
+    fn the_query_leaves_out_done_closed_canceled_and_duplicate_by_state() {
+        assert!(QUERY.contains(r#"type: { nin: ["completed", "canceled", "duplicate"] }"#));
+        assert!(QUERY.contains(r#"name: { nin: ["Done", "Closed"] }"#));
     }
 
     #[test]
