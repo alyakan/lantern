@@ -305,30 +305,58 @@ function isIssueOf(issue: LinearIssue, item: WorkItem): boolean {
 
 const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
 
+/** Ready: merged, not yet released. */
+export const isReady = (issue: LinearIssue) => issue.state.trim().toLowerCase() === "ready";
+
 /**
  * Your work with Linear's: each item marked with the issue it is the work of, and an item for each of your issues that nothing
  * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
  * team no Desk project is in is listed without a step. The step names the issue by its identifier and link only.
  */
-export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number): WorkItem[] {
+export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number, hideReady = false): WorkItem[] {
   if (!work?.connected || !work.issues.length) return items;
   const started = new Set<string>();
-  const out = items.map((item) => {
+  const out = items.flatMap((item): WorkItem[] => {
     const issue = work.issues.find((i) => isIssueOf(i, item));
-    if (!issue) return item;
+    if (!issue) return [item];
     started.add(issue.identifier);
+    // Settings → Linear can hide the work of Ready issues (merged, waiting for a release).
+    if (hideReady && isReady(issue)) return [];
     // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
     const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
     const tag = issue.project ? `${named} · ${issue.project}` : named;
-    return { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` };
+    return [{ ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` }];
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
   for (const issue of work.issues) {
-    if (started.has(issue.identifier)) continue;
+    if (started.has(issue.identifier) || (hideReady && isReady(issue))) continue;
     const r = repoOfTeam(issue.team);
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
     const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
+    // Linear files In Review, Testing and Ready under "completed", but they aren't done: nothing to start, and it is on its way (or, Ready,
+    // merged and waiting for a release). Its pull request, if the Desk has it, is its row instead (above).
+    if (issue.state_type === "completed") {
+      const ready = isReady(issue);
+      out.push({
+        key: `linear:${issue.identifier}`,
+        repo: r?.repo ?? "",
+        name: r ? short(r) : issue.team,
+        github: r?.github ?? null,
+        number: null,
+        branch: null,
+        title: `${issue.identifier} ${issue.title}`,
+        stage: ready ? "release" : "review",
+        tone: "wait",
+        word: issue.state,
+        meta: [issue.project, ready && "merged, waiting for a release", !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
+        at: null,
+        next: null,
+        sig: `issue:${issue.state}`,
+        issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+      });
+      continue;
+    }
     const facts = [issue.project, PRIORITY[issue.priority], issue.due && `due ${issue.due}`, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · ");
     out.push({
       key: `linear:${issue.identifier}`,

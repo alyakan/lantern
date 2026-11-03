@@ -1,5 +1,5 @@
 /**
- * Linear on the Desk (linear.rs): your issues that aren't done, asked while the Desk is on screen, and which Linear team each
+ * Linear on the Desk (linear.rs): your issues that aren't Done, Closed or Canceled, asked while the Desk is on screen, and which Linear team each
  * Desk project's work is in. A team is the one Settings → Linear says, else the one whose issue identifiers ("ENG-142") the
  * repository's branches and pull requests carry most.
  */
@@ -10,6 +10,7 @@ import type { LinearWork, RepoStatus } from "../types";
 /** How often the Desk asks again while it is on screen (the Mac keeps what Linear said for 90 s besides). */
 const POLL_MS = 120_000;
 const TEAMS_KEY = "linear.teams";
+const HIDE_READY_KEY = "linear.hideReady";
 
 /** An issue identifier, as Linear makes them: a team key, a dash, a number. */
 export const ISSUE_ID = /\b([A-Za-z][A-Za-z0-9]{0,9})-(\d{1,7})\b/g;
@@ -30,6 +31,23 @@ export function loadTeams(): TeamChoice {
 
 export function saveTeams(t: TeamChoice) {
   localStorage.setItem(TEAMS_KEY, JSON.stringify(t));
+}
+
+/** Settings → Linear: leave out the work of Ready issues (merged, waiting for a release) from Your work, on the Desk and the phone. */
+export function loadHideReady(): boolean {
+  try {
+    return localStorage.getItem(HIDE_READY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveHideReady(on: boolean) {
+  try {
+    localStorage.setItem(HIDE_READY_KEY, on ? "1" : "0");
+  } catch {
+    /* kept for this run only */
+  }
 }
 
 /** The team keys your branches and pull requests in a repository name, most named first (only the workspace's own teams count,
