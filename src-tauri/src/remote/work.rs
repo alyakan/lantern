@@ -84,7 +84,7 @@ fn tidy(item: RemoteWorkItem) -> Option<RemoteWorkItem> {
         url: item.url.filter(|u| link_ok(u)),
         sig: cut(&item.sig, 80),
         step_only: item.step_only,
-        next: item.next.map(|n| RemoteWorkNext { what: cut(&n.what, 80), yours: n.yours, button: cut(&n.button, 20) }),
+        next: item.next.map(|n| RemoteWorkNext { what: cut(&n.what, 80), yours: n.yours, button: cut(&n.button, 20), warn: n.warn }),
     })
 }
 
@@ -138,7 +138,7 @@ mod tests {
             url: Some("https://github.com/aly/lantern/pull/7".into()),
             sig: "checks:Checks failing".into(),
             step_only: false,
-            next: Some(RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into() }),
+            next: Some(RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into(), warn: false }),
         }
     }
 

@@ -15,4 +15,8 @@ yours: boolean,
 /**
  * The button's word.
  */
-button: string, };
+button: string, 
+/**
+ * Goes around a rule (merging a pull request nobody approved): the button is drawn in a warning colour.
+ */
+warn: boolean, };

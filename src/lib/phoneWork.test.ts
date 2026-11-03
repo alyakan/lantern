@@ -18,6 +18,13 @@ describe("Your work for a phone", () => {
     expect(JSON.stringify(told)).not.toMatch(/request_approval|gh pr checks/);
   });
 
+  it("says a merge that goes around the required review is a warning, and a plain merge is not", () => {
+    const r = repo({ prs: [pr(1, { review: "REVIEW_REQUIRED" }), pr(2, { review: "APPROVED" })] });
+    const told = phoneWork(yourWork([r], NOW), false, true, []).items;
+    expect(told.find((i) => i.number === 1)!.next).toEqual({ what: "Bypass review and merge", yours: true, button: "Bypass & merge…", warn: true });
+    expect(told.find((i) => i.number === 2)!.next).toEqual({ what: "Merge", yours: true, button: "Merge…", warn: false });
+  });
+
   it("leaves a time out of a line, to be filled in on the phone, so the line doesn't change every minute", () => {
     const at = new Date(2026, 10, 2, 16, 0);
     const r = repo({ merged: [{ number: 9, title: "m", author: "aly", branch: "m9", merged_at: at.toISOString() }], release: { tag: "v1", published_at: new Date(2026, 10, 1).toISOString() } });

@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, next: null, ...over });
-const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWorkItem["next"]>> = {}) => ({ what, yours: false, button: "Do it", ...over });
+const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWorkItem["next"]>> = {}) => ({ what, yours: false, button: "Do it", warn: false, ...over });
 
 const work: RemoteWork = {
   issues: true,
@@ -78,6 +78,17 @@ describe("Your work on the phone", () => {
     });
     expect(start()).toBe(132);
     expect(before).not.toBe(132);
+  });
+
+  it("draws a merge that goes around the required review as Bypass & merge, outlined, and says what it does", async () => {
+    const bypass = item("pr10", { number: 10, title: "Unreviewed", tone: "you", stage: "review", word: "Not approved", next: step("Bypass review and merge", { yours: true, warn: true, button: "Bypass & merge…" }) });
+    await open({ work: { ...work, items: [...work.items, bypass] } });
+    const button = card("Next").getByRole("button", { name: "Bypass review and merge #10" });
+    expect(button.props.accessibilityHint).toMatch(/past the required review/);
+    expect(StyleSheet.flatten(button.props.style)).toMatchObject({ borderWidth: 1 });
+    // The plain merge keeps its usual look.
+    const plain = card("Next").getByRole("button", { name: "Merge #8" });
+    expect(StyleSheet.flatten(plain.props.style).borderWidth).toBeUndefined();
   });
 
   it("is not offered by a Mac that lists no work, which keeps the Desk", async () => {

@@ -155,6 +155,19 @@ describe("the Desk", () => {
     expect(notes).not.toHaveTextContent("…");
   });
 
+  it("offers Bypass & merge, in a warning, for a pull request whose required review nobody gave, and a plain Merge once it is approved", () => {
+    setup({ repos: [repo("/p/lantern", { prs: [pr(12, "pass", { review: "REVIEW_REQUIRED" }), pr(13, "pass", { review: "APPROVED" })] })] });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    const bypass = next.getByRole("button", { name: "Bypass review and merge #12" });
+    expect(bypass).toHaveTextContent("Bypass & merge…");
+    expect(bypass).toHaveClass("yw-bypass");
+    expect(bypass.closest("li")).toHaveClass("yw-warn");
+    expect(bypass.closest("li")).toHaveTextContent("Bypasses review");
+    const merge = next.getByRole("button", { name: "Merge #13" });
+    expect(merge).toHaveClass("yw-yours");
+    expect(merge.closest("li")).not.toHaveClass("yw-warn");
+  });
+
   it("puts your next steps first, yours to decide before what is blocked, and where each stands as nodes", () => {
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);

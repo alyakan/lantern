@@ -41,6 +41,8 @@ export interface Step {
   text: string;
   /** It changes code on the branch, so a chat that isn't on it is told to use a worktree of its own. */
   onBranch: boolean;
+  /** Yours to decide, and it goes around a rule (merging a pull request nobody approved): drawn in a warning colour. */
+  warn?: boolean;
 }
 
 export interface WorkItem {
@@ -95,11 +97,12 @@ function prRef(r: RepoStatus, n: number) {
 type Pr = RepoStatus["prs"][number];
 
 /** Where one of your open pull requests stands, and what comes next. Conflicts come before checks: GitHub runs no checks on a
- * pull request that conflicts. Your own pull request needs no approval to be yours to merge: a repository you merge alone
- * stays "review required" for good. */
+ * pull request that conflicts. One that is approved, or whose repository asks for no review, is merged. One whose review is
+ * required and missing can still be merged by an admin (a repository you merge alone stays "review required" for good), but that
+ * is **Bypass & merge**, in a warning colour: it goes around the rule. */
 function openStage(r: RepoStatus, p: Pr): Pick<WorkItem, "stage" | "tone" | "word" | "next"> {
   const ref = prRef(r, p.number);
-  const step = (kind: StepKind, what: string, text: string, yours = false, button = "Do it", onBranch = !yours): Step => ({ kind, what, text, yours, button, onBranch });
+  const step = (kind: StepKind, what: string, text: string, yours = false, button = "Do it", onBranch = !yours, warn = false): Step => ({ kind, what, text, yours, button, onBranch, ...(warn ? { warn } : {}) });
   if (p.draft) return { stage: "pr", tone: "wait", word: "Draft", next: null };
   if (p.mergeable === "CONFLICTING" || p.merge_state === "DIRTY")
     return { stage: "merge", tone: "bad", word: "Conflicts with its base", next: step("conflicts", "Resolve conflicts on", `${cap(ref)} has merge conflicts with its base branch. Read it with gh, resolve the conflicts on its branch and run the tests. ${ASK_PUSH}`) };
@@ -111,6 +114,22 @@ function openStage(r: RepoStatus, p: Pr): Pick<WorkItem, "stage" | "tone" | "wor
   if (p.merge_state === "BEHIND")
     return { stage: "merge", tone: "bad", word: "Behind its base", next: step("update", "Bring up to date", `${cap(ref)} is behind its base branch. Bring its branch up to date with the base and run the tests. ${ASK_PUSH}`) };
   if (p.mergeable === "UNKNOWN" || p.merge_state === "UNKNOWN") return { stage: "merge", tone: "wait", word: "GitHub is checking it", next: null };
+  // Nobody approved it and a review is required: merging is a decision to go around the rule, and the chat is told to say so.
+  if (p.review === "REVIEW_REQUIRED")
+    return {
+      stage: "review",
+      tone: "you",
+      word: "Not approved",
+      next: step(
+        "merge",
+        "Bypass review and merge",
+        `${cap(ref)} has no approval, and its repository requires a review. Its checks pass and it has no conflicts. Check it once more with gh. Merging it goes around the review rule (gh pr merge --admin), so ask me with request_approval, and say on the card that it bypasses the required review. Merge it only if I say yes.`,
+        true,
+        "Bypass & merge…",
+        false,
+        true,
+      ),
+    };
   return {
     stage: "merge",
     tone: "you",

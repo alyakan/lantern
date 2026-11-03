@@ -2,7 +2,7 @@ import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { filterItems, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, next: null, ...over });
-const step = { what: "Fix", yours: false, button: "Do it" };
+const step = { what: "Fix", yours: false, button: "Do it", warn: false };
 
 describe("Your work on the phone", () => {
   it("lists what to do next with what is yours first, then what is blocked, then local work and issues to start", () => {

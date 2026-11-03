@@ -43,6 +43,9 @@ function toneColor(tone: Tone, c: Palette): string {
   }
 }
 
+/** An item's colour: its state's, or the warning amber when its step goes around a rule (merging a pull request nobody approved). */
+const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "wait" : toneOf(item), c);
+
 /** What happened to a step asked for: where it went, or why it didn't. Kept while the item stays in the state it was asked in. */
 interface Outcome {
   sig: string;
@@ -53,7 +56,7 @@ interface Outcome {
 /** An item's path, a node a stage: green behind it, ringed in its colour where it is, grey ahead. */
 function Path({ item, issues }: { item: RemoteWorkItem; issues: boolean }) {
   const colors = useColors();
-  const tone = toneColor(toneOf(item), colors);
+  const tone = hueOf(item, colors);
   const nodes = pathOf(item, issues);
   const at = nodes.find((n) => n.state === "now") ?? nodes[nodes.length - 1];
   return (
@@ -77,7 +80,7 @@ function Path({ item, issues }: { item: RemoteWorkItem; issues: boolean }) {
 /** One item: its dot and name (a link to its page when it has one), a quiet line, and under it what the caller adds. */
 function Item({ item, meta, lead, children }: { item: RemoteWorkItem; meta: string; lead?: string; children?: ReactNode }) {
   const colors = useColors();
-  const tone = toneColor(toneOf(item), colors);
+  const tone = hueOf(item, colors);
   const link = safeLink(item.url) ? item.url : null;
   const name = (
     <Txt variant="body" style={{ fontWeight: "600", flexShrink: 1 }}>
@@ -234,15 +237,25 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
           <PressScale
             accessibilityRole="button"
             accessibilityLabel={`${item.next.what} ${item.number !== null ? `#${item.number}` : item.title}`}
-            accessibilityHint={item.next.yours ? "Asks a chat to get it ready; it asks you before anything happens" : "Sends this to a chat on your Mac"}
+            accessibilityHint={item.next.warn ? "Asks a chat to merge it past the required review; it asks you before anything happens" : item.next.yours ? "Asks a chat to get it ready; it asks you before anything happens" : "Sends this to a chat on your Mac"}
             accessibilityState={{ disabled: busy === item.key }}
             disabled={busy === item.key}
             onPress={() => run(item)}
             haptic="select"
             scaleTo={0.95}
-            style={{ alignSelf: "flex-start", minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", backgroundColor: item.next.yours ? colors.hi : colors.ink, opacity: busy === item.key ? 0.5 : 1 }}
+            style={{
+              alignSelf: "flex-start",
+              minHeight: 36,
+              paddingHorizontal: 16,
+              borderRadius: radius.pill,
+              alignItems: "center",
+              justifyContent: "center",
+              // A step that goes around a rule is outlined in amber, not filled: it isn't the way the usual steps look.
+              ...(item.next.warn ? { backgroundColor: `${hueOf(item, colors)}22`, borderWidth: 1, borderColor: hueOf(item, colors) } : { backgroundColor: item.next.yours ? colors.hi : colors.ink }),
+              opacity: busy === item.key ? 0.5 : 1,
+            }}
           >
-            <Txt variant="small" tone={item.next.yours ? "on-hi" : "on-ink"} style={{ fontWeight: "700" }}>
+            <Txt variant="small" tone={item.next.warn ? undefined : item.next.yours ? "on-hi" : "on-ink"} style={{ fontWeight: "700", ...(item.next.warn ? { color: hueOf(item, colors) } : {}) }}>
               {busy === item.key ? "Asking your Mac…" : item.next.button}
             </Txt>
           </PressScale>
@@ -327,7 +340,7 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
       <Item item={i} meta={metaUnder(i, now, heading)}>
         <View style={{ flexDirection: "row", alignItems: "center", paddingLeft: 16 }}>
-          <Txt variant="tiny" style={{ color: toneColor(toneOf(i), colors), fontWeight: "700" }}>
+          <Txt variant="tiny" style={{ color: hueOf(i, colors), fontWeight: "700" }}>
             {i.word}
           </Txt>
         </View>

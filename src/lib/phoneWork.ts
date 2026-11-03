@@ -21,7 +21,7 @@ export interface WindowWorkItem {
   url: string | null;
   sig: string;
   step_only: boolean;
-  next: { what: string; yours: boolean; button: string } | null;
+  next: { what: string; yours: boolean; button: string; warn: boolean } | null;
 }
 
 export interface WindowWork {
@@ -69,7 +69,7 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       url: linkOf(i),
       sig: i.sig,
       step_only: !!i.stepOnly,
-      next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button } : null,
+      next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button, warn: !!i.next.warn } : null,
     })),
   };
 }

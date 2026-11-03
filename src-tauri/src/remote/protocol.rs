@@ -780,6 +780,9 @@ pub struct RemoteWorkNext {
     pub yours: bool,
     /// The button's word.
     pub button: String,
+    /// Goes around a rule (merging a pull request nobody approved): the button is drawn in a warning colour.
+    #[serde(default)]
+    pub warn: bool,
 }
 
 /// The answer to Request::WorkStep: what the Mac did with the step.

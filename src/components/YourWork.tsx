@@ -100,8 +100,8 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
   const to = target.kind === "chat" ? `"${target.title}"` : "a new chat";
   return (
     <button
-      className={step.yours ? "yw-yours" : "primary"}
-      title={step.yours ? `Asks ${to} to get it ready; it asks you on an approval card before anything happens` : `Sends this to ${to}`}
+      className={step.warn ? "yw-bypass" : step.yours ? "yw-yours" : "primary"}
+      title={step.warn ? `Asks ${to} to merge it past the required review; it asks you on an approval card that says so, before anything happens` : step.yours ? `Asks ${to} to get it ready; it asks you on an approval card before anything happens` : `Sends this to ${to}`}
       aria-label={`${step.what} ${item.number !== null ? `#${item.number}` : item.title}`}
       onClick={() => {
         if (!onStep(item, target)) return;
@@ -141,7 +141,7 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
   const chip = !!item.issue && item.tone !== "todo";
   const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature).join(" · ");
   return (
-    <li className={`dp-row yw-row yw-tone-${item.tone}`}>
+    <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}`}>
       <span className="dp-row-top">
         <span className="dp-title yw-name">
           <Named item={item} />
@@ -292,14 +292,14 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
           <>
             <ul className="dp-list">
               {nextShown.map((i) => (
-                <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}`}>
+                <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}${i.next!.warn ? " yw-warn" : ""}`}>
                   <span className="dp-row-top">
                     <span className="dp-title yw-name">
                       {i.next!.what} <Named item={i} />
                     </span>
                     <span className="dp-aside">
-                      {/* Yours to decide is said outright; otherwise the pill is where it stands, in its state's colour. */}
-                      <span className="yw-word">{i.next!.yours ? "Your call" : i.word}</span>
+                      {/* Yours to decide is said outright (a step that goes around a rule says so); otherwise the pill is where it stands, in its state's colour. */}
+                      <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
                       <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
                     </span>
                   </span>

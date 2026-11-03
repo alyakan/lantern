@@ -24,15 +24,31 @@ describe("Your work", () => {
     expect(stage({ review: "CHANGES_REQUESTED" })).toEqual(["review", "bad", "Changes asked", "changes"]);
     expect(stage({ merge_state: "BEHIND" })).toEqual(["merge", "bad", "Behind its base", "update"]);
     expect(stage({ mergeable: "UNKNOWN", merge_state: "UNKNOWN" })).toEqual(["merge", "wait", "GitHub is checking it", null]);
-    // A repository merged alone stays "review required" and BLOCKED for good: checks passing and no conflicts is yours to merge.
-    expect(stage({})).toEqual(["merge", "you", "Ready to merge", "merge"]);
-    expect(one(pr(1)).next).toMatchObject({ yours: true, button: "Merge…" });
+    // Approved, or a repository that asks for no review: a plain merge.
+    expect(stage({ review: "APPROVED" })).toEqual(["merge", "you", "Ready to merge", "merge"]);
+    expect(stage({ review: null })).toEqual(["merge", "you", "Ready to merge", "merge"]);
+    expect(one(pr(1, { review: "APPROVED" })).next).toMatchObject({ yours: true, button: "Merge…" });
+    expect(one(pr(1, { review: "APPROVED" })).next?.warn).toBeUndefined();
+  });
+
+  it("offers Bypass & merge, in a warning, for a pull request whose required review nobody gave", () => {
+    // A repository merged alone stays "review required" for good: the merge is still yours, but it goes around the rule.
+    const i = one(pr(1));
+    expect([i.stage, i.tone, i.word, i.next?.kind]).toEqual(["review", "you", "Not approved", "merge"]);
+    expect(i.next).toMatchObject({ yours: true, warn: true, button: "Bypass & merge…", what: "Bypass review and merge" });
+    expect(i.next!.text).toMatch(/no approval/);
+    expect(i.next!.text).toMatch(/bypasses the required review/);
+    // Its sig moves when it is approved, so a step sent for the bypass doesn't stay marked as sent for the merge.
+    expect(i.sig).not.toBe(one(pr(1, { review: "APPROVED" })).sig);
+    // Conflicts, failing checks and requested changes still come first.
+    expect(one(pr(1, { checks: "fail" })).next?.warn).toBeUndefined();
+    expect(one(pr(1, { review: "CHANGES_REQUESTED" })).next?.warn).toBeUndefined();
   });
 
   it("follows your pull requests and the ones that ask you to review, not everyone's", () => {
     const items = yourWork([repo({ prs: [pr(1), pr(2, { author: "sara" }), pr(3, { author: "sara", review_requests: ["Aly"] })] })], NOW);
     expect(items.map((i) => [i.number, i.word])).toEqual([
-      [1, "Ready to merge"],
+      [1, "Not approved"],
       [3, "Your review is asked"],
     ]);
     // Not knowing who you are, none counts as yours: a stranger's is never offered to fix or merge. Branches still show.
