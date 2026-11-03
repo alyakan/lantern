@@ -13,6 +13,12 @@ describe("Your work on the phone", () => {
     expect(foldWord("done", 2)).toBe("2 Done");
   });
 
+  it("doesn't count done work as being worked on in a feature", () => {
+    const items = [item("a", { feature: "Sync", issue: "ENG-1", tone: "wait" }), item("b", { feature: "Sync", issue: "ENG-2", tone: "done", fold: "done" }), item("c", { feature: "Sync", issue: "ENG-3", tone: "done", fold: "done" })];
+    const [g] = groupItems(items, "feature");
+    expect([g.label, g.doing, g.todo]).toEqual(["Sync", 1, 0]);
+  });
+
   it("treats a kind of fold it doesn't know, or none at all, as a plain item", () => {
     const items = [item("a", { fold: "loud" }), item("b", { fold: "loud" }), item("c", { fold: undefined as unknown as null })];
     expect(foldRows(items).map((r) => r.kind)).toEqual(["item", "item", "item"]);

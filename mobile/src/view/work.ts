@@ -88,7 +88,7 @@ export function groupItems(items: RemoteWorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => toneOf(i) !== "todo" && i.issue).map((i) => i.issue)).size,
+      doing: new Set(g.items.filter((i) => toneOf(i) !== "todo" && toneOf(i) !== "done" && i.issue).map((i) => i.issue)).size,
       todo: g.items.filter((i) => toneOf(i) === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || items.indexOf(a.items[0]) - items.indexOf(b.items[0]) || a.label.localeCompare(b.label));

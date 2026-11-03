@@ -358,6 +358,17 @@ const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
 /** Ready: merged, not yet released. */
 export const isReady = (issue: LinearIssue) => issue.state.trim().toLowerCase() === "ready";
 
+/** Done or Closed: finished. Linear says an issue is done only by its state's name here (Ready and In Review are "completed" too). */
+export const isFinished = (issue: LinearIssue) => issue.state_type === "completed" && ["done", "closed"].includes(issue.state.trim().toLowerCase());
+
+/** The pull request Linear has linked to `issue` in this repository, when it has one. */
+function linkedPull(issue: LinearIssue, github: string | null): number | null {
+  if (!github) return null;
+  const prefix = `https://github.com/${github}/pull/`;
+  const link = issue.links.find((l) => l.startsWith(prefix) && /^\d{1,7}$/.test(l.slice(prefix.length)));
+  return link ? Number(link.slice(prefix.length)) : null;
+}
+
 /**
  * Your work with Linear's: each item marked with the issue it is the work of, and an item for each of your issues that nothing
  * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
@@ -376,9 +387,36 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     return [{ ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` }];
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
+  // A feature (Linear project) is going while any issue of yours in it isn't finished: only then its finished issues are listed.
+  const featureOf = (i: LinearIssue) => (i.project ? (i.project_id ?? i.project) : null);
+  const going = new Set(work.issues.filter((i) => !isFinished(i)).map(featureOf));
   for (const issue of work.issues) {
     if (started.has(issue.identifier)) continue;
     const r = repoOfTeam(issue.team);
+    if (isFinished(issue)) {
+      const feature = featureOf(issue);
+      if (feature === null || !going.has(feature)) continue;
+      const pull = linkedPull(issue, r?.github ?? null);
+      out.push({
+        key: `linear:${issue.identifier}`,
+        repo: r?.repo ?? "",
+        name: r ? short(r) : issue.team,
+        github: r?.github ?? null,
+        number: pull,
+        branch: null,
+        title: `${issue.identifier} ${issue.title}`,
+        stage: "release",
+        tone: "done",
+        word: issue.state,
+        meta: [issue.project, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
+        at: null,
+        next: null,
+        sig: `issue:${issue.state}`,
+        issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+        fold: "done",
+      });
+      continue;
+    }
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
     const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
@@ -438,6 +476,7 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
   for (const i of items) {
     if (i.repo !== repo || !i.issue?.project) continue;
     const p = by.get(i.issue.project) ?? { doing: new Set<string>(), todo: 0 };
+    if (i.tone === "done") continue;
     if (i.tone === "todo") p.todo++;
     else p.doing.add(i.issue.identifier);
     by.set(i.issue.project, p);
@@ -488,7 +527,7 @@ export function groupWork(items: WorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.issue).map((i) => i.issue!.identifier)).size,
+      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.tone !== "done" && i.issue).map((i) => i.issue!.identifier)).size,
       todo: g.items.filter((i) => i.tone === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || ordered.indexOf(a.items[0]) - ordered.indexOf(b.items[0]) || a.label.localeCompare(b.label));

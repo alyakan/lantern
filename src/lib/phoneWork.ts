@@ -42,9 +42,9 @@ const RELATIVE = /\b(?:just now|\d+[mhd] ago)\b/;
 /** `owner/name`, as GitHub names a repository. */
 const SLUG = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
-/** The page of an item: its pull request on GitHub, or its Linear issue when it is only that. */
+/** The page of an item: its pull request on GitHub, or its Linear issue when it is only that (not started, on its way, or done). */
 function linkOf(item: WorkItem): string | null {
-  if (item.tone === "todo" && item.issue) return safeIssueUrl(item.issue.url) ? item.issue.url : null;
+  if (item.number === null && item.issue) return safeIssueUrl(item.issue.url) ? item.issue.url : null;
   return item.number !== null && item.github && SLUG.test(item.github) ? `https://github.com/${item.github}/pull/${item.number}` : null;
 }
 

@@ -48,6 +48,14 @@ describe("Your work for a phone", () => {
     expect(told.find((i) => i.key === "linear:ENG-9")!.url).toBeNull();
   });
 
+  it("tells the phone a feature's Done issues, to fold, with a link to the pull request or the issue, and not as work in progress", () => {
+    const done = { state: "Done", state_type: "completed", project: "Sync", project_id: "p" };
+    const r = repo();
+    const told = phoneWork(withLinear([], linearWork([issue("ENG-1", { state: "In Progress", state_type: "started" }), issue("ENG-2", { ...done, links: ["https://github.com/aly/lantern/pull/30"] }), issue("ENG-3", done)]), { "/p/lantern": "ENG" }, [r], NOW), true, true, []).items;
+    expect(told.find((i) => i.key === "linear:ENG-2")).toMatchObject({ tone: "done", fold: "done", number: 30, url: "https://github.com/aly/lantern/pull/30", next: null });
+    expect(told.find((i) => i.key === "linear:ENG-3")).toMatchObject({ tone: "done", fold: "done", number: null, url: "https://linear.app/a/issue/ENG-3" });
+  });
+
   it("lists what stands first, blocked before the rest, then the steps with no row of their own", () => {
     const at = (d: number) => new Date(2026, 10, d, 12).toISOString();
     const r = repo({ prs: [pr(1), pr(2, { checks: "fail" })], merged: [{ number: 9, title: "m", author: "aly", branch: "m9", merged_at: at(2) }], release: { tag: "v1.2.0", published_at: new Date(2026, 10, 1, 18).toISOString() } });
