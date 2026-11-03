@@ -315,7 +315,9 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     const issue = work.issues.find((i) => isIssueOf(i, item));
     if (!issue) return item;
     started.add(issue.identifier);
-    const tag = issue.project ? `${issue.identifier} · ${issue.project}` : issue.identifier;
+    // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
+    const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
+    const tag = issue.project ? `${named} · ${issue.project}` : named;
     return { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project }, meta: `${tag} · ${item.meta}` };
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);

@@ -180,7 +180,7 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
         {GROUPS.map((g) => {
           const off = g.by === "feature" && !issues;
           return (
-            <button key={g.by} role="radio" aria-checked={by === g.by} disabled={off} className={by === g.by ? "on" : ""} onClick={() => onBy(g.by)} title={off ? "Connect Linear in Settings to group by feature" : undefined}>
+            <button key={g.by} role="radio" aria-checked={by === g.by} disabled={off} className={by === g.by ? "on" : ""} onClick={() => onBy(g.by)} title={off ? "Connect Linear in Settings to group by feature" : g.by === "feature" ? "A feature is the Linear project an issue is in; a pull request joins it by its issue's link or its branch name" : undefined}>
               {g.label}
             </button>
           );

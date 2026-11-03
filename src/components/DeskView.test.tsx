@@ -214,8 +214,8 @@ describe("the Desk", () => {
     const stand = screen.getByRole("region", { name: "Where things stand" });
     const sync = within(stand).getByRole("region", { name: "Sync" });
     expect(sync).toHaveTextContent("1 doing");
-    // Under its feature's heading, a row doesn't name the feature again.
-    expect(within(sync).getByText(/^ENG-1 · lantern · aly\/eng-1-a$/)).toBeInTheDocument();
+    // Under its feature's heading, a row doesn't name the feature again, but names the issue it is the work of.
+    expect(within(sync).getByText(/^ENG-1 Sync it · lantern · aly\/eng-1-a$/)).toBeInTheDocument();
     expect(within(stand).getByRole("region", { name: "No feature" })).toHaveTextContent("PR 8");
   });
 

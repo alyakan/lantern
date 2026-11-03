@@ -122,7 +122,9 @@ describe("Your work with Linear", () => {
       ["pr:8", "ENG-2"],
       ["branch:aly/eng-3-sync", "ENG-3"],
     ]);
-    expect(items[0].meta).toMatch(/^ENG-1 · Offline mode · /);
+    // A row says which issue it is the work of by name, so it is plain why it sits under that issue's feature.
+    expect(items[0].meta).toMatch(/^ENG-1 Issue ENG-1 · Offline mode · /);
+    expect(items[2].meta).toMatch(/^ENG-3 Issue ENG-3 · /);
   });
 
   it("lists your issues nothing is the work of yet, a next step only when urgent, high or due soon", () => {

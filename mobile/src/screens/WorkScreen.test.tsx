@@ -44,7 +44,7 @@ const work: RemoteWork = {
   looked: true,
   blind: [],
   items: [
-    item("pr7", { number: 7, title: "Retry fetchJson", tone: "bad", word: "Checks failing", feature: "Reliability", issue: "ENG-1", meta: "ENG-1 · Reliability · lantern", url: "https://github.com/aly/lantern/pull/7", sig: "checks:fail", next: step() }),
+    item("pr7", { number: 7, title: "Retry fetchJson", tone: "bad", word: "Checks failing", feature: "Reliability", issue: "ENG-1", meta: "ENG-1 Retry on 429 · Reliability · lantern", url: "https://github.com/aly/lantern/pull/7", sig: "checks:fail", next: step() }),
     item("pr8", { number: 8, title: "Cache settings", tone: "you", stage: "merge", word: "Ready to merge", feature: "Reliability", issue: "ENG-2", next: step("Merge", { yours: true, button: "Merge…" }) }),
     item("eng5", { title: "ENG-5 Rate limit", tone: "todo", stage: "issue", word: "Todo", feature: "Dashboard", issue: "ENG-5", repo: "web", url: "https://linear.app/a/issue/ENG-5", next: step("Start", { button: "Start" }) }),
     item("pr9", { number: 9, title: "Old merged", tone: "done", stage: "release", word: "Released", repo: "web", meta: "web · merged {ago}", at: NOW - 2 * 3_600_000 }),
@@ -86,8 +86,9 @@ describe("Your work on the phone", () => {
     expect(stand.getByRole("button", { name: "Dashboard" })).toBeTruthy();
     expect(stand.getByRole("button", { name: "No feature" })).toBeTruthy();
     // Under its feature's heading a row doesn't say the feature again.
-    expect(stand.queryByText("ENG-1 · Reliability · lantern")).toBeNull();
-    expect(stand.getByText("ENG-1 · lantern")).toBeTruthy();
+    expect(stand.queryByText("ENG-1 Retry on 429 · Reliability · lantern")).toBeNull();
+    // ...but it still names the issue it is the work of.
+    expect(stand.getByText("ENG-1 Retry on 429 · lantern")).toBeTruthy();
     // A time the Mac left out is filled in here.
     expect(stand.getByText("web · merged 2 h ago")).toBeTruthy();
     clock.mockRestore();
