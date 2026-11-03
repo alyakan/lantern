@@ -599,6 +599,15 @@ impl remote::gateway::Host for RemoteHost {
         Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
     }
 
+    fn work_step(&self, key: String, sig: String) -> remote::gateway::BoxFut<Result<(String, String), String>> {
+        let app = self.app.clone();
+        Box::pin(async move { request_work_step(&app, key, sig).await })
+    }
+
+    fn work_refresh(&self) -> Result<(), String> {
+        self.app.emit("remote-work-refresh", ()).map_err(|e| e.to_string())
+    }
+
     fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
         self.app.emit("remote-set-workflow", remote::SetWorkflowRequest { slot: slot.to_string(), workflow: workflow.as_str() }).map_err(|e| e.to_string())
     }
@@ -2888,6 +2897,12 @@ fn remote_window_desk(state: State<'_, AppState>, desk: remote::desk::WindowDesk
     state.remote.window_desk(desk);
 }
 
+/// Where the user's work stands (Your work), for a phone's Work tab (see remote/work.rs).
+#[tauri::command]
+fn remote_window_work(state: State<'_, AppState>, work: remote::work::WindowWork) {
+    state.remote.window_work(work);
+}
+
 /// The sidebar's One project (None: every project), for the phones that follow it.
 #[tauri::command]
 fn remote_window_single(state: State<'_, AppState>, single: Option<remote::single::WindowSingle>) {
@@ -3034,6 +3049,40 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, permiss
     })
     .await;
     listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
+}
+
+/// A phone asked for a step of the user's work: the window is asked (it knows what the item is and where the chat for it is), and
+/// answers with what it did, as ("sent" or "started", where), or why not.
+async fn request_work_step(app: &AppHandle, key: String, sig: String) -> Result<(String, String), String> {
+    let state = app.state::<AppState>();
+    let (id, answer) = state.remote.expect_new_chat();
+    if let Err(e) = app.emit("remote-work-step", &remote::WorkStepRequest { id: id.clone(), key, sig }) {
+        state.remote.forget_new_chat(&id);
+        return Err(e.to_string());
+    }
+    match tokio::time::timeout(NEW_CHAT_WAIT, answer).await {
+        Ok(Ok(result)) => {
+            let said = result?;
+            let (kind, to) = said.split_once('\u{1f}').unwrap_or((said.as_str(), ""));
+            Ok((kind.to_string(), to.to_string()))
+        }
+        _ => {
+            state.remote.forget_new_chat(&id);
+            // The window may have sent it after all (it only answered late): don't invite a second one.
+            Err("Lantern didn't answer in time. The step may still have been sent: look in your chats before trying again.".into())
+        }
+    }
+}
+
+/// The window's answer to `remote-work-step`: what it did, or why not.
+#[tauri::command]
+fn remote_work_step_done(state: State<'_, AppState>, id: String, kind: Option<String>, to: Option<String>, error: Option<String>) {
+    let result = match (kind, error) {
+        (Some(kind), None) if matches!(kind.as_str(), "sent" | "started") => Ok((kind, to.unwrap_or_default().chars().take(120).filter(|c| !c.is_control()).collect())),
+        (_, Some(e)) => Err(e.chars().take(300).collect()),
+        _ => Err("Lantern didn't do that step.".to_string()),
+    };
+    state.remote.work_step_done(&id, result);
 }
 
 /// The window says where it found `claude`, for the calls the backend makes by itself (what to suggest on a phone).
@@ -3977,6 +4026,8 @@ pub fn run() {
             locate_claude,
             remote_window_chats,
             remote_window_desk,
+            remote_window_work,
+            remote_work_step_done,
             remote_window_single,
             remote_window_controls,
             remote_settings,

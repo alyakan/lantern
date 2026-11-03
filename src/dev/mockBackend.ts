@@ -2091,6 +2091,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "remote_pair_cancel":
         case "remote_window_chats":
         case "remote_window_desk":
+        case "remote_window_work":
+        case "remote_work_step_done":
         case "remote_window_single":
         case "remote_window_controls":
         case "remote_new_chat_done":

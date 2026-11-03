@@ -6,6 +6,7 @@ pub mod answers;
 pub mod bus;
 pub mod desk;
 pub mod single;
+pub mod work;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
@@ -85,6 +86,16 @@ pub struct NewChatRequest {
     pub workflow: &'static str,
     /// The id of one of the providers the window listed, or None for the project's own.
     pub provider: Option<String>,
+}
+
+/// What the window is asked when a phone asks for a step of the user's work (a button of Your work). The gateway has checked the item
+/// is listed and was shown as it is; the window finds it again, and refuses it if it moved on or was sent already.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WorkStepRequest {
+    /// Single-use: the window answers with it (`Remote::work_step_done`).
+    pub id: String,
+    pub key: String,
+    pub sig: String,
 }
 
 /// What the window is asked when a phone puts a chat on Chat or Step by step. The gateway has checked the chat; the window checks again.
@@ -462,6 +473,17 @@ impl Remote {
     /// Takes in what the window says its Desks hold (see desk.rs).
     pub fn window_desk(&self, desk: desk::WindowDesk) {
         self.hub.desk.set(desk);
+    }
+
+    /// Takes in what the window says the user's work is (see work.rs).
+    pub fn window_work(&self, work: work::WindowWork) {
+        self.hub.work.set(work);
+    }
+
+    /// The window's answer to a step a phone asked for: what it did ("sent" to a chat, or "started" one, and where), or why not. False
+    /// for an id nobody waits for. Shares the table of `expect_new_chat`: an id is one or the other.
+    pub fn work_step_done(&self, id: &str, result: Result<(String, String), String>) -> bool {
+        self.new_chat_done(id, result.map(|(kind, to)| format!("{kind}\u{1f}{to}")))
     }
 
     /// Takes in the window's One project (see single.rs): None when it shows every project.

@@ -32,6 +32,14 @@ const sent = new Map<string, { sig: string; to: string }>();
 /** Forgets every step sent (for tests: each starts with none). */
 export const forgetSent = () => sent.clear();
 
+/** Where a step was sent, while the item is still in the state it was sent in (a phone's step goes through here too, so a step
+ * sent from the phone isn't offered on the Mac again, nor the other way round). */
+export const stepSentTo = (key: string, sig: string): string | null => {
+  const was = sent.get(key);
+  return was && was.sig === sig ? was.to : null;
+};
+export const markStepSent = (key: string, sig: string, to: string) => void sent.set(key, { sig, to });
+
 /** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. With Linear, the path starts
  * at the issue; work with no issue in Linear has that node dashed. */
 function Nodes({ item, issues }: { item: WorkItem; issues: boolean }) {
@@ -83,8 +91,8 @@ function Named({ item }: { item: WorkItem }) {
 function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"] }) {
   const [, redraw] = useState(0);
   const step = item.next!;
-  const was = sent.get(item.key);
-  if (was && was.sig === item.sig) return <span className="yw-sent">Sent to {was.to}</span>;
+  const was = stepSentTo(item.key, item.sig);
+  if (was) return <span className="yw-sent">Sent to {was}</span>;
   const target = targetFor(item, chats, repos);
   if (!target) return null;
   if (target.kind === "busy") return <span className="yw-sent" title={`"${target.title}" ${target.why}: try again when it's idle`}>Its chat {target.why}</span>;
@@ -96,7 +104,7 @@ function StepButton({ item, chats, repos, onStep }: { item: WorkItem; chats: Inb
       aria-label={`${step.what} ${item.number !== null ? `#${item.number}` : item.title}`}
       onClick={() => {
         if (!onStep(item, target)) return;
-        sent.set(item.key, { sig: item.sig, to: target.kind === "chat" ? `"${target.title}"` : "a new chat" });
+        markStepSent(item.key, item.sig, target.kind === "chat" ? `"${target.title}"` : "a new chat");
         redraw((n) => n + 1);
       }}
     >
