@@ -53,6 +53,8 @@ export const NOT_FOLDER_KEYED = [
   // The Desk's Ask pane: shown or not, and how wide. The sidebar's list: Chats or Timeline.
   "desk.askCollapsed",
   "desk.askRatio",
+  // How Your work on the Desk is grouped: by feature, by project or not at all.
+  "desk.work.groupBy",
   "sidebar.view",
   "settings.modeBySession",
   "settings.harnessBySession",

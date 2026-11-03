@@ -41,6 +41,7 @@ const needs = () => screen.getByRole("region", { name: "Needs you" });
 describe("the Desk", () => {
   beforeEach(() => {
     forgetSent();
+    localStorage.clear();
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -235,5 +236,47 @@ describe("the Desk", () => {
     expect(within(region).getAllByRole("list", { name: /^At / })).toHaveLength(8);
     fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getAllByRole("list", { name: /^At / })).toHaveLength(11);
+  });
+
+  it("groups where things stand by project without Linear, folds a group, and lets you group by none", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] }), repo("/p/web", { prs: [pr(1, "fail")] })];
+    setup({ repos });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    // Blocked first: the project with a failing check comes before the other.
+    expect(stand().getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["web", "lantern"]);
+    // Feature needs Linear.
+    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
+    expect(stand().getByRole("radio", { name: "Project" })).toBeChecked();
+    // A row doesn't name its project again under the project's heading.
+    expect(within(stand().getByRole("region", { name: "lantern" })).getByText("b7")).toBeInTheDocument();
+    fireEvent.click(stand().getByRole("button", { name: "lantern" }));
+    expect(within(stand().getByRole("region", { name: "lantern" })).queryByText("PR 7")).toBeNull();
+    expect(stand().getByRole("button", { name: "lantern" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(stand().getByRole("radio", { name: "None" }));
+    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("filters where things stand by state, and says when nothing is in the states chosen", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "fail"), pr(9, "pass")] })];
+    setup({ repos });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+    fireEvent.click(stand().getByRole("button", { name: /^blocked 1/ }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(1);
+    expect(stand().getByText("PR 8")).toBeInTheDocument();
+    fireEvent.click(stand().getByRole("button", { name: /^waiting 1/ }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
+    fireEvent.click(stand().getByRole("button", { name: "Show all" }));
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("shows five of Next's steps, the rest on asking", () => {
+    const prs = Array.from({ length: 7 }, (_, i) => pr(i + 1, "fail"));
+    setup({ repos: [repo("/p/lantern", { prs })] });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    expect(next.getAllByRole("button", { name: /^Fix failing checks/ })).toHaveLength(5);
+    fireEvent.click(next.getByRole("button", { name: "Show 2 more" }));
+    expect(next.getAllByRole("button", { name: /^Fix failing checks/ })).toHaveLength(7);
   });
 });

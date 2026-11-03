@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
-import { byFeature, nextSteps, projectsOf, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
+import { byFeature, filterWork, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
@@ -162,6 +162,25 @@ describe("Your work with Linear", () => {
       ["Sync", [7, "ENG-4 Issue ENG-4"], 1, 1],
       [null, [9], 0, 0],
     ]);
+  });
+
+  it("groups by project or not at all, and filters by state", () => {
+    const web = repo({ repo: "/p/web", github: "aly/web", folders: [{ folder: "/p/web", branch: "main", changed: 0 }], prs: [pr(1, { checks: "fail" })] });
+    const lantern = repo({ prs: [pr(7), pr(8, { checks: "pending" })] });
+    const items = yourWork([lantern, web], NOW);
+    // The project with something blocked comes first, whatever the order the repositories came in.
+    expect(groupWork(items, "project").map((g) => [g.label, g.items.map((i) => i.number)])).toEqual([
+      ["web", [1]],
+      ["lantern", [7, 8]],
+    ]);
+    const flat = groupWork(items, "none");
+    expect(flat).toHaveLength(1);
+    expect(flat[0].items.map((i) => i.number)).toEqual([1, 7, 8]);
+    // By feature with no Linear: all of it is in no feature.
+    expect(groupWork(items, "feature").map((g) => [g.label, g.plain])).toEqual([["No feature", true]]);
+    expect(stateCounts(items)).toEqual({ bad: 1, you: 1, wait: 1 });
+    expect(filterWork(items, []).map((i) => i.number)).toEqual([7, 8, 1]);
+    expect(filterWork(items, ["bad", "wait"]).map((i) => i.number)).toEqual([8, 1]);
   });
 
   it("finds a project's team in its branches when Settings doesn't say", () => {

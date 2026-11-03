@@ -374,24 +374,60 @@ export interface FeatureGroup {
   todo: number;
 }
 
+/** How where things stand is grouped: by feature (the Linear project), by project (the repository), or not at all. */
+export type GroupBy = "feature" | "project" | "none";
+
+export interface WorkGroup {
+  /** Stable across refreshes: what a folded group is remembered by. */
+  key: string;
+  label: string;
+  /** Work with no feature: its label is only a stand-in, and it goes last. */
+  plain: boolean;
+  items: WorkItem[];
+  doing: number;
+  todo: number;
+}
+
 /**
- * Where things stand, a group per feature (the Linear project its issue is in): the features with something blocked or yours
- * first, by the most pressing item in each, then by name; work in no feature last.
+ * Where things stand in groups, the ones with something blocked or yours first (by the most pressing item in each), then by name;
+ * work in no feature last. By project a group is a repository; by none there is one group, with no heading.
  */
-export function byFeature(items: WorkItem[]): FeatureGroup[] {
+export function groupWork(items: WorkItem[], by: GroupBy): WorkGroup[] {
   const ordered = whereThingsStand(items);
-  const groups = new Map<string | null, WorkItem[]>();
+  const keyOf = (i: WorkItem): { key: string; label: string; plain: boolean } =>
+    by === "feature" ? { key: i.issue?.project ?? "", label: i.issue?.project ?? "No feature", plain: !i.issue?.project } : by === "project" ? { key: i.repo || i.name, label: i.name, plain: false } : { key: "", label: "", plain: false };
+  const groups = new Map<string, { label: string; plain: boolean; items: WorkItem[] }>();
   for (const i of ordered) {
-    const f = i.issue?.project ?? null;
-    groups.set(f, [...(groups.get(f) ?? []), i]);
+    const k = keyOf(i);
+    const g = groups.get(k.key) ?? { label: k.label, plain: k.plain, items: [] };
+    g.items.push(i);
+    groups.set(k.key, g);
   }
-  const first = (list: WorkItem[]) => ordered.indexOf(list[0]);
   return [...groups.entries()]
-    .map(([feature, list]) => ({
-      feature,
-      items: list,
-      doing: new Set(list.filter((i) => i.tone !== "todo" && i.issue).map((i) => i.issue!.identifier)).size,
-      todo: list.filter((i) => i.tone === "todo").length,
+    .map(([key, g]) => ({
+      key,
+      ...g,
+      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.issue).map((i) => i.issue!.identifier)).size,
+      todo: g.items.filter((i) => i.tone === "todo").length,
     }))
-    .sort((a, b) => (a.feature === null ? 1 : 0) - (b.feature === null ? 1 : 0) || first(a.items) - first(b.items) || (a.feature ?? "").localeCompare(b.feature ?? ""));
+    .sort((a, b) => Number(a.plain) - Number(b.plain) || ordered.indexOf(a.items[0]) - ordered.indexOf(b.items[0]) || a.label.localeCompare(b.label));
+}
+
+/** Where things stand by feature (the Linear project its issue is in). */
+export function byFeature(items: WorkItem[]): FeatureGroup[] {
+  return groupWork(items, "feature").map((g) => ({ feature: g.plain ? null : g.label, items: g.items, doing: g.doing, todo: g.todo }));
+}
+
+/** The states a filter offers, in the order shown, with how many items are in each (done included: it is listed, only quieter). */
+export const FILTER_TONES: Tone[] = ["bad", "you", "wait", "local", "todo", "done"];
+
+export function stateCounts(items: WorkItem[]): Partial<Record<Tone, number>> {
+  const n: Partial<Record<Tone, number>> = {};
+  for (const i of items) if (!i.stepOnly) n[i.tone] = (n[i.tone] ?? 0) + 1;
+  return n;
+}
+
+/** Only the items in these states; none chosen shows everything. */
+export function filterWork(items: WorkItem[], only: Tone[]): WorkItem[] {
+  return only.length === 0 ? items : items.filter((i) => only.includes(i.tone));
 }

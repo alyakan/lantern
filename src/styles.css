@@ -3870,6 +3870,23 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-feature-head h3 { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .yw-feature-sum { margin-left: auto; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .yw-feature-head + .dp-list { border-top: none; }
+/* Where things stand: what groups it and which states it shows, then groups that fold. */
+.yw-bar { display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 8px; border-bottom: 0.5px solid var(--line); }
+.yw-group { display: flex; align-items: center; gap: 2px; }
+.yw-bar-label { margin-right: 6px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+.yw-group button { padding: 2px 9px; border: 0.5px solid var(--line); background: none; color: var(--muted-text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-group button:first-of-type { border-radius: var(--radius-inner) 0 0 var(--radius-inner); }
+.yw-group button:last-of-type { border-radius: 0 var(--radius-inner) var(--radius-inner) 0; }
+.yw-group button.on { background: var(--text); border-color: var(--text); color: var(--pane); }
+.yw-group button:disabled { opacity: 0.4; cursor: default; }
+.yw-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.yw-pill { display: inline-flex; align-items: center; padding: 2px 9px 2px 7px; border: 0.5px solid var(--line); border-radius: var(--radius-inner); background: none; color: var(--text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; font-variant-numeric: tabular-nums; }
+.yw-pill .yw-dot { width: 7px; height: 7px; margin-right: 5px; }
+.yw-pill.on { border-color: var(--yw); background: color-mix(in srgb, var(--yw) 14%, var(--pane)); }
+.yw-fold { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; }
+.yw-chev { width: 10px; font-size: calc(10px * var(--font-scale)); color: var(--muted-text); }
+/* A row's path is quiet: only the node it is at is named (the rest say their stage on hover). */
+.yw-node:not(.yw-now) { font-size: 0; gap: 0; }
 .yw-sub { margin: 0; padding: 8px 12px 2px; font: 600 calc(10.5px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
 .yw-sub + .dp-list { border-top: none; }
 .yw-card section + section { border-top: 0.5px solid var(--line); }
