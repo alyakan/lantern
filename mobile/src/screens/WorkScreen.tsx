@@ -18,7 +18,7 @@ export interface WorkProps {
 }
 
 /** How many of Next's steps show before "Show N more", and how many rows of a group (all of it when there is one list). */
-const NEXT_SHOWN = 5;
+const NEXT_SHOWN = 3;
 const GROUP_SHOWN = 4;
 const LIST_SHOWN = 8;
 const COLUMN_MAX = 640;
@@ -315,7 +315,6 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
         <View style={{ paddingLeft: 16 }}>
           <Path item={i} issues={issues} />
         </View>
-        {step(i)}
       </Item>
     </View>
   );
