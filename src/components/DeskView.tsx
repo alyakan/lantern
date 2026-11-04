@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { requestText, type InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
+import type { Todo } from "../lib/todos";
 import type { NewRule, RepoStatus } from "../types";
 import { DeskProject } from "./DeskProject";
 import { DeskProjects } from "./DeskProjects";
 import { YourWork } from "./YourWork";
-import { withLinear, yourWork, type Target, type WorkItem } from "../lib/yourWork";
+import { withLinear, workOfRepo, yourWork, type Target, type WorkItem } from "../lib/yourWork";
 import type { LinearWork } from "../types";
 import { AllowButton } from "./Inbox";
 import { PermissionCard } from "./PermissionCard";
@@ -26,6 +27,9 @@ export interface DeskViewProps {
   onPage: (folder: string | null) => void;
   /** Starts a chat in a project (from its page). */
   onNewChat: (folder: string) => void;
+  /** From a project's landing page: a chat started with a first message, and one started on a to-do. */
+  onStartChat?: (folder: string, first: string) => void;
+  onStartTodo?: (folder: string, todo: Todo) => void;
   onGo: (item: InboxItem) => void;
   onDecide: (item: InboxItem, allow: boolean) => void;
   /** Sends one of Your work's next steps: to its chat, or to a new chat in its project. */
@@ -195,7 +199,7 @@ export function DeskView(props: DeskViewProps) {
   const issues = !!props.linear?.work?.connected;
   // Its page shows only its own work: the whole Desk's list would repeat every other project.
   const pageRepo = pageRow ? (props.repos?.find((r) => r.folders.some((f) => f.folder === pageRow.folder)) ?? null) : null;
-  const pageWork = pageRepo ? work.filter((i) => i.repo === pageRepo.repo) : [];
+  const pageWork = pageRepo ? workOfRepo(work, pageRepo.repo) : [];
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
@@ -209,7 +213,7 @@ export function DeskView(props: DeskViewProps) {
           <DeskProject
             row={pageRow}
             chats={props.chats.filter((c) => c.folder === pageRow.folder)}
-            repo={pageRepo}
+            repo={props.repos === null ? undefined : pageRepo}
             work={pageWork}
             issues={issues}
             onStep={props.onStep}
@@ -218,6 +222,8 @@ export function DeskView(props: DeskViewProps) {
             onBack={() => props.onPage(null)}
             onOpen={onOpen}
             onNewChat={props.onNewChat}
+            onStartChat={props.onStartChat}
+            onStartTodo={props.onStartTodo}
           />
           </>
         ) : (

@@ -57,6 +57,49 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeNull());
   });
 
+  it("opens Ask from the bar at the foot of the Desk, and ⌘J opens and puts it away", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(ask()).toBeNull();
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    expect(await screen.findByRole("region", { name: "Ask" })).toBeInTheDocument();
+    // A second press within 150 ms is dropped as the same keystroke arriving twice (see runAction).
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    await waitFor(() => expect(ask()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+    expect(await screen.findByRole("region", { name: "Ask" })).toBeInTheDocument();
+  });
+
+  it("puts the Ask sheet away on Escape and on a click behind it, but not on a click inside it", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const open = async () => {
+      if (!ask()) fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+      return screen.findByRole("region", { name: "Ask" });
+    };
+    const inside = await open();
+    fireEvent.mouseDown(inside);
+    expect(ask()).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(ask()).toBeNull());
+    await open();
+    fireEvent.mouseDown(document.querySelector(".desk-ask-overlay")!);
+    await waitFor(() => expect(ask()).toBeNull());
+  });
+
+  it("closes the Ask sheet when the Desk is left, so it is not waiting when the Desk comes back", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+    await screen.findByRole("region", { name: "Ask" });
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(ask()).toBeNull();
+  });
+
   it("opens a project's page on the Desk from its sidebar right-click menu", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());

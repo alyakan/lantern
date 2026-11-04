@@ -250,8 +250,8 @@ export const OpenOutIcon = () => (
 );
 
 export const ChevronIcon = ({ up = false }: { up?: boolean }) => (
-  <svg width="12" height="12" viewBox="0 0 12 12" {...base} strokeWidth={1.7}>
-    <path d={up ? "M2.4 7.4 6 3.8l3.6 3.6" : "M2.4 4.6 6 8.2l3.6-3.6"} />
+  <svg width="11" height="11" viewBox="0 0 11 11" {...base}>
+    <path d={up ? "M2.2 6.8 5.5 3.5l3.3 3.3" : "M2.2 4.2 5.5 7.5l3.3-3.3"} />
   </svg>
 );
 

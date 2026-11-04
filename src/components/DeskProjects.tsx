@@ -101,7 +101,13 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
   return (
     <div className="desk-tile-chats" ref={root}>
       <button className="desk-more" aria-haspopup="menu" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the chats of ${label}`} disabled={!chats.length} onClick={() => setOpen(!open)}>
-        {chats.length ? `Chats (${chats.length}) ▾` : "No chats"}
+        {chats.length ? (
+          <>
+            Chats ({chats.length}) <span className="chev down" aria-hidden />
+          </>
+        ) : (
+          "No chats"
+        )}
       </button>
       {open && (
         <div className="menu desk-chats-menu" ref={inside.ref} style={inside.style} role="menu" aria-label={`Chats of ${label}`} onKeyDown={keys.onKeyDown}>

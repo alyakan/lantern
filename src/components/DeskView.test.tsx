@@ -377,4 +377,78 @@ describe("the Desk", () => {
     expect(screen.getByRole("region", { name: "Where things stand" })).toHaveTextContent("Retry the fetch");
     expect(screen.getByRole("region", { name: "Where things stand" })).not.toHaveTextContent("Another repository");
   });
+
+  it("opens a project's page with nothing on its board on a landing page that starts a chat", () => {
+    const { props } = setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")], page: "/p/lantern" });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    expect(screen.queryByRole("region", { name: "Where things stand" })).toBeNull();
+    // An empty chat is the plain new chat.
+    fireEvent.click(within(landing).getByRole("button", { name: "Empty chat" }));
+    expect(props.onNewChat).toHaveBeenCalledWith("/p/lantern");
+  });
+
+  it("starts a typed first message in the project, through the app's handler", () => {
+    const onStartChat = vi.fn();
+    setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")], page: "/p/lantern", onStartChat });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    fireEvent.change(within(landing).getByRole("textbox"), { target: { value: "Fix the flaky test" } });
+    fireEvent.click(within(landing).getByRole("button", { name: "Start chat" }));
+    expect(onStartChat).toHaveBeenCalledWith("/p/lantern", "Fix the flaky test");
+  });
+
+  it("keeps the landing page away while there is work on the board, and while the repositories are still being read", () => {
+    const { rerender } = setup({ repos: null, projects: [project("/p/lantern")], page: "/p/lantern" });
+    expect(screen.queryByRole("region", { name: "Start here" })).toBeNull();
+    rerender({ repos: [repo("/p/lantern", { prs: [pr(1, "fail")] })] });
+    expect(screen.queryByRole("region", { name: "Start here" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Where things stand" })).toBeInTheDocument();
+  });
+
+  it("says a project outside any repository has no branches to follow, and still offers a chat", () => {
+    setup({ repos: [repo("/p/other")], projects: [project("/p/lantern")], page: "/p/lantern" });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    expect(within(landing).getByText(/isn't in a git repository/)).toBeInTheDocument();
+    expect(within(landing).getByRole("button", { name: "Start chat" })).toBeInTheDocument();
+  });
+
+  it("lets a page's work be grouped by none, with Feature needing Linear", () => {
+    setup({ repos: [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] })], page: "/p/lantern", projects: [project("/p/lantern")] });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
+    fireEvent.click(stand().getByRole("radio", { name: "None" }));
+    expect(stand().getByRole("radio", { name: "None" })).toBeChecked();
+    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
+    // Kept for next time.
+    expect(JSON.parse(localStorage.getItem("desk.work.groupBy") ?? "null")).toBe("none");
+  });
+
+  it("says nothing is to do when Next is folded and has no steps, and remembers it folded", () => {
+    const { rerender } = setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")] });
+    const next = () => within(screen.getByRole("region", { name: "Next" }));
+    fireEvent.click(next().getByRole("button", { name: "Collapse" }));
+    expect(next().getByText("Nothing to do right now.")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("desk.work.nextClosed") ?? "null")).toBe(true);
+    rerender({ repos: [repo("/p/lantern")] });
+    expect(next().getByRole("button", { name: "Expand" })).toBeInTheDocument();
+  });
+
+  it("remembers which features are open, by grouping and feature", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" })] })];
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    setup({
+      repos,
+      linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } },
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
+    });
+    const stand = () => screen.getByRole("region", { name: "Where things stand" });
+    // Only one group: a click on the feature opens it (no Expand all), and the choice is saved by grouping and feature name.
+    expect(within(stand()).queryByRole("button", { name: "Expand all" })).toBeNull();
+    fireEvent.click(within(stand()).getByRole("button", { name: /Sync/ }));
+    expect(JSON.parse(localStorage.getItem("desk.work.open") ?? "[]")).toEqual(["feature:Sync"]);
+    expect(within(stand()).getAllByRole("list", { name: /^At / }).length).toBeGreaterThan(0);
+    fireEvent.click(within(stand()).getByRole("button", { name: /Sync/ }));
+    expect(JSON.parse(localStorage.getItem("desk.work.open") ?? "[]")).toEqual([]);
+  });
 });

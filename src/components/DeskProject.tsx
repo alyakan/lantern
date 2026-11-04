@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { elapsed } from "../lib/time";
-import type { Todo } from "../lib/todos";
+import { todoPrompt, type Todo } from "../lib/todos";
 import type { WorkItem, Target } from "../lib/yourWork";
 import type { RepoStatus, StorageItem } from "../types";
 import { Card, Row } from "./DeskCard";
+import { DeskProjectLanding } from "./DeskProjectLanding";
 import { ExternalLink } from "./ExternalLink";
 import { YourWork } from "./YourWork";
 
@@ -25,6 +26,9 @@ export interface DeskProjectProps {
   onBack: () => void;
   onOpen: (slot: string) => void;
   onNewChat: (folder: string) => void;
+  /** Starts a chat in the project with this as its first message, and one linked to a to-do (the landing page's). */
+  onStartChat?: (folder: string, first: string) => void;
+  onStartTodo?: (folder: string, todo: Todo) => void;
 }
 
 const ago = (now: number, at: number | null) => (at === null ? "" : now - at < 60_000 ? "just now" : `${elapsed(now - at)} ago`);
@@ -194,11 +198,15 @@ function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: 
  * scan says of each, and Remove when that found it safe), and its open to-dos, each a card. Everything is what Lantern, git, gh
  * and the Storage scan said; nothing is guessed. The right pane's Ask asks about this project only while it is open.
  */
-export function DeskProject({ row, chats, repo, work, issues = false, onStep, onRefresh, now, onBack, onOpen, onNewChat }: DeskProjectProps) {
+export function DeskProject({ row, chats, repo, work, issues = false, onStep, onRefresh, now, onBack, onOpen, onNewChat, onStartChat, onStartTodo }: DeskProjectProps) {
   const here = repo?.folders.find((f) => f.folder === row.folder);
   const worktrees = repo?.worktrees ?? [];
   const storage = useStorage(worktrees.some((w) => !w.agent));
   const todos = useTodos(row.folder);
+  // With nothing on its board, the page opens on what is next and a way to start a chat (once the repository has been read).
+  const landing = repo !== undefined && !(work && work.length > 0);
+  const startChat = (first: string) => (first && onStartChat ? onStartChat(row.folder, first) : onNewChat(row.folder));
+  const startTodo = (todo: Todo) => (onStartTodo ? onStartTodo(row.folder, todo) : startChat(todoPrompt(todo)));
   return (
     <section className="desk-project-page" aria-label={`Project ${row.label}`}>
       <header className="desk-page-head">
@@ -220,6 +228,8 @@ export function DeskProject({ row, chats, repo, work, issues = false, onStep, on
       {work && work.length > 0 && (
         <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} standFirst />
       )}
+
+      {landing && <DeskProjectLanding label={row.label} repo={repo} here={here} todos={todos} onStartChat={startChat} onStartTodo={startTodo} />}
 
       <Card
         title="Chats"

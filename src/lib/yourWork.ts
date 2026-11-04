@@ -484,6 +484,15 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
   return [...by.entries()].map(([project, p]) => ({ project, doing: p.doing.size, todo: p.todo }));
 }
 
+/**
+ * What a repository's own page lists: its work, and the Linear issues of a team no Desk project is in (they belong to no repository)
+ * that sit in a feature being worked on there, so the feature's board is whole. A feature nothing there is doing leaves them out.
+ */
+export function workOfRepo(items: WorkItem[], repo: string): WorkItem[] {
+  const going = new Set(items.flatMap((i) => (i.repo === repo && i.tone !== "done" && i.issue?.project ? [i.issue.project] : [])));
+  return items.filter((i) => i.repo === repo || (i.repo === "" && !!i.issue?.project && going.has(i.issue.project)));
+}
+
 export interface FeatureGroup {
   /** The Linear project (feature); null: work in no feature. */
   feature: string | null;

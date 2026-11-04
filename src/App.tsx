@@ -95,6 +95,7 @@ import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates
 import { deskOf, NO_DESKS, openOn } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { DeskAsk } from "./components/DeskAsk";
+import { AskSheet } from "./components/AskSheet";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
@@ -2586,16 +2587,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const deskCandidates = routeCandidates(chats, askOpen);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
-  // The board's to-do counts, read only while the Desk is on screen.
+  // Ask is a sheet over the Desk: it goes with it.
   useEffect(() => {
     if (!deskShown) setAskSheet(false);
   }, [deskShown]);
-  useEffect(() => {
-    if (!askSheet) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setAskSheet(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [askSheet]);
+  // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
   // A paired phone with the Work tab asks for the same, so it is read while one is connected too, not only while the Desk is on screen.
@@ -3119,6 +3115,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   page={pageOn}
                   onPage={setDeskPage}
                   onNewChat={sidebarHandlers.onNewChatIn}
+                  onStartChat={leaveDesk((folder: string, first: string) => startFresh(folder, false, false, first))}
+                  onStartTodo={leaveDesk(startTodo)}
                   onOpen={switchTo}
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
@@ -3266,36 +3264,25 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           }
         />
         {deskShown && askSheet && (
-          <div
-            className="desk-ask-overlay"
-            role="presentation"
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setAskSheet(false);
-            }}
-          >
-            <section className="desk-ask-sheet" role="dialog" aria-modal="true" aria-label="Ask across projects">
-              <button className="desk-ask-close" aria-label="Close Ask" onClick={() => setAskSheet(false)}>
-                ×
-              </button>
-              <ErrorBoundary name="desk ask">
-                <DeskAsk
-                  entries={deskLog.filter((e) => e.desk === desks.on)}
-                  targets={deskTargets}
-                  across={askFolders.length > 1}
-                  about={pageOn ? deskProjects[0]?.label : undefined}
-                  canSend={agentReady}
-                  onSend={deskSend}
-                  onSendTo={deskSendTo}
-                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  onOpenPast={(hit) => {
-                    setDesk(false);
-                    openSession(hit.id, hit.folder);
-                  }}
-                  onOpen={switchTo}
-                />
-              </ErrorBoundary>
-            </section>
-          </div>
+          <AskSheet onClose={() => setAskSheet(false)}>
+            <ErrorBoundary name="desk ask">
+              <DeskAsk
+                entries={deskLog.filter((e) => e.desk === desks.on)}
+                targets={deskTargets}
+                across={askFolders.length > 1}
+                about={pageOn ? deskProjects[0]?.label : undefined}
+                canSend={agentReady}
+                onSend={deskSend}
+                onSendTo={deskSendTo}
+                onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                onOpenPast={(hit) => {
+                  setDesk(false);
+                  openSession(hit.id, hit.folder);
+                }}
+                onOpen={switchTo}
+              />
+            </ErrorBoundary>
+          </AskSheet>
         )}
         </div>
         </div>

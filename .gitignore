@@ -6,3 +6,6 @@ target/
 
 .superpowers/
 docs/superpowers/
+
+# Lantern's own scratch for this folder: artifacts it shows, dashboards it tries
+.lantern/
