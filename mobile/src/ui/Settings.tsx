@@ -1,7 +1,7 @@
 import { Children, Fragment, useState, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 import { HStack, Host, Image, Menu, Button as MenuButton, Section as MenuSection, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
-import { accessibilityLabel, disabled as off, font, foregroundStyle, lineLimit } from "@expo/ui/swift-ui/modifiers";
+import { accessibilityLabel, disabled as off, font, foregroundStyle, lineLimit, padding } from "@expo/ui/swift-ui/modifiers";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
@@ -155,7 +155,8 @@ export function Segmented({ look, title, choices, selected, onPick, busy = false
               haptic="select"
               scaleTo={0.97}
               onPress={() => !on && onPick(c.value)}
-              style={{ flex: 1, minHeight: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 6, backgroundColor: on ? colors.card : "transparent", shadowColor: "#000", shadowOpacity: on ? 0.12 : 0, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } }}
+              // Raised, as iOS draws the chosen segment: white by day, a lighter grey by night.
+              style={{ flex: 1, minHeight: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 6, backgroundColor: on ? (colors.isDark ? "#ffffff2e" : colors.card) : "transparent", shadowColor: "#000", shadowOpacity: on ? 0.12 : 0, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } }}
             >
               <Txt variant="small" tone={on ? "ink" : "ink2"} numberOfLines={1} style={{ fontWeight: on ? "700" : "600" }}>
                 {c.label}
@@ -193,12 +194,11 @@ export function MenuRow({ look, title, value, detail, choices, selected, onPick,
           <Menu
             modifiers={[accessibilityLabel(`${title}, ${value}`), ...(disabled ? [off(true)] : [])]}
             label={
-              <HStack spacing={8} modifiers={[]}>
+              <HStack spacing={8} modifiers={[padding({ trailing: PAD })]}>
                 <SwiftText modifiers={[font({ size: 15 }), foregroundStyle(colors.ink)]}>{title}</SwiftText>
                 <Spacer />
                 <SwiftText modifiers={[font({ size: 15 }), foregroundStyle(colors.ink3), lineLimit(1)]}>{value}</SwiftText>
                 <Image systemName="chevron.up.chevron.down" size={11} color={colors.ink3} />
-                <Spacer modifiers={[]} minLength={PAD} />
               </HStack>
             }
           >
