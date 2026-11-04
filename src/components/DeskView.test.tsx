@@ -172,7 +172,7 @@ describe("the Desk", () => {
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);
     const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
-    setup({ repos: [repo("/p/lantern", { merged: [merged(6, at(15)), merged(5, at(14))], release: { tag: "v0.1.93", published_at: at(10, 30) } })] });
+    setup({ repos: [repo("/p/lantern", { merged: [merged(6, at(15)), merged(5, at(14))], release: { tag: "v0.1.93", published_at: at(10, 30) } })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = within(screen.getByRole("region", { name: "Where things stand" }));
     const line = stand.getByRole("button", { name: /2 Ready · merged, waiting for a release/ });
     expect(line).toHaveAttribute("aria-expanded", "false");
@@ -195,6 +195,8 @@ describe("the Desk", () => {
           release: { tag: "v0.1.93", published_at: at(10, 30) },
         }),
       ],
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
     });
     const next = within(screen.getByRole("region", { name: "Next" })).getAllByRole("listitem").map((l) => l.textContent);
     expect(next).toEqual([
@@ -238,7 +240,7 @@ describe("the Desk", () => {
   it("sets Next apart in a card of its own, and groups where things stand by feature when Linear is connected", () => {
     const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
     const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
-    setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } } });
+    setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } }, page: "/p/lantern", projects: [project("/p/lantern")] });
     expect(within(screen.getByRole("region", { name: "Next" })).getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
     const stand = screen.getByRole("region", { name: "Where things stand" });
     const sync = within(stand).getByRole("region", { name: "Sync" });
@@ -264,35 +266,16 @@ describe("the Desk", () => {
 
   it("shows eight rows of where things stand, and the rest on asking", () => {
     const prs = Array.from({ length: 11 }, (_, i) => pr(i + 1, "pending"));
-    setup({ repos: [repo("/p/lantern", { prs })] });
+    setup({ repos: [repo("/p/lantern", { prs })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const region = screen.getByRole("region", { name: "Where things stand" });
     expect(within(region).getAllByRole("list", { name: /^At / })).toHaveLength(8);
     fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getAllByRole("list", { name: /^At / })).toHaveLength(11);
   });
 
-  it("groups where things stand by project without Linear, folds a group, and lets you group by none", () => {
-    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] }), repo("/p/web", { prs: [pr(1, "fail")] })];
-    setup({ repos });
-    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
-    // Blocked first: the project with a failing check comes before the other.
-    expect(stand().getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["web", "lantern"]);
-    // Feature needs Linear.
-    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
-    expect(stand().getByRole("radio", { name: "Project" })).toBeChecked();
-    // A row doesn't name its project again under the project's heading.
-    expect(within(stand().getByRole("region", { name: "lantern" })).getByText("b7")).toBeInTheDocument();
-    fireEvent.click(stand().getByRole("button", { name: "lantern" }));
-    expect(within(stand().getByRole("region", { name: "lantern" })).queryByText("PR 7")).toBeNull();
-    expect(stand().getByRole("button", { name: "lantern" })).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(stand().getByRole("radio", { name: "None" }));
-    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
-    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
-  });
-
   it("filters where things stand by state, and says when nothing is in the states chosen", () => {
     const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "fail"), pr(9, "pass")] })];
-    setup({ repos });
+    setup({ repos, page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
     fireEvent.click(stand().getByRole("button", { name: /^blocked 1/ }));

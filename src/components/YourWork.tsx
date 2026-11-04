@@ -21,6 +21,8 @@ export interface YourWorkProps {
   onRefresh: () => void;
   /** The status board first, Next under it: a project's page shows where its work stands before what to do. */
   standFirst?: boolean;
+  /** Only Next: the Desk's cross-project actions, while each project's page carries the board (see #desk-v2). */
+  nextOnly?: boolean;
 }
 
 /** The rows of "Where things stand" shown before "Show N more": all of it in one list, or each group's; and Next's. */
@@ -279,7 +281,7 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false }: YourWorkProps) {
   const [all, setAll] = useState(false);
   const [allNext, setAllNext] = useState(false);
   const [chosen, setChosen] = usePersistentState<GroupBy | "auto">("desk.work.groupBy", "auto");
@@ -372,6 +374,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
           )}
         </Card>
   ) : null;
+  if (nextOnly) return nextCard;
   return <>{standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}</>;
 }
 
