@@ -107,3 +107,29 @@ try {
 
 // Where Step by step chats were read is held for the app's life: each test starts with none.
 beforeEach(() => require("./src/view/stepPlace").forgetPlaces());
+
+// No SwiftUI on Node: a menu is its label and its items, there at once; an item is a "menuitem" a test can press, ticked when
+// it shows a checkmark. The modifiers are plain records, so a menu's accessibility label and an item's being off can be read.
+jest.mock("@expo/ui/swift-ui/modifiers", () => new Proxy({}, { get: (_t, name) => (typeof name === "string" && name !== "__esModule" ? (value: unknown) => ({ $type: name, value }) : undefined) }));
+jest.mock("@expo/ui/swift-ui", () => {
+  const React = require("react");
+  const { Pressable, Text, View } = require("react-native");
+  type MockMod = { $type: string; value: unknown };
+  const mod = (mods: MockMod[] | undefined, name: string) => mods?.find((m) => m?.$type === name)?.value;
+  const box = ({ children }: { children?: unknown }) => React.createElement(View, null, children);
+  return {
+    Host: ({ children, style }: { children?: unknown; style?: unknown }) => React.createElement(View, { style }, children),
+    HStack: box,
+    VStack: box,
+    Section: box,
+    Spacer: () => null,
+    Image: () => null,
+    Text: ({ children }: { children?: unknown }) => React.createElement(Text, null, children),
+    Menu: ({ label, children, modifiers }: { label: unknown; children?: unknown; modifiers?: MockMod[] }) =>
+      React.createElement(View, { accessible: true, accessibilityRole: "menu", accessibilityLabel: mod(modifiers, "accessibilityLabel") ?? (typeof label === "string" ? label : undefined), accessibilityState: { disabled: !!mod(modifiers, "disabled") } }, typeof label === "string" ? null : label, children),
+    Button: ({ label, onPress, systemImage, modifiers }: { label?: string; onPress?: () => void; systemImage?: string; modifiers?: MockMod[] }) => {
+      const disabled = !!mod(modifiers, "disabled");
+      return React.createElement(Pressable, { accessibilityRole: "menuitem", accessibilityLabel: label, accessibilityState: { checked: systemImage === "checkmark", disabled }, disabled, onPress }, React.createElement(Text, null, label));
+    },
+  };
+});

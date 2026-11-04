@@ -1,7 +1,7 @@
 import { currentUsageWindows } from "../view/providerUsage";
 import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
 import type { ConversationSettings } from "../sync/sync";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
@@ -14,9 +14,11 @@ import { ContextRow, UsageRow, WeekRow, WindowRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
+import { DangerButton, LOOKS, MenuRow, PendingRow, Segmented, SettingsSection, SheetHeader, type Choice } from "../ui/Settings";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
+import { UsageRing } from "../ui/UsageRing";
 import { autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
@@ -34,131 +36,120 @@ const SHOW: Option[] = [
   { value: "list", label: "One list", hint: "The whole chat as one list of messages" },
 ];
 
-interface Option {
-  value: string;
-  label: string;
-  hint: string;
-  /** Why it can't be picked now; the row is shown but off. */
-  off?: string | null;
-}
+type Option = Choice;
 
-/** One choice of a few, as a row: its name and what it does, or why it can't be picked now. */
-function OptionRow({ option, selected, onPick, notice }: { option: Option; selected: boolean; onPick: () => void; notice?: string | null }) {
+/** What is being switched, and to what: until the chat says it changed. */
+export type Switching = { kind: "mode" | "preset" | "workflow"; to: string } | null;
+
+/** Effort's levels as words ("xhigh" is "Extra high"). */
+const effortLabel = (e: string) => ({ xhigh: "Extra high", max: "Max", medium: "Medium", low: "Low", high: "High", minimal: "Minimal" })[e] ?? e.charAt(0).toUpperCase() + e.slice(1);
+
+/** The chat, in a card at the top: its name, where it runs and on what, and how full its context is. */
+function Summary({ chat, model, context }: { chat: RemoteChat; model: string | null; context?: { tokens: number; window: number | null } | null }) {
   const colors = useColors();
+  const held = context ? contextOf(context) : null;
+  const line = [chat.project, chat.provider ?? "Claude", model].filter(Boolean).join(" · ");
   return (
-    <PressScale
-      accessibilityRole="radio"
-      accessibilityLabel={option.label}
-      accessibilityState={{ selected, checked: selected, disabled: !!option.off }}
-      disabled={!!option.off}
-      opacity={option.off ? 0.5 : 1}
-      haptic="select"
-      scaleTo={0.98}
-      onPress={onPick}
-      style={{ borderRadius: radius.inner, borderWidth: 1, borderColor: selected ? colors.ink : colors.rule, backgroundColor: selected ? colors.paper : colors.card, padding: 12, gap: 2 }}
-    >
-      <Txt variant="body" style={{ fontWeight: "700" }}>
-        {selected ? `${option.label} ✓` : option.label}
-      </Txt>
-      <Txt variant="small" tone="ink2">
-        {option.off && option.off !== notice ? option.off : option.hint}
-      </Txt>
-    </PressScale>
+    <View accessible accessibilityLabel={`${chat.title?.trim() || "This chat"}. ${line}${held ? `. ${held.label}` : ""}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.inner, backgroundColor: colors.wash }}>
+      <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: LOOKS.provider.tint, alignItems: "center", justifyContent: "center" }}>
+        <Txt variant="heading" tone="white">
+          {(chat.title?.trim() || "?").charAt(0).toUpperCase()}
+        </Txt>
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Txt variant="body" numberOfLines={1} style={{ fontWeight: "700" }}>
+          {chat.title?.trim() || "This chat"}
+        </Txt>
+        <Txt variant="small" tone="ink2" numberOfLines={1}>
+          {line}
+        </Txt>
+      </View>
+      {held?.percent != null && (
+        <UsageRing fill={held.percent / 100} tone={held.tone} size={42} stroke={4}>
+          <Txt variant="tiny" style={{ fontWeight: "700" }}>
+            {held.percent}%
+          </Txt>
+        </UsageRing>
+      )}
+    </View>
   );
 }
 
-interface SettingsSection {
-  id: string;
-  title: string;
-  value: string;
-  options: Option[];
-  selected: string;
-  onPick: (value: string) => void;
-}
-
-/** A setting's current value, opening its choices inline without changing pages. */
-function SettingsLink({ title, value, expanded, onPress }: { title: string; value: string; expanded: boolean; onPress: () => void }) {
-  const colors = useColors();
-  return (
-    <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${value}`} accessibilityHint={expanded ? "Collapses choices" : "Expands choices"} accessibilityState={{ expanded }} onPress={onPress} haptic="select" scaleTo={0.98}
-      style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: colors.card, borderRadius: radius.inner }}>
-      <Txt variant="body" style={{ flexShrink: 0 }}>{title}</Txt>
-      <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flex: 1, textAlign: "right" }}>{value}</Txt>
-      <Txt variant="body" tone="ink3" accessibilityElementsHidden>{expanded ? "⌃" : "⌄"}</Txt>
-    </PressScale>
-  );
-}
-
-/** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, providers, onConfigure }: { configuration?: ConversationSettings | null; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+/**
+ * The chat's settings, as a sheet: the chat at the top; how it runs (Ask or Auto, Chat or Step by step); what it runs on (the
+ * provider, the model, its effort, the preset); its usage; how this phone shows it; and closing it. A choice is changed in place
+ * and the sheet stays: what is switching says so until the chat does, and a refusal is said here.
+ */
+function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, switching, problem, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, configuring, providers, onConfigure }: { configuration?: ConversationSettings | null; /** The provider's settings are still being asked of the Mac: their rows are held. */ configuring?: boolean; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; switching: Switching; /** Why the last change didn't happen, while the sheet is up. */ problem: string | null; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
-  const [showOlder, setShowOlder] = useState(false);
   const next = useRef<(() => void) | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const toggle = (id: string) => setExpanded((current) => current === id ? null : id);
-  const sections: SettingsSection[] = [];
-  if (configuration && onConfigure) {
-    const provider = providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider);
-    if (providers?.length) sections.push({ id: "provider", title: "Provider", value: provider, selected: configuration.provider,
-      options: providers.map((p) => ({ value: p.id, label: p.name, hint: "Continue this conversation with this provider", off })),
-      onPick: (provider) => onConfigure({ provider }) });
-    if (configuration.capabilities.model_switchable) sections.push({ id: "model", title: "Model", value: configuration.model ?? "Provider default", selected: configuration.model ?? "",
-      options: [{ value: "", label: "Provider default", hint: "Used for the next turn", off }, ...configuration.models.map((m) => ({ value: m, label: m, hint: "Used for the next turn", off }))],
-      onPick: (model) => onConfigure({ model: model || null }) });
-    if (configuration.capabilities.supports_effort && configuration.effort_levels.length) sections.push({ id: "effort", title: "Effort", value: configuration.effort ?? "Provider default", selected: configuration.effort ?? "",
-      options: configuration.effort_levels.map((e) => ({ value: e, label: e, hint: "Thinking effort", off })), onPick: (effort) => onConfigure({ effort }) });
-  }
-  if (workflows.length) sections.push({ id: "workflow", title: "Workflow", value: workflowLabel(chat.workflow ?? "chat"), selected: chat.workflow ?? "", options: workflows, onPick: onWorkflow });
-  if (pages) sections.push({ id: "show", title: "Show", value: pages.on ? "Pages" : "One list", selected: pages.on ? "pages" : "list", options: SHOW, onPick: (v) => pages.onChange(v === "pages") });
-  sections.push({ id: "permissions", title: "Permissions", value: modeLabel(chat.permissions ?? "ask"), selected: chat.permissions ?? "", options: modes, onPick: onMode });
-  if (presets.length) sections.push({ id: "presets", title: "Model preset", value: presets.find((p) => p.value === chat.preset)?.label ?? "Standard", selected: chat.preset ?? "", options: presets, onPick: onPreset });
+  // What is chosen is what the chat says, or what it is switching to: a refused switch goes back on its own.
+  const now = (kind: NonNullable<Switching>["kind"], value: string) => (switching?.kind === kind ? switching.to : value);
+  const providerName = configuration ? (providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider)) : null;
+  const presetLabel = presets.find((p) => p.value === chat.preset)?.label ?? null;
+  const model = configuration?.model ?? presetLabel;
   const activeUsage = currentUsageWindows(providerUsage);
+  const exhausted = (activeUsage.some((w) => w.used >= 0.95) || (!!plan && Math.max(plan.used, plan.week?.used ?? 0) >= 0.95)) && configuration?.provider === "claude" && !off && !!providers?.some((p) => p.id === "codex") && !!onConfigure;
   const hasUsage = !!context || !!plan || !!providerUsage || !!chat.provider;
+  const models = configuration?.capabilities.model_switchable ? [{ value: "", label: "Provider default", off }, ...configuration.models.map((m) => ({ value: m, label: m, off }))] : [];
+  const efforts = configuration?.capabilities.supports_effort ? configuration.effort_levels.map((e) => ({ value: e, label: effortLabel(e), off })) : [];
   return (
     <Sheet onClose={() => { onClose(); next.current?.(); }}>
       {(close, scroll) => (
         <View style={{ flexShrink: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.lg, paddingVertical: 10, gap: 8 }}>
-            <Txt variant="body" accessibilityRole="header" style={{ flex: 1, fontWeight: "700" }}>Chat settings</Txt>
-            <PressScale accessibilityRole="button" accessibilityLabel="Done" onPress={close} hitSlop={8} style={{ minWidth: 60, minHeight: 44, alignItems: "flex-end", justifyContent: "center" }}><Txt variant="body" tone="cobalt" style={{ fontWeight: "700" }}>Done</Txt></PressScale>
-          </View>
-          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8 }}>
-            <View style={off ? { backgroundColor: colors.hiSoft, borderRadius: radius.inner, padding: 12 } : undefined}>
-              <Txt variant="small" tone={off ? "cobalt" : "ink2"}>{off ?? "Changes apply to this conversation."}</Txt>
-            </View>
+          <SheetHeader title="Chat settings" onDone={close} />
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6 }}>
+            <Summary chat={chat} model={model} context={context} />
+            {(problem || off) && (
+              <View accessible={!!problem} accessibilityRole={problem ? "alert" : undefined} style={{ backgroundColor: problem ? colors.wash : colors.hiSoft, borderRadius: radius.inner, padding: 12, marginTop: 6 }}>
+                <Txt variant="small" tone={problem ? "stop" : "cobalt"}>{problem ?? off}</Txt>
+              </View>
+            )}
+            {exhausted && (
+              <PressScale accessibilityRole="button" accessibilityLabel="Switch this chat to Codex" onPress={() => onConfigure!({ provider: "codex" })} haptic="select" scaleTo={0.98} style={{ marginTop: 6, padding: 12, borderRadius: radius.inner, backgroundColor: colors.wash }}>
+                <Txt variant="body" tone="cobalt" style={{ fontWeight: "600" }}>Switch this chat to Codex</Txt>
+                <Txt variant="tiny" tone="ink3">Claude's limit is nearly used up: Codex carries on the conversation.</Txt>
+              </PressScale>
+            )}
             {loading ? (
               <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}><Dots /></View>
             ) : (
               <>
-                {(activeUsage.some(w => w.used >= .95) || plan && Math.max(plan.used, plan.week?.used ?? 0) >= .95) && configuration?.provider === "claude" && !off && providers?.some(p => p.id === "codex") && onConfigure && <PressScale accessibilityRole="button" accessibilityLabel="Switch this chat to Codex" onPress={() => { onConfigure({ provider: "codex" }); close(); }} style={{ paddingVertical: 12 }}><Txt variant="body" tone="cobalt">Switch this chat to Codex</Txt></PressScale>}
-                {sections.map((section) => (
-                  <Fragment key={section.id}>
-                    <SettingsLink title={section.title} value={section.value} expanded={expanded === section.id} onPress={() => toggle(section.id)} />
-                    {expanded === section.id && <View style={{ gap: 6, paddingHorizontal: 6 }}>
-                      {section.options.filter((option, index) => section.id !== "model" || showOlder || index <= 5 || option.value === section.selected).map((option) => <OptionRow key={option.value} notice={off} option={option} selected={option.value === section.selected} onPick={() => { section.onPick(option.value); close(); }} />)}
-                      {section.id === "model" && section.options.length > 6 && <PressScale accessibilityRole="button" accessibilityLabel={showOlder ? "Hide older models" : "Show older models"} onPress={() => setShowOlder((shown) => !shown)} style={{ padding: 12, minHeight: 44 }}>
-                        <Txt variant="small" tone="cobalt">{showOlder ? "Hide older models" : "Show older models"}</Txt>
-                      </PressScale>}
-                    </View>}
-                  </Fragment>
-                ))}
-                {hasUsage && <SettingsLink title="Usage & context" value={context ? contextOf(context).label : "View usage"} expanded={expanded === "usage"} onPress={() => toggle("usage")} />}
-                {expanded === "usage" && <>
-                  {context && <ContextRow context={context} />}
-                  {activeUsage.length ? activeUsage.map(w => <WindowRow key={w.label} window={w} provider={chat.provider ?? undefined} />) : plan ? <>
-                    <UsageRow plan={plan} />
-                    {plan.week && <WeekRow week={plan.week} />}
-                  </> : <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
-                </>}
+                <SettingsSection label="How it runs">
+                  <Segmented look={LOOKS.permissions} title="Permissions" choices={modes} selected={now("mode", chat.permissions ?? "ask")} busy={switching?.kind === "mode"} onPick={onMode} quiet={off} />
+                  {workflows.length > 0 && <Segmented look={LOOKS.workflow} title="Workflow" choices={workflows} selected={now("workflow", chat.workflow ?? "chat")} busy={switching?.kind === "workflow"} onPick={onWorkflow} quiet={off} />}
+                </SettingsSection>
+                <SettingsSection label="Model">
+                  {configuring && <PendingRow look={LOOKS.provider} title="Provider" />}
+                  {configuring && <PendingRow look={LOOKS.model} title="Model" />}
+                  {configuration && onConfigure && !!providers?.length && <MenuRow look={LOOKS.provider} title="Provider" value={providerName ?? ""} choices={providers.map((p) => ({ value: p.id, label: p.name, off }))} selected={configuration.provider} onPick={(provider) => onConfigure({ provider })} disabled={!!off} />}
+                  {configuration && onConfigure && models.length > 0 && <MenuRow look={LOOKS.model} title="Model" value={configuration.model ?? "Provider default"} choices={models} selected={configuration.model ?? ""} onPick={(m) => onConfigure({ model: m || null })} shown={6} moreLabel="Older models" disabled={!!off} />}
+                  {configuration && onConfigure && efforts.length > 0 && efforts.length <= 4 && <Segmented look={LOOKS.effort} title="Effort" choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} quiet={off} />}
+                  {configuration && onConfigure && efforts.length > 4 && <MenuRow look={LOOKS.effort} title="Effort" value={configuration.effort ? effortLabel(configuration.effort) : "Provider default"} choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} disabled={!!off} />}
+                  {presets.length > 0 && <MenuRow look={LOOKS.preset} title="Preset" value={switching?.kind === "preset" ? "Switching…" : (presetLabel ?? "Standard")} detail={presets.find((p) => p.value === now("preset", chat.preset ?? ""))?.hint} choices={presets} selected={now("preset", chat.preset ?? "")} onPick={onPreset} disabled={!!off || switching?.kind === "preset"} />}
+                </SettingsSection>
+                {hasUsage && (
+                  <>
+                    <Txt variant="tiny" tone="ink3" accessibilityRole="header" style={{ fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.6, marginLeft: 6, marginTop: 16 }}>Usage</Txt>
+                    {context && <ContextRow context={context} />}
+                    {activeUsage.length ? activeUsage.map((w) => <WindowRow key={w.label} window={w} provider={chat.provider ?? undefined} />) : plan ? <>
+                      <UsageRow plan={plan} />
+                      {plan.week && <WeekRow week={plan.week} />}
+                    </> : <Txt variant="small" tone="ink3">{chat.provider ?? "Claude"} · Usage unavailable</Txt>}
+                  </>
+                )}
+                {pages && (
+                  <SettingsSection label="On this phone">
+                    <Segmented look={LOOKS.show} title="Show" choices={SHOW} selected={pages.on ? "pages" : "list"} onPick={(v) => pages.onChange(v === "pages")} />
+                  </SettingsSection>
+                )}
                 {onAskClose && (
-                  <PressScale accessibilityRole="button" accessibilityLabel="Close this chat" onPress={() => {
+                  <DangerButton label="Close this chat" onPress={() => {
                     // The question comes once this sheet is away: iOS shows no sheet while another is still going.
                     next.current = onAskClose;
                     close();
-                  }} haptic="select" scaleTo={0.98} style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}>
-                    <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>Close this chat</Txt>
-                  </PressScale>
+                  }} footer="It closes on your Mac too." />
                 )}
               </>
             )}
@@ -182,15 +173,23 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const [open, setOpen] = useState(false);
   const canConversation = useMacCan("conversation");
   const [configuration, setConfiguration] = useState<ConversationSettings | null>(null);
+  // The Mac didn't say them: their rows aren't held for them any more.
+  const [unconfigured, setUnconfigured] = useState(false);
   useEffect(() => {
     let current = true;
-    if (open && canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, () => {});
+    if (open && canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, () => { if (current) setUnconfigured(true); });
     return () => { current = false; };
   }, [open, slot, chat?.provider, canConversation, sync]);
   const [closing, setClosing] = useState(false);
   const canClose = useMacCan("close");
   const canFlow = useMacCan("workflow");
-  const [switching, setSwitching] = useState<{ kind: "mode" | "preset" | "workflow"; to: string } | null>(null);
+  const [switching, setSwitching] = useState<Switching>(null);
+  // Why the last change didn't happen: said in the sheet while it is up (it stays up now), and to the screen.
+  const [problem, setProblem] = useState<string | null>(null);
+  const say = (why: string) => {
+    setProblem(why);
+    onProblem(why);
+  };
 
   // The switch is over once the chat reports it, or has had long enough.
   const reported = switching && (switching.kind === "mode" ? chat?.permissions === switching.to : switching.kind === "workflow" ? chat?.workflow === switching.to : chat?.preset === switching.to);
@@ -199,6 +198,7 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
     if (reported) return setSwitching(null);
     const t = setTimeout(() => {
       setSwitching(null);
+      setProblem("It didn't change. Look at Lantern on your Mac.");
       onProblem("It didn't change. Look at Lantern on your Mac.");
     }, waitMs);
     return () => clearTimeout(t);
@@ -208,10 +208,11 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const off = whyNotNow(chat);
   const pick = (kind: "mode" | "preset" | "workflow", to: string) => {
     setSwitching({ kind, to });
+    setProblem(null);
     const sent = kind === "mode" ? sync.setPermissions(slot, to as RemotePermissions) : kind === "workflow" ? sync.setWorkflow(slot, to as Exclude<RemoteWorkflow, "team">) : sync.setPreset(slot, to);
     sent.catch((e: Error) => {
       setSwitching(null);
-      onProblem(e.message);
+      say(e.message);
     });
   };
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
@@ -235,6 +236,7 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
         accessibilityHint="Opens this chat's permissions and models"
         onPress={() => {
           reload();
+          setProblem(null);
           setOpen(true);
         }}
         haptic="select"
@@ -255,8 +257,11 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
           onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
           // Another provider than Claude's has no Auto mode, and the Mac's presets are Claude Code's models: neither is offered for its chat.
           configuration={configuration}
+          configuring={canConversation && configuration === null && !unconfigured}
+          switching={switching}
+          problem={problem}
           providers={controls?.providers ?? []}
-          onConfigure={(change) => { void sync.conversationSettings(slot, change).then(setConfiguration).catch((e: Error) => onProblem(e.message)); }}
+          onConfigure={(change) => { setProblem(null); void sync.conversationSettings(slot, change).then(setConfiguration).catch((e: Error) => say(e.message)); }}
           modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? (configuration ? (configuration.capabilities.supports_auto_mode ? autoNote(controls) : noAutoOn(provider ?? configuration.provider)) : provider ? noAutoOn(provider) : autoNote(controls)) : null) }))}
           pages={pages}
           presets={(configuration ? !configuration.capabilities.supports_advisor : !!provider) ? [] : (controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
