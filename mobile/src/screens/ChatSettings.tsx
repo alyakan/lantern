@@ -2,9 +2,10 @@ import { currentUsageWindows } from "../view/providerUsage";
 import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
 import type { ConversationSettings } from "../sync/sync";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ScrollView, View } from "react-native";
+import { Alert, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
+import type { RemoteWhen } from "../protocol/generated/RemoteWhen";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { PlanUsage } from "../sync/reducer";
@@ -84,13 +85,18 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const next = useRef<(() => void) | null>(null);
-  // What is chosen is what the chat says, or what it is switching to: a refused switch goes back on its own.
-  const now = (kind: NonNullable<Switching>["kind"], value: string) => (switching?.kind === kind ? switching.to : value);
+  // What is chosen is what the chat says, or what it is switching to, or what the Mac holds for it: a refused switch goes back on its own.
+  const pending = chat.pending ?? null;
+  const held = (kind: NonNullable<Switching>["kind"]) => (kind === "mode" ? pending?.permissions : kind === "workflow" ? pending?.workflow : pending?.preset) ?? null;
+  const now = (kind: NonNullable<Switching>["kind"], value: string) => (switching?.kind === kind ? switching.to : (held(kind) ?? value));
   // Ask or Auto, Chat or Step by step: a menu, with what the chosen one does (or why one is off) under it, and Switching… while it does.
   const choiceRow = ({ look, title, kind, choices, value, onPick }: { look: Look; title: string; kind: NonNullable<Switching>["kind"]; choices: Option[]; value: string; onPick: (v: string) => void }) => {
     const selected = now(kind, value);
-    const busy = switching?.kind === kind;
-    return <MenuRow key={kind} look={look} title={title} value={busy ? "Switching…" : (choices.find((c) => c.value === selected)?.label ?? selected)} detail={noteOf(choices, selected, off)} choices={choices} selected={selected} onPick={onPick} disabled={busy} />;
+    const busy = switching?.kind === kind || (!!held(kind) && pending?.when === "now");
+    const label = choices.find((c) => c.value === selected)?.label ?? selected;
+    // Held until the turn ends, it says so; being applied now, Switching…
+    const shown = busy ? "Switching…" : held(kind) ? `${label}, after this turn` : label;
+    return <MenuRow key={kind} look={look} title={title} value={shown} detail={noteOf(choices, selected, off)} choices={choices} selected={selected} onPick={onPick} disabled={busy} />;
   };
   const providerName = configuration ? (providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider)) : null;
   const presetLabel = presets.find((p) => p.value === chat.preset)?.label ?? null;
@@ -107,6 +113,13 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
           <SheetHeader title="Chat settings" onDone={close} />
           <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6 }}>
             <Summary chat={chat} model={model} context={context} />
+            {pending && (
+              <View accessible accessibilityLabel={pending.when === "now" ? `Stopping to change to ${pending.text}` : `Changes to ${pending.text} once ${chat.provider ?? "Claude"} finishes`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, padding: 12, marginTop: 6 }}>
+                <Txt variant="small" tone="ink2">
+                  {pending.when === "now" ? `Stopping to change to ${pending.text}…` : `Changes to ${pending.text} once ${chat.provider ?? "Claude"} finishes.`}
+                </Txt>
+              </View>
+            )}
             {(problem || off) && (
               <View accessible={!!problem} accessibilityRole={problem ? "alert" : undefined} style={{ backgroundColor: problem ? colors.wash : colors.hiSoft, borderRadius: radius.inner, padding: 12, marginTop: 6 }}>
                 <Txt variant="small" tone={problem ? "stop" : "cobalt"}>{problem ?? off}</Txt>
@@ -188,6 +201,8 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const [closing, setClosing] = useState(false);
   const canClose = useMacCan("close");
   const canFlow = useMacCan("workflow");
+  // A Mac that can change a working chat: it stops the turn and carries on, or waits for it, as asked.
+  const canBusy = useMacCan("switchbusy");
   const [switching, setSwitching] = useState<Switching>(null);
   // Why the last change didn't happen: said in the sheet while it is up (it stays up now), and to the screen.
   const [problem, setProblem] = useState<string | null>(null);
@@ -201,25 +216,40 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   useEffect(() => {
     if (!switching) return;
     if (reported) return setSwitching(null);
+    // While the Mac holds the change (stopping the turn first), it isn't late: it says when it is applied.
+    if (chat?.pending) return;
     const t = setTimeout(() => {
       setSwitching(null);
       setProblem("It didn't change. Look at Lantern on your Mac.");
       onProblem("It didn't change. Look at Lantern on your Mac.");
     }, waitMs);
     return () => clearTimeout(t);
-  }, [switching, reported, onProblem, waitMs]);
+  }, [switching, reported, onProblem, waitMs, !!chat?.pending]);
 
   if (!supported || !chat?.permissions) return <View style={{ flex: 1 }}>{children(null)}</View>;
-  const off = whyNotNow(chat);
-  const pick = (kind: "mode" | "preset" | "workflow", to: string) => {
-    setSwitching({ kind, to });
-    setProblem(null);
-    const sent = kind === "mode" ? sync.setPermissions(slot, to as RemotePermissions) : kind === "workflow" ? sync.setWorkflow(slot, to as Exclude<RemoteWorkflow, "team">) : sync.setPreset(slot, to);
-    sent.catch((e: Error) => {
-      setSwitching(null);
-      say(e.message);
-    });
+  const working = chat.status === "working" || chat.status === "needs_you";
+  const off = canBusy && working ? null : whyNotNow(chat);
+  // A change to a working chat asks first: stop it and change it now, or once it finishes. Cancel changes nothing.
+  const ask = (go: (when?: RemoteWhen) => void) => {
+    if (!(canBusy && working)) return go();
+    const agent = chat.provider ?? "Claude";
+    Alert.alert("Change it now?", `${agent} is working. Apply now stops its turn, changes this, and tells it to carry on where it left off. Or change it once it finishes.`, [
+      { text: "Apply now", onPress: () => go("now") },
+      { text: "When it finishes", onPress: () => go("finished") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
+  const pick = (kind: "mode" | "preset" | "workflow", to: string) =>
+    ask((when) => {
+      // Held for later, the Mac says what waits (the chat's `pending`): nothing is late.
+      if (when !== "finished") setSwitching({ kind, to });
+      setProblem(null);
+      const sent = kind === "mode" ? sync.setPermissions(slot, to as RemotePermissions, when) : kind === "workflow" ? sync.setWorkflow(slot, to as Exclude<RemoteWorkflow, "team">, when) : sync.setPreset(slot, to, when);
+      sent.catch((e: Error) => {
+        setSwitching(null);
+        say(e.message);
+      });
+    });
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
   // (A chat on another provider than Claude's runs on its own model: the Mac records a preset for every chat, but it isn't one it runs on.)
   const preset = switching?.kind === "preset" ? "Switching…" : chat.preset && !chat.provider ? presetName(controls, chat.preset) : null;
@@ -266,7 +296,7 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
           switching={switching}
           problem={problem}
           providers={controls?.providers ?? []}
-          onConfigure={(change) => { setProblem(null); void sync.conversationSettings(slot, change).then(setConfiguration).catch((e: Error) => say(e.message)); }}
+          onConfigure={(change) => ask((when) => { setProblem(null); void sync.conversationSettings(slot, change, when).then(setConfiguration).catch((e: Error) => say(e.message)); })}
           modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? (configuration ? (configuration.capabilities.supports_auto_mode ? autoNote(controls) : noAutoOn(provider ?? configuration.provider)) : provider ? noAutoOn(provider) : autoNote(controls)) : null) }))}
           pages={pages}
           presets={(configuration ? !configuration.capabilities.supports_advisor : !!provider) ? [] : (controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}

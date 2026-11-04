@@ -13,7 +13,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+
+/// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
+/// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
+pub const SWITCH_BUSY: &str = "switchbusy";
 
 /// The Changes pane's three views (Request::Changes, and Diff's `scope`): the feature that says a Mac answers them.
 pub const CHANGE_SCOPES: &str = "changescopes";
@@ -407,6 +411,47 @@ pub struct RemoteChat {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub preview: Option<String>,
+    /// A change to its settings that waits for it (made while it worked): None when there is none, and from a Mac that doesn't say.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pending: Option<RemotePending>,
+}
+
+/// When a change to a working chat's settings is made: `now` stops its turn first (and tells it to carry on), `finished` waits
+/// for the turn to end by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteWhen {
+    Now,
+    Finished,
+}
+
+impl RemoteWhen {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Now => "now",
+            Self::Finished => "finished",
+        }
+    }
+}
+
+/// A change waiting for a chat, as the Mac's window holds it: when it is made, what it is in words ("Auto, Step by step"), and
+/// what it puts the chat on, so a phone shows the new value with the setting it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemotePending {
+    pub when: RemoteWhen,
+    pub text: String,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub permissions: Option<RemotePermissions>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub workflow: Option<RemoteWorkflow>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub preset: Option<String>,
 }
 
 /// How a chat goes about its work: a plain conversation, one page at a time in a flavour (Build, Review, Debug or Design), or a
@@ -640,7 +685,7 @@ impl From<crate::storage::phone::PhoneView> for RemoteStorage {
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview, pending: c.pending }
     }
 }
 
@@ -984,16 +1029,45 @@ pub enum Request {
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
     Controls,
     /// Provider-neutral settings and operations, only sent when Welcome lists "conversation".
-    ConversationSettings { slot: String, #[ts(type = "{ provider?: string; model?: string | null; effort?: string | null } | null")] change: Option<serde_json::Value> },
+    ///
+    /// `when`, for a change to a chat that is working (only to a Mac whose Welcome lists "switchbusy"): `now` stops it, changes it
+    /// and tells it to carry on; `finished` changes it once its turn ends. Left out, a busy chat's change is refused, as before.
+    /// The same goes for SetPermissions, SetPreset and SetWorkflow.
+    ConversationSettings {
+        slot: String,
+        #[ts(type = "{ provider?: string; model?: string | null; effort?: string | null } | null")]
+        change: Option<serde_json::Value>,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     ConversationAction { slot: String, action: String },
     /// Puts a chat on Ask or Auto (its claude restarts on the same session). Refused for Auto unless the Mac lets phones use
     /// it, and while the chat is working or waiting on someone: the restart would drop what it is doing.
-    SetPermissions { slot: String, permissions: RemotePermissions },
+    SetPermissions {
+        slot: String,
+        permissions: RemotePermissions,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// Puts a chat on one of Controls' presets (its claude restarts on the same session), under the same conditions.
-    SetPreset { slot: String, preset: String },
+    SetPreset {
+        slot: String,
+        preset: String,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// Puts a chat on Chat or Step by step (its claude restarts on the same session), under the same conditions. Not a team's
     /// Lead, and not onto Team: a team is started and left on the Mac. Only sent to a Mac whose Welcome lists "workflow".
-    SetWorkflow { slot: String, workflow: RemoteWorkflow },
+    SetWorkflow {
+        slot: String,
+        workflow: RemoteWorkflow,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
@@ -1371,7 +1445,7 @@ mod tests {
 
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
-        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None };
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None, pending: None };
         let auto = RemoteChat::from(info(Some("auto")));
         assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
@@ -1522,7 +1596,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()) };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()), pending: None };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }

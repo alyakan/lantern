@@ -51,6 +51,8 @@ pub struct ChatInfo {
     pub provider: Option<String>,
     /// One short line of what the chat is doing (the tool it is in) or last said, for a list row (None until it has done either).
     pub preview: Option<String>,
+    /// A change to its settings that waits for it, as the window holds it (None when there is none).
+    pub pending: Option<super::protocol::RemotePending>,
 }
 
 /// What came after a number a client had.
@@ -114,6 +116,8 @@ struct Log {
     /// The chat runs on another provider than Claude Code (a gateway's model, Codex): what is said in it is never put to Claude
     /// for the phone's suggestions, which are made on the user's own Claude login.
     off_claude: bool,
+    /// The change to its settings that waits for it (made while it worked), as the window last said.
+    switch_pending: Option<super::protocol::RemotePending>,
 }
 
 impl Log {
@@ -146,6 +150,7 @@ impl Log {
             workflow: self.workflow.clone(),
             provider: self.provider.clone(),
             preview: self.doing.clone().or_else(|| self.said.clone()),
+            pending: self.switch_pending.clone(),
         }
     }
 
@@ -490,6 +495,13 @@ impl SessionHub {
             if matches!(workflow, "chat" | "steps" | "team") {
                 log.workflow = Some(workflow.to_string());
             }
+        }
+    }
+
+    /// The change waiting for a chat, as the window says (None: none waits). Only for a chat the hub lists.
+    pub fn set_pending(&self, slot: &str, pending: Option<super::protocol::RemotePending>) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.switch_pending = pending;
         }
     }
 

@@ -6,7 +6,8 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
+import { busy as switchBusy, changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -24,7 +25,7 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
@@ -535,16 +536,22 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return capabilitiesOf(provider).supports_effort ? s : { ...s, effort: null };
   };
 
+  // Changes to a working chat's settings, waiting for it (lib/pendingSwitch.ts), from the Mac's menus or a phone. `phone`: a phone
+  // asked for it, so Auto is checked against the Mac's setting again when it is applied, and it doesn't become the project's.
+  const [switches, setSwitches] = useState<Record<string, Pending & { phone?: boolean }>>({});
+  // A change picked at the Mac while the chat works, until it is answered: now, once it finishes, or not at all.
+  const [askSwitch, setAskSwitch] = useState<{ slot: string; change: Change } | null>(null);
   /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
   const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
     to(slot)({ type: "restarting" });
     api.restartSession(slot, mode, withEffort, (change.autoApprove ?? chats.slots[slot]?.autoApprove ?? false) && capsOf(slot).supports_auto_mode, change.team ?? null).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
-  // If Stop made claude exit instead of just ending the turn, resume the session.
+  // If Stop made claude exit instead of just ending the turn, resume the session. Not for a chat a change waits for: applying it
+  // restarts claude with the new settings (see `switches`), and a resume here would race it with the old ones.
   useEffect(() => {
-    for (const [slot, s] of Object.entries(chats.slots)) if (s.status === "ended" && s.stopRequested) restart(slot, s.mode);
-  }, [chats.slots]);
+    for (const [slot, s] of Object.entries(chats.slots)) if (s.status === "ended" && s.stopRequested && !switches[slot]) restart(slot, s.mode);
+  }, [chats.slots, switches]);
 
   // Removes a chat and closes its claude. The reducer never removes the chat on screen, so after a switch this is
   // safe for the chat left behind, even though `active` here still names it.
@@ -1391,7 +1398,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const held = (slot: string) => guards.heldSlots.includes(slot);
+    // A chat stopped for a change keeps its queue for after the change (it goes with the carry-on message), and its notes too.
+    const held = (slot: string) => guards.heldSlots.includes(slot) || (!!switches[slot] && !(switches[slot].phase === "waiting" && switches[slot].when === "finished"));
     const due = queuesToSend(prevStatus.current, chats.slots).filter(({ slot }) => !held(slot));
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
@@ -1410,7 +1418,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots, paused, guards.heldSlots.join(",")]);
+  }, [chats.slots, paused, guards.heldSlots.join(","), switches]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -1538,12 +1546,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const changePermissions = (permissions: Permissions, slot = active) => {
     delete phoneMode.current[slot];
     const s = chats.slots[slot];
-    if (s && permissionsOf(s) !== permissions) setSettings(slot, permissions, workflowOf(s));
+    if (!s) return;
+    // Back to what it runs while a change waits: that change is dropped.
+    if (switches[slot] && permissionsOf(s) === permissions) return queueSwitch(slot, { permissions }, switches[slot].when);
+    if (permissionsOf(s) !== permissions) changeOrAsk(slot, { permissions }, () => setSettings(slot, permissions, workflowOf(s)));
   };
   const changeWorkflow = (workflow: Workflow, slot = active) => {
     delete phoneFlow.current[slot];
     const s = chats.slots[slot];
-    if (s && workflowOf(s) !== workflow) setSettings(slot, permissionsOf(s), workflow);
+    if (!s) return;
+    // A Team is started and left at an idle chat: its agents and canvas come with it.
+    if (workflow !== "team" && switches[slot] && workflowOf(s) === workflow) return queueSwitch(slot, { workflow }, switches[slot].when);
+    if (workflowOf(s) === workflow) return;
+    if (workflow === "team" || workflowOf(s) === "team") return switchBusy(s) ? to(slot)({ type: "notice", text: "Wait until this chat has finished before starting or leaving a team." }) : setSettings(slot, permissionsOf(s), workflow);
+    changeOrAsk(slot, { workflow }, () => setSettings(slot, permissionsOf(s), workflow));
   };
 
   // Step by step's flavour as you see it (and whether Explain as you go is on): one you picked and haven't sent yet, or
@@ -1585,7 +1601,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * Switches a chat to a preset (and makes it its folder's): its claude restarts on the same session with the
    * preset's models, as for a new mode.
    */
-  const switchHarness = (h: Harness, slot = active) => unlessBackground(slot, () => applyHarness(h, slot));
+  const switchHarness = (h: Harness, slot = active) => changeOrAsk(slot, { preset: h.id }, () => unlessBackground(slot, () => applyHarness(h, slot)));
   // `remember`: it also becomes the folder's preset, for the project's next chats; a phone's switch doesn't (nobody chose it at the Mac).
   const applyHarness = (h: Harness, slot: string, remember = true) => {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
@@ -1595,6 +1611,153 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     to(slot)({ type: "restarting" });
     api.applyHarness(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
+  const putSwitch = (slot: string, p: (Pending & { phone?: boolean }) | null) =>
+    setSwitches((all) => {
+      const { [slot]: _gone, ...rest } = all;
+      return p ? { ...rest, [slot]: p } : rest;
+    });
+  // What the window knows the chat runs on: the provider's model and effort it may not (a phone changed them on the backend).
+  const currentOf = (slot: string): Current => {
+    const s = chats.slots[slot];
+    return { permissions: s ? permissionsOf(s) : "ask", workflow: s ? workflowOf(s) : "chat", preset: harnessOf(slot).id, conversation: {} };
+  };
+  const queueSwitch = (slot: string, change: Change, when: When, phone = false) => {
+    const s = chats.slots[slot];
+    if (!s) return;
+    const prev = switches[slot];
+    if (prev && prev.phase !== "waiting") return to(slot)({ type: "notice", text: "This chat is switching already. Change it again once it has." });
+    const next = queueChange(prev, change, when, currentOf(slot));
+    putSwitch(slot, next && { ...next, phone: !!prev?.phone || phone });
+    // Stopped once: another change asked for now doesn't stop it again.
+    if (next?.when === "now" && !s.stopRequested && (s.status === "running" || hasPendingPrompt(s.items))) stopIn(slot);
+  };
+  // A change picked at the Mac: made at once on a chat doing nothing, else asked about.
+  const changeOrAsk = (slot: string, change: Change, apply: () => void) => {
+    const s = chats.slots[slot];
+    if (!s || !switchBusy(s)) return apply();
+    // A team's Lead and agents work together: one isn't stopped and restarted under the others.
+    if (s.orchestrator || chats.agents[slot]) return to(slot)({ type: "notice", text: "A team's Lead and agents change once they have finished their turn." });
+    setAskSwitch({ slot, change });
+  };
+  const applyConversation = (slot: string, change: ConversationChange) => {
+    to(slot)({ type: "restarting" });
+    api.conversationSettings(slot, change).then(
+      (config) => {
+        to(slot)({ type: "provider_set", provider: { id: config.provider, capabilities: config.capabilities } });
+        to(slot)({ type: "session_ready" });
+      },
+      (e) => {
+        to(slot)({ type: "session_ready" });
+        to(slot)({ type: "failed", text: errText(e) });
+      },
+    );
+  };
+  /** Marks the slot's switch: `over` lays fields on it as it is now (another render may have moved it on). */
+  const touchSwitch = (slot: string, over: Partial<Pending>) => setSwitches((all) => (all[slot] ? { ...all, [slot]: { ...all[slot], ...over } } : all));
+  const applyStep = (slot: string, s: State, step: "settings" | "preset" | "conversation", p: Pending & { phone?: boolean }) => {
+    const c = p.change;
+    if (step === "preset" && c.preset) {
+      // Only a preset the window still has (one deleted while it waited isn't swapped for the default).
+      const h = presets.find((x) => x.id === c.preset);
+      if (!h) return touchSwitch(slot, { note: "That preset is gone, so this chat stays on its own." });
+      return applyHarness(h, slot, !p.phone);
+    }
+    if (step === "conversation" && c.conversation) return applyConversation(slot, c.conversation);
+    const workflow = c.workflow ?? workflowOf(s);
+    const settle = (permissions: Permissions) => {
+      // Nothing left to change (the Auto asked for was refused): no restart for nothing.
+      if (permissions === permissionsOf(s) && workflow === workflowOf(s)) return;
+      if (p.phone) {
+        if (c.permissions) phoneMode.current[slot] = permissions;
+        if (c.workflow) phoneFlow.current[slot] = c.workflow;
+      }
+      setSettings(slot, permissions, workflow);
+    };
+    if (!(p.phone && c.permissions === "auto")) return settle(c.permissions ?? permissionsOf(s));
+    // Auto from a phone is the Mac's to allow, then as now: it may have been turned off while the change waited. Nothing else is
+    // done while it is asked; the reason is said once everything is done (a restart clears what the chat's banner says).
+    touchSwitch(slot, { inFlight: true });
+    remoteContext().then(
+      (ctx) => {
+        settle(ctx.allowAuto ? "auto" : permissionsOf(s));
+        touchSwitch(slot, { inFlight: false, ...(ctx.allowAuto ? {} : { note: "Auto from a phone was turned off on this Mac, so this chat stays on Ask." }) });
+      },
+      () => touchSwitch(slot, { inFlight: false, note: "Lantern couldn't read its Settings, so this chat stays on Ask." }),
+    );
+  };
+  // The end of a switch: what was refused along the way is said now, after any restart and the carry-on message.
+  const endSwitch = (slot: string, p: Pending) => {
+    putSwitch(slot, null);
+    if (p.note) to(slot)({ type: "notice", text: p.note });
+  };
+  // A waiting change is applied once the chat can take it, a restart at a time; after a stop, the agent is told to carry on.
+  useEffect(() => {
+    for (const [slot, p] of Object.entries(switches)) {
+      const s = chats.slots[slot];
+      if (!s || s.status === "asleep") {
+        putSwitch(slot, null);
+        continue;
+      }
+      if (p.inFlight) continue;
+      if (p.phase === "continuing") {
+        if (s.status === "ended") endSwitch(slot, p);
+        if (s.status !== "idle") continue;
+        // What the user queued behind the stopped turn is theirs: it goes as their message, with Lantern's note in front.
+        if (s.queued.length) {
+          to(slot)({ type: "queue_set", items: [] });
+          sendIn(slot, `${CONTINUE_TEXT}\n\n${s.queued.join("\n\n")}`);
+        } else sendIn(slot, CONTINUE_TEXT, undefined, true);
+        endSwitch(slot, p);
+        continue;
+      }
+      if (p.phase === "waiting" ? !switchReady(s, p) : s.status !== "idle" && s.status !== "ended") continue;
+      const stopped = p.phase === "waiting" ? p.when === "now" && wasStopped(s) : !!p.stopped;
+      const next = nextStep(p.change);
+      if (!next) {
+        if (stopped) putSwitch(slot, { ...p, phase: "continuing", stopped });
+        else endSwitch(slot, p);
+        continue;
+      }
+      // A claude the stop made exit is started again first, so the provider's settings meet a running chat.
+      if (next.step === "conversation" && s.status === "ended") {
+        putSwitch(slot, { ...p, phase: "applying", stopped });
+        restart(slot, s.mode);
+        continue;
+      }
+      putSwitch(slot, { ...p, change: next.rest, phase: "applying", stopped });
+      applyStep(slot, s, next.step, p);
+    }
+  }, [chats.slots, switches]);
+  // A phone's change to a working chat (the backend checked it as it checks one to an idle chat; this window checks it again):
+  // held until it is applied. Not a team's Lead or agent, which a phone doesn't switch.
+  const remoteQueueRef = useRef<(r: { slot: string; change: unknown; when: string }) => void>(() => {});
+  // What was waiting when the Settings read comes back, not when the phone asked.
+  const queueSwitchRef = useRef(queueSwitch);
+  queueSwitchRef.current = queueSwitch;
+  remoteQueueRef.current = (r) => {
+    const s = chats.slots[r.slot];
+    const change = changeOf(r.change);
+    const when = r.when === "now" || r.when === "finished" ? r.when : null;
+    if (!s || !change || !when || s.orchestrator || chats.agents[r.slot] || s.status === "asleep" || s.backgroundTasks.length > 0) return;
+    // The provider's settings are checked by the backend when they are applied.
+    if (change.conversation) return queueSwitch(r.slot, change, when, true);
+    // The rest as a phone's change to an idle chat is (any window can emit this): a preset this window lists, Auto only where
+    // Settings let phones and the provider has one, no Claude preset on another provider.
+    remoteContext().then((ctx) => {
+      const onId = s.provider ? providerIdOf(s.provider) : CLAUDE;
+      const target = { known: true, idle: true, asleep: false, background: 0, provider: onId === CLAUDE ? null : { name: providerName(onId), auto: capabilitiesOf(s.provider).supports_auto_mode } };
+      const one = change.permissions ? { permissions: change.permissions } : change.workflow ? { workflow: change.workflow } : { preset: change.preset ?? "" };
+      if (checkRemoteSwitch(one, target, ctx)) return;
+      queueSwitchRef.current(r.slot, change, when, true);
+    });
+  };
+  useEffect(() => {
+    const off = api.onRemoteQueueSwitch((r) => remoteQueueRef.current(r)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
+    };
+  }, []);
+
   // Changing model or effort on a chat with a preset makes it Custom: that preset with the change.
   const customize = (patch: Partial<Harness>) => {
     const custom = customOf(harnessOf(active), patch);
@@ -2541,7 +2704,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const id = s?.provider ? providerIdOf(s.provider) : ((s?.sessionId && providerBySession[s.sessionId]) || CLAUDE);
     return id !== CLAUDE ? providerName(id) : null;
   };
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel);
+  const presetLabel = (id: string) => presets.find((h) => h.id === id)?.name ?? id;
+  const pendingOf = (slot: string): WindowPending | null => {
+    const p = switches[slot];
+    if (!p || p.phase === "continuing") return null;
+    const { permissions, workflow, preset } = p.change;
+    return { when: p.when, text: describeChange(p.change, presetLabel), ...(permissions ? { permissions } : {}), ...(workflow ? { workflow } : {}), ...(preset ? { preset } : {}) };
+  };
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel, pendingOf);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});
@@ -3025,6 +3195,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
+      pendingSwitch={
+        switches[active] && switches[active].phase === "waiting"
+          ? { text: describeChange(switches[active].change, presetLabel), when: switches[active].when, onNow: () => queueSwitch(active, {}, "now"), onCancel: () => putSwitch(active, null) }
+          : null
+      }
       history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
       skillIndex={skillIndex}
@@ -3415,6 +3590,25 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           />
         )}
         {settingUp && <ProjectSetupDialog folder={settingUp} saved={setupBy[settingUp]} onSave={(setup: ProjectSetup) => setSetupBy({ ...setupBy, [settingUp]: setup })} onClose={() => setSettingUp(null)} />}
+        {askSwitch && chats.slots[askSwitch.slot] && (
+          <div className="app-modal">
+            <ConfirmDialog
+              title="Change this chat's settings now?"
+              confirmLabel="Apply now"
+              busyLabel="Applying…"
+              busy={false}
+              alternative={{ label: "When it finishes", onClick: () => (queueSwitch(askSwitch.slot, askSwitch.change, "finished"), setAskSwitch(null)) }}
+              onConfirm={() => (queueSwitch(askSwitch.slot, askSwitch.change, "now"), setAskSwitch(null))}
+              onCancel={() => setAskSwitch(null)}
+            >
+              <p>
+                {agentName(chats.slots[askSwitch.slot].provider)} is working. <strong>Apply now</strong> stops its turn, switches to {describeChange(askSwitch.change, presetLabel)}, and tells it to carry on where it left off.{" "}
+                <strong>When it finishes</strong> switches once its turn is done, with nothing stopped.
+                {chats.slots[askSwitch.slot].backgroundTasks.length > 0 && " Switching restarts it, which also stops its background tasks."}
+              </p>
+            </ConfirmDialog>
+          </div>
+        )}
         {closingFull && (
           <div className="app-modal">
             <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>

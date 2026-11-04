@@ -60,6 +60,8 @@ interface Props {
   sessions?: { load: () => Promise<SessionSummary[]>; exclude: string[]; onOpen: (id: string) => void };
   /** The folder capsule's menu: recent folders to switch to. */
   folders?: { load: () => Promise<RecentFolder[]>; onPick: (path: string) => void; relocate?: RelocateMenu };
+  /** A change to the chat's settings made while it works, waiting for it: in words, when, and ways to apply it at once or drop it. */
+  pendingSwitch?: { text: string; when: "now" | "finished"; onNow: () => void; onCancel: () => void } | null;
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
@@ -94,7 +96,7 @@ interface Props {
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, harness: allHarness, update, history, provider, providers }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, harness: allHarness, update, history, provider, providers, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
   // What the provider hasn't got isn't offered: its box has no effort, harness or "/" menu to show.
@@ -412,8 +414,22 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {sessions && folder && <SessionPill loadSessions={sessions.load} exclude={sessions.exclude} onOpen={sessions.onOpen} disabled={status === "starting"} />}
         </div>
       )}
-      {queued.length > 0 && (
+      {(queued.length > 0 || !!pendingSwitch) && (
         <ul className="queue" aria-label="Queued messages">
+          {pendingSwitch && (
+            <li className="queue-item">
+              <span className="queue-label">Settings</span>
+              <span className="queue-text">{pendingSwitch.when === "now" ? `Stopping to switch to ${pendingSwitch.text}` : `${pendingSwitch.text} once ${agent} finishes`}</span>
+              {pendingSwitch.when === "finished" && (
+                <button className="link-button queue-now" title={`Stops ${agent}'s turn, switches, and tells it to carry on`} onClick={pendingSwitch.onNow}>
+                  Apply now
+                </button>
+              )}
+              <button className="icon queue-remove" aria-label="Keep the settings as they are" title="Keep the settings as they are" onClick={pendingSwitch.onCancel}>
+                ×
+              </button>
+            </li>
+          )}
           {queued.map((q, i) => (
             <li key={i} className="queue-item">
               <span className="queue-label">Queued</span>
@@ -620,8 +636,8 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       </div>
       {(permissions || branch || update) && (
         <div className="composer-meta">
-          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} auto={caps.supports_auto_mode} agent={agent} />}
-          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} team={caps.can_lead_team} agentName={agent} />}
+          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={status === "starting"} auto={caps.supports_auto_mode} agent={agent} />}
+          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={status === "starting"} holdsAgents={holdsAgents} team={caps.can_lead_team} agentName={agent} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}
           {branch && (
