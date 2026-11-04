@@ -127,6 +127,17 @@ jest.mock("@expo/ui/swift-ui", () => {
     Text: ({ children }: { children?: unknown }) => React.createElement(Text, null, children),
     Menu: ({ label, children, modifiers }: { label: unknown; children?: unknown; modifiers?: MockMod[] }) =>
       React.createElement(View, { accessible: true, accessibilityRole: "menu", accessibilityLabel: mod(modifiers, "accessibilityLabel") ?? (typeof label === "string" ? label : undefined), accessibilityState: { disabled: !!mod(modifiers, "disabled") } }, typeof label === "string" ? null : label, children),
+    // A segmented picker: a radio per tagged option, ticked by `selection`; off when the picker or the option is.
+    Picker: ({ selection, onSelectionChange, children, modifiers }: { selection?: unknown; onSelectionChange?: (v: unknown) => void; children?: unknown; modifiers?: MockMod[] }) =>
+      React.createElement(
+        View,
+        null,
+        React.Children.toArray(children).map((c: { props: { modifiers?: MockMod[]; children?: unknown } }) => {
+          const value = mod(c.props.modifiers, "tag");
+          const disabled = !!mod(modifiers, "disabled") || !!mod(c.props.modifiers, "disabled");
+          return React.createElement(Pressable, { key: String(value), accessibilityRole: "radio", accessibilityLabel: c.props.children, accessibilityState: { checked: value === selection, disabled }, disabled, onPress: () => onSelectionChange?.(value) }, React.createElement(Text, null, c.props.children));
+        }),
+      ),
     Button: ({ label, onPress, systemImage, modifiers }: { label?: string; onPress?: () => void; systemImage?: string; modifiers?: MockMod[] }) => {
       const disabled = !!mod(modifiers, "disabled");
       return React.createElement(Pressable, { accessibilityRole: "menuitem", accessibilityLabel: label, accessibilityState: { checked: systemImage === "checkmark", disabled }, disabled, onPress }, React.createElement(Text, null, label));

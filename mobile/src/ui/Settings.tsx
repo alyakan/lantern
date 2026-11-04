@@ -1,7 +1,7 @@
-import { Children, Fragment, useState, type ReactNode } from "react";
+import { Children, Fragment, useReducer, useState, type ReactNode } from "react";
 import { Platform, View } from "react-native";
-import { HStack, Host, Image, Menu, Button as MenuButton, Section as MenuSection, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
-import { accessibilityLabel, disabled as off, font, foregroundStyle, lineLimit, padding } from "@expo/ui/swift-ui/modifiers";
+import { HStack, Host, Image, Menu, Button as MenuButton, Picker, Section as MenuSection, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
+import { accessibilityLabel, disabled as off, font, foregroundStyle, labelsHidden, lineLimit, padding, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
@@ -122,14 +122,19 @@ export interface Choice {
 }
 
 /**
- * A setting of two to four choices, changed in place: its row, with the choices as segments under the name. The one chosen is
- * raised; while it is switching, a few dots say so. Under it: why a choice is off, or what the chosen one does.
+ * A setting of two to four choices, changed in place: its row, with the choices as segments under the name. On iOS they are
+ * iOS's own segmented control (a Liquid Glass pill on iOS 26); elsewhere, drawn segments. While it is switching, a few dots say
+ * so. Under it: why a choice is off, or what the chosen one does.
+ *
+ * iOS's control can't turn off one segment: a choice that is off is dimmed, and picking it springs back to the one chosen.
  */
 export function Segmented({ look, title, choices, selected, onPick, busy = false, quiet }: { look: Look; title: string; choices: Choice[]; selected: string; onPick: (value: string) => void; busy?: boolean; /** A reason the sheet already says at its top (the chat is busy): not said again here. */ quiet?: string | null }) {
   const colors = useColors();
   const chosen = choices.find((c) => c.value === selected);
   const why = choices.find((c) => c.off && c.off !== quiet)?.off ?? null;
   const under = why ?? chosen?.hint ?? null;
+  // Remounting iOS's control puts it back on the one chosen, after a pick that didn't take.
+  const [resets, reset] = useReducer((n: number) => n + 1, 0);
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel={title} style={{ paddingHorizontal: PAD, paddingVertical: 10, gap: 8 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
@@ -139,6 +144,25 @@ export function Segmented({ look, title, choices, selected, onPick, busy = false
         </Txt>
         {busy && <Dots />}
       </View>
+      {Platform.OS === "ios" ? (
+        <Host key={resets} style={{ marginLeft: TILE + 11, height: 34 }} matchContents={{ vertical: false, horizontal: false }}>
+          <Picker
+            selection={selected}
+            onSelectionChange={(v: string) => {
+              const c = choices.find((x) => x.value === v);
+              if (!c || c.off || busy || v === selected) return reset();
+              onPick(v);
+            }}
+            modifiers={[pickerStyle("segmented"), labelsHidden(), accessibilityLabel(title), ...(busy ? [off(true)] : [])]}
+          >
+            {choices.map((c) => (
+              <SwiftText key={c.value} modifiers={[tag(c.value), ...(c.off ? [foregroundStyle(colors.ink3), off(true)] : [])]}>
+                {c.label}
+              </SwiftText>
+            ))}
+          </Picker>
+        </Host>
+      ) : (
       <View style={{ flexDirection: "row", marginLeft: TILE + 11, padding: 2, borderRadius: 10, backgroundColor: colors.wash }}>
         {choices.map((c) => {
           const on = c.value === selected;
@@ -165,6 +189,7 @@ export function Segmented({ look, title, choices, selected, onPick, busy = false
           );
         })}
       </View>
+      )}
       {!!under && (
         <Txt variant="tiny" tone={why ? "cobalt" : "ink3"} style={{ marginLeft: TILE + 11 }}>
           {under}
