@@ -15,7 +15,6 @@ export interface PrSetting {
   tries: number;
 }
 
-export const PR_SETTINGS_KEY = "prChecks.byFolder";
 export const PR_LOOP_KEY = "prChecks.loopByFolder";
 
 export const TRIES_MIN = 1;

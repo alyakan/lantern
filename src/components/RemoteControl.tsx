@@ -217,6 +217,18 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               Off, chats a phone starts are on Ask and it can't switch a chat to Auto. On, a phone can choose Auto, where a classifier approves most actions and nobody has to be at the Mac. Turning it off doesn't change chats already on Auto.
             </span>
           </section>
+          <section className="general-section" aria-labelledby="remote-shell">
+            <h3 id="remote-shell" className="general-title">
+              Commands from a phone
+            </h3>
+            <label className="general-option">
+              <input type="checkbox" checked={view.allow_phone_shell} onChange={(e) => act(api.remoteSetAllowShell(e.target.checked))} />
+              <span>Let paired phones run ! commands</span>
+            </label>
+            <span className="settings-muted">
+              Off, a command typed after ! on a phone is refused. On, it runs in the chat's folder as you, with no Allow card on this Mac: anyone holding your unlocked phone can change these files. Unpair the phone to take that away.
+            </span>
+          </section>
           <section className="general-section" aria-labelledby="remote-notify">
             <h3 id="remote-notify" className="general-title">
               Notifications

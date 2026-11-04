@@ -1,5 +1,4 @@
 import { setProviderUsage } from "./planUsage";
-import { useEffect, useState } from "react";
 
 /**
  * How much of the subscription's weekly (seven-day) window is used, as the latest `rate_limit_event` said, and where the pace
@@ -16,23 +15,8 @@ export const WEEK_SECS = 7 * 24 * 3600;
 /** Less of the window than this has gone and a pace means nothing (the first hours of a week would say it ends in a day). */
 export const MIN_ELAPSED_SECS = 6 * 3600;
 
-const CHANGED = "lantern-week-usage";
-let latest: WeekUsage | null = null;
-
 export function setWeekUsage(w: WeekUsage): void {
-  latest = w;
   setProviderUsage({ provider: "claude", windows: [{ label: "Week", used: w.used, resets_at: w.resetsAt, minutes: 10080 }], updated_at: Math.floor(Date.now() / 1000) });
-  window.dispatchEvent(new Event(CHANGED));
-}
-
-export function useWeekUsage(): WeekUsage | null {
-  const [w, setW] = useState(latest);
-  useEffect(() => {
-    const sync = () => setW(latest);
-    window.addEventListener(CHANGED, sync);
-    return () => window.removeEventListener(CHANGED, sync);
-  }, []);
-  return w;
 }
 
 export interface WeekForecast {

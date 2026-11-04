@@ -2793,6 +2793,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
   useAction("session-history", toggleHistory, true);
+  useAction("show-desk", () => { setDeskPage(null); setDesk(true); }, Object.keys(openByProject).length > 0);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;

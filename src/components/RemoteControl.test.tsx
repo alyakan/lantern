@@ -45,6 +45,11 @@ vi.mock("../api", () => ({
       view = { ...view, allow_phone_auto: on };
       return Promise.resolve(view);
     },
+    remoteSetAllowShell: (on: boolean) => {
+      calls.push({ cmd: "shell", args: on });
+      view = { ...view, allow_phone_shell: on };
+      return Promise.resolve(view);
+    },
     remotePair: () => {
       if (!view.enabled) return Promise.reject("Turn on Remote control first.");
       view = { ...view, pairing: true };
@@ -67,7 +72,7 @@ const { RemoteControl } = await import("./RemoteControl");
 beforeEach(() => {
   calls.length = 0;
   picked = null;
-  view = { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+  view = { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, allow_phone_shell: false, devices: [], connected: [], listening: false, pairing: false };
 });
 
 describe("Settings › Remote control", () => {
@@ -202,6 +207,15 @@ describe("Settings › Remote control", () => {
     expect(screen.getByText(/Turning it off doesn't change chats already on Auto/)).toBeTruthy();
     fireEvent.click(auto);
     await waitFor(() => expect(calls).toContainEqual({ cmd: "auto", args: true }));
+  });
+
+  it("running commands from a phone is off until the Mac allows it", async () => {
+    render(<RemoteControl now={() => 0} />);
+    const shell = await screen.findByRole("checkbox", { name: "Let paired phones run ! commands" });
+    expect(shell).not.toBeChecked();
+    fireEvent.click(shell);
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "shell", args: true }));
+    expect(shell).toBeChecked();
   });
 
   it("chat titles in notifications are off until turned on", async () => {

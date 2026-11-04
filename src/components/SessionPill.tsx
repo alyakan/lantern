@@ -36,7 +36,7 @@ export function SessionPill({ loadSessions, exclude, onOpen, disabled }: Props) 
     <div className="pill-anchor" ref={root}>
       <button className="pill" ref={button} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past chat" onClick={toggle}>
         <ClockIcon />
-        <span>New chat</span>
+        <span>Past chats</span>
         <span className="chev down" aria-hidden />
       </button>
       {open && (

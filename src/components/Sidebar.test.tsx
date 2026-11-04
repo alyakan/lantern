@@ -611,14 +611,14 @@ describe("one project", () => {
   it("picks a project from the button, lists only it under a banner in its colour, and shows every project again", async () => {
     setup({ open: ALL_OPEN, colors: { [LANTERN]: 2, [MONITOR]: 1, [IOS]: 0 } });
     await waitFor(() => expect(regions()).toHaveLength(3));
-    fireEvent.click(screen.getByRole("button", { name: "One project" }));
-    const menu = screen.getByRole("menu", { name: "Show only" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "network-monitor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    const menu = screen.getByRole("menu", { name: "Projects" });
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(4);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "network-monitor" }));
     expect(regions()).toEqual(["network-monitor"]);
     const banner = screen.getByRole("status", { name: "Only network-monitor" });
     expect(banner.style.getPropertyValue("--pc")).toBe(PROJECT_COLORS[1]);
-    expect(screen.getByRole("button", { name: "Show all projects", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show all projects" })).toBeInTheDocument();
     fireEvent.click(within(banner).getByRole("button", { name: "Show all projects" }));
     expect(regions()).toHaveLength(3);
     expect(screen.queryByRole("status", { name: /^Only/ })).toBeNull();
@@ -644,10 +644,10 @@ describe("one project", () => {
   it("offers recent projects with nothing open, and picking one leaves only its banner", async () => {
     setup({ open: { [LANTERN]: lanternOpen } });
     await waitFor(() => expect(regions()).toEqual(["lantern"]));
-    fireEvent.click(screen.getByRole("button", { name: "One project" }));
-    const menu = screen.getByRole("menu", { name: "Show only" });
-    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["lantern", "network-monitor", "lumiform-ios"]));
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "lumiform-ios" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    const menu = screen.getByRole("menu", { name: "Projects" });
+    await waitFor(() => expect(within(menu).getAllByRole("menuitemradio").map((i) => i.textContent)).toEqual(["All projects", "lantern", "network-monitor", "lumiform-ios"]));
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "lumiform-ios" }));
     expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
     expect(screen.queryAllByRole("region")).toHaveLength(0);
   });

@@ -543,7 +543,15 @@ pub struct FileStat {
     pub removed: u32,
 }
 
+/// Whether a ref can go into a revision range: not empty, not read as an option, and no control characters.
+fn usable_ref(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('-') && !name.chars().any(char::is_control)
+}
+
 pub fn branch_summary(repo: &Path, base: &str, branch: &str, path_env: Option<&str>) -> Result<BranchSummary, String> {
+    if !usable_ref(base) || !usable_ref(branch) {
+        return Err("The branch to compare isn't usable.".into());
+    }
     let commits = run(repo, &["rev-list", "--count", &format!("{base}..{branch}")], path_env)?.parse().unwrap_or(0);
     let numstat = run(repo, &["diff", "--no-ext-diff", "--no-textconv", "--numstat", &format!("{base}...{branch}")], path_env)?;
     let files = numstat
@@ -577,7 +585,7 @@ const STAT_MAX: usize = 6_000;
 /// conversion program the repository's config names, and cut to `max_bytes` of diff at a line. The merge base is what the
 /// builder started from, so it is the builder's work and not what the base branch gained since.
 pub fn review_diff(repo: &Path, base: &str, commit: &str, max_bytes: usize, path_env: Option<&str>) -> Result<ReviewDiff, String> {
-    if base.is_empty() || base.starts_with('-') || base.chars().any(char::is_control) {
+    if !usable_ref(base) {
         return Err("The branch the work started from isn't usable.".into());
     }
     if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -726,6 +734,15 @@ pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_branch_summary_refuses_a_ref_git_would_read_as_an_option() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(branch_summary(dir.path(), "main", "--output=/tmp/x", None).is_err());
+        assert!(branch_summary(dir.path(), "-x", "main", None).is_err());
+        assert!(branch_summary(dir.path(), "main", "a\nb", None).is_err());
+        assert!(branch_summary(dir.path(), "main", "", None).is_err());
+    }
 
     #[test]
     fn parses_branch_and_detached_head() {

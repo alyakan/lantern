@@ -1060,17 +1060,38 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
       await sleep(50);
     }
   };
+  // The app may already have the folder open (it restores the last one and starts on the Desk): then there is no welcome
+  // button to press, and the screen it is on has no message box until a chat is opened.
+  const untilOr = async <T,>(find: () => T | null | undefined, ms: number): Promise<T | null> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const found = find();
+      if (found) return found;
+      if (Date.now() > end) return null;
+      await sleep(50);
+    }
+  };
+  const openChat = () => document.querySelector<HTMLButtonElement>(".sb-row")?.click();
   void (async () => {
     if (new URLSearchParams(location.search).has("folders")) return;
-    (await until(() => document.querySelector<HTMLButtonElement>(".welcome-open"))).click();
+    (await untilOr(() => document.querySelector<HTMLButtonElement>(".welcome-open"), 1500))?.click();
     if (history) {
       const pill = new URLSearchParams(location.search).has("pill");
-      const selector = pill ? '.composer-pills .pill[title="Continue a past session"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
-      (await until(() => document.querySelector<HTMLButtonElement>(selector))).click();
+      const selector = pill ? '.composer-pills .pill[title="Continue a past chat"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
+      let trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      if (!trigger) {
+        openChat();
+        trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      }
+      trigger?.click();
       return;
     }
     if (openOnly) return;
-    const box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    let box = await untilOr(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"), 2500);
+    if (!box) {
+      openChat();
+      box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    }
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
     setValue.call(box, "Add retries with backoff to fetchJson for transient errors, then run the retry tests.");
     box.dispatchEvent(new Event("input", { bubbles: true }));
@@ -2083,9 +2104,10 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "remote_set_rich_notifications":
         case "remote_set_keep_awake":
         case "remote_set_allow_auto":
+        case "remote_set_allow_shell":
         case "remote_remove_device":
         case "remote_set_live_key":
-          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, allow_phone_shell: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";
         case "remote_pair_cancel":

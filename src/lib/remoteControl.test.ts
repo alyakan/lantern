@@ -10,6 +10,7 @@ describe("who is connected", () => {
     keep_awake: false,
     tailnet: [],
     allow_phone_auto: false,
+    allow_phone_shell: false,
     devices: [
       { id: "a", name: "Aly's iPhone", paired_at: 0, last_seen: 0 },
       { id: "b", name: "Pixel", paired_at: 0, last_seen: 0 },

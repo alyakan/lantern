@@ -16,9 +16,6 @@ export const FLAVOURS: Flavour[] = ["build", "review", "debug", "architecture"];
 
 export const FLAVOUR_LABEL: Record<Flavour, string> = { build: "Build", review: "Review", debug: "Debug", architecture: "Design" };
 
-/** What Step by step's page buttons and status line say while a flavour runs. */
-export const FLAVOUR_PHASE: Record<Flavour, string> = { build: "Building", review: "Reviewing", debug: "Debugging", architecture: "Mapping" };
-
 /** The flavours that have the Explain as you go option. */
 export const canExplain = (flavour: Flavour | null): boolean => flavour === "build" || flavour === "debug";
 
