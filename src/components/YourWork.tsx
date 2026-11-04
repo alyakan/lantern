@@ -217,6 +217,16 @@ function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; 
           <span className="yw-feature-sum">{[group.doing > 0 && `${group.doing} doing`, group.todo > 0 && `${group.todo} to start`].filter(Boolean).join(" · ")}</span>
         )}
       </header>
+      {/* Folded away, a feature still says what is in it: its rows' names, and how many are left out. */}
+      {folded && (
+        <p className="yw-peek">
+          {group.items
+            .slice(0, 3)
+            .map((i) => (i.number !== null ? `#${i.number} ${i.title}` : i.title))
+            .join(" · ")}
+          {group.items.length > 3 ? " · …" : ""}
+        </p>
+      )}
       {!folded && (
         <>
           <ul className="dp-list">
@@ -240,10 +250,11 @@ const GROUPS: { by: GroupBy; label: string }[] = [
 ];
 
 /** What groups the list, and which states it shows: a switch for the grouping, a chip for each state in the list. */
-function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; counts: Partial<Record<Tone, number>>; only: Tone[]; onOnly: (t: Tone[]) => void }) {
+function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; counts: Partial<Record<Tone, number>>; only: Tone[]; onOnly: (t: Tone[]) => void; grouped: boolean; allOpen: boolean; onAll: () => void }) {
   const tones = FILTER_TONES.filter((t) => counts[t]);
   return (
     <div className="yw-bar">
+      <div className="yw-bar-top">
       <div className="yw-group" role="radiogroup" aria-label="Group by">
         <span className="yw-bar-label">Group by</span>
         {GROUPS.map((g) => {
@@ -254,6 +265,13 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
             </button>
           );
         })}
+      </div>
+      {/* Every feature open or folded at once. Only when there is something to group. */}
+      {grouped && (
+        <button className="yw-all" onClick={onAll}>
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
+      )}
       </div>
       <div className="yw-filter" role="group" aria-label="Show only">
         {tones.map((t) => {
@@ -286,7 +304,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const [allNext, setAllNext] = useState(false);
   const [chosen, setChosen] = usePersistentState<GroupBy | "auto">("desk.work.groupBy", "auto");
   const [only, setOnly] = useState<Tone[]>([]);
-  const [folded, setFolded] = useState<string[]>([]);
+  // Which features are open, by `${grouping}:${feature}`: all folded until the user opens one, and kept between visits.
+  const [open, setOpen] = usePersistentState<string[]>("desk.work.open", []);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
   const nextShown = allNext ? next : next.slice(0, SHOWN_NEXT);
@@ -302,7 +321,10 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const shown = all ? stand : stand.slice(0, SHOWN);
   const more = stand.length - shown.length;
   const blind = unknownViewer(repos);
-  const toggle = (key: string) => setFolded((f) => (f.includes(key) ? f.filter((k) => k !== key) : [...f, key]));
+  const toggle = (key: string) => setOpen(open.includes(key) ? open.filter((k) => k !== key) : [...open, key]);
+  const groupKeys = groups.map((g) => `${by}:${g.key}`);
+  const allOpen = groupKeys.length > 0 && groupKeys.every((k) => open.includes(k));
+  const toggleAll = () => setOpen(allOpen ? open.filter((k) => !groupKeys.includes(k)) : [...new Set([...open, ...groupKeys])]);
   const nextCard = (
       <Card
         title="Next"
@@ -355,7 +377,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   );
   const standCard = items.length > 0 ? (
         <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand">
-          <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} />
+          <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} grouped={!flat && groups.length > 1} allOpen={allOpen} onAll={toggleAll} />
           {groups.length === 0 ? (
             <p className="dp-note">Nothing is {only.map((t) => TONE_WORD[t]).join(" or ")}.</p>
           ) : flat ? (
@@ -370,7 +392,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
               )}
             </>
           ) : (
-            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
+            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={!open.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
           )}
         </Card>
   ) : null;

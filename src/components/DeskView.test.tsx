@@ -243,6 +243,8 @@ describe("the Desk", () => {
     setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } }, page: "/p/lantern", projects: [project("/p/lantern")] });
     expect(within(screen.getByRole("region", { name: "Next" })).getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
     const stand = screen.getByRole("region", { name: "Where things stand" });
+    // Features start folded; the whole board opens from its one control.
+    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
     const sync = within(stand).getByRole("region", { name: "Sync" });
     expect(sync).toHaveTextContent("1 doing");
     // Under its feature's heading, a row doesn't name the feature again, but names the issue it is the work of, as a chip that links to it.
@@ -331,6 +333,24 @@ describe("the Desk", () => {
       widthOf.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+
+  it("folds each feature to its name and the work in it, and opens them all at once", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    setup({
+      repos,
+      linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } },
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
+    });
+    const stand = screen.getByRole("region", { name: "Where things stand" });
+    // Folded: no rows, but the feature says what is in it.
+    expect(within(stand).queryAllByRole("list", { name: /^At / })).toHaveLength(0);
+    expect(stand).toHaveTextContent("#7 PR 7");
+    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
+    expect(within(stand).getAllByRole("list", { name: /^At / }).length).toBeGreaterThan(0);
+    expect(within(stand).getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
   });
 
   it("gives a project's page its own work first, and only that project's", () => {

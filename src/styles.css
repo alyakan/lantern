@@ -4083,3 +4083,10 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-tile-foot { margin-top: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .desk-tile-foot .desk-tile-chats { margin-top: 0; align-self: auto; }
 .desk-tile-foot .desk-more { color: var(--accent); white-space: nowrap; }
+
+/* A folded feature's one-line summary: what is in it, under its name; and the whole board's Expand all. */
+.yw-peek { margin: 1px 0 6px 22px; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yw-all { flex: none; margin-left: 8px; height: 22px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); }
+.yw-all:hover { background: var(--bg-hover); }
+.yw-bar-top { display: flex; align-items: center; gap: 8px; }
+.yw-bar-top .yw-all { margin-left: auto; }
