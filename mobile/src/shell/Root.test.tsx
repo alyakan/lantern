@@ -247,6 +247,17 @@ describe("the Mac's sheet", () => {
     expect(screen.queryByText("Usage by provider")).toBeNull();
   });
 
+  it("opens this phone's voice typing once the sheet is away, saying which is in use", async () => {
+    await open({ chats: [chat()] });
+    await press(/^Aly's MacBook Pro, connected/);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Voice typing, / })).toBeTruthy());
+    await press(/^Voice typing, /);
+    await settle();
+    expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
+    expect(screen.getByRole("header", { name: "Voice typing" })).toBeTruthy();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+  });
+
   it("has no What's new when this build carries no notes (a development run)", async () => {
     await open({ chats: [chat()] });
     await press("Aly's MacBook Pro, connected");

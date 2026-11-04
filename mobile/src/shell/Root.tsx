@@ -12,6 +12,7 @@ import { PairDeviceSheet } from "../screens/PairDevice";
 import { StorageSheet } from "../screens/StorageSheet";
 import { TodosSheet } from "../screens/TodosSheet";
 import { UsageSheet } from "../screens/UsageSheet";
+import { SettingsSheet as VoiceSheet } from "../screens/SettingsSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -105,6 +106,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   const [storageOpen, setStorageOpen] = useState(false);
   // The usage in full, from the Mac sheet.
   const [usageOpen, setUsageOpen] = useState(false);
+  // What turns speech into text on this phone, from the Mac sheet.
+  const [voiceOpen, setVoiceOpen] = useState(false);
   // The to-do lists, from the Mac sheet (any project) or a reminder (its project).
   const [todos, setTodos] = useState<{ project: string | null } | null>(null);
   useEffect(() => {
@@ -178,7 +181,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   }, [homeUp]);
   // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
   // in: it waits until they are gone. On a tablet the chats are always a tap away, so a chat open doesn't hold it back there.
-  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !usageOpen && !todos && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
+  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !usageOpen && !voiceOpen && !todos && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
@@ -193,6 +196,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
       if (pairingDevice) return setPairingDevice(false), true;
       if (storageOpen) return setStorageOpen(false), true;
       if (usageOpen) return setUsageOpen(false), true;
+      if (voiceOpen) return setVoiceOpen(false), true;
       if (todos) return setTodos(null), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
@@ -204,7 +208,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, usageOpen, todos, notesOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, usageOpen, voiceOpen, todos, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
@@ -315,6 +319,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
           onClose={() => setMacSheet(false)}
           onUnpair={unpair}
           onUsage={() => setUsageOpen(true)}
+          onVoice={() => setVoiceOpen(true)}
           onSupport={() => setSupporting(true)}
           onPairDevice={() => setPairingDevice(true)}
           onStorage={() => setStorageOpen(true)}
@@ -332,6 +337,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
       {usageOpen && <UsageSheet plan={plan} providers={providerUsage} onClose={() => setUsageOpen(false)} />}
+      {voiceOpen && <VoiceSheet onClose={() => setVoiceOpen(false)} />}
       {todos && <TodosSheet project={todos.project} onClose={() => setTodos(null)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}

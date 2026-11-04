@@ -6,7 +6,8 @@ import { loadVoiceEngine, saveVoiceEngine, type VoiceEngine } from "../prefs";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
+import { LOOKS, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
+import { space, useColors } from "../ui/theme";
 
 /** Three sliders, each with its knob somewhere else: Settings. */
 export function SettingsGlyph({ color, size = 18 }: { color: string; size?: number }) {
@@ -50,44 +51,31 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   };
   return (
     <Sheet onClose={onClose}>
-      {() => (
-        <View style={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            Settings
-          </Txt>
-          <Txt variant="small" tone="ink2" style={{ marginBottom: 8 }}>
-            For this phone only.
-          </Txt>
-          <Txt variant="small" tone="ink3" accessibilityRole="header" style={{ fontWeight: "600" }}>
-            Voice typing
-          </Txt>
-          <View accessibilityRole="radiogroup" style={{ backgroundColor: colors.card, borderRadius: radius.inner, borderWidth: 1, borderColor: colors.rule, overflow: "hidden" }}>
-            {ENGINES.map((o, i) => {
-              const on = engine === o.value;
-              return (
-                <PressScale
-                  key={o.value}
-                  accessibilityRole="radio"
-                  accessibilityLabel={o.title}
-                  accessibilityHint={o.detail}
-                  accessibilityState={{ checked: on }}
-                  haptic="select"
-                  scaleTo={0.98}
-                  onPress={() => pick(o.value)}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, paddingHorizontal: 14, minHeight: 44, borderTopWidth: i ? 1 : 0, borderTopColor: colors.rule }}
-                >
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Txt variant="body">{o.title}</Txt>
-                    <Txt variant="small" tone="ink3">
-                      {o.detail}
+      {(close) => (
+        <View style={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}>
+          <SheetHeader title="Voice typing" onDone={close} />
+          <View style={{ paddingHorizontal: space.lg, gap: 6 }}>
+            <SettingsSection label="Turns your words into text" footer="For this phone only.">
+              {ENGINES.map((o) => {
+                const on = engine === o.value;
+                return (
+                  <PressScale key={o.value} accessibilityRole="radio" accessibilityLabel={o.title} accessibilityHint={o.detail} accessibilityState={{ checked: on }} haptic="select" scaleTo={0.99} onPress={() => pick(o.value)} style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 11, paddingHorizontal: 12, minHeight: 46 }}>
+                    <View style={{ alignSelf: "flex-start" }}>
+                      <Tile {...(o.value === "model" ? LOOKS.voice : { symbol: "network", glyph: "☁", tint: "#2f5bff" })} />
+                    </View>
+                    <View style={{ flex: 1, gap: 2, paddingTop: 3 }}>
+                      <Txt variant="body">{o.title}</Txt>
+                      <Txt variant="tiny" tone="ink3">
+                        {o.detail}
+                      </Txt>
+                    </View>
+                    <Txt variant="body" style={{ color: colors.cobalt, fontWeight: "700", opacity: on ? 1 : 0 }}>
+                      ✓
                     </Txt>
-                  </View>
-                  <Txt variant="body" style={{ color: colors.cobalt, fontWeight: "700", opacity: on ? 1 : 0 }}>
-                    ✓
-                  </Txt>
-                </PressScale>
-              );
-            })}
+                  </PressScale>
+                );
+              })}
+            </SettingsSection>
           </View>
         </View>
       )}
