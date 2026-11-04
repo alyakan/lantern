@@ -145,7 +145,7 @@ export function SliderRow({ look, title, choices, selected, onPick, disabled = f
     if (choices[i] && i !== at) onPick(choices[i].value);
   };
   return (
-    <View style={{ paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 6 }}>
+    <View style={{ paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
         <Tile {...look} />
         <Txt variant="body" style={{ flex: 1 }}>
@@ -155,7 +155,7 @@ export function SliderRow({ look, title, choices, selected, onPick, disabled = f
           {shown?.label}
         </Txt>
       </View>
-      <Host style={{ marginLeft: TILE + 11, height: 36 }}>
+      <Host style={{ marginLeft: TILE + 11, height: 30 }}>
         <Slider
           value={held ?? at}
           min={0}
