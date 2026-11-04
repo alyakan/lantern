@@ -179,12 +179,15 @@ interface WorkflowProps {
   team?: boolean;
   /** What the chat's agent is called, in that reason. */
   agentName?: string;
+  /** The chat is working: Chat and Step by step can still be picked (it asks when to switch), but a team starts or ends only at an idle chat. */
+  working?: boolean;
 }
 
 /** Workflow: how the work is shaped (Chat, Step by step or Team). */
-export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents, team = true, agentName = "Claude" }: WorkflowProps) {
-  const held = holdsAgents ? "This team still has agents. Close them first." : undefined;
-  const noTeam = team ? undefined : `${agentName} can't lead a team yet: a team's Lead runs on Claude Code.`;
+export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents, team = true, agentName = "Claude", working = false }: WorkflowProps) {
+  const busy = working ? `Wait until ${agentName} has finished: a team starts and ends at an idle chat.` : undefined;
+  const held = holdsAgents ? "This team still has agents. Close them first." : workflow === "team" ? busy : undefined;
+  const noTeam = team ? busy : `${agentName} can't lead a team yet: a team's Lead runs on Claude Code.`;
   const rows: Row<Workflow>[] = WORKFLOW_ROWS.filter((r) => !(agent && r.value === "team")).map((r) => ({ ...r, label: WORKFLOW_LABEL[r.value], off: r.value !== "team" ? held : noTeam }));
   // A new team from a template is offered where a team could be started: not on an agent, a title bar, or a team that has agents.
   const startTemplate = useContext(TemplateTeamContext);

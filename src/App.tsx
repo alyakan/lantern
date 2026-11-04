@@ -7,7 +7,7 @@ import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
-import { busy as switchBusy, changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
+import { changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -1558,7 +1558,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // A Team is started and left at an idle chat: its agents and canvas come with it.
     if (workflow !== "team" && switches[slot] && workflowOf(s) === workflow) return queueSwitch(slot, { workflow }, switches[slot].when);
     if (workflowOf(s) === workflow) return;
-    if (workflow === "team" || workflowOf(s) === "team") return switchBusy(s) ? to(slot)({ type: "notice", text: "Wait until this chat has finished before starting or leaving a team." }) : setSettings(slot, permissionsOf(s), workflow);
+    if (workflow === "team" || workflowOf(s) === "team") return isBusy(s) ? to(slot)({ type: "notice", text: "Wait until this chat has finished before starting or leaving a team." }) : setSettings(slot, permissionsOf(s), workflow);
     changeOrAsk(slot, { workflow }, () => setSettings(slot, permissionsOf(s), workflow));
   };
 
@@ -1634,7 +1634,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A change picked at the Mac: made at once on a chat doing nothing, else asked about.
   const changeOrAsk = (slot: string, change: Change, apply: () => void) => {
     const s = chats.slots[slot];
-    if (!s || !switchBusy(s)) return apply();
+    if (!s || !isBusy(s)) return apply();
     // A team's Lead and agents work together: one isn't stopped and restarted under the others.
     if (s.orchestrator || chats.agents[slot]) return to(slot)({ type: "notice", text: "A team's Lead and agents change once they have finished their turn." });
     setAskSwitch({ slot, change });
