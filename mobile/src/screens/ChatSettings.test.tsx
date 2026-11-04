@@ -32,7 +32,8 @@ const openSheet = async () => {
   await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
   await waitFor(() => expect(screen.getByText("Permissions")).toBeTruthy());
 };
-const radio = (name: string) => screen.getByRole("radio", { name });
+// Ask, Auto, Chat, Step by step and the presets are items of the rows' menus.
+const radio = (name: string) => screen.getByRole("menuitem", { name });
 const item = (name: string) => screen.getByRole("menuitem", { name });
 
 describe("the title bar's settings line", () => {
@@ -63,7 +64,10 @@ describe("the settings sheet", () => {
     expect(screen.getByLabelText(/^Release 0\.1\.53\. lantern · Claude · Balanced\. 50% of context$/)).toBeTruthy();
     expect(radio("Ask").props.accessibilityState).toMatchObject({ checked: true });
     expect(radio("Auto").props.accessibilityState).toMatchObject({ checked: false, disabled: false });
+    expect(screen.getByRole("menu", { name: "Permissions, Ask" })).toBeTruthy();
     expect(screen.getByRole("menu", { name: "Preset, Balanced" })).toBeTruthy();
+    // What the chosen mode does, under its row.
+    expect(screen.getByText("Edits apply; commands and other actions ask you first")).toBeTruthy();
     // A preset's summary says what it is, under its row.
     expect(screen.getByText("Sonnet · Opus advisor · Haiku subagents")).toBeTruthy();
     expect(screen.getByText("50% of context")).toBeTruthy();
@@ -116,6 +120,7 @@ describe("switching Ask or Auto", () => {
     await waitFor(() => expect(screen.getByText("under the title: Switching… · Balanced")).toBeTruthy());
     // Still up, with Auto chosen while it switches.
     expect(radio("Auto").props.accessibilityState).toMatchObject({ checked: true, disabled: true });
+    expect(screen.getByRole("menu", { name: "Permissions, Switching…" })).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [{ ...c, permissions: "auto" }] } }));
   });
 
@@ -264,9 +269,10 @@ describe("provider-neutral settings", () => {
     const { lastOf } = await open({ features: ["controls", "conversation"], chatOver: { provider: "Codex" }, answers: { conversation_settings: codexConfiguration } });
     await openSheet();
     await screen.findByRole("menuitem", { name: "gpt-example" });
-    expect(screen.queryByRole("radio", { name: "Medium" })).toBeNull();
-    expect(radio("High").props.accessibilityState).toMatchObject({ checked: true });
-    expect(radio("Low")).toBeTruthy();
+    // Effort is a slider over the provider's two levels, on High.
+    const effort = screen.getByRole("adjustable", { name: "Effort" });
+    expect(effort.props.accessibilityValue).toMatchObject({ now: 1, max: 1 });
+    expect(screen.getByText("High")).toBeTruthy();
     await fireEvent.press(item("gpt-example"));
     expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" } });
   });
@@ -298,4 +304,12 @@ it("offers a direct conversation handoff when Claude is exhausted", async () => 
   await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
   await fireEvent.press(await screen.findByRole("button", { name: "Switch this chat to Codex" }));
   expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { provider: "codex" } });
+});
+
+it("sends the effort the slider is let go on", async () => {
+  const { lastOf } = await open({ features: ["controls", "conversation"], answers: { conversation_settings: codexConfiguration } });
+  await openSheet();
+  const effort = await screen.findByRole("adjustable", { name: "Effort" });
+  await fireEvent(effort, "valueChange", 0);
+  expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { effort: "low" } });
 });

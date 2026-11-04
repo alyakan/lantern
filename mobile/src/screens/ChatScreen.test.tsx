@@ -1069,7 +1069,7 @@ describe("Step by step's pages", () => {
           await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
           await waitFor(() => expect(screen.getByText("Show")).toBeTruthy());
         }
-        await fireEvent.press(screen.getByRole("radio", { name: label }));
+        await fireEvent.press(screen.getByRole("menuitem", { name: label }));
       };
       await show("One list");
       await waitFor(() => expect(screen.getByTestId("chat-list")).toBeTruthy());

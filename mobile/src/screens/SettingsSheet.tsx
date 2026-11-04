@@ -60,8 +60,10 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
                 const on = engine === o.value;
                 return (
                   <PressScale key={o.value} accessibilityRole="radio" accessibilityLabel={o.title} accessibilityHint={o.detail} accessibilityState={{ checked: on }} haptic="select" scaleTo={0.99} onPress={() => pick(o.value)} style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 11, paddingHorizontal: 12, minHeight: 46 }}>
-                    <Tile {...(o.value === "model" ? LOOKS.voice : { symbol: "network", glyph: "☁", tint: "#2f5bff" })} />
-                    <View style={{ flex: 1, gap: 2 }}>
+                    <View style={{ alignSelf: "flex-start" }}>
+                      <Tile {...(o.value === "model" ? LOOKS.voice : { symbol: "network", glyph: "☁", tint: "#2f5bff" })} />
+                    </View>
+                    <View style={{ flex: 1, gap: 2, paddingTop: 3 }}>
                       <Txt variant="body">{o.title}</Txt>
                       <Txt variant="tiny" tone="ink3">
                         {o.detail}

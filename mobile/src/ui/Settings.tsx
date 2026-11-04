@@ -1,7 +1,7 @@
-import { Children, Fragment, useReducer, useState, type ReactNode } from "react";
+import { Children, Fragment, useRef, useState, type ReactNode } from "react";
 import { Platform, View } from "react-native";
-import { HStack, Host, Image, Menu, Button as MenuButton, Picker, Section as MenuSection, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
-import { accessibilityLabel, disabled as off, font, foregroundStyle, labelsHidden, lineLimit, padding, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
+import { HStack, Host, Image, Menu, Button as MenuButton, Section as MenuSection, Slider, Spacer, Text as SwiftText } from "@expo/ui/swift-ui";
+import { accessibilityLabel, disabled as off, font, foregroundStyle, lineLimit, padding } from "@expo/ui/swift-ui/modifiers";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
@@ -11,8 +11,8 @@ import { radius, space, useColors } from "./theme";
 /**
  * The settings sheets' one look, as iOS's own Settings: a small grey label over a card of rows, each row a coloured square with
  * a symbol in it, its name, and its value or control at the right; a hairline between rows that starts after the square.
- * Choices of two to four are a segmented control, changed in place; longer lists are a native menu over the row (a list of
- * rows on Android). Nothing expands, so a sheet sized to what is in it never jumps.
+ * A choice is a native menu over its row (a list of rows on Android), a scale a slider. Nothing expands, so a sheet sized to
+ * what is in it never jumps.
  */
 
 /** How tall a row is, and how wide its square: the hairline between rows starts past the square. */
@@ -80,8 +80,9 @@ export interface Look {
 export function SettingsRow({ look, title, detail, value, right, onPress, chevron = !!onPress, tone = "ink", accessibilityHint }: { look?: Look; title: string; detail?: string | null; value?: string | null; right?: ReactNode; onPress?: () => void; chevron?: boolean; tone?: "ink" | "stop"; accessibilityHint?: string }) {
   const body = (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 11, minHeight: ROW, paddingHorizontal: PAD, paddingVertical: 8 }}>
-      {look && <Tile {...look} />}
-      <View style={{ flex: 1, gap: 1 }}>
+      {/* Beside a name with a line under it, the square stays by the name, at the top. */}
+      {look && <View style={detail ? { alignSelf: "flex-start" } : undefined}><Tile {...look} /></View>}
+      <View style={{ flex: 1, gap: 1, paddingTop: detail ? 3 : 0 }}>
         <Txt variant="body" tone={tone} style={tone === "stop" ? { fontWeight: "600" } : undefined}>
           {title}
         </Txt>
@@ -121,80 +122,58 @@ export interface Choice {
   off?: string | null;
 }
 
+/** What is said under a choice's row: why one is off (unless the sheet says it already, `quiet`), or what the chosen one does. */
+export function noteOf(choices: Choice[], selected: string, quiet?: string | null): string | null {
+  return choices.find((c) => c.off && c.off !== quiet)?.off ?? choices.find((c) => c.value === selected)?.hint ?? null;
+}
+
 /**
- * A setting of two to four choices, changed in place: its row, with the choices as segments under the name. On iOS they are
- * iOS's own segmented control (a Liquid Glass pill on iOS 26); elsewhere, drawn segments. While it is switching, a few dots say
- * so. Under it: why a choice is off, or what the chosen one does.
- *
- * iOS's control can't turn off one segment: a choice that is off is dimmed, and picking it springs back to the one chosen.
+ * A setting on a scale of a few steps (effort): its row, with the step at the right, and iOS's own slider under it, which
+ * snaps to the steps. The step is sent once the thumb is let go (at once for VoiceOver, which moves it a step at a time).
+ * Android has no such slider here: a menu instead.
  */
-export function Segmented({ look, title, choices, selected, onPick, busy = false, quiet }: { look: Look; title: string; choices: Choice[]; selected: string; onPick: (value: string) => void; busy?: boolean; /** A reason the sheet already says at its top (the chat is busy): not said again here. */ quiet?: string | null }) {
-  const colors = useColors();
-  const chosen = choices.find((c) => c.value === selected);
-  const why = choices.find((c) => c.off && c.off !== quiet)?.off ?? null;
-  const under = why ?? chosen?.hint ?? null;
-  // Remounting iOS's control puts it back on the one chosen, after a pick that didn't take.
-  const [resets, reset] = useReducer((n: number) => n + 1, 0);
+export function SliderRow({ look, title, choices, selected, onPick, disabled = false }: { look: Look; title: string; choices: Choice[]; selected: string; onPick: (value: string) => void; disabled?: boolean }) {
+  const at = Math.max(0, choices.findIndex((c) => c.value === selected));
+  // Where the thumb is while it is held, so the step at the right follows it.
+  const [held, setHeld] = useState<number | null>(null);
+  const editing = useRef(false);
+  const last = useRef(at);
+  if (Platform.OS !== "ios" || choices.length < 2) return <MenuRow look={look} title={title} value={choices[at]?.label ?? ""} choices={choices} selected={selected} onPick={onPick} disabled={disabled} />;
+  const shown = choices[held ?? at];
+  const send = (i: number) => {
+    setHeld(null);
+    if (choices[i] && i !== at) onPick(choices[i].value);
+  };
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={title} style={{ paddingHorizontal: PAD, paddingVertical: 10, gap: 8 }}>
+    <View style={{ paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 6 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 11 }}>
         <Tile {...look} />
         <Txt variant="body" style={{ flex: 1 }}>
           {title}
         </Txt>
-        {busy && <Dots />}
-      </View>
-      {Platform.OS === "ios" ? (
-        <Host key={resets} style={{ marginLeft: TILE + 11, height: 34 }} matchContents={{ vertical: false, horizontal: false }}>
-          <Picker
-            selection={selected}
-            onSelectionChange={(v: string) => {
-              const c = choices.find((x) => x.value === v);
-              if (!c || c.off || busy || v === selected) return reset();
-              onPick(v);
-            }}
-            modifiers={[pickerStyle("segmented"), labelsHidden(), accessibilityLabel(title), ...(busy ? [off(true)] : [])]}
-          >
-            {choices.map((c) => (
-              <SwiftText key={c.value} modifiers={[tag(c.value), ...(c.off ? [foregroundStyle(colors.ink3), off(true)] : [])]}>
-                {c.label}
-              </SwiftText>
-            ))}
-          </Picker>
-        </Host>
-      ) : (
-      <View style={{ flexDirection: "row", marginLeft: TILE + 11, padding: 2, borderRadius: 10, backgroundColor: colors.wash }}>
-        {choices.map((c) => {
-          const on = c.value === selected;
-          const disabled = !!c.off || busy;
-          return (
-            <PressScale
-              key={c.value}
-              accessibilityRole="radio"
-              accessibilityLabel={c.label}
-              accessibilityHint={c.off ?? c.hint}
-              accessibilityState={{ selected: on, checked: on, disabled }}
-              disabled={disabled}
-              opacity={c.off ? 0.45 : 1}
-              haptic="select"
-              scaleTo={0.97}
-              onPress={() => !on && onPick(c.value)}
-              // Raised, as iOS draws the chosen segment: white by day, a lighter grey by night.
-              style={{ flex: 1, minHeight: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 6, backgroundColor: on ? (colors.isDark ? "#ffffff2e" : colors.card) : "transparent", shadowColor: "#000", shadowOpacity: on ? 0.12 : 0, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } }}
-            >
-              <Txt variant="small" tone={on ? "ink" : "ink2"} numberOfLines={1} style={{ fontWeight: on ? "700" : "600" }}>
-                {c.label}
-              </Txt>
-            </PressScale>
-          );
-        })}
-      </View>
-      )}
-      {!!under && (
-        <Txt variant="tiny" tone={why ? "cobalt" : "ink3"} style={{ marginLeft: TILE + 11 }}>
-          {under}
+        <Txt variant="body" tone="ink3">
+          {shown?.label}
         </Txt>
-      )}
+      </View>
+      <Host style={{ marginLeft: TILE + 11, height: 36 }}>
+        <Slider
+          value={held ?? at}
+          min={0}
+          max={choices.length - 1}
+          step={1}
+          modifiers={[accessibilityLabel(title), ...(disabled ? [off(true)] : [])]}
+          onEditingChanged={(on) => {
+            editing.current = on;
+            if (!on) send(last.current);
+          }}
+          onValueChange={(v) => {
+            const i = Math.round(v);
+            last.current = i;
+            if (editing.current) setHeld(i);
+            else send(i);
+          }}
+        />
+      </Host>
     </View>
   );
 }

@@ -14,7 +14,7 @@ import { ContextRow, UsageRow, WeekRow, WindowRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
-import { DangerButton, LOOKS, MenuRow, PendingRow, Segmented, SettingsSection, SheetHeader, type Choice } from "../ui/Settings";
+import { DangerButton, LOOKS, MenuRow, noteOf, PendingRow, SettingsSection, SheetHeader, SliderRow, type Choice, type Look } from "../ui/Settings";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
@@ -86,6 +86,12 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
   const next = useRef<(() => void) | null>(null);
   // What is chosen is what the chat says, or what it is switching to: a refused switch goes back on its own.
   const now = (kind: NonNullable<Switching>["kind"], value: string) => (switching?.kind === kind ? switching.to : value);
+  // Ask or Auto, Chat or Step by step: a menu, with what the chosen one does (or why one is off) under it, and Switching… while it does.
+  const choiceRow = ({ look, title, kind, choices, value, onPick }: { look: Look; title: string; kind: NonNullable<Switching>["kind"]; choices: Option[]; value: string; onPick: (v: string) => void }) => {
+    const selected = now(kind, value);
+    const busy = switching?.kind === kind;
+    return <MenuRow key={kind} look={look} title={title} value={busy ? "Switching…" : (choices.find((c) => c.value === selected)?.label ?? selected)} detail={noteOf(choices, selected, off)} choices={choices} selected={selected} onPick={onPick} disabled={busy} />;
+  };
   const providerName = configuration ? (providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider)) : null;
   const presetLabel = presets.find((p) => p.value === chat.preset)?.label ?? null;
   const model = configuration?.model ?? presetLabel;
@@ -117,16 +123,15 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
             ) : (
               <>
                 <SettingsSection label="How it runs">
-                  <Segmented look={LOOKS.permissions} title="Permissions" choices={modes} selected={now("mode", chat.permissions ?? "ask")} busy={switching?.kind === "mode"} onPick={onMode} quiet={off} />
-                  {workflows.length > 0 && <Segmented look={LOOKS.workflow} title="Workflow" choices={workflows} selected={now("workflow", chat.workflow ?? "chat")} busy={switching?.kind === "workflow"} onPick={onWorkflow} quiet={off} />}
+                  {choiceRow({ look: LOOKS.permissions, title: "Permissions", kind: "mode", choices: modes, value: chat.permissions ?? "ask", onPick: onMode })}
+                  {workflows.length > 0 && choiceRow({ look: LOOKS.workflow, title: "Workflow", kind: "workflow", choices: workflows, value: chat.workflow ?? "chat", onPick: onWorkflow })}
                 </SettingsSection>
                 <SettingsSection label="Model">
                   {configuring && <PendingRow look={LOOKS.provider} title="Provider" />}
                   {configuring && <PendingRow look={LOOKS.model} title="Model" />}
                   {configuration && onConfigure && !!providers?.length && <MenuRow look={LOOKS.provider} title="Provider" value={providerName ?? ""} choices={providers.map((p) => ({ value: p.id, label: p.name, off }))} selected={configuration.provider} onPick={(provider) => onConfigure({ provider })} disabled={!!off} />}
                   {configuration && onConfigure && models.length > 0 && <MenuRow look={LOOKS.model} title="Model" value={configuration.model ?? "Provider default"} choices={models} selected={configuration.model ?? ""} onPick={(m) => onConfigure({ model: m || null })} shown={6} moreLabel="Older models" disabled={!!off} />}
-                  {configuration && onConfigure && efforts.length > 0 && efforts.length <= 4 && <Segmented look={LOOKS.effort} title="Effort" choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} quiet={off} />}
-                  {configuration && onConfigure && efforts.length > 4 && <MenuRow look={LOOKS.effort} title="Effort" value={configuration.effort ? effortLabel(configuration.effort) : "Provider default"} choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} disabled={!!off} />}
+                  {configuration && onConfigure && efforts.length > 0 && <SliderRow look={LOOKS.effort} title="Effort" choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} disabled={!!off} />}
                   {presets.length > 0 && <MenuRow look={LOOKS.preset} title="Preset" value={switching?.kind === "preset" ? "Switching…" : (presetLabel ?? "Standard")} detail={presets.find((p) => p.value === now("preset", chat.preset ?? ""))?.hint} choices={presets} selected={now("preset", chat.preset ?? "")} onPick={onPreset} disabled={!!off || switching?.kind === "preset"} />}
                 </SettingsSection>
                 {hasUsage && (
@@ -141,7 +146,7 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
                 )}
                 {pages && (
                   <SettingsSection label="On this phone">
-                    <Segmented look={LOOKS.show} title="Show" choices={SHOW} selected={pages.on ? "pages" : "list"} onPick={(v) => pages.onChange(v === "pages")} />
+                    <MenuRow look={LOOKS.show} title="Show" value={pages.on ? "Pages" : "One list"} detail={noteOf(SHOW, pages.on ? "pages" : "list")} choices={SHOW} selected={pages.on ? "pages" : "list"} onPick={(v) => pages.onChange(v === "pages")} />
                   </SettingsSection>
                 )}
                 {onAskClose && (
