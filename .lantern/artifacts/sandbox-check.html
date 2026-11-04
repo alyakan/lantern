@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sandbox check</title>
+<link rel="stylesheet" href="lantern.css">
+<style>
+  body { max-width: 640px; }
+  h1 { margin-top: 0; }
+  .row { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line, #ddd); }
+  .row:last-child { border-bottom: none; }
+  .mark { width: 18px; font-weight: 700; }
+  .ok { color: var(--add, #1a7f37); }
+  .bad { color: var(--del, #cf222e); }
+  .muted { color: var(--muted, #888); font-size: 12px; }
+  .name { flex: 1; font-family: var(--mono, monospace); font-size: 12px; }
+  .tl { display: flex; gap: 8px; margin: 14px 0 4px; flex-wrap: wrap; }
+  .step { padding: 6px 10px; border: 1px solid var(--line-strong, #ccc); border-radius: var(--radius-md, 8px); background: var(--bg-subtle, #f3f3f5); font-size: 12px; }
+  .step b { display: block; font-size: 11px; color: var(--muted, #888); font-weight: 600; }
+  .bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 90px; margin-top: 10px; }
+  .bar { border-radius: 4px 4px 0 0; }
+</style>
+</head>
+<body>
+<h1>Sandbox check</h1>
+<p class="muted">This page runs inside the Artifacts frame. The list below is measured live by a script on this page, so a green mark means it ran here, in the real app.</p>
+
+<div id="checks"></div>
+
+<h2>Theme</h2>
+<p class="muted">The seven bars use the app's chart colours (<code>--series-1…7</code>) from <code>lantern.css</code>. Switch the app's theme or dark mode and they change with it.</p>
+<div class="bars" id="bars"></div>
+
+<h2>Tonight</h2>
+<div class="tl">
+  <div class="step"><b>#318</b>Artifacts tab</div>
+  <div class="step"><b>#319</b>iPad Return sends</div>
+  <div class="step"><b>TestFlight 58</b>uploaded, tagged</div>
+  <div class="step"><b>#321</b>release PR merged</div>
+  <div class="step"><b>v0.1.82</b>published, installed</div>
+</div>
+
+<script>
+const checks = [
+  ["This page's scripts run", () => true, true],
+  ["No Tauri API (window.__TAURI__)", () => typeof window.__TAURI__ === "undefined", true],
+  ["No Tauri internals (window.__TAURI_INTERNALS__)", () => typeof window.__TAURI_INTERNALS__ === "undefined", true],
+  ["No WebRTC (RTCPeerConnection)", () => typeof RTCPeerConnection === "undefined", true],
+  ["Can't read the app (parent.document)", () => { try { void parent.document.body; return false; } catch (e) { return true; } }, true],
+  ["Can't store data (localStorage)", () => { try { localStorage.setItem("x", "1"); return false; } catch (e) { return true; } }, true],
+  ["Theme reached the page (lantern.css)", () => getComputedStyle(document.documentElement).getPropertyValue("--text").trim() !== "", true],
+];
+const box = document.getElementById("checks");
+for (const [name, test, want] of checks) {
+  let pass = false;
+  try { pass = test() === want; } catch (e) {}
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<span class="mark ${pass ? "ok" : "bad"}">${pass ? "✓" : "✗"}</span><span class="name"></span>`;
+  row.querySelector(".name").textContent = name;
+  box.append(row);
+}
+// The one that needs the network: it must fail.
+fetch("https://example.com/").then(
+  () => add("Can't reach the internet (fetch)", false),
+  () => add("Can't reach the internet (fetch)", true),
+);
+function add(name, pass) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.innerHTML = `<span class="mark ${pass ? "ok" : "bad"}">${pass ? "✓" : "✗"}</span><span class="name"></span>`;
+  row.querySelector(".name").textContent = name;
+  box.append(row);
+}
+const heights = [40, 62, 48, 80, 55, 70, 35];
+document.getElementById("bars").innerHTML = heights.map((h, i) => `<div class="bar" style="height:${h}px;background:var(--series-${i + 1}, #888)"></div>`).join("");
+</script>
+</body>
+</html>

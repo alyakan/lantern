@@ -37,11 +37,11 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     expect(deskButton()).toHaveAttribute("aria-pressed", "true");
-    // Ask is the right pane, and its button puts it away and back.
-    expect(within(ask()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
+    // Ask is a sheet: the title bar's panel button opens it, and puts it away again.
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    expect(within(await screen.findByRole("region", { name: "Ask" })).getByText(/Nothing asked here yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
+    await waitFor(() => expect(ask()).toBeNull());
     // The Desk has the chat's project, whose tile drops the chat down.
     const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
@@ -77,7 +77,10 @@ describe("the Desk in the app", () => {
     fireEvent.click(within(within(desk()!).getByRole("region", { name: "Projects" })).getByRole("button", { name: "acme-api" }));
     const page = () => screen.getByRole("region", { name: "Project acme-api" });
     expect(within(page()).getByRole("heading", { name: "acme-api" })).toBeInTheDocument();
+    await openAsk();
     expect(within(ask()!).getByRole("heading", { name: "Ask about acme-api" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Ask" }));
+    await waitFor(() => expect(ask()).toBeNull());
     // Its worktrees, with the Storage scan's word on each once it has scanned.
     const wts = await within(page()).findByRole("region", { name: "Worktrees" });
     fireEvent.click(await within(wts).findByRole("button", { name: "Scan now" }));
@@ -88,10 +91,17 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(page()).toBeInTheDocument());
     fireEvent.click(within(page()).getByRole("button", { name: "‹ All projects" }));
     await waitFor(() => expect(within(desk()!).getByRole("region", { name: "Projects" })).toBeInTheDocument());
+    await openAsk();
     expect(within(ask()!).getByRole("heading", { name: "Ask" })).toBeInTheDocument();
   });
 
+  const openAsk = async () => {
+    if (!ask()) fireEvent.click(screen.getByRole("button", { name: /^Ask (across|about)/ }));
+    return screen.findByRole("region", { name: "Ask" });
+  };
+
   const type = async (text: string) => {
+    await openAsk();
     const box = await screen.findByRole("textbox", { name: "Tell Lantern" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeDisabled());
     fireEvent.change(box, { target: { value: text } });
@@ -121,6 +131,7 @@ describe("the Desk in the app", () => {
     const { default: App } = await import("./App");
     render(<App startOnDesk />);
     await waitFor(() => expect(desk()).toBeInTheDocument());
+    await openAsk();
     const to = screen.getByRole("combobox", { name: "Send to" });
     const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
     fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
@@ -155,6 +166,7 @@ describe("the Desk in the app", () => {
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
+    await openAsk();
     const to = screen.getByRole("combobox", { name: "Send to" });
     const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
     fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });

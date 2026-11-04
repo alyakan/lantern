@@ -32,6 +32,8 @@ export interface DeskViewProps {
   onStep: (item: WorkItem, target: Target) => boolean;
   /** Asks git, GitHub and Linear again now (Your work's Refresh). */
   onRefreshRepos: () => void;
+  /** Opens the Ask sheet: the message box that asks across projects (or about the page's one). */
+  onAsk: () => void;
   /** What Linear says of your issues, and the Linear team each repository's work is in (by its main checkout). */
   linear?: { work: LinearWork | null; teamOf: Record<string, string> };
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
@@ -226,6 +228,12 @@ export function DeskView(props: DeskViewProps) {
           </div>
         )}
       </div>
+      <button className="desk-ask-bar" onClick={props.onAsk} aria-label={pageRow ? `Ask about ${pageRow.label}` : "Ask across your projects"}>
+        <span>{pageRow ? `Ask about ${pageRow.label}…` : "Ask across your projects…"}</span>
+        <span className="desk-ask-key" aria-hidden>
+          ⌘J
+        </span>
+      </button>
     </section>
   );
 }

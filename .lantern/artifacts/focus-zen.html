@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Focus mode: zen</title>
+<link rel="stylesheet" href="lantern.css">
+<style>
+  body { margin: 0; padding: 28px; font-family: var(--ui, -apple-system, system-ui, sans-serif); color: var(--text, #1d1d1f); background: var(--bg, #f5f5f2); line-height: 1.5; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 13px; margin: 44px 0 6px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted, #888); font-weight: 600; }
+  p.lead, p.note { color: var(--muted, #666); max-width: 760px; margin: 0 0 16px; font-size: 14px; }
+  .row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .frame { border: 1px solid var(--line, #e2e2e2); border-radius: 14px; overflow: hidden; background: var(--pane, #fff); box-shadow: 0 10px 40px rgba(0,0,0,.07); position: relative; }
+  .mac { width: 880px; height: 560px; display: flex; flex-direction: column; }
+  .top { height: 38px; display: flex; align-items: center; padding: 0 14px; gap: 7px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #e6e6e6; }
+  .whisper { flex: 1; text-align: center; font-size: 12px; color: #b5b5b5; letter-spacing: .02em; }
+  .col { width: 560px; margin: 0 auto; flex: 1; display: flex; flex-direction: column; gap: 22px; padding-top: 36px; font-size: 15px; }
+  .you { color: #999; }
+  .claude { color: var(--text, #222); }
+  code { font-family: var(--mono, ui-monospace, monospace); font-size: 13px; background: rgba(0,0,0,.04); padding: 1px 5px; border-radius: 5px; }
+  .line { width: 560px; margin: 0 auto 26px; border-bottom: 1px solid var(--line, #e6e6e6); padding: 8px 0; font-size: 15px; color: #bbb; }
+  .hint { position: absolute; bottom: 8px; right: 14px; font-size: 11px; color: #ccc; }
+  kbd { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line, #ddd); color: #999; }
+  .breathe { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #9a8ae0; margin-right: 8px; vertical-align: middle; animation: b 3s ease-in-out infinite; }
+  @keyframes b { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .breathe { animation: none; } }
+
+  .scrim { position: absolute; inset: 0; background: rgba(250,250,248,.75); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; }
+  .float { width: 460px; font-size: 15px; }
+  .float .in { font-size: 20px; padding: 8px 0 12px; border-bottom: 1px solid var(--line, #ddd); }
+  .float .sub { font-size: 12.5px; color: #999; margin-top: 10px; }
+  .list { font-size: 15px; }
+  .list div { padding: 9px 0; color: #999; }
+  .list .on { color: var(--text, #222); }
+  .list .on::before { content: "› "; color: #9a8ae0; }
+  .ask { width: 420px; font-size: 15px; }
+  .ask p { margin: 0 0 16px; }
+  .choices { display: flex; gap: 22px; font-size: 14px; }
+  .choices span { color: #999; } .choices b { color: var(--text, #222); font-weight: 600; }
+
+  .phone { width: 280px; height: 560px; border-radius: 40px; border: 10px solid #1d1d1f; background: var(--pane, #fff); display: flex; flex-direction: column; position: relative; overflow: hidden; }
+  .phone .whisper { padding: 40px 0 0; flex: none; }
+  .phone .col { width: auto; padding: 30px 22px 0; font-size: 14px; gap: 18px; }
+  .phone .line { width: auto; margin: 0 22px 34px; font-size: 14px; }
+  ul { max-width: 760px; padding-left: 18px; } li { font-size: 14px; margin-bottom: 7px; }
+  .gone { color: #999; }
+</style>
+</head>
+<body>
+
+<h1>Focus, zen version</h1>
+<p class="lead">The first sketch added more UI. This one takes UI away. While you're in a Focus, Lantern is one chat and one line to type in. No sidebar, no tabs, no slots, no badges. Everything else is a keystroke away and gone again when you're done.</p>
+
+<h2>The whole window</h2>
+<div class="row">
+  <div class="frame mac">
+    <div class="top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="whisper"><span class="breathe"></span>Testo pairing</span></div>
+    <div class="col">
+      <div class="you">the pairing sheet still flashes on iPad, can you look?</div>
+      <div class="claude">Found it. The sheet mounts again when AccessorySetupKit returns, so it animates in twice. Moving the presentation into <code>PairingSheet.swift</code>'s parent fixes it. Two lines.</div>
+    </div>
+    <div class="line">Reply…</div>
+    <div class="hint"><kbd>⌘K</kbd></div>
+  </div>
+</div>
+<p class="note" style="margin-top:12px">The only chrome is the chat's name at the top. The dot breathes while Claude works. Diffs, approvals and questions still show up inline in the chat, because they need you. Changes, Files and the rest open with a key and close again.</p>
+
+<h2>⌘K: everything else, one at a time</h2>
+<div class="row">
+  <div class="frame mac">
+    <div class="top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="whisper">Testo pairing</span></div>
+    <div class="scrim">
+      <div class="float">
+        <div class="in">che</div>
+        <div class="list">
+          <div class="on">Checklist crash <span style="color:#c96">· needs you</span></div>
+          <div>Changes in this chat</div>
+          <div>New chat in ios-app</div>
+        </div>
+        <div class="sub">Only Lumiform's chats exist here. Nahar, Lantern and the rest don't show up, even by search.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>An idea: ⌥Space, type, gone</h2>
+<div class="row">
+  <div class="frame mac">
+    <div class="top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="whisper">Testo pairing</span></div>
+    <div class="scrim">
+      <div class="float">
+        <div class="in">nahar: drag blocks between days</div>
+        <div class="sub">⏎ saves it for Nahar. You'll see it next time Nahar is your focus.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="note" style="margin-top:12px">No confirmation card and no counter. It just disappears. The only proof it was saved is that it's there later.</p>
+
+<h2>When a Focus starts</h2>
+<div class="row">
+  <div class="frame mac">
+    <div class="top"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="whisper"></span></div>
+    <div class="scrim" style="background:rgba(250,250,248,.9)">
+      <div class="ask">
+        <p>Lumiform until 18:00.</p>
+        <p style="color:#888">Nahar · Week view is still working.</p>
+        <div class="choices"><b>Let it finish ⏎</b><span>Pause it</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="note" style="margin-top:12px">Asked once per working chat, then the window fades to the zen view. When the Focus ends, one quiet screen shows what finished and which ideas are waiting.</p>
+
+<h2>Phone and iPad</h2>
+<div class="row">
+  <div class="phone">
+    <div class="whisper"><span class="breathe"></span>Testo pairing</div>
+    <div class="col">
+      <div class="you">the pairing sheet still flashes on iPad</div>
+      <div class="claude">Found it. Two lines in PairingSheet.swift.</div>
+    </div>
+    <div class="line">Reply…</div>
+  </div>
+  <div style="max-width:380px;font-size:14px;color:#666">
+    <p style="margin-top:0">Same idea: the phone opens straight into the chat you were in. Swipe down for the focus's other chats. Hold the reply line for an idea.</p>
+    <p>Notifications only come for this Focus's chats when they need you (an approval or a question). "Done" pings wait until the Focus ends.</p>
+  </div>
+</div>
+
+<h2>What goes away during a Focus</h2>
+<ul>
+  <li class="gone">The sidebar, the chat list, and other projects (not even searchable)</li>
+  <li class="gone">The tab bar (Changes, Files, Activity, Tests, Network, Artifacts): one key opens one</li>
+  <li class="gone">Usage meters, badges, the background-task count, the "N asleep" line</li>
+  <li class="gone">The topic-slot meter: the limit only speaks up when you try to start one too many</li>
+  <li class="gone">Notifications from other projects, and "done" pings from this one</li>
+</ul>
+
+</body>
+</html>

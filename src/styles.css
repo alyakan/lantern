@@ -4099,3 +4099,13 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-pulse b { color: var(--text); font-weight: 600; }
 .desk-pulse > span:not(.pulse-lead) + span:not(.pulse-lead)::before { content: "·"; margin-right: 10px; color: var(--muted); }
 .desk-pulse .pulse-bad { color: var(--del); }
+
+/* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
+.app-main { position: relative; }
+.desk-ask-bar { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 24px 16px; height: 44px; padding: 0 14px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--card-shadow); }
+.desk-ask-bar:hover { color: var(--text-2); }
+.desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
+.desk-ask-sheet { position: relative; width: min(980px, 100%); height: min(72%, 620px); display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--shadow); }
+.desk-ask-sheet .desk-side { flex: 1; min-height: 0; }
+.desk-ask-close { position: absolute; top: 8px; right: 10px; z-index: 2; width: 24px; height: 24px; border: none; background: none; color: var(--muted-text); font-size: calc(16px * var(--font-scale)); }

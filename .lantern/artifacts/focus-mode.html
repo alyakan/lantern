@@ -1,0 +1,281 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Focus mode: sketch</title>
+<link rel="stylesheet" href="lantern.css">
+<style>
+  body { margin: 0; padding: 28px; font-family: var(--ui, -apple-system, system-ui, sans-serif); color: var(--text, #1d1d1f); background: var(--bg, #f5f5f2); line-height: 1.45; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 14px; margin: 40px 0 6px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #777); }
+  p.lead { margin: 0 0 18px; color: var(--muted, #666); max-width: 780px; }
+  p.note { font-size: 13px; color: var(--muted, #666); max-width: 780px; margin: 0 0 14px; }
+  .row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .frame { border: 1px solid var(--line, #ddd); border-radius: 14px; overflow: hidden; background: var(--pane, #fff); box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+  .mac { width: 880px; height: 560px; display: flex; flex-direction: column; }
+  .titlebar { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--line, #e3e3e3); font-size: 12px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #e0e0e0; }
+  .macbody { flex: 1; display: flex; min-height: 0; }
+  .side { width: 230px; border-right: 1px solid var(--line, #e3e3e3); padding: 10px 8px; font-size: 13px; background: rgba(0,0,0,.02); display: flex; flex-direction: column; }
+  .side .item { padding: 6px 9px; border-radius: 8px; display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  .side .sel { background: rgba(59,91,219,.12); }
+  .side .label { font-size: 11px; color: var(--muted, #888); text-transform: uppercase; letter-spacing: .05em; margin: 14px 9px 6px; display: flex; justify-content: space-between; }
+  .asleep { margin-top: auto; border-top: 1px dashed var(--line, #ddd); padding: 10px 9px 4px; font-size: 12px; color: var(--muted, #888); }
+  .asleep b { color: var(--text, #333); font-weight: 600; }
+  .st { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .working { background: #f0a020; } .waiting { background: #e5484d; } .idle { background: #bbb; }
+
+  .focusbar { display: flex; align-items: center; gap: 12px; padding: 9px 16px; border-bottom: 1px solid var(--line, #eee); background: linear-gradient(90deg, rgba(124,92,255,.10), rgba(124,92,255,0)); font-size: 13px; }
+  .fpill { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; padding: 4px 11px; border-radius: 999px; background: #6e56cf; color: #fff; font-size: 12px; }
+  .slots { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted, #777); }
+  .slot { width: 16px; height: 8px; border-radius: 3px; background: #6e56cf; }
+  .slot.free { background: transparent; border: 1.5px solid #b8a9f0; }
+  .spacer { flex: 1; }
+  .ghost { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line, #ddd); color: var(--muted, #666); }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+  .chat { flex: 1; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+  .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line, #e6e6e6); background: var(--pane, #fff); }
+  .me { align-self: flex-end; background: #1d1d1f; color: #fff; border: 0; border-radius: 16px 16px 4px 16px; }
+  .box { margin: 0 16px 14px; border: 1px solid var(--line, #ddd); border-radius: 14px; padding: 10px 12px; font-size: 13px; color: var(--muted, #888); display: flex; gap: 8px; align-items: center; }
+  kbd { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line, #ccc); background: rgba(0,0,0,.03); }
+
+  /* idea catcher overlay */
+  .catcher { position: absolute; left: 50%; top: 120px; transform: translateX(-50%); width: 480px; border-radius: 16px; background: var(--pane, #fff); border: 1px solid var(--line, #ddd); box-shadow: 0 24px 60px rgba(0,0,0,.22); padding: 14px; font-size: 13px; }
+  .catcher .input { font-size: 15px; padding: 6px 4px 10px; border-bottom: 1px solid var(--line, #eee); color: var(--text, #222); }
+  .catcher .input .bulb { margin-right: 6px; }
+  .catcher .guess { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12.5px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 650; padding: 2px 9px; border-radius: 999px; background: rgba(59,91,219,.1); color: var(--accent, #3b5bdb); }
+  .chip.off { background: rgba(0,0,0,.06); color: var(--muted, #666); }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btn { font-size: 12px; font-weight: 650; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line, #ddd); background: var(--pane, #fff); }
+  .btn.primary { background: #6e56cf; color: #fff; border-color: #6e56cf; }
+  .small { font-size: 11.5px; color: var(--muted, #888); margin-top: 8px; }
+
+  /* cards */
+  .card { border: 1px solid var(--line, #e3e3e3); border-radius: 14px; padding: 14px 16px; background: var(--pane, #fff); font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+  .card h3 { margin: 0 0 8px; font-size: 14px; }
+  .w360 { width: 360px; } .w420 { width: 420px; } .w300 { width: 300px; }
+  .sched { display: flex; flex-direction: column; gap: 8px; }
+  .srow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(0,0,0,.03); }
+  .srow .when { width: 110px; font-size: 12px; color: var(--muted, #666); }
+  .srow .what { font-weight: 650; flex: 1; }
+  .toggle { width: 30px; height: 18px; border-radius: 999px; background: #6e56cf; position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .toggle.offt { background: #ccc; } .toggle.offt::after { right: auto; left: 2px; }
+  .field { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line, #eee); }
+  .field:last-child { border-bottom: 0; }
+  .val { color: var(--muted, #666); }
+  .idea { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line, #eee); align-items: flex-start; }
+  .idea:last-child { border-bottom: 0; }
+  .idea .t { flex: 1; } .idea .age { font-size: 11px; color: var(--muted, #999); }
+  .warn { border-color: rgba(110,86,207,.5); }
+
+  /* phone */
+  .phone { width: 300px; height: 600px; border-radius: 40px; border: 10px solid #1d1d1f; background: var(--pane, #fff); display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+  .pstatus { height: 30px; display: flex; justify-content: space-between; padding: 6px 22px 0; font-size: 12px; font-weight: 650; }
+  .phead { padding: 6px 16px 10px; }
+  .phead .big { font-size: 26px; font-weight: 800; }
+  .plist { flex: 1; padding: 0 10px; }
+  .pchat { padding: 10px 8px; border-bottom: 1px solid var(--line, #eee); display: flex; gap: 10px; align-items: center; }
+  .pchat .t { flex: 1; } .pchat .t div:last-child { font-size: 11.5px; color: var(--muted, #888); }
+  .pasleep { margin: 10px 8px; padding: 10px; border-radius: 12px; background: rgba(0,0,0,.04); font-size: 12px; color: var(--muted, #777); }
+  .pbar { margin: 10px; padding: 10px 12px; border-radius: 22px; border: 1px solid var(--line, #ddd); display: flex; justify-content: space-between; color: var(--muted, #999); }
+  .notif { width: 300px; border-radius: 18px; padding: 10px 12px; background: rgba(255,255,255,.85); backdrop-filter: blur(10px); border: 1px solid var(--line, #ddd); font-size: 12.5px; box-shadow: 0 6px 20px rgba(0,0,0,.1); }
+  .notif.held { opacity: .45; text-decoration: line-through; }
+
+  ol.build li, ul.q li { margin-bottom: 6px; font-size: 13.5px; }
+  .tagline { font-size: 12px; font-weight: 700; color: #6e56cf; text-transform: uppercase; letter-spacing: .06em; }
+</style>
+</head>
+<body>
+
+<div class="tagline">Brainstorm sketch, not a spec</div>
+<h1>Focus mode</h1>
+<p class="lead">One rule: while a Focus is on, Lantern only <i>has</i> the projects in it. Everything else is asleep, silent, and out of sight on the Mac, the phone and the iPad. Ideas for asleep projects still get caught in two seconds and wait for you, so switching focus never means losing a thought.</p>
+<p class="note">It sits on top of Desks, which already exist: a Desk is a named set of projects. A Focus is just "a Desk, locked, on a schedule". So "Lumiform" (ios-app, lumiform-*) during work hours, "Side projects" (Lantern, Nahar, Typewright…) in the evening.</p>
+
+<!-- ============ 1. Mac while focused ============ -->
+<h2>1 · The Mac while Focus is on</h2>
+<p class="note">Sidebar shows only the Focus's projects. The rest collapse into one quiet line at the bottom. The focus bar shows what you're in, until when, and your topic slots.</p>
+<div class="row">
+  <div class="frame mac">
+    <div class="titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:10px;color:#888">Lantern</span></div>
+    <div class="macbody">
+      <div class="side">
+        <div class="label"><span>Lumiform</span><span>Focus</span></div>
+        <div class="item sel"><span class="st working"></span>ios-app · Testo pairing</div>
+        <div class="item"><span class="st waiting"></span>ios-app · Checklist crash</div>
+        <div class="item"><span class="st idle"></span>lumiform-api · PR review</div>
+        <div class="label"><span>Ideas for this focus</span><span>2</span></div>
+        <div class="item" style="color:#888">💡 Offline photo queue</div>
+        <div class="item" style="color:#888">💡 Snapshot tests for forms</div>
+        <div class="asleep">
+          <b>4 projects asleep</b> until 18:00<br>
+          Lantern, Nahar, Typewright, FuelFox<br>
+          <span style="color:#6e56cf">7 ideas parked · 2 chats finished quietly</span>
+        </div>
+      </div>
+      <div class="main">
+        <div class="focusbar">
+          <span class="fpill">◐ Focus · Lumiform</span>
+          <span style="color:#777">until 18:00</span>
+          <span class="slots">Topics <span class="slot"></span><span class="slot"></span><span class="slot free"></span> 2 of 3</span>
+          <span class="spacer"></span>
+          <span class="ghost">💡 Idea <kbd>⌥ Space</kbd></span>
+          <span class="ghost">Step out…</span>
+        </div>
+        <div class="chat">
+          <div class="msg me">the pairing sheet still flashes on iPad, can you look?</div>
+          <div class="msg">Found it: the sheet re-mounts when AccessorySetupKit returns. Fix is in <code>PairingSheet.swift</code>, two lines…</div>
+        </div>
+
+        <div class="catcher">
+          <div class="input"><span class="bulb">💡</span>nahar: let the week view drag blocks between days</div>
+          <div class="guess">Goes to <span class="chip">Nahar</span> <span class="chip off">asleep</span> · its Ideas list</div>
+          <div class="btns">
+            <span class="btn primary">Park it ⏎</span>
+            <span class="btn">Change project</span>
+            <span class="btn">Start it now (leaves focus)</span>
+          </div>
+          <div class="small">No chat starts, nothing runs. It shows up when Nahar is in focus again.</div>
+        </div>
+
+        <div class="box">Message ios-app · Testo pairing…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 2. Idea catcher ============ -->
+<h2>2 · Catching an idea without starting it</h2>
+<p class="note">The urge is "build it right now". The catcher answers it with something that feels like progress but costs nothing: the idea is written down, filed in the right project, and you're back in your chat in two seconds.</p>
+<div class="row">
+  <div class="card w360">
+    <h3>Where you can jot from</h3>
+    <div class="field"><span><kbd>⌥ Space</kbd> anywhere on the Mac</span><span class="val">global hotkey</span></div>
+    <div class="field"><span>The 💡 button in the focus bar</span><span class="val">Mac</span></div>
+    <div class="field"><span>Long-press the chat bar</span><span class="val">phone / iPad</span></div>
+    <div class="field"><span>Dictation on the phone</span><span class="val">"idea for Nahar…"</span></div>
+    <div class="field"><span>Typed into the Desk box</span><span class="val">router sees it's off-focus</span></div>
+  </div>
+  <div class="card w360">
+    <h3>Where it goes</h3>
+    <p style="margin:0 0 8px">Into that project's to-do list (already built), marked 💡 so ideas and real to-dos don't mix. The Desk's Haiku router guesses the project; you can fix it with one tap. If it's a brand-new project idea, it goes to an <b>Inbox</b>.</p>
+    <p style="margin:0;color:#777">Optional: Claude can add a one-line "what this might take" under the idea later, when the project is back in focus, never now.</p>
+  </div>
+  <div class="card w360">
+    <h3>When you switch focus to Nahar</h3>
+    <div class="idea"><span>💡</span><span class="t">Drag blocks between days in the week view</span><span class="age">today</span></div>
+    <div class="idea"><span>💡</span><span class="t">Token usage in settings</span><span class="age">2 days</span></div>
+    <div class="idea"><span>💡</span><span class="t">Widget with the NOW block</span><span class="age">1 week</span></div>
+    <div class="btns"><span class="btn primary">Start a chat from one</span><span class="btn">Keep</span><span class="btn">Drop old ones</span></div>
+  </div>
+</div>
+
+<!-- ============ 3. Topic limit ============ -->
+<h2>3 · The topic limit</h2>
+<p class="note">A topic is one chat, by default. That's dumb on purpose: no agent has to decide what counts as "the same thing", so nothing gets misread. The Desk router can still say "this sounds like your Testo chat, send it there?" before you open a new one.</p>
+<div class="row">
+  <div class="card w420 warn">
+    <h3>You're at 3 of 3 topics</h3>
+    <p style="margin:0 0 10px;color:#555">Starting "Snapshot tests for forms" would be a 4th thing in your head.</p>
+    <div class="btns" style="flex-wrap:wrap">
+      <span class="btn primary">Park it as an idea</span>
+      <span class="btn">Put "PR review" to sleep</span>
+      <span class="btn">It's part of "Checklist crash"</span>
+      <span class="btn">Go over, just this once</span>
+    </div>
+    <div class="small">"Go over" is allowed. It's counted, and shows in the end-of-focus recap. No guilt, just a mirror.</div>
+  </div>
+  <div class="card w360">
+    <h3>What frees a slot</h3>
+    <div class="field"><span>Chat closed or put to sleep</span><span class="val">frees it</span></div>
+    <div class="field"><span>PR merged from that chat</span><span class="val">frees it</span></div>
+    <div class="field"><span>Idle for 2h with nothing waiting</span><span class="val">asks: still on it?</span></div>
+    <div class="field"><span>Subagents, workers, background tasks</span><span class="val">don't count</span></div>
+  </div>
+</div>
+
+<!-- ============ 4. Settings ============ -->
+<h2>4 · Settings: schedule, and getting out</h2>
+<div class="row">
+  <div class="card w420">
+    <h3>Focus schedule</h3>
+    <div class="sched">
+      <div class="srow"><span class="when">Mon–Thu 9–18</span><span class="what">Lumiform</span><span class="val">3 topics</span><span class="toggle"></span></div>
+      <div class="srow"><span class="when">Fri 9–14</span><span class="what">Lumiform</span><span class="val">2 topics</span><span class="toggle"></span></div>
+      <div class="srow"><span class="when">Evenings</span><span class="what">Side projects</span><span class="val">2 topics</span><span class="toggle"></span></div>
+      <div class="srow"><span class="when">After 23:30</span><span class="what">Wind down</span><span class="val">ideas only</span><span class="toggle offt"></span></div>
+    </div>
+    <div class="small">Outside any slot, no Focus: everything is visible, like today.</div>
+  </div>
+  <div class="card w360">
+    <h3>Pause the schedule</h3>
+    <div class="field"><span>Vacation</span><span class="val">until Nov 14 · Side projects only</span></div>
+    <div class="field"><span>Today only</span><span class="val">sick day / day off</span></div>
+    <div class="field"><span>Follow macOS Focus</span><span class="val">"Work" Focus → Lumiform</span></div>
+    <div class="small">macOS Focus filters could switch it for you, so iPhone, Mac and Lantern agree.</div>
+  </div>
+  <div class="card w300">
+    <h3>Step out…</h3>
+    <div class="field"><span>Why?</span><span class="val">"prod bug in Lantern"</span></div>
+    <div class="field"><span>For</span><span class="val"><b>15 min</b> · 1 h · rest of day</span></div>
+    <div class="small">Shows the asleep projects for that long, then snaps back. A small timer sits in the focus bar while you're out.</div>
+  </div>
+</div>
+
+<!-- ============ 5. Phone ============ -->
+<h2>5 · Phone and iPad</h2>
+<p class="note">The Mac decides; the phone follows. The Mac simply doesn't send asleep projects' chats, cards, pushes or Live Activities, so it works even on an old build and nothing leaks through a notification.</p>
+<div class="row">
+  <div class="phone">
+    <div class="pstatus"><span>14:32</span><span>◐</span></div>
+    <div class="phead">
+      <div class="big">Lumiform</div>
+      <span class="fpill" style="font-size:11px">◐ Focus until 18:00 · 2 of 3</span>
+    </div>
+    <div class="plist">
+      <div class="pchat"><span class="st working"></span><div class="t"><div>Testo pairing</div><div>ios-app · working</div></div></div>
+      <div class="pchat"><span class="st waiting"></span><div class="t"><div>Checklist crash</div><div>ios-app · needs you</div></div></div>
+      <div class="pchat"><span class="st idle"></span><div class="t"><div>PR review</div><div>lumiform-api</div></div></div>
+      <div class="pasleep">4 projects asleep until 18:00 · 7 ideas parked</div>
+    </div>
+    <div class="pbar"><span>Message…</span><span>💡 hold</span></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="notif"><b>Lantern · ios-app</b><br>Checklist crash needs your OK to run tests</div>
+    <div class="notif held"><b>Lantern · Nahar</b><br>Week view done, 3 files changed</div>
+    <div class="notif held"><b>Lantern · Lantern</b><br>CI passed on #347</div>
+    <div class="small" style="max-width:300px">Asleep projects' notifications are held, then come as one digest when the focus ends: "While you were on Lumiform: Nahar finished 1 chat, Lantern CI passed."</div>
+    <div class="card w300" style="margin-top:6px">
+      <h3>End of focus</h3>
+      <div class="field"><span>Topics touched</span><span class="val">3</span></div>
+      <div class="field"><span>Ideas parked</span><span class="val">5 (3 Lantern, 2 Nahar)</span></div>
+      <div class="field"><span>Stepped out</span><span class="val">once, 15 min</span></div>
+      <div class="field"><span>Went over the limit</span><span class="val">0</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 6. Open questions ============ -->
+<h2>6 · Things to decide</h2>
+<ul class="q">
+  <li><b>Decided:</b> when a Focus starts and an out-of-focus chat is still working, Lantern asks each time: "Nahar · Week view is still working. Let it finish quietly, or pause it?"</li>
+  <li>Can Claude in a focused chat touch an asleep project's files? Probably yes, Focus is about your attention, not a sandbox.</li>
+  <li>Friction for stepping out: a reason + a timer (shown here), or a plain button?</li>
+  <li>Topic = chat, or let the Desk router group chats into topics and you confirm?</li>
+</ul>
+
+<h2>Rough build order</h2>
+<ol class="build">
+  <li>Mac: a Focus = a Desk + a lock; sidebar hides the rest; focus bar; manual on/off.</li>
+  <li>Idea catcher: hotkey + 💡 to-dos per project + the "ideas waiting" sheet on switch.</li>
+  <li>Schedule, pause/vacation, step-out timer.</li>
+  <li>Mac filters what it sends the phone (chats, pushes, Live Activities) + digest.</li>
+  <li>Topic slots and the "3 of 3" card.</li>
+  <li>Maybe: follow macOS Focus.</li>
+</ol>
+
+</body>
+</html>

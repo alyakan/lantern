@@ -52,6 +52,8 @@ const CATALOGUE = [
   { id: "focus-input", title: "Focus the Message Box", group: "Chat", key: "l" },
   // A quick question about the chat, answered apart from it (see SideChat.tsx).
   { id: "side-chat", title: "Ask a Side Question…", group: "Chat", key: "b" },
+  // The Desk's Ask, across every project: a sheet over the board, rather than a third of the window taken for good.
+  { id: "ask-desk", title: "Ask Across Projects…", group: "Chat", key: "j" },
   { id: "stop", title: "Stop Claude", group: "Chat", key: "." },
   // In the palette (and the Done page and the Changes tab's Ship it…): no shortcut and no native menu item.
   { id: "ship-it", title: "Ship It…", group: "Chat" },

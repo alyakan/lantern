@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Focus: full screen, top bar slides away</title>
+<link rel="stylesheet" href="lantern.css">
+<style>
+  body { margin: 0; padding: 28px; font-family: var(--ui, -apple-system, system-ui, sans-serif); color: var(--text, #1d1d1f); background: var(--bg, #f5f5f2); line-height: 1.45; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead, p.note { color: var(--muted, #666); max-width: 800px; margin: 0 0 16px; font-size: 14px; }
+  .controls { display: flex; gap: 10px; margin: 0 0 14px; }
+  .controls button { font: inherit; font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line, #ccc); background: var(--pane, #fff); color: var(--text, #222); cursor: pointer; }
+  .controls button.primary { background: var(--accent, #3b5bdb); color: #fff; border-color: transparent; }
+
+  .win { width: 960px; height: 580px; border: 1px solid var(--line, #ddd); border-radius: 12px; overflow: hidden; background: var(--pane, #fff); box-shadow: 0 10px 40px rgba(0,0,0,.08); display: flex; flex-direction: column; position: relative; }
+  .topbar { height: 40px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 78px; border-bottom: 1px solid var(--line, #e4e4e4); font-size: 12.5px; transition: margin-top .32s cubic-bezier(.2,.8,.2,1), opacity .32s; background: var(--pane, #fff); position: relative; z-index: 2; }
+  .lights { position: absolute; left: 12px; top: 14px; display: flex; gap: 7px; transition: opacity .2s; }
+  .lights span { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; } .lights span:nth-child(2) { background: #febc2e; } .lights span:nth-child(3) { background: #28c840; }
+  .ic { width: 26px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: #777; font-size: 13px; }
+  .ic.hl { background: rgba(59,91,219,.12); color: var(--accent, #3b5bdb); }
+  .center { flex: 1; display: flex; justify-content: center; align-items: center; gap: 8px; }
+  .scheme { padding: 3px 10px; border-radius: 7px; background: rgba(0,0,0,.04); }
+  .scheme b { font-weight: 650; } .scheme span { color: #888; }
+  .status { color: #888; }
+  .run { padding: 3px 10px; border-radius: 7px; border: 1px solid var(--line, #ddd); }
+  .fpill { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #6e56cf; color: #fff; }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+  .side { width: 220px; border-right: 1px solid var(--line, #e4e4e4); padding: 10px 8px; font-size: 13px; background: rgba(0,0,0,.02); }
+  .label { font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: .05em; margin: 10px 9px 6px; }
+  .item { padding: 6px 9px; border-radius: 8px; display: flex; gap: 8px; align-items: center; }
+  .item.sel { background: rgba(59,91,219,.12); }
+  .st { width: 7px; height: 7px; border-radius: 50%; } .w { background: #f0a020; } .n { background: #e5484d; } .i { background: #bbb; }
+  .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .msgs { flex: 1; padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+  .me { align-self: flex-end; background: #1d1d1f; color: #fff; padding: 8px 12px; border-radius: 14px 14px 4px 14px; max-width: 70%; }
+  .cl { max-width: 80%; }
+  code { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; background: rgba(0,0,0,.05); padding: 1px 5px; border-radius: 4px; }
+  .box { margin: 0 16px 14px; border: 1px solid var(--line, #ddd); border-radius: 12px; padding: 10px 12px; color: #999; font-size: 13px; }
+  .review { width: 300px; border-left: 1px solid var(--line, #e4e4e4); display: flex; flex-direction: column; font-size: 12.5px; }
+  .tabs { display: flex; gap: 2px; padding: 8px; border-bottom: 1px solid var(--line, #eee); flex-wrap: wrap; }
+  .tabs span { padding: 3px 8px; border-radius: 6px; color: #777; } .tabs span.on { background: rgba(0,0,0,.06); color: var(--text, #222); font-weight: 600; }
+  .diff { padding: 10px; font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.6; }
+  .add { background: rgba(48,164,108,.12); } .del { background: rgba(229,72,77,.1); }
+
+  /* full screen state */
+  .win.full .topbar { margin-top: -41px; opacity: 0; }
+  .win.full .lights { opacity: 0; }
+  .win.full.peek .topbar { margin-top: 0; opacity: 1; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+  .edge { position: absolute; top: 0; left: 0; right: 0; height: 8px; z-index: 3; display: none; }
+  .win.full .edge { display: block; }
+  .exit { position: absolute; top: 8px; right: 10px; z-index: 1; font-size: 11px; color: #bbb; opacity: 0; transition: opacity .3s .2s; }
+  .win.full .exit { opacity: 1; }
+  .win.full.peek .exit { opacity: 0; }
+
+  .item.desk { font-weight: 650; }
+  .item.desk.sel { background: var(--accent, #3b5bdb); color: #fff; }
+  .deskview { flex: 1; display: none; flex-direction: column; min-width: 0; }
+  .win.desk .deskview { display: flex; } .win.desk .chat { display: none; }
+  .strip { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line, #eee); }
+  .live { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(240,160,32,.12); }
+  .feed { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+  .card { border: 1px solid var(--line, #e6e6e6); border-radius: 12px; padding: 9px 12px; }
+  .card.needs { border-color: rgba(229,72,77,.45); background: rgba(229,72,77,.04); }
+  .tag { display: inline-block; font-size: 11px; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: rgba(59,91,219,.1); color: var(--accent, #3b5bdb); margin-bottom: 4px; }
+  .tag.idea { background: rgba(110,86,207,.12); color: #6e56cf; }
+  .route { align-self: flex-end; font-size: 11.5px; color: #888; margin-top: -6px; }
+  .btn { display: inline-block; font-size: 11.5px; font-weight: 650; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line, #ddd); margin: 6px 6px 0 0; }
+  .btn.primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+  ul { max-width: 800px; padding-left: 18px; } li { font-size: 14px; margin-bottom: 7px; }
+  h2 { font-size: 13px; margin: 34px 0 8px; text-transform: uppercase; letter-spacing: .07em; color: #888; }
+  kbd { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line, #ccc); }
+</style>
+</head>
+<body>
+
+<h1>Focus: today's app, top bar slides away</h1>
+<p class="lead">Everything you have today stays: sidebar, chat, Changes, Files and the other tabs. Focus only does two things: the sidebar shows only the focus's projects, and a full-screen button slides the top bar off the screen.</p>
+
+<div class="controls">
+  <button class="primary" id="toggle">Full screen ⌃⌘F</button>
+  <button id="peek">Move the mouse to the top</button>
+  <button id="deskbtn">Show the Desk</button>
+</div>
+
+<div class="win" id="win">
+  <div class="edge" id="edge"></div>
+  <div class="lights"><span></span><span></span><span></span></div>
+  <div class="topbar">
+    <span class="ic">▤</span><span class="ic">‹</span>
+    <div class="center">
+      <span class="scheme"><b>ios-app</b> <span>› feat/testo-pairing</span></span>
+      <span class="status">Editing PairingSheet.swift</span>
+    </div>
+    <span class="fpill">◐ Lumiform</span>
+    <span class="run">▶ Run</span>
+    <span class="ic">◫</span><span class="ic">⛁</span><span class="ic">📱</span><span class="ic">⚙︎</span>
+    <span class="ic hl" id="fsbtn" title="Full screen">⤢</span>
+    <span class="ic">◨</span>
+  </div>
+  <div class="exit">⌃⌘F or Esc to bring it back</div>
+  <div class="body">
+    <div class="side">
+      <div class="item desk" id="desknav">◎ Desk · Lumiform</div>
+      <div class="label">ios-app</div>
+      <div class="item sel" id="chatnav"><span class="st w"></span>Testo pairing</div>
+      <div class="item"><span class="st n"></span>Checklist crash</div>
+      <div class="label">lumiform-api</div>
+      <div class="item"><span class="st i"></span>PR review</div>
+    </div>
+    <div class="chat">
+      <div class="msgs">
+        <div class="me">the pairing sheet still flashes on iPad, can you look?</div>
+        <div class="cl">Found it. The sheet mounts again when AccessorySetupKit returns. Moving the presentation to the parent in <code>PairingSheet.swift</code> fixes it.</div>
+      </div>
+      <div class="box">Reply…</div>
+    </div>
+    <div class="deskview">
+      <div class="strip"><span class="live">● Testo pairing · editing PairingSheet.swift</span></div>
+      <div class="feed">
+        <div class="card"><span class="tag">PR review</span><br>Left 3 comments on the forms PR; one asks for a test on empty sections.</div>
+        <div class="card needs"><span class="tag">Checklist crash</span><br>Wants to run the UI tests on the iPad simulator.<br><span class="btn primary">Allow</span><span class="btn">Deny</span></div>
+        <div class="me">how are we on testo?</div>
+        <div class="card"><span class="tag">Desk</span><br><b>Done:</b> pairing flow, mock sensor. <b>Open:</b> the iPad sheet flash (being fixed now in Testo pairing).</div>
+        <div class="me">nahar: drag blocks between days in the week view</div>
+        <div class="route">Nahar isn't in this Focus</div>
+        <div class="card"><span class="tag idea">💡 Parked for Nahar</span><br>Saved in Nahar's ideas. It'll be there when Nahar is your Focus.<br><span class="btn">Not Nahar</span><span class="btn">Start it anyway (step out)</span></div>
+      </div>
+      <div class="box">Tell the Desk… (Lumiform chats only)</div>
+    </div>
+    <div class="review">
+      <div class="tabs"><span class="on">Changes</span><span>Files</span><span>Activity</span><span>Tests</span><span>Artifacts</span></div>
+      <div class="diff">
+        <div>PairingSheet.swift</div>
+        <div class="del">-  .sheet(isPresented: $pairing)</div>
+        <div class="add">+  .sheet(item: $session)</div>
+        <div>   { PairingView(session: $0) }</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>How it behaves</h2>
+<ul>
+  <li><b>The button:</b> ⤢ in the top bar, next to the Review toggle. Also <kbd>⌃⌘F</kbd>, like macOS full screen. It slides the top bar up and goes true full screen, so the menu bar and Dock go too.</li>
+  <li><b>Peek:</b> move the mouse to the top edge and the bar slides back down over the content, then away again when you leave. Like Safari and Xcode in full screen.</li>
+  <li><b>Things that need you still reach you:</b> an approval or question card shows in the chat as today. If one comes from another focus chat, its sidebar dot turns red.</li>
+  <li><b>Sidebar and the Review pane</b> keep their own toggles (<kbd>⌘\</kbd>, the sidebar key), so you can go down to just the chat if you want, but you don't have to.</li>
+  <li><b>The Desk</b> stays at the top of the sidebar, as the Focus's own Desk: its feed, live lines and needs-you cards only come from the Focus's chats, and the router only picks among them. "How are we on testo?" answers from Lumiform chats only.</li>
+  <li><b>Ideas through the Desk:</b> a message meant for a project outside the Focus isn't routed or started. The Desk parks it as an idea for that project, with "Not Nahar" and "Start it anyway" (which steps out of the Focus).</li>
+  <li><b>Focus</b> is the purple pill: the sidebar lists only the Lumiform projects, and the others don't ping. Full screen works with or without a Focus.</li>
+</ul>
+
+<script>
+  const win = document.getElementById("win");
+  const t = document.getElementById("toggle");
+  const set = (on) => { win.classList.toggle("full", on); win.classList.remove("peek"); t.textContent = on ? "Exit full screen ⌃⌘F" : "Full screen ⌃⌘F"; };
+  t.onclick = () => set(!win.classList.contains("full"));
+  document.getElementById("fsbtn").onclick = () => set(true);
+  document.getElementById("peek").onclick = () => { if (!win.classList.contains("full")) set(true); win.classList.add("peek"); setTimeout(() => win.classList.remove("peek"), 1800); };
+  document.getElementById("edge").onmouseenter = () => win.classList.add("peek");
+  win.querySelector(".topbar").onmouseleave = () => win.classList.remove("peek");
+  const showDesk = (on) => { win.classList.toggle("desk", on); document.getElementById("desknav").classList.toggle("sel", on); document.getElementById("chatnav").classList.toggle("sel", !on); document.getElementById("deskbtn").textContent = on ? "Show the chat" : "Show the Desk"; };
+  document.getElementById("deskbtn").onclick = () => showDesk(!win.classList.contains("desk"));
+  document.getElementById("desknav").onclick = () => showDesk(true);
+  document.getElementById("chatnav").onclick = () => showDesk(false);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
+</script>
+</body>
+</html>

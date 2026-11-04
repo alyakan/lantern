@@ -306,6 +306,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const [only, setOnly] = useState<Tone[]>([]);
   // Which features are open, by `${grouping}:${feature}`: all folded until the user opens one, and kept between visits.
   const [open, setOpen] = usePersistentState<string[]>("desk.work.open", []);
+  // Next can be folded to its count and the first steps: useful when the board below is what you came for.
+  const [nextClosed, setNextClosed] = usePersistentState("desk.work.nextClosed", false);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
   const nextShown = allNext ? next : next.slice(0, SHOWN_NEXT);
@@ -332,11 +334,30 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         heading="h2"
         className="yw-card yw-next"
         action={
-          <button className="desk-more" onClick={onRefresh} title={issues ? "Ask git, GitHub and Linear again" : "Ask git and GitHub again"}>
-            Refresh
-          </button>
+          <span className="yw-next-actions">
+            <button className="desk-more" aria-expanded={!nextClosed} onClick={() => setNextClosed(!nextClosed)}>
+              {nextClosed ? "Expand" : "Collapse"}
+            </button>
+            <button className="desk-more" onClick={onRefresh} title={issues ? "Ask git, GitHub and Linear again" : "Ask git and GitHub again"}>
+              Refresh
+            </button>
+          </span>
         }
       >
+        {nextClosed ? (
+          next.length > 0 ? (
+            <p className="yw-peek">
+              {next
+                .slice(0, 2)
+                .map((i) => `${i.next!.what} ${i.number !== null ? `#${i.number} ${i.title}` : i.title}`)
+                .join(" · ")}
+              {next.length > 2 ? " · …" : ""}
+            </p>
+          ) : (
+            <p className="dp-note">Nothing to do right now.</p>
+          )
+        ) : (
+        <>
         {blind.length > 0 && (
           <p className="dp-note">
             Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
@@ -372,6 +393,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
               </button>
             )}
           </>
+        )}
+        </>
         )}
       </Card>
   );

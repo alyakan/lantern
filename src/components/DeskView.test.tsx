@@ -27,6 +27,7 @@ function setup(over: Partial<DeskViewProps> = {}) {
     onDecide: vi.fn(),
     onStep: vi.fn(() => true),
     onRefreshRepos: vi.fn(),
+    onAsk: vi.fn(),
     ...over,
   };
   const view = render(<DeskView {...props} />);

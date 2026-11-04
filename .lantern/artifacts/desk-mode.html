@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Desk mode: design</title>
+<link rel="stylesheet" href="lantern.css">
+<style>
+  body { margin: 0; padding: 28px; font-family: var(--ui, -apple-system, system-ui, sans-serif); color: var(--text, #1d1d1f); background: var(--bg, #f5f5f2); line-height: 1.45; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 34px 0 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #777); }
+  p.lead { margin: 0 0 18px; color: var(--muted, #666); max-width: 760px; }
+  .row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+  .frame { border: 1px solid var(--line, #ddd); border-radius: 14px; overflow: hidden; background: var(--pane, #fff); box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+  .mac { width: 860px; height: 600px; display: flex; flex-direction: column; }
+  .titlebar { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--line, #e3e3e3); }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #e0e0e0; }
+  .macbody { flex: 1; display: flex; min-height: 0; }
+  .side { width: 210px; border-right: 1px solid var(--line, #e3e3e3); padding: 10px 8px; font-size: 13px; background: rgba(0,0,0,.02); }
+  .side .item { padding: 6px 9px; border-radius: 8px; display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  .side .desk { background: var(--accent, #3b5bdb); color: #fff; font-weight: 650; }
+  .side .label { font-size: 11px; color: var(--muted, #888); text-transform: uppercase; letter-spacing: .05em; margin: 14px 9px 6px; }
+  .st { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .working { background: #f0a020; } .waiting { background: #e5484d; } .idle { background: #bbb; } .done { background: #30a46c; }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .strip { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line, #eee); flex-wrap: wrap; }
+  .live { font-size: 12px; padding: 5px 10px; border-radius: 999px; background: rgba(240,160,32,.12); display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .feed { flex: 1; overflow: hidden; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .card { border: 1px solid var(--line, #e6e6e6); border-radius: 12px; padding: 10px 12px; font-size: 13px; background: var(--pane, #fff); }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 650; padding: 2px 8px; border-radius: 999px; background: rgba(59,91,219,.1); color: var(--accent, #3b5bdb); margin-bottom: 5px; }
+  .me { align-self: flex-end; max-width: 70%; background: #1d1d1f; color: #fff; border-radius: 16px 16px 4px 16px; padding: 8px 12px; font-size: 13px; }
+  .route { align-self: flex-end; font-size: 11.5px; color: var(--muted, #777); margin-top: -6px; }
+  .route b { color: var(--accent, #3b5bdb); }
+  .desknote { font-size: 13px; max-width: 80%; }
+  .desknote .who { font-size: 11px; font-weight: 700; color: var(--muted, #888); text-transform: uppercase; letter-spacing: .05em; }
+  .needs { border-color: rgba(229,72,77,.45); background: rgba(229,72,77,.04); }
+  .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .btn { font-size: 12px; font-weight: 650; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line, #ddd); }
+  .btn.primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+  code { font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 12px; background: rgba(0,0,0,.05); padding: 1px 5px; border-radius: 5px; }
+  .muted { color: var(--muted, #888); }
+  .composer { margin: 10px 16px 14px; border: 1px solid var(--line, #ddd); border-radius: 18px; padding: 9px 12px; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .to { font-size: 11.5px; font-weight: 650; padding: 3px 9px; border-radius: 999px; background: rgba(0,0,0,.05); white-space: nowrap; }
+  .phone { width: 300px; height: 620px; border-radius: 38px; display: flex; flex-direction: column; }
+  .phone .top { padding: 16px 18px 8px; font-weight: 750; font-size: 20px; display: flex; justify-content: space-between; align-items: center; }
+  .phone .top span { font-size: 12px; font-weight: 600; color: var(--accent, #3b5bdb); }
+  .phone .strip { padding: 6px 14px 10px; }
+  .phone .feed { padding: 10px 12px; }
+  .phone .card, .phone .me, .phone .desknote { font-size: 12.5px; }
+  .phone .composer { margin: 8px 12px 18px; }
+  ul.notes { max-width: 860px; padding-left: 20px; margin: 0; }
+  ul.notes li { margin: 5px 0; }
+</style>
+</head>
+<body>
+<h1>Desk mode</h1>
+<p class="lead">One place to talk to Lantern. You type; the Desk agent sends it to the right chat (or starts one) and says where. Every chat's answers come back here as short cards; anything that needs you shows in full. The chats are all still there, a tap away. Mock content.</p>
+
+<h2>Mac</h2>
+<div class="frame mac">
+  <div class="titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+  <div class="macbody">
+    <div class="side">
+      <div class="item desk">◎ Desk</div>
+      <div class="label">lantern</div>
+      <div class="item"><span class="st working"></span>Release 0.1.84</div>
+      <div class="item"><span class="st waiting"></span>Native sheets polish</div>
+      <div class="item"><span class="st done"></span>Phone notifications</div>
+      <div class="label">site</div>
+      <div class="item"><span class="st idle"></span>Fix the footer</div>
+    </div>
+    <div class="main">
+      <div class="strip">
+        <div class="live"><span class="st working"></span><b>Release 0.1.84</b> running the tests…</div>
+        <div class="live" style="background:rgba(229,72,77,.1)"><span class="st waiting"></span><b>Native sheets polish</b> needs you</div>
+      </div>
+      <div class="feed">
+        <div class="me">Notifications are way too much on the phone: only things that need my approval or an answer.</div>
+        <div class="route">→ sent to <b>Phone notifications</b> (new chat, lantern, Chat)</div>
+        <div class="card">
+          <div class="tag"><span class="st done"></span>Phone notifications · done</div>
+          <div>Pushes now only go out for approvals and questions. Turn-finished and errors stay in the app. PR #334 is open.</div>
+          <div class="muted" style="margin-top:4px">Open the chat →</div>
+        </div>
+        <div class="card needs">
+          <div class="tag" style="background:rgba(229,72,77,.1);color:#c4373b"><span class="st waiting"></span>Native sheets polish · needs you</div>
+          <div>Allow <code>npm ci --ignore-scripts</code> in <code>mobile/</code>?</div>
+          <div class="btns"><span class="btn primary">Allow</span><span class="btn">Deny</span><span class="btn">Open the chat</span></div>
+        </div>
+        <div class="me">which chat has the step by step float?</div>
+        <div class="desknote"><div class="who">Desk</div>That was <b>Native sheets everywhere</b> (closed): merged as #333 at 16:31. Open it?</div>
+      </div>
+      <div class="composer"><span class="to">→ Desk picks</span><span class="muted">Tell Lantern…</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>Phone</h2>
+<div class="row">
+  <div class="frame phone">
+    <div class="top">Desk <span>Chats</span></div>
+    <div class="strip"><div class="live"><span class="st working"></span><b>Release 0.1.84</b> tests…</div></div>
+    <div class="feed">
+      <div class="me">Notifications are way too much on the phone…</div>
+      <div class="route">→ <b>Phone notifications</b> (new)</div>
+      <div class="card needs">
+        <div class="tag" style="background:rgba(229,72,77,.1);color:#c4373b">Native sheets polish · needs you</div>
+        <div>Allow <code>npm ci</code>?</div>
+        <div class="btns"><span class="btn primary">Allow</span><span class="btn">Deny</span></div>
+      </div>
+      <div class="card">
+        <div class="tag">Release 0.1.84 · done</div>
+        <div>The draft is built and signed. Say "publish".</div>
+      </div>
+    </div>
+    <div class="composer"><span class="to">→ Desk</span><span class="muted">Tell Lantern…</span></div>
+  </div>
+  <div style="flex:1;min-width:300px">
+    <ul class="notes">
+      <li><b>The "→" chip</b> on the box says where the next message goes. "Desk picks" by default; tap it to choose a chat yourself.</li>
+      <li><b>Under each of your messages</b>, where it went. Tap it to move it to another chat if the Desk got it wrong.</li>
+      <li><b>The strip at the top</b>: one live line per working or waiting chat.</li>
+      <li><b>Cards</b>: a short summary of each finished answer, tagged with its chat. Approvals and question cards show in full and are answered right here.</li>
+      <li><b>Ask the Desk itself</b>: "which chat has X?", "what's waiting on me?", "what did I say about notifications?"</li>
+    </ul>
+  </div>
+</div>
+
+<h2>How it works</h2>
+<ul class="notes">
+  <li><b>The Desk agent</b> is one long-lived Claude session on the Mac, on a small model (Haiku by default), in no project folder, with no file or shell tools. Its only tools are Lantern's: list the open chats (name, project, workflow, status, a line on what each is doing), read a chat's recent turns, search every chat ever (the existing history search), send a message to a chat, and start a chat (project, workflow, first message).</li>
+  <li><b>It never</b> approves, answers a question card, closes a chat, or edits code. Starting a chat is said in the feed. When unsure where something goes it asks, with the likely chats as buttons.</li>
+  <li><b>What it's told</b> is chat names and statuses, plus what it reads. The text of other chats reaches it as quoted data, never as instructions.</li>
+  <li><b>The feed's summaries</b> come from what the chats already produce: the turn's last message, cut short, plus the existing waiting/approval events. No extra model call per turn.</li>
+  <li><b>Phone</b>: the same Desk over the existing connection. Two new requests (send to the Desk, read the feed) and one push (a new feed card). It needs a Mac release as well as a TestFlight build.</li>
+</ul>
+
+<h2>Build order</h2>
+<ul class="notes">
+  <li><b>1. Mac Desk, read side</b>: Desk is home, live strip, feed of summaries and needs-you cards. Useful alone, with no agent.</li>
+  <li><b>2. The Desk agent</b>: the box, routing, "→" chip, moving a misrouted message, asking the Desk about chats.</li>
+  <li><b>3. Phone Desk</b>: the same, as the phone's home screen.</li>
+</ul>
+</body>
+</html>
