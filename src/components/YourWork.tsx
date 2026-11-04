@@ -19,6 +19,10 @@ export interface YourWorkProps {
   onStep: (item: WorkItem, target: Target) => boolean;
   /** Asks git, GitHub and Linear again now. */
   onRefresh: () => void;
+  /** The status board first, Next under it: a project's page shows where its work stands before what to do. */
+  standFirst?: boolean;
+  /** Only Next: the Desk's cross-project actions, while each project's page carries the board (see #desk-v2). */
+  nextOnly?: boolean;
 }
 
 /** The rows of "Where things stand" shown before "Show N more": all of it in one list, or each group's; and Next's. */
@@ -161,9 +165,7 @@ function FoldRow({ fold, items, issues, feature }: { fold: Fold; items: WorkItem
   return (
     <li className={`dp-row yw-row yw-foldrow yw-tone-${fold === "done" ? "done" : "wait"}`}>
       <button className="yw-fold" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? "Fold them away" : "Show them"}>
-        <span className="yw-chev" aria-hidden>
-          {open ? "▾" : "▸"}
-        </span>
+        <span className="chev" aria-hidden />
         <span className="yw-name">{foldWord(fold, items.length)}</span>
       </button>
       {open && (
@@ -199,9 +201,7 @@ function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; 
     <section className="yw-feature" aria-label={group.label}>
       <header className="yw-feature-head">
         <button className="yw-fold" aria-expanded={!folded} onClick={onFold} title={folded ? "Show its work" : "Fold it away"}>
-          <span className="yw-chev" aria-hidden>
-            {folded ? "▸" : "▾"}
-          </span>
+          <span className="chev" aria-hidden />
           <span className="yw-head-text">
             {/* What a group is, said once on its heading: a Linear project (a feature) or a repository. */}
             {!group.plain && by !== "none" && <span className="yw-kicker" aria-hidden>{by === "feature" ? "Feature · Linear project" : "Project"}</span>}
@@ -213,6 +213,16 @@ function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; 
           <span className="yw-feature-sum">{[group.doing > 0 && `${group.doing} doing`, group.todo > 0 && `${group.todo} to start`].filter(Boolean).join(" · ")}</span>
         )}
       </header>
+      {/* Folded away, a feature still says what is in it: its rows' names, and how many are left out. */}
+      {folded && (
+        <p className="yw-peek">
+          {group.items
+            .slice(0, 3)
+            .map((i) => (i.number !== null ? `#${i.number} ${i.title}` : i.title))
+            .join(" · ")}
+          {group.items.length > 3 ? " · …" : ""}
+        </p>
+      )}
       {!folded && (
         <>
           <ul className="dp-list">
@@ -236,10 +246,11 @@ const GROUPS: { by: GroupBy; label: string }[] = [
 ];
 
 /** What groups the list, and which states it shows: a switch for the grouping, a chip for each state in the list. */
-function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; counts: Partial<Record<Tone, number>>; only: Tone[]; onOnly: (t: Tone[]) => void }) {
+function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; counts: Partial<Record<Tone, number>>; only: Tone[]; onOnly: (t: Tone[]) => void; grouped: boolean; allOpen: boolean; onAll: () => void }) {
   const tones = FILTER_TONES.filter((t) => counts[t]);
   return (
     <div className="yw-bar">
+      <div className="yw-bar-top">
       <div className="yw-group" role="radiogroup" aria-label="Group by">
         <span className="yw-bar-label">Group by</span>
         {GROUPS.map((g) => {
@@ -250,6 +261,13 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
             </button>
           );
         })}
+      </div>
+      {/* Every feature open or folded at once. Only when there is something to group. */}
+      {grouped && (
+        <button className="yw-all" onClick={onAll}>
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
+      )}
       </div>
       <div className="yw-filter" role="group" aria-label="Show only">
         {tones.map((t) => {
@@ -277,12 +295,15 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false }: YourWorkProps) {
   const [all, setAll] = useState(false);
   const [allNext, setAllNext] = useState(false);
   const [chosen, setChosen] = usePersistentState<GroupBy | "auto">("desk.work.groupBy", "auto");
   const [only, setOnly] = useState<Tone[]>([]);
-  const [folded, setFolded] = useState<string[]>([]);
+  // Which features are open, by `${grouping}:${feature}`: all folded until the user opens one, and kept between visits.
+  const [open, setOpen] = usePersistentState<string[]>("desk.work.open", []);
+  // Next can be folded to its count and the first steps: useful when the board below is what you came for.
+  const [nextClosed, setNextClosed] = usePersistentState("desk.work.nextClosed", false);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
   const nextShown = allNext ? next : next.slice(0, SHOWN_NEXT);
@@ -298,20 +319,41 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
   const shown = all ? stand : stand.slice(0, SHOWN);
   const more = stand.length - shown.length;
   const blind = unknownViewer(repos);
-  const toggle = (key: string) => setFolded((f) => (f.includes(key) ? f.filter((k) => k !== key) : [...f, key]));
-  return (
-    <>
+  const toggle = (key: string) => setOpen(open.includes(key) ? open.filter((k) => k !== key) : [...open, key]);
+  const groupKeys = groups.map((g) => `${by}:${g.key}`);
+  const allOpen = groupKeys.length > 0 && groupKeys.every((k) => open.includes(k));
+  const toggleAll = () => setOpen(allOpen ? open.filter((k) => !groupKeys.includes(k)) : [...new Set([...open, ...groupKeys])]);
+  const nextCard = (
       <Card
         title="Next"
         count={next.length}
         heading="h2"
         className="yw-card yw-next"
         action={
-          <button className="desk-more" onClick={onRefresh} title={issues ? "Ask git, GitHub and Linear again" : "Ask git and GitHub again"}>
-            Refresh
-          </button>
+          <span className="yw-next-actions">
+            <button className="desk-more" aria-expanded={!nextClosed} onClick={() => setNextClosed(!nextClosed)}>
+              {nextClosed ? "Expand" : "Collapse"}
+            </button>
+            <button className="desk-more" onClick={onRefresh} title={issues ? "Ask git, GitHub and Linear again" : "Ask git and GitHub again"}>
+              Refresh
+            </button>
+          </span>
         }
       >
+        {nextClosed ? (
+          next.length > 0 ? (
+            <p className="yw-peek">
+              {next
+                .slice(0, 2)
+                .map((i) => `${i.next!.what} ${i.number !== null ? `#${i.number} ${i.title}` : i.title}`)
+                .join(" · ")}
+              {next.length > 2 ? " · …" : ""}
+            </p>
+          ) : (
+            <p className="dp-note">Nothing to do right now.</p>
+          )
+        ) : (
+        <>
         {blind.length > 0 && (
           <p className="dp-note">
             Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
@@ -348,10 +390,13 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
             )}
           </>
         )}
+        </>
+        )}
       </Card>
-      {items.length > 0 && (
+  );
+  const standCard = items.length > 0 ? (
         <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand">
-          <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} />
+          <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} grouped={!flat && groups.length > 1} allOpen={allOpen} onAll={toggleAll} />
           {groups.length === 0 ? (
             <p className="dp-note">Nothing is {only.map((t) => TONE_WORD[t]).join(" or ")}.</p>
           ) : flat ? (
@@ -366,12 +411,12 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
               )}
             </>
           ) : (
-            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
+            groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={!open.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
           )}
         </Card>
-      )}
-    </>
-  );
+  ) : null;
+  if (nextOnly) return nextCard;
+  return <>{standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}</>;
 }
 
 /** A project's work in a line on its tile: a coloured dot and a count for each state, blocked first. */

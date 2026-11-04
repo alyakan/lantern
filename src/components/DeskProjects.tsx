@@ -101,7 +101,13 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
   return (
     <div className="desk-tile-chats" ref={root}>
       <button className="desk-more" aria-haspopup="menu" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the chats of ${label}`} disabled={!chats.length} onClick={() => setOpen(!open)}>
-        {chats.length ? `Chats (${chats.length}) ▾` : "No chats"}
+        {chats.length ? (
+          <>
+            Chats ({chats.length}) <span className="chev down" aria-hidden />
+          </>
+        ) : (
+          "No chats"
+        )}
       </button>
       {open && (
         <div className="menu desk-chats-menu" ref={inside.ref} style={inside.style} role="menu" aria-label={`Chats of ${label}`} onKeyDown={keys.onKeyDown}>
@@ -187,7 +193,13 @@ export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }:
                 <dt>To-dos</dt>
                 <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
               </dl>
-              <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+              <footer className="desk-tile-foot">
+                <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+                {/* Its page is where the full work board lives: where each pull request, branch and issue of this project stands. */}
+                <button className="desk-more" onClick={() => onPage(r.folder)} aria-label={`Open ${r.label}'s page: work, pull requests, worktrees and to-dos`}>
+                  Open page →
+                </button>
+              </footer>
             </article>
           );
         })}

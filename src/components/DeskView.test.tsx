@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
-import { NO_DESKS } from "../lib/desks";
 import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
 import { forgetSent } from "./YourWork";
@@ -23,12 +22,12 @@ function setup(over: Partial<DeskViewProps> = {}) {
     page: null,
     onPage: vi.fn(),
     onNewChat: vi.fn(),
-    desks: { value: NO_DESKS, waiting: {}, projects: [], onChange: vi.fn(), onAdd: vi.fn() },
     onOpen: vi.fn(),
     onGo: vi.fn(),
     onDecide: vi.fn(),
     onStep: vi.fn(() => true),
     onRefreshRepos: vi.fn(),
+    onAsk: vi.fn(),
     ...over,
   };
   const view = render(<DeskView {...props} />);
@@ -98,9 +97,12 @@ describe("the Desk", () => {
 
   it("lists the projects with what Lantern knows of each", () => {
     setup({ projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })] });
-    expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
-    // With nothing waiting, the first tile sums the Desk up.
-    expect(screen.getByRole("region", { name: "Summary" })).toHaveTextContent("Projects2Chats open3Working2Unread0To-dos overdue1");
+    // With nothing waiting, one line above the board sums the Desk up.
+    const pulse = screen.getByRole("status", { name: "Where the Desk stands" });
+    expect(pulse).toHaveTextContent("✓ Nothing needs you");
+    expect(pulse).toHaveTextContent("3 chats open");
+    expect(pulse).toHaveTextContent("2 working");
+    expect(pulse).toHaveTextContent("1 to-do overdue");
     const [lantern, rayak] = within(screen.getByRole("region", { name: "Projects" })).getAllByRole("article");
     expect(lantern).toHaveTextContent("2 working · 1 needs you");
     expect(lantern).toHaveTextContent("3 · 1 overdue");
@@ -172,7 +174,7 @@ describe("the Desk", () => {
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);
     const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
-    setup({ repos: [repo("/p/lantern", { merged: [merged(6, at(15)), merged(5, at(14))], release: { tag: "v0.1.93", published_at: at(10, 30) } })] });
+    setup({ repos: [repo("/p/lantern", { merged: [merged(6, at(15)), merged(5, at(14))], release: { tag: "v0.1.93", published_at: at(10, 30) } })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = within(screen.getByRole("region", { name: "Where things stand" }));
     const line = stand.getByRole("button", { name: /2 Ready · merged, waiting for a release/ });
     expect(line).toHaveAttribute("aria-expanded", "false");
@@ -195,6 +197,8 @@ describe("the Desk", () => {
           release: { tag: "v0.1.93", published_at: at(10, 30) },
         }),
       ],
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
     });
     const next = within(screen.getByRole("region", { name: "Next" })).getAllByRole("listitem").map((l) => l.textContent);
     expect(next).toEqual([
@@ -238,9 +242,11 @@ describe("the Desk", () => {
   it("sets Next apart in a card of its own, and groups where things stand by feature when Linear is connected", () => {
     const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
     const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
-    setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } } });
+    setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } }, page: "/p/lantern", projects: [project("/p/lantern")] });
     expect(within(screen.getByRole("region", { name: "Next" })).getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
     const stand = screen.getByRole("region", { name: "Where things stand" });
+    // Features start folded; the whole board opens from its one control.
+    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
     const sync = within(stand).getByRole("region", { name: "Sync" });
     expect(sync).toHaveTextContent("1 doing");
     // Under its feature's heading, a row doesn't name the feature again, but names the issue it is the work of, as a chip that links to it.
@@ -264,35 +270,16 @@ describe("the Desk", () => {
 
   it("shows eight rows of where things stand, and the rest on asking", () => {
     const prs = Array.from({ length: 11 }, (_, i) => pr(i + 1, "pending"));
-    setup({ repos: [repo("/p/lantern", { prs })] });
+    setup({ repos: [repo("/p/lantern", { prs })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const region = screen.getByRole("region", { name: "Where things stand" });
     expect(within(region).getAllByRole("list", { name: /^At / })).toHaveLength(8);
     fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getAllByRole("list", { name: /^At / })).toHaveLength(11);
   });
 
-  it("groups where things stand by project without Linear, folds a group, and lets you group by none", () => {
-    const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] }), repo("/p/web", { prs: [pr(1, "fail")] })];
-    setup({ repos });
-    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
-    // Blocked first: the project with a failing check comes before the other.
-    expect(stand().getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["web", "lantern"]);
-    // Feature needs Linear.
-    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
-    expect(stand().getByRole("radio", { name: "Project" })).toBeChecked();
-    // A row doesn't name its project again under the project's heading.
-    expect(within(stand().getByRole("region", { name: "lantern" })).getByText("b7")).toBeInTheDocument();
-    fireEvent.click(stand().getByRole("button", { name: "lantern" }));
-    expect(within(stand().getByRole("region", { name: "lantern" })).queryByText("PR 7")).toBeNull();
-    expect(stand().getByRole("button", { name: "lantern" })).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(stand().getByRole("radio", { name: "None" }));
-    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
-    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
-  });
-
   it("filters where things stand by state, and says when nothing is in the states chosen", () => {
     const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "fail"), pr(9, "pass")] })];
-    setup({ repos });
+    setup({ repos, page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
     fireEvent.click(stand().getByRole("button", { name: /^blocked 1/ }));
@@ -302,6 +289,17 @@ describe("the Desk", () => {
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
     fireEvent.click(stand().getByRole("button", { name: "Show all" }));
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("folds Next to its first steps, and opens it again", () => {
+    setup({ repos: [repo("/p/lantern", { prs: [pr(1, "fail"), pr(2, "fail")] })] });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    expect(next.getAllByRole("listitem").length).toBeGreaterThan(0);
+    fireEvent.click(next.getByRole("button", { name: "Collapse" }));
+    expect(next.queryAllByRole("listitem")).toHaveLength(0);
+    expect(next.getByText(/#1 PR 1/)).toBeInTheDocument();
+    fireEvent.click(next.getByRole("button", { name: "Expand" }));
+    expect(next.getAllByRole("listitem").length).toBeGreaterThan(0);
   });
 
   it("shows five of Next's steps, the rest on asking", () => {
@@ -348,5 +346,109 @@ describe("the Desk", () => {
       widthOf.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+
+  it("folds each feature to its name and the work in it, and opens them all at once", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    setup({
+      repos,
+      linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } },
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
+    });
+    const stand = screen.getByRole("region", { name: "Where things stand" });
+    // Folded: no rows, but the feature says what is in it.
+    expect(within(stand).queryAllByRole("list", { name: /^At / })).toHaveLength(0);
+    expect(stand).toHaveTextContent("#7 PR 7");
+    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
+    expect(within(stand).getAllByRole("list", { name: /^At / }).length).toBeGreaterThan(0);
+    expect(within(stand).getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+  });
+
+  it("gives a project's page its own work first, and only that project's", () => {
+    const here = repo("/p/lantern", { prs: [pr(1, "fail", { title: "Retry the fetch" })] });
+    const elsewhere = repo("/p/other", { prs: [pr(2, "pass", { title: "Another repository" })] });
+    setup({ repos: [here, elsewhere], projects: [project("/p/lantern"), project("/p/other")], page: "/p/lantern" });
+    // Where things stand comes before Next: the page opens on where its work stands.
+    const heads = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(heads.indexOf("Where things stand")).toBeGreaterThanOrEqual(0);
+    expect(heads.indexOf("Where things stand")).toBeLessThan(heads.indexOf("Next"));
+    expect(screen.getByRole("region", { name: "Where things stand" })).toHaveTextContent("Retry the fetch");
+    expect(screen.getByRole("region", { name: "Where things stand" })).not.toHaveTextContent("Another repository");
+  });
+
+  it("opens a project's page with nothing on its board on a landing page that starts a chat", () => {
+    const { props } = setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")], page: "/p/lantern" });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    expect(screen.queryByRole("region", { name: "Where things stand" })).toBeNull();
+    // An empty chat is the plain new chat.
+    fireEvent.click(within(landing).getByRole("button", { name: "Empty chat" }));
+    expect(props.onNewChat).toHaveBeenCalledWith("/p/lantern");
+  });
+
+  it("starts a typed first message in the project, through the app's handler", () => {
+    const onStartChat = vi.fn();
+    setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")], page: "/p/lantern", onStartChat });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    fireEvent.change(within(landing).getByRole("textbox"), { target: { value: "Fix the flaky test" } });
+    fireEvent.click(within(landing).getByRole("button", { name: "Start chat" }));
+    expect(onStartChat).toHaveBeenCalledWith("/p/lantern", "Fix the flaky test");
+  });
+
+  it("keeps the landing page away while there is work on the board, and while the repositories are still being read", () => {
+    const { rerender } = setup({ repos: null, projects: [project("/p/lantern")], page: "/p/lantern" });
+    expect(screen.queryByRole("region", { name: "Start here" })).toBeNull();
+    rerender({ repos: [repo("/p/lantern", { prs: [pr(1, "fail")] })] });
+    expect(screen.queryByRole("region", { name: "Start here" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Where things stand" })).toBeInTheDocument();
+  });
+
+  it("says a project outside any repository has no branches to follow, and still offers a chat", () => {
+    setup({ repos: [repo("/p/other")], projects: [project("/p/lantern")], page: "/p/lantern" });
+    const landing = screen.getByRole("region", { name: "Start here" });
+    expect(within(landing).getByText(/isn't in a git repository/)).toBeInTheDocument();
+    expect(within(landing).getByRole("button", { name: "Start chat" })).toBeInTheDocument();
+  });
+
+  it("lets a page's work be grouped by none, with Feature needing Linear", () => {
+    setup({ repos: [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] })], page: "/p/lantern", projects: [project("/p/lantern")] });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
+    fireEvent.click(stand().getByRole("radio", { name: "None" }));
+    expect(stand().getByRole("radio", { name: "None" })).toBeChecked();
+    expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
+    // Kept for next time.
+    expect(JSON.parse(localStorage.getItem("desk.work.groupBy") ?? "null")).toBe("none");
+  });
+
+  it("says nothing is to do when Next is folded and has no steps, and remembers it folded", () => {
+    const { rerender } = setup({ repos: [repo("/p/lantern")], projects: [project("/p/lantern")] });
+    const next = () => within(screen.getByRole("region", { name: "Next" }));
+    fireEvent.click(next().getByRole("button", { name: "Collapse" }));
+    expect(next().getByText("Nothing to do right now.")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("desk.work.nextClosed") ?? "null")).toBe(true);
+    rerender({ repos: [repo("/p/lantern")] });
+    expect(next().getByRole("button", { name: "Expand" })).toBeInTheDocument();
+  });
+
+  it("remembers which features are open, by grouping and feature", () => {
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" })] })];
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    setup({
+      repos,
+      linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } },
+      page: "/p/lantern",
+      projects: [project("/p/lantern")],
+    });
+    const stand = () => screen.getByRole("region", { name: "Where things stand" });
+    // Only one group: a click on the feature opens it (no Expand all), and the choice is saved by grouping and feature name.
+    expect(within(stand()).queryByRole("button", { name: "Expand all" })).toBeNull();
+    fireEvent.click(within(stand()).getByRole("button", { name: /Sync/ }));
+    expect(JSON.parse(localStorage.getItem("desk.work.open") ?? "[]")).toEqual(["feature:Sync"]);
+    expect(within(stand()).getAllByRole("list", { name: /^At / }).length).toBeGreaterThan(0);
+    fireEvent.click(within(stand()).getByRole("button", { name: /Sync/ }));
+    expect(JSON.parse(localStorage.getItem("desk.work.open") ?? "[]")).toEqual([]);
   });
 });

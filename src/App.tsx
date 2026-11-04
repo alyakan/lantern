@@ -93,9 +93,10 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_BAR, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
 import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
-import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
+import { deskOf, NO_DESKS, openOn } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { DeskAsk } from "./components/DeskAsk";
+import { AskSheet } from "./components/AskSheet";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
@@ -267,9 +268,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [view, setView] = useState<"chat" | "canvas">("chat");
   // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
   const [desk, setDesk] = useState(startOnDesk);
-  // The Desks (see lib/desks.ts) and the messages typed on them (see lib/desk.ts), kept across launches.
-  const [desksStored, setDesks] = usePersistentState<unknown>("desk.desks", NO_DESKS);
-  const desks = useMemo(() => readDesks(desksStored), [desksStored]);
+  // One Desk holds every project (see lib/desks.ts); the messages typed on it are kept across launches.
+  const desks = NO_DESKS;
   const [deskLog, setDeskLog] = useState<DeskEntry[]>(() => readLog(readStored("desk.log", [])));
   useEffect(() => {
     try {
@@ -324,9 +324,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     else setCollapsedDefault(collapsed);
   };
   const [splitRatio, setSplitRatio] = usePersistentState("review.ratio", 0.5);
-  // On the Desk the right pane is Ask: open or not, and how wide, its own, not the project's Changes.
-  const [askCollapsed, setAskCollapsed] = usePersistentState("desk.askCollapsed", false);
-  const [askRatio, setAskRatio] = usePersistentState("desk.askRatio", 0.68);
+  // The Desk's Ask is a sheet over the board (⌘J): open or not is its own, and it never takes the board's width.
+  const [askSheet, setAskSheet] = useState(false);
   // The Changes pane's filter: everything this chat changed, or only what the last turn changed.
   const [changeScope, setChangeScope] = usePersistentState<ChangeScope>("review.scope", "session");
   const [turnFiles, setTurnFiles] = useState<ChangedFile[]>([]);
@@ -1808,7 +1807,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     setReviewCollapsed(false);
   };
 
-  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskCollapsed(!askCollapsed) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
+  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskSheet((open) => !open) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
 
   // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
   // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
@@ -2623,6 +2622,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const deskCandidates = routeCandidates(chats, askOpen);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
+  // Ask is a sheet over the Desk: it goes with it.
+  useEffect(() => {
+    if (!deskShown) setAskSheet(false);
+  }, [deskShown]);
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
@@ -2828,6 +2831,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
   useAction("session-history", toggleHistory, true);
+  // The Desk's Ask, from anywhere on it; deskShown is settled by here.
+  useAction("ask-desk", () => setAskSheet((open) => !open), deskShown);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
@@ -2857,6 +2862,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
     onProjectNotes: (folder: string) => setEditingNotes(folder),
+    onOpenInDesk: (folder: string) => {
+      setDeskPage(folder);
+      setDesk(true);
+    },
     onSetup: (folder: string) => setSettingUp(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
@@ -3076,9 +3085,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
-          reviewCollapsed={deskShown ? askCollapsed : reviewCollapsed}
+          reviewCollapsed={deskShown ? !askSheet : reviewCollapsed}
           onOpenFolder={openFolder}
-          onToggleReview={deskShown ? () => setAskCollapsed(!askCollapsed) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
+          onToggleReview={deskShown ? () => setAskSheet((open) => !open) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
@@ -3117,10 +3126,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} onDismiss={guards.dismiss} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
-          ratio={deskShown ? askRatio : splitRatio}
-          collapsed={deskShown ? askCollapsed : reviewCollapsed || !state.folder}
+          ratio={splitRatio}
+          collapsed={deskShown ? true : reviewCollapsed || !state.folder}
           scope={deskShown ? "desk" : showCanvas ? "canvas" : (state.folder ?? "")}
-          onRatio={deskShown ? setAskRatio : setSplitRatio}
+          onRatio={setSplitRatio}
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
@@ -3141,20 +3150,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   page={pageOn}
                   onPage={setDeskPage}
                   onNewChat={sidebarHandlers.onNewChatIn}
-                  desks={{
-                    value: desks,
-                    waiting: waitingBy(desks, openByProject),
-                    projects: (() => {
-                      const all = [...new Set([...Object.keys(openByProject), ...desks.list.flatMap((d) => d.projects)])];
-                      const labels = projectLabels(all);
-                      return all.map((folder, i) => ({ folder, label: labels[i] }));
-                    })(),
-                    onChange: setDesks,
-                    onAdd: (name) => {
-                      const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
-                      if (next) setDesks(next);
-                    },
-                  }}
+                  onStartChat={leaveDesk((folder: string, first: string) => startFresh(folder, false, false, first))}
+                  onStartTodo={leaveDesk(startTodo)}
                   onOpen={switchTo}
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
@@ -3172,6 +3169,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     refreshRepos();
                     linear.refresh();
                   }}
+                  onAsk={() => setAskSheet(true)}
                   linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
               </ErrorBoundary>
@@ -3229,25 +3227,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           }
           right={
             <>
-            {deskShown && (
-              <ErrorBoundary name="desk ask">
-                <DeskAsk
-                  entries={deskLog.filter((e) => e.desk === desks.on)}
-                  targets={deskTargets}
-                  across={askFolders.length > 1}
-                  about={pageOn ? deskProjects[0]?.label : undefined}
-                  canSend={agentReady}
-                  onSend={deskSend}
-                  onSendTo={deskSendTo}
-                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  onOpenPast={(hit) => {
-                    setDesk(false);
-                    openSession(hit.id, hit.folder);
-                  }}
-                  onOpen={switchTo}
-                />
-              </ErrorBoundary>
-            )}
             {/* Kept while the Desk is up (unsaved edits in Files live in it), only not shown. */}
             <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
@@ -3320,6 +3299,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             </>
           }
         />
+        {deskShown && askSheet && (
+          <AskSheet onClose={() => setAskSheet(false)}>
+            <ErrorBoundary name="desk ask">
+              <DeskAsk
+                entries={deskLog.filter((e) => e.desk === desks.on)}
+                targets={deskTargets}
+                across={askFolders.length > 1}
+                about={pageOn ? deskProjects[0]?.label : undefined}
+                canSend={agentReady}
+                onSend={deskSend}
+                onSendTo={deskSendTo}
+                onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                onOpenPast={(hit) => {
+                  setDesk(false);
+                  openSession(hit.id, hit.folder);
+                }}
+                onOpen={switchTo}
+              />
+            </ErrorBoundary>
+          </AskSheet>
+        )}
         </div>
         </div>
         <SettingsView
