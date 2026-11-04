@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
-import { NO_DESKS } from "../lib/desks";
 import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
 import { forgetSent } from "./YourWork";
@@ -23,7 +22,6 @@ function setup(over: Partial<DeskViewProps> = {}) {
     page: null,
     onPage: vi.fn(),
     onNewChat: vi.fn(),
-    desks: { value: NO_DESKS, waiting: {}, projects: [], onChange: vi.fn(), onAdd: vi.fn() },
     onOpen: vi.fn(),
     onGo: vi.fn(),
     onDecide: vi.fn(),

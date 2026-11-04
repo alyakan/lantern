@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
-import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import { requestText, type InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
 import type { NewRule, RepoStatus } from "../types";
@@ -21,15 +20,6 @@ export interface DeskViewProps {
   needs: InboxItem[];
   /** How this Desk's repositories stand (git and GitHub); null until the Mac has said. */
   repos: RepoStatus[] | null;
-  desks: {
-    value: Desks;
-    /** How many things wait on you on each Desk. */
-    waiting: Record<string, number>;
-    /** Every project known (open, or on a Desk), with its name: what the Desks editor lists. */
-    projects: { folder: string; label: string }[];
-    onChange: (desks: Desks) => void;
-    onAdd: (name: string) => void;
-  };
   onOpen: (slot: string) => void;
   /** The project whose own page is open (a folder), or null for all of them; and the way to open or leave one. */
   page: string | null;
@@ -50,88 +40,6 @@ export interface DeskViewProps {
 
 /** How often the times are redrawn. */
 const TICK_MS = 30_000;
-
-/** Which Desk is on screen, and the way to make more and say which projects are on each. */
-function DeskTabs({ desks }: { desks: DeskViewProps["desks"] }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState("");
-  const { value } = desks;
-  const many = value.list.length > 1;
-  return (
-    <div className="desk-tabs">
-      {many ? (
-        <div role="tablist" aria-label="Desks" className="desk-tablist">
-          {value.list.map((d) => (
-            <button key={d.id} role="tab" aria-selected={d.id === value.on} className={`desk-tab${d.id === value.on ? " on" : ""}`} onClick={() => desks.onChange({ ...value, on: d.id })}>
-              {d.name}
-              {d.id !== value.on && (desks.waiting[d.id] ?? 0) > 0 && (
-                <span className="desk-tab-badge" aria-label={`${desks.waiting[d.id]} waiting`}>
-                  {desks.waiting[d.id]}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <h1 className="desk-title">Desk</h1>
-      )}
-      <button className="desk-edit" aria-expanded={editing} onClick={() => setEditing(!editing)}>
-        {editing ? "Done" : many ? "Edit Desks" : "Split into Desks…"}
-      </button>
-      {editing && (
-        <div className="desk-editor" role="group" aria-label="Desks">
-          <p className="muted">Each project is on one Desk. A Desk shows only its projects' chats, and what you type on it goes only to them.</p>
-          {value.list.length > 1 &&
-            value.list.map((d) => (
-              <div key={d.id} className="desk-editor-row">
-                <input aria-label={`Name of ${d.name}`} defaultValue={d.name} maxLength={40} onBlur={(e) => e.target.value.trim() !== d.name && desks.onChange(renameDesk(value, d.id, e.target.value))} />
-                {d.id !== HOME_ID && (
-                  <button aria-label={`Remove ${d.name}`} title="Its projects go back to the first Desk" onClick={() => desks.onChange(removeDesk(value, d.id))}>
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          <form
-            className="desk-editor-row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim()) desks.onAdd(name.trim());
-              setName("");
-            }}
-          >
-            <input aria-label="New Desk's name" placeholder="New Desk, e.g. Work" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
-            <button type="submit" disabled={!name.trim()}>
-              Add
-            </button>
-          </form>
-          {value.list.length > 1 && desks.projects.length > 0 && (
-            <ul className="desk-editor-projects">
-              {desks.projects.map((pr) => {
-                return (
-                  <li key={pr.folder}>
-                    <span title={pr.folder}>{pr.label}</span>
-                    <select
-                      aria-label={`Desk for ${pr.label}`}
-                      value={deskOf(value, pr.folder)}
-                      onChange={(e) => desks.onChange(moveProject(value, pr.folder, e.target.value))}
-                    >
-                      {value.list.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** What waits on you, one thing at a time: the first, big, with what it asks; the rest a click away. */
 function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxItem[]; now: number } & Pick<DeskViewProps, "onGo" | "onDecide" | "onAnswer">) {
@@ -289,7 +197,7 @@ export function DeskView(props: DeskViewProps) {
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
-        <DeskTabs desks={props.desks} />
+        <h1 className="desk-title">Desk</h1>
       </header>
       <div className="desk-main" ref={main}>
         {!pageRow && <Pulse needs={props.needs} projects={props.projects} repos={props.repos} />}

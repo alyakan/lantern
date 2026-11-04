@@ -92,7 +92,7 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_BAR, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
 import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
-import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
+import { deskOf, NO_DESKS, openOn } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { DeskAsk } from "./components/DeskAsk";
 import { timelineEvents } from "./lib/timeline";
@@ -266,9 +266,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [view, setView] = useState<"chat" | "canvas">("chat");
   // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
   const [desk, setDesk] = useState(startOnDesk);
-  // The Desks (see lib/desks.ts) and the messages typed on them (see lib/desk.ts), kept across launches.
-  const [desksStored, setDesks] = usePersistentState<unknown>("desk.desks", NO_DESKS);
-  const desks = useMemo(() => readDesks(desksStored), [desksStored]);
+  // One Desk holds every project (see lib/desks.ts); the messages typed on it are kept across launches.
+  const desks = NO_DESKS;
   const [deskLog, setDeskLog] = useState<DeskEntry[]>(() => readLog(readStored("desk.log", [])));
   useEffect(() => {
     try {
@@ -3106,20 +3105,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   page={pageOn}
                   onPage={setDeskPage}
                   onNewChat={sidebarHandlers.onNewChatIn}
-                  desks={{
-                    value: desks,
-                    waiting: waitingBy(desks, openByProject),
-                    projects: (() => {
-                      const all = [...new Set([...Object.keys(openByProject), ...desks.list.flatMap((d) => d.projects)])];
-                      const labels = projectLabels(all);
-                      return all.map((folder, i) => ({ folder, label: labels[i] }));
-                    })(),
-                    onChange: setDesks,
-                    onAdd: (name) => {
-                      const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
-                      if (next) setDesks(next);
-                    },
-                  }}
                   onOpen={switchTo}
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
