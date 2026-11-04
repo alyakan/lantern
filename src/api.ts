@@ -333,6 +333,8 @@ export const api = {
   sidebarMenu: (hidden: boolean, compact: boolean) => invoke<void>("sidebar_menu", { hidden, compact }),
   /** Anything is working (and the user allows it): the Mac is kept from idle sleep until it isn't. */
   keepAwake: (working: boolean, allowed: boolean) => invoke<void>("keep_awake", { working, allowed }),
+  /** One line in sleep.log about a chat the window put to sleep (see lib/idleSleep.ts `sleepNote`). */
+  sleepLog: (line: string) => invoke<void>("sleep_log", { line }),
   /** A menu bar item backed by an action was chosen: the action's id (see src/lib/actions.ts). */
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */

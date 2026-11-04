@@ -141,6 +141,13 @@ fn keep_awake(awake: State<'_, awake::Awake>, working: bool, allowed: bool) {
     awake.update(working, allowed);
 }
 
+/// The window says what a chat looked like when it put it to sleep (see lib/idleSleep.ts `sleepNote`): one line in sleep.log.
+#[tauri::command]
+fn sleep_log(line: String) {
+    let line: String = line.chars().filter(|c| !c.is_control()).take(400).collect();
+    remote::push_log::SLEEP.note(&format!("window {line}"));
+}
+
 /// The user changed how many agents may run at once (or the window started and says what it was set to).
 #[tauri::command]
 fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
@@ -252,10 +259,11 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
     // app's, so trying things out never touches them.
     let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
     let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
-    // What the Mac did about each push (see remote/push_log.rs); a dev run keeps none.
+    // What the Mac did about each push, and each chat it put to sleep (see remote/push_log.rs); a dev run keeps none.
     if dev_file.is_none() {
         if let Ok(dir) = app.path().app_data_dir() {
             remote::push_log::set_path(dir.join("push.log"));
+            remote::push_log::SLEEP.set_path(dir.join("sleep.log"));
         }
     }
     let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
@@ -4089,6 +4097,7 @@ pub fn run() {
             claude_login,
             sidebar_menu,
             keep_awake,
+            sleep_log,
             list_providers,
             list_endpoints,
             save_endpoints,
