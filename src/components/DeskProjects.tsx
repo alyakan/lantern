@@ -187,7 +187,13 @@ export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }:
                 <dt>To-dos</dt>
                 <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
               </dl>
-              <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+              <footer className="desk-tile-foot">
+                <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+                {/* Its page is where the full work board lives: where each pull request, branch and issue of this project stands. */}
+                <button className="desk-more" onClick={() => onPage(r.folder)} aria-label={`Open ${r.label}'s page: work, pull requests, worktrees and to-dos`}>
+                  Open page →
+                </button>
+              </footer>
             </article>
           );
         })}

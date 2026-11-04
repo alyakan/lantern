@@ -4078,3 +4078,8 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-box > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
 .desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }
+
+/* A project tile's foot: its chats on the left, and the way to its page, where its work board lives. */
+.desk-tile-foot { margin-top: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.desk-tile-foot .desk-tile-chats { margin-top: 0; align-self: auto; }
+.desk-tile-foot .desk-more { color: var(--accent); white-space: nowrap; }
