@@ -19,6 +19,8 @@ export interface YourWorkProps {
   onStep: (item: WorkItem, target: Target) => boolean;
   /** Asks git, GitHub and Linear again now. */
   onRefresh: () => void;
+  /** The status board first, Next under it: a project's page shows where its work stands before what to do. */
+  standFirst?: boolean;
 }
 
 /** The rows of "Where things stand" shown before "Show N more": all of it in one list, or each group's; and Next's. */
@@ -277,7 +279,7 @@ function Bar({ by, issues, onBy, counts, only, onOnly }: { by: GroupBy; issues: 
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false }: YourWorkProps) {
   const [all, setAll] = useState(false);
   const [allNext, setAllNext] = useState(false);
   const [chosen, setChosen] = usePersistentState<GroupBy | "auto">("desk.work.groupBy", "auto");
@@ -299,8 +301,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
   const more = stand.length - shown.length;
   const blind = unknownViewer(repos);
   const toggle = (key: string) => setFolded((f) => (f.includes(key) ? f.filter((k) => k !== key) : [...f, key]));
-  return (
-    <>
+  const nextCard = (
       <Card
         title="Next"
         count={next.length}
@@ -349,7 +350,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
           </>
         )}
       </Card>
-      {items.length > 0 && (
+  );
+  const standCard = items.length > 0 ? (
         <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand">
           <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} />
           {groups.length === 0 ? (
@@ -369,9 +371,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh }: You
             groups.map((g) => <Group key={`${by}:${g.key}`} group={g} by={by} issues={issues} fold={foldThem} folded={folded.includes(`${by}:${g.key}`)} onFold={() => toggle(`${by}:${g.key}`)} />)
           )}
         </Card>
-      )}
-    </>
-  );
+  ) : null;
+  return <>{standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}</>;
 }
 
 /** A project's work in a line on its tile: a coloured dot and a count for each state, blocked first. */

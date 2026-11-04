@@ -3,9 +3,11 @@ import { api } from "../api";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { elapsed } from "../lib/time";
 import type { Todo } from "../lib/todos";
+import type { WorkItem, Target } from "../lib/yourWork";
 import type { RepoStatus, StorageItem } from "../types";
 import { Card, Row } from "./DeskCard";
 import { ExternalLink } from "./ExternalLink";
+import { YourWork } from "./YourWork";
 
 export interface DeskProjectProps {
   row: ProjectRow;
@@ -13,6 +15,12 @@ export interface DeskProjectProps {
   chats: InboxRow[];
   /** Its repository as the Mac last said; undefined while it hasn't, null when it isn't in one. */
   repo: RepoStatus | null | undefined;
+  /** This project's own work, as Your work lists it (only its repository's), and how to act on it. */
+  work?: WorkItem[];
+  /** Linear is connected: the work can be grouped by feature. */
+  issues?: boolean;
+  onStep?: (item: WorkItem, target: Target) => boolean;
+  onRefresh?: () => void;
   now: number;
   onBack: () => void;
   onOpen: (slot: string) => void;
@@ -186,7 +194,7 @@ function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: 
  * scan says of each, and Remove when that found it safe), and its open to-dos, each a card. Everything is what Lantern, git, gh
  * and the Storage scan said; nothing is guessed. The right pane's Ask asks about this project only while it is open.
  */
-export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }: DeskProjectProps) {
+export function DeskProject({ row, chats, repo, work, issues = false, onStep, onRefresh, now, onBack, onOpen, onNewChat }: DeskProjectProps) {
   const here = repo?.folders.find((f) => f.folder === row.folder);
   const worktrees = repo?.worktrees ?? [];
   const storage = useStorage(worktrees.some((w) => !w.agent));
@@ -207,6 +215,11 @@ export function DeskProject({ row, chats, repo, now, onBack, onOpen, onNewChat }
           </span>
         )}
       </header>
+
+      {/* Its own work first: where each pull request, branch and issue of this project stands, grouped by feature when Linear is on. */}
+      {work && work.length > 0 && (
+        <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} standFirst />
+      )}
 
       <Card
         title="Chats"

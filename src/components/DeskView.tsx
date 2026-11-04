@@ -272,6 +272,9 @@ export function DeskView(props: DeskViewProps) {
   const pageRow = props.page === null ? undefined : props.projects.find((p) => p.folder === props.page);
   const work = withLinear(yourWork(props.repos, now), props.linear?.work ?? null, props.linear?.teamOf ?? {}, props.repos, now);
   const issues = !!props.linear?.work?.connected;
+  // Its page shows only its own work: the whole Desk's list would repeat every other project.
+  const pageRepo = pageRow ? (props.repos?.find((r) => r.folders.some((f) => f.folder === pageRow.folder)) ?? null) : null;
+  const pageWork = pageRepo ? work.filter((i) => i.repo === pageRepo.repo) : [];
   return (
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
@@ -284,7 +287,11 @@ export function DeskView(props: DeskViewProps) {
           <DeskProject
             row={pageRow}
             chats={props.chats.filter((c) => c.folder === pageRow.folder)}
-            repo={props.repos && (props.repos.find((r) => r.folders.some((f) => f.folder === pageRow.folder)) ?? null)}
+            repo={pageRepo}
+            work={pageWork}
+            issues={issues}
+            onStep={props.onStep}
+            onRefresh={props.onRefreshRepos}
             now={now}
             onBack={() => props.onPage(null)}
             onOpen={onOpen}

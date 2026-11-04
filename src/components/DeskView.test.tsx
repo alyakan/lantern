@@ -349,4 +349,16 @@ describe("the Desk", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("gives a project's page its own work first, and only that project's", () => {
+    const here = repo("/p/lantern", { prs: [pr(1, "fail", { title: "Retry the fetch" })] });
+    const elsewhere = repo("/p/other", { prs: [pr(2, "pass", { title: "Another repository" })] });
+    setup({ repos: [here, elsewhere], projects: [project("/p/lantern"), project("/p/other")], page: "/p/lantern" });
+    // Where things stand comes before Next: the page opens on where its work stands.
+    const heads = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(heads.indexOf("Where things stand")).toBeGreaterThanOrEqual(0);
+    expect(heads.indexOf("Where things stand")).toBeLessThan(heads.indexOf("Next"));
+    expect(screen.getByRole("region", { name: "Where things stand" })).toHaveTextContent("Retry the fetch");
+    expect(screen.getByRole("region", { name: "Where things stand" })).not.toHaveTextContent("Another repository");
+  });
 });
