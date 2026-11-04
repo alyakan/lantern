@@ -2831,6 +2831,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
     onProjectNotes: (folder: string) => setEditingNotes(folder),
+    onOpenInDesk: (folder: string) => {
+      setDeskPage(folder);
+      setDesk(true);
+    },
     onSetup: (folder: string) => setSettingUp(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),

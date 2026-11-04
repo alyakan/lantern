@@ -57,6 +57,15 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeNull());
   });
 
+  it("opens a project's page on the Desk from its sidebar right-click menu", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.contextMenu(document.querySelector(".sidebar .sb-header")!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in Desk" }));
+    expect(await screen.findByRole("region", { name: "Project acme-api" })).toBeInTheDocument();
+    expect(within(desk()!).getByRole("region", { name: "Where things stand" })).toBeInTheDocument();
+  });
+
   it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());

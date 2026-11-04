@@ -52,6 +52,7 @@ function setup(over: Partial<Props> = {}) {
     onNewTeamIn: vi.fn(),
     onBringOld: vi.fn(),
     onProjectNotes: vi.fn(),
+    onOpenInDesk: vi.fn(),
     onSetup: vi.fn(),
     onReveal: vi.fn(),
     onPrChecks: vi.fn(),
@@ -315,15 +316,24 @@ describe("clicking in the open sidebar", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Open in Desk", "New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
-    for (const [label, handler] of [["Project notes…", h.onProjectNotes], ["Project setup…", h.onSetup], ["Bring old chats here…", h.onBringOld], ["Pull request checks…", h.onPrChecks], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
+    for (const [label, handler] of [["Open in Desk", h.onOpenInDesk], ["Project notes…", h.onProjectNotes], ["Project setup…", h.onSetup], ["Bring old chats here…", h.onBringOld], ["Pull request checks…", h.onPrChecks], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
       fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
       fireEvent.click(screen.getByRole("menuitem", { name: label }));
       expect(handler).toHaveBeenCalledWith(MONITOR);
     }
+  });
+
+  it("opens the project menu on a right-click, with Open in Desk", () => {
+    const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
+    const header = project("network-monitor").querySelector(".sb-header")!;
+    fireEvent.contextMenu(header);
+    const menu = screen.getByRole("menu", { name: "network-monitor actions" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open in Desk" }));
+    expect(h.onOpenInDesk).toHaveBeenCalledWith(MONITOR);
   });
 
   it("marks a project that has notes on its header, and only that one", () => {
