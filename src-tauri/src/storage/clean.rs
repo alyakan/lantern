@@ -328,10 +328,17 @@ mod tests {
             std::fs::create_dir_all(p).unwrap();
         }
         assert!(remove(&env, &item(Kind::Archive, Removal::Permanent, &archive)).ok);
-        assert!(remove(&env, &item(Kind::BuildOutput, Removal::Permanent, &runner)).ok);
+        // On a Mac running a CI job (CI's own runner, running this test) a runner's cache is refused, not deleted.
+        let job = scan::runner_job_running();
+        let cache = remove(&env, &item(Kind::BuildOutput, Removal::Permanent, &runner));
+        if job {
+            assert!(cache.error.unwrap().contains("CI job is running"));
+        } else {
+            assert!(cache.ok);
+        }
         assert!(remove(&env, &item(Kind::Archive, Removal::Permanent, &stray)).error.unwrap().contains("where a scan finds"));
         assert!(remove(&env, &item(Kind::BuildOutput, Removal::Permanent, &deep)).error.unwrap().contains("where a scan finds"));
-        assert!(!archive.exists() && !runner.exists() && stray.exists() && deep.exists());
+        assert!(!archive.exists() && runner.exists() == job && stray.exists() && deep.exists());
     }
 
     #[test]
