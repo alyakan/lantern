@@ -1596,8 +1596,17 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
-          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false } : null;
+          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false, pinned: false } : null;
         case "set_view_main":
+          return undefined;
+        case "list_worktrees":
+          return new URLSearchParams(location.search).get("worktree")
+            ? [
+                { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix" },
+                { path: `${FOLDER}/.claude/worktrees/new-sheet`, name: "new-sheet", branch: "worktree-new-sheet" },
+              ]
+            : [];
+        case "pin_worktree":
           return undefined;
         case "branch_review":
           return {

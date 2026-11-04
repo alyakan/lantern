@@ -58,6 +58,41 @@ describe("ReviewPanel's worktree chip", () => {
   });
 });
 
+describe("ReviewPanel's worktree picker", () => {
+  const list = [
+    { path: "/p/.claude/worktrees/retry-fix", name: "retry-fix", branch: "worktree-retry-fix" },
+    { path: "/p/.claude/worktrees/spike", name: "spike", branch: null },
+  ];
+
+  it("lists the project's worktrees, marks the one shown and hands back the one picked", () => {
+    const onPick = vi.fn();
+    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktrees={{ list, current: list[0].path, pinned: false, onPick }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose a worktree" }));
+    const menu = screen.getByRole("menu", { name: "Choose a worktree" });
+    expect(within(menu).getByRole("menuitemradio", { name: /retry-fix/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: /spike/ })).toHaveAttribute("aria-checked", "false");
+    expect(within(menu).getByText("No branch checked out")).toBeInTheDocument();
+    // Not put in one, so there is nothing to follow edits back from.
+    expect(within(menu).queryByRole("menuitem", { name: /Follow my edits/ })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /spike/ }));
+    expect(onPick).toHaveBeenCalledWith(list[1].path);
+    expect(screen.queryByRole("menu", { name: "Choose a worktree" })).toBeNull();
+  });
+
+  it("offers to follow the chat's edits again once it was put in one", () => {
+    const onPick = vi.fn();
+    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktrees={{ list, current: list[0].path, pinned: true, onPick }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose a worktree" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Follow my edits/ }));
+    expect(onPick).toHaveBeenCalledWith(null);
+  });
+
+  it("is absent when the project has no other worktree", () => {
+    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Choose a worktree" })).toBeNull();
+  });
+});
+
 describe("ReviewPanel's file list", () => {
   it("marks a moved file as moved, with where it was, once rather than as one new and one deleted", () => {
     const moved = [{ path: "/p/Kit/a.swift", created: false, added: 1, removed: 0, moved_from: "/p/a.swift" }];

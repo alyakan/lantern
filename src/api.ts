@@ -16,12 +16,18 @@ import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, C
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
 
-/** The worktree a chat works in when Claude entered one itself; `main`: the user chose to read the chat's own folder instead. */
-export interface WorkView {
+/** A linked worktree of the chat's project. */
+export interface Worktree {
   path: string;
   name: string;
   branch: string | null;
+}
+
+/** The worktree a chat works in (Claude entered one itself, or was put in one); `main`: the user chose to read the chat's own folder instead. */
+export interface WorkView extends Worktree {
   main: boolean;
+  /** The chat was put in it (enter_worktree, or the picker), rather than found from where it edited. */
+  pinned: boolean;
 }
 
 /** A local branch under review: its commits (newest first) since it left `base`. */
@@ -194,6 +200,10 @@ export const api = {
   workFolder: (slot: string) => invoke<WorkView | null>("work_folder", { slot }),
   /** `main`: read Git and Branch from the chat's own folder even while it works in a worktree. */
   setViewMain: (slot: string, main: boolean) => invoke<void>("set_view_main", { slot, main }),
+  /** The project's linked worktrees, for the Changes pane's picker. */
+  listWorktrees: (slot: string) => invoke<Worktree[]>("list_worktrees", { slot }),
+  /** Put the chat in one of them (`path` from listWorktrees), so Git and Branch read from it; null lets its latest edit decide again. */
+  pinWorktree: (slot: string, path: string | null) => invoke<void>("pin_worktree", { slot, path }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce or approval request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>

@@ -50,6 +50,8 @@ interface Props {
   onScope?: (scope: ChangeScope) => void;
   /** Claude entered a worktree itself: Git and Branch read from it (`main`: from the chat's own folder, by the user's choice). */
   worktree?: { name: string; branch: string | null; main: boolean; onToggle: () => void };
+  /** The project's worktrees to pick from: `current` is the one shown (a path; null: none, or the chat's own folder), `pinned` that the chat was put in it. */
+  worktrees?: { list: { path: string; name: string; branch: string | null }[]; current: string | null; pinned: boolean; onPick: (path: string | null) => void };
   /** On a Step-by-step page: the turns "turn" means (null: not all known, e.g. an earlier page of a reopened session). */
   stepRange?: { from: number; to: number } | null;
   /** How many files each filter would show (null: not known yet). */
@@ -237,6 +239,7 @@ export function ReviewPanel(props: Props) {
             {props.worktree.main ? "Main folder" : props.worktree.name}
           </button>
         )}
+        {tab === "changes" && props.worktrees && <WorktreePicker {...props.worktrees} named={!!props.worktree} />}
         {tab === "changes" && props.onShip && count > 0 && (
           <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
             Ship it…
@@ -557,6 +560,61 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
               </span>
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The project's worktrees: pick the one whose Git and Branch the pane shows, or let the chat's latest edit decide again. */
+function WorktreePicker({ list, current, pinned, onPick, named }: NonNullable<Props["worktrees"]> & { named: boolean }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const pick = (path: string | null) => {
+    onPick(path);
+    setOpen(false);
+  };
+  return (
+    <div className="scope-anchor worktree-anchor" ref={root}>
+      <button className={`ghost worktree-picker${open ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label="Choose a worktree" title="Show a worktree's Git and Branch changes" onClick={() => setOpen(!open)}>
+        {!named && <span className="scope-label">Worktrees</span>}
+        <span className="scope-chevron" aria-hidden />
+      </button>
+      {open && (
+        <div className="menu scope-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Choose a worktree" onKeyDown={keys.onKeyDown}>
+          {list.map((w) => (
+            <button key={w.path} role="menuitemradio" aria-checked={current === w.path} className={`menu-row scope-option${current === w.path ? " current" : ""}`} onClick={() => pick(w.path)}>
+              <span className="scope-check" aria-hidden>
+                {current === w.path ? "✓" : ""}
+              </span>
+              <span className="scope-option-text">
+                <span className="scope-option-title">{w.name}</span>
+                <span className="scope-option-about">{w.branch ?? "No branch checked out"}</span>
+              </span>
+            </button>
+          ))}
+          {pinned && (
+            <button role="menuitem" className="menu-row scope-option" onClick={() => pick(null)}>
+              <span className="scope-check" aria-hidden />
+              <span className="scope-option-text">
+                <span className="scope-option-title">Follow my edits</span>
+                <span className="scope-option-about">Show the worktree this chat last edited in, if any</span>
+              </span>
+            </button>
+          )}
         </div>
       )}
     </div>
