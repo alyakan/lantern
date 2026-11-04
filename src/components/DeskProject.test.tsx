@@ -27,8 +27,8 @@ const repo: RepoStatus = {
   branches: [],
   error: null,
 };
-const item = (id: string, path: string, over: Partial<StorageItem> = {}): StorageItem => ({ id, kind: "worktree", name: path, path, bytes: 2e9, risk: "safe", removal: "worktree", note: "", warning: null, ticked: true, idle_days: 3, within: null, suggestion: null, ...over });
-const view = (items: StorageItem[] | null): StorageView => ({ items: items ?? [], scanning: false, progress: "", scanned_at: items ? 1 : null, free_bytes: null, snapshots: 0, notes: [], deleting: false });
+const item = (id: string, path: string, over: Partial<StorageItem> = {}): StorageItem => ({ id, kind: "worktree", name: path, path, bytes: 2e9, risk: "safe", removal: "worktree", note: "", warning: null, ticked: true, idle_days: 3, within: null, suggestion: null, shared: false, ...over });
+const view = (items: StorageItem[] | null): StorageView => ({ items: items ?? [], scanning: false, progress: "", scanned_at: items ? 1 : null, free_bytes: null, total_bytes: null, purgeable_bytes: null, snapshots: 0, notes: [], deleting: false });
 
 function setup(over: Partial<DeskProjectProps> = {}) {
   const props: DeskProjectProps = { row, chats: [chat], repo, now: Date.now(), onBack: vi.fn(), onOpen: vi.fn(), onNewChat: vi.fn(), ...over };

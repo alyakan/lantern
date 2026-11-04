@@ -664,7 +664,7 @@ export interface DashboardPreview {
   confirm: string | null;
 }
 
-export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
+export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "archive" | "temp" | "download" | "trash";
 /** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
 export type StorageRisk = "safe" | "review" | "blocked";
 
@@ -689,6 +689,8 @@ export interface StorageItem {
   within: string | null;
   /** Claude's reason for suggesting it. */
   suggestion: string | null;
+  /** Its size may be shared with something that stays (an APFS copy of an app): deleting it frees up to `bytes`. */
+  shared: boolean;
 }
 
 /** What the Storage tab shows. */
@@ -699,6 +701,10 @@ export interface StorageView {
   /** When the last scan finished (ms since the epoch); null before the first. */
   scanned_at: number | null;
   free_bytes: number | null;
+  /** The size of the disk. */
+  total_bytes: number | null;
+  /** What macOS can free by itself when it needs the room, measured at the end of a scan; null before one. */
+  purgeable_bytes: number | null;
   /** Local Time Machine snapshots, which can keep deleted space from showing as free. */
   snapshots: number;
   notes: string[];

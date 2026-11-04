@@ -131,3 +131,22 @@ export function rememberStorageTab(tab: StorageTabName): void {
     // storage unavailable: it lasts until the panel is closed
   }
 }
+
+const BIG_KEY = "lantern.storageBig";
+
+/** Whether the Storage panel was left expanded to nearly the whole window. */
+export function lastStorageBig(): boolean {
+  try {
+    return localStorage.getItem(BIG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberStorageBig(big: boolean): void {
+  try {
+    localStorage.setItem(BIG_KEY, big ? "1" : "0");
+  } catch {
+    // storage unavailable: it lasts until the app restarts
+  }
+}
