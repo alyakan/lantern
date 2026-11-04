@@ -4,7 +4,7 @@ import { StoragePanel } from "./StoragePanel";
 import { api } from "../api";
 import type { MemorySnapshot, StorageItem, StorageView } from "../types";
 
-vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), memorySnapshot: vi.fn() } }));
+vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), menubarStats: vi.fn(), memorySnapshot: vi.fn() } }));
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
   id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
@@ -20,6 +20,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(api.storageScan).mockResolvedValue(true);
   vi.mocked(api.storageDelete).mockResolvedValue([]);
+  // No live reading unless a test gives one: the view's own figures stand.
+  vi.mocked(api.menubarStats).mockReturnValue(new Promise(() => {}));
   vi.mocked(api.memorySnapshot).mockReset();
   vi.mocked(api.memorySnapshot).mockResolvedValue(memory);
 });

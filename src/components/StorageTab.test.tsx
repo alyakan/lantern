@@ -4,7 +4,7 @@ import { StorageTab, suggestedCount } from "./StorageTab";
 import { api } from "../api";
 import type { StorageItem, StorageView } from "../types";
 
-vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn() } }));
+vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), menubarStats: vi.fn() } }));
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
   id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
@@ -14,6 +14,8 @@ const view = (over: Partial<StorageView> = {}): StorageView => ({ items: [], sca
 beforeEach(() => {
   vi.mocked(api.storageScan).mockResolvedValue(true);
   vi.mocked(api.storageDelete).mockResolvedValue([]);
+  // No live reading unless a test gives one: the view's own figures stand.
+  vi.mocked(api.menubarStats).mockReturnValue(new Promise(() => {}));
 });
 
 const GB = 1_000_000_000;
@@ -52,6 +54,25 @@ describe("StorageTab", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Delete copy" }));
     expect(within(stat("Deleting frees")).getByText("10.0 GB")).toBeInTheDocument();
     expect(within(stat("Free after deleting")).getByText("30.0 GB")).toBeInTheDocument();
+  });
+
+  it("reads the disk's free space again every few seconds while open, not only when a scan or a delete ends", async () => {
+    vi.useFakeTimers();
+    try {
+      let free = 20 * GB;
+      vi.mocked(api.menubarStats).mockImplementation(async () => ({ ram: null, disk_free: free, disk_total: 500 * GB }));
+      render(<StorageTab view={view({ items: [item("a")], free_bytes: 8 * GB, total_bytes: 500 * GB })} onAsk={null} />);
+      const freeNow = () => (screen.getByText("Free now").closest(".storage-stat") as HTMLElement).querySelector("dd")!.textContent;
+      await act(async () => {});
+      expect(freeNow()).toBe("20.0 GB");
+      free = 12 * GB;
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(freeNow()).toBe("12.0 GB");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says purgeable is measured by the next scan until one has, and ticks every safe item at once", () => {

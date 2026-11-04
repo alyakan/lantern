@@ -30,6 +30,25 @@ export const suggestedCount = (view: StorageView | null) => view?.items.filter((
 export const FREE_UP_SPACE_REQUEST = "Free up disk space: scan this Mac with the storage tools, then mark what is safe to delete (storage_suggest) with a short reason each. I'll review it in the Storage panel (the disk button in the title bar) and delete from there.";
 
 const SHOWN = 40;
+/** How often the disk's free space is read while the tab is open, as the menu bar panel does: a scan or a delete is not
+ * the only thing that changes it. */
+const DISK_MS = 3000;
+
+/** The disk's free space and size, read now and every DISK_MS while the tab is open; null until the first read. */
+function useLiveDisk(): { free: number | null; total: number | null } | null {
+  const [disk, setDisk] = useState<{ free: number | null; total: number | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const read = () => api.menubarStats().then((s) => live && setDisk({ free: s.disk_free, total: s.disk_total }), () => {});
+    read();
+    const timer = window.setInterval(read, DISK_MS);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  return disk;
+}
 
 /** Safe, and nothing about it gives pause (not changed today, not a cache in use): what "Tick all safe" ticks. */
 const plainSafe = (i: StorageItem) => i.risk === "safe" && i.warning === null;
@@ -57,7 +76,8 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   const items = useMemo(() => view?.items ?? [], [view]);
   const sel = useMemo(() => selection(items, touched), [items, touched]);
   const total = useMemo(() => GROUPS.reduce((n, g) => n + groupOf(items, g.kind).bytes, 0), [items]);
-  const disk = useMemo(() => (view ? diskFigures(view, sel) : null), [view, sel]);
+  const live = useLiveDisk();
+  const disk = useMemo(() => (view ? diskFigures({ total_bytes: live?.total ?? view.total_bytes, free_bytes: live?.free ?? view.free_bytes, purgeable_bytes: view.purgeable_bytes }, sel) : null), [view, sel, live]);
   const working = deleting || !!view?.deleting;
   // What the confirmation names: ticked items that need a judgement (review risk) or that only Claude's suggestion ticked.
   const look = useMemo(() => {
