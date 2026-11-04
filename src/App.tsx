@@ -4,7 +4,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
+import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
@@ -2036,11 +2036,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const sleepAfter = useSleepMinutes();
   const idleClock = useRef<Record<string, number>>({});
   // A team goes to sleep as one, once every member has rested: its Lead's slot stands for it in the clock.
-  const sleepSlots = (slots: string[]) => {
+  const sleepSlots = (slots: string[], idleMs: number) => {
     // What each one is, saved before any of them is put to sleep (an agent's is its place in the team: its Lead's session).
     const saved = Object.fromEntries(slots.map((slot) => [slot, savedChatOf(slot, chats.slots, active, drafts.current, titles, chats.agents)]));
     for (const slot of slots) {
       const s = chats.slots[slot];
+      // What it looked like when it went (sleep.log), to tell a chat that was idle from one that was at work.
+      api.sleepLog(sleepNote(slot, s, slots.length > 1 ? "idle-team" : "idle", idleMs)).catch(() => {});
       delete idleClock.current[slot];
       delete relaunch.current[slot];
       // Asleep first, so the end of its process (which closing it makes) is not taken for a crash.
@@ -2060,12 +2062,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
     idleClock.current = clock;
     for (const slot of due) {
+      const idleMs = Date.now() - clock[slot];
       // An agent has its claude stopped and stays in its team and on the canvas (the backend says when it has: it refuses when
       // the agent is in the middle of something). A Lead stands for its team: the Lead first in the list, its agents after it.
       if (agents.includes(slot)) {
         delete idleClock.current[slot];
+        if (chats.slots[slot]) api.sleepLog(sleepNote(slot, chats.slots[slot], "idle-agent", idleMs)).catch(() => {});
         api.sleepAgent(slot).catch(() => {});
-      } else sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot]);
+      } else sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot], idleMs);
     }
   };
   const sweepNow = useRef(sleepSweep);

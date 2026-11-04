@@ -3,6 +3,9 @@
 //!
 //! One line per push, never a token, a key, a chat's words or its title. Kept in `push.log` in the app's data folder,
 //! cut back to its last half when it passes `MAX_BYTES`.
+//!
+//! `SLEEP` is the same kind of log for chats put to sleep (`sleep.log`): which chat, what it looked like to the window and
+//! to the hub when it was, so that a chat that slept while it worked can be told from one that was only idle.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -10,12 +13,18 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_BYTES: u64 = 64 * 1024;
 
-static PATH: OnceLock<PathBuf> = OnceLock::new();
-static WRITE: Mutex<()> = Mutex::new(());
+/// A log file: where it lives is set once at launch, and a line is added with the time.
+pub struct Log {
+    path: OnceLock<PathBuf>,
+    write: Mutex<()>,
+}
 
-/// Where the log is kept (the app sets it once at launch; without it nothing is written, as in tests).
+static PUSH: Log = Log::new();
+pub static SLEEP: Log = Log::new();
+
+/// Where the push log is kept (the app sets it once at launch; without it nothing is written, as in tests).
 pub fn set_path(path: PathBuf) {
-    let _ = PATH.set(path);
+    PUSH.set_path(path);
 }
 
 /// `YYYY-MM-DD HH:MM:SS` in UTC, from seconds since 1970.
@@ -34,25 +43,57 @@ fn stamp(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC", rest / 3_600, rest % 3_600 / 60, rest % 60)
 }
 
-/// Adds one line. A log that can't be written is not worth failing a push for.
-pub fn note(line: &str) {
-    let Some(path) = PATH.get() else { return };
-    let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_BYTES) {
-        if let Ok(text) = std::fs::read_to_string(path) {
-            let keep = text.len() / 2;
-            let from = text[keep..].find('\n').map_or(text.len(), |i| keep + i + 1);
-            let _ = std::fs::write(path, &text[from..]);
+impl Log {
+    const fn new() -> Self {
+        Self { path: OnceLock::new(), write: Mutex::new(()) }
+    }
+
+    pub fn set_path(&self, path: PathBuf) {
+        let _ = self.path.set(path);
+    }
+
+    /// Adds one line. A log that can't be written is not worth failing what it describes for.
+    pub fn note(&self, line: &str) {
+        let Some(path) = self.path.get() else { return };
+        let _guard = self.write.lock().unwrap_or_else(|e| e.into_inner());
+        if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_BYTES) {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                let keep = text.len() / 2;
+                let from = text[keep..].find('\n').map_or(text.len(), |i| keep + i + 1);
+                let _ = std::fs::write(path, &text[from..]);
+            }
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{} {line}", stamp(super::now_ms() / 1000));
         }
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{} {line}", stamp(super::now_ms() / 1000));
-    }
+}
+
+/// Adds one line to the push log.
+pub fn note(line: &str) {
+    PUSH.note(line);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::stamp;
+    use super::{stamp, Log};
+
+    #[test]
+    fn a_log_keeps_its_lines_and_writes_nothing_until_it_has_a_place() {
+        let log = Log::new();
+        log.note("before a path is set");
+        let path = std::env::temp_dir().join(format!("lantern-sleep-log-test-{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        log.set_path(path.clone());
+        log.note("hub slot=s1 asleep while working=true");
+        log.note("window slot=s1 why=idle");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].ends_with(" UTC hub slot=s1 asleep while working=true"));
+        assert!(lines[1].ends_with(" UTC window slot=s1 why=idle"));
+    }
 
     #[test]
     fn a_time_is_written_as_a_utc_date_and_clock() {
