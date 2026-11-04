@@ -4,6 +4,7 @@ import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
 import type { UsageWindow } from "../protocol/generated/UsageWindow";
 import { contextOf, progressOf, shortTokens, usageOf, weekOf, windowOf } from "../view/plan";
+import { tightestOf } from "../view/providerUsage";
 import { ScrollView, Share, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -370,13 +371,13 @@ export function UsageStrip({ plan, onPress }: { plan: PlanUsage; /** Opens the u
   );
 }
 
-/** On Home: one provider's usage in a line with a thin bar under it, for the window nearest its limit. */
+/** One provider's usage in a line with a thin bar under it, for the window nearest its limit (at it, then running out before it resets). */
 export function ProviderStrip({ name, windows, onPress }: { name: string; windows: UsageWindow[]; onPress?: () => void }) {
   const colors = useColors();
-  const top = windows.reduce<UsageWindow | null>((a, w) => (a === null || w.used > a.used ? w : a), null);
+  const top = tightestOf(windows);
   const w = top ? windowOf(top) : null;
   const fill = w?.tone === "stop" ? colors.stop : w?.tone === "warn" ? colors.hi : colors.go;
-  const said = w === null ? "Usage unavailable" : w.tone === "stop" ? `${w.title} limit reached` : `${w.title} · ${w.percent}% used`;
+  const said = w === null ? "Usage unavailable" : w.tone === "stop" ? `${w.title}${/limit$/i.test(w.title) ? "" : " limit"} reached` : `${w.title} · ${w.percent}% used`;
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={`${name} usage, ${w === null ? "usage unavailable" : `${w.percent} percent used`}${w?.short ? `. ${w.short}` : ""}`} onPress={onPress} haptic="select" scaleTo={0.98} style={{ gap: 5 }}>
       {/* The words give way (cut with "…") before the reset does: side by side they ran over each other. */}

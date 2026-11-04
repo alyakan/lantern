@@ -15,8 +15,6 @@ jest.mock("../prefs", () => ({
   saveFolded: jest.fn(async () => {}),
   loadSeen: jest.fn(async () => null),
   saveSeen: jest.fn(async () => {}),
-  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: false, dismissed: [] as string[] })),
-  saveSuggestionPrefs: jest.fn(async () => {}),
 }));
 
 beforeEach(() => {
