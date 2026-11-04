@@ -165,9 +165,7 @@ function FoldRow({ fold, items, issues, feature }: { fold: Fold; items: WorkItem
   return (
     <li className={`dp-row yw-row yw-foldrow yw-tone-${fold === "done" ? "done" : "wait"}`}>
       <button className="yw-fold" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? "Fold them away" : "Show them"}>
-        <span className="yw-chev" aria-hidden>
-          {open ? "▾" : "▸"}
-        </span>
+        <span className="chev" aria-hidden />
         <span className="yw-name">{foldWord(fold, items.length)}</span>
       </button>
       {open && (
@@ -203,9 +201,7 @@ function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; 
     <section className="yw-feature" aria-label={group.label}>
       <header className="yw-feature-head">
         <button className="yw-fold" aria-expanded={!folded} onClick={onFold} title={folded ? "Show its work" : "Fold it away"}>
-          <span className="yw-chev" aria-hidden>
-            {folded ? "▸" : "▾"}
-          </span>
+          <span className="chev" aria-hidden />
           <span className="yw-head-text">
             {/* What a group is, said once on its heading: a Linear project (a feature) or a repository. */}
             {!group.plain && by !== "none" && <span className="yw-kicker" aria-hidden>{by === "feature" ? "Feature · Linear project" : "Project"}</span>}
