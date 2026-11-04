@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Switch, TextInput, View } from "react-native";
+import { Animated, Easing, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
@@ -12,7 +12,9 @@ import { DarkLantern } from "../ui/lanterns";
 import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
+import { DangerButton, LOOKS, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
 import { radius, space, useColors } from "../ui/theme";
+import { loadVoiceEngine, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
 import { ProviderStrip } from "./ChatExtras";
 
@@ -222,37 +224,6 @@ export function ReconnectPill({ state }: { state: ConnectionState }) {
   );
 }
 
-/** The lock's switch: Face ID (or the phone's passcode) before Lantern shows anything. It asks first, to turn it on or off. */
-function LockRow() {
-  const colors = useColors();
-  const lock = useAppLock();
-  const { enabled, available, authenticating, method, problem } = useLockState();
-  return (
-    <View style={{ marginTop: 10, gap: 4 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
-          Lock with {method}
-        </Txt>
-        <Switch
-          accessibilityLabel={`Lock with ${method}`}
-          value={enabled}
-          disabled={authenticating || (!available && !enabled)}
-          onValueChange={(on) => void (on ? lock.enable() : lock.disable())}
-          trackColor={{ true: colors.go, false: colors.rule }}
-        />
-      </View>
-      <Txt variant="small" tone="ink2">
-        {available || enabled ? `Asks for ${method} when you come back to Lantern after half a minute away. Your phone's passcode works too.` : "Set a passcode on this phone to use this."}
-      </Txt>
-      {problem && (
-        <Txt variant="small" tone="stop" accessibilityRole="alert">
-          {problem}
-        </Txt>
-      )}
-    </View>
-  );
-}
-
 /** Each provider's limit nearest its end, a line each with when it resets or runs out: the whole of it (the chart) on a press. */
 function UsageCard({ onPress }: { onPress: () => void }) {
   const colors = useColors();
@@ -261,7 +232,7 @@ function UsageCard({ onPress }: { onPress: () => void }) {
   const shown = USAGE_PROVIDERS.map((p) => ({ ...p, windows: currentUsageWindows(readingOf(p.id, plan, providerUsage), now) })).filter((p) => p.windows.length > 0);
   if (shown.length === 0) return null;
   return (
-    <View accessibilityLabel="Usage" style={{ marginTop: 6, padding: 14, gap: 12, borderRadius: radius.inner, backgroundColor: colors.card }}>
+    <View accessibilityLabel="Usage" style={{ padding: 14, gap: 12, borderRadius: radius.inner, backgroundColor: colors.wash }}>
       {shown.map((p) => (
         <ProviderStrip key={p.id} name={p.name} windows={p.windows} onPress={onPress} />
       ))}
@@ -269,8 +240,47 @@ function UsageCard({ onPress }: { onPress: () => void }) {
   );
 }
 
-/** The Mac, as a sheet: its name, where the connection stands, its providers' usage, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onUsage, onSupport, onPairDevice, onStorage, onTodos, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the usage in full: every limit, and each day's highest. */ onUsage?: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens your to-do lists (kept on the Mac). Offered only to a Mac that lists "todos". */ onTodos?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
+/** The lock's switch, as a row of "This phone": Face ID (or the phone's passcode) before Lantern shows anything. It asks first, to turn it on or off. */
+function LockRow() {
+  const colors = useColors();
+  const lock = useAppLock();
+  const { enabled, available, authenticating, method, problem } = useLockState();
+  return (
+    <View>
+      <SettingsRow
+        look={LOOKS.lock}
+        title={`Lock with ${method}`}
+        detail={available || enabled ? `Asks for ${method} when you come back to Lantern after half a minute away. Your phone's passcode works too.` : "Set a passcode on this phone to use this."}
+        right={<Switch accessibilityLabel={`Lock with ${method}`} value={enabled} disabled={authenticating || (!available && !enabled)} onValueChange={(on) => void (on ? lock.enable() : lock.disable())} trackColor={{ true: colors.go, false: colors.rule }} />}
+      />
+      {problem && (
+        <Txt variant="small" tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: 12, paddingBottom: 10 }}>
+          {problem}
+        </Txt>
+      )}
+    </View>
+  );
+}
+
+/** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
+function VoiceRow({ onPress }: { onPress: () => void }) {
+  const [engine, setEngine] = useState<VoiceEngine | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadVoiceEngine().then((e) => live && setEngine(e));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return <SettingsRow look={LOOKS.voice} title="Voice typing" value={engine === null ? null : engine === "server" ? "Apple's service" : "On the phone"} onPress={onPress} accessibilityHint="Picks what turns your words into text in the message box." />;
+}
+
+/**
+ * The Mac, as a sheet, which is the app's settings: the Mac and how it is connected, its providers' usage, then what lives on
+ * the Mac (to-dos, storage, pairing another device), this phone's own (the lock, voice typing), Lantern's (what's new, the
+ * tips), and unpairing, in red at the bottom.
+ */
+export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport, onPairDevice, onStorage, onTodos, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the usage in full: every limit, and each day's highest. */ onUsage?: () => void; /** Opens this phone's voice typing settings. */ onVoice?: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens your to-do lists (kept on the Mac). Offered only to a Mac that lists "todos". */ onTodos?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
@@ -286,35 +296,51 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onSupport, onPairD
         next.current?.();
       }}
     >
-      {(close) => {
+      {(close, scroll) => {
         const then = (open?: () => void) => () => {
           next.current = open ?? null;
           close();
         };
         return (
-        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
-          <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
-          <Txt variant="body" tone="ink2">
-            {where}
-          </Txt>
-          {state.kind === "connected" && (
-            <Txt variant="small" tone="ink3">
-              Lantern {state.welcome.app_version}
-            </Txt>
-          )}
-          {state.kind === "connected" && onUsage && <UsageCard onPress={then(onUsage)} />}
-          <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
-            Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
-          </Txt>
-          <LockRow />
-          {canPair && <Button label="Pair another device" kind="ghost" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
-          {canTodos && <Button label="Your to-dos" kind="ghost" onPress={then(onTodos)} accessibilityHint="Shows the to-do list of each project on your Mac." />}
-          {canStorage && <Button label="Mac storage" kind="ghost" onPress={then(onStorage)} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
-          {onWhatsNew && <Button label="What's new" kind="ghost" onPress={then(onWhatsNew)} />}
-          {onSupport &&<Button label="Support development" kind="ghost" onPress={then(onSupport)} style={{ marginTop: 6 }} />}
-          <Button label="Unpair this phone" kind="ghost" onPress={then(onUnpair)} style={{ marginTop: onSupport ? 0 : 6 }} />
-          <Button label="Close" onPress={close} />
-        </View>
+          <View style={{ flexShrink: 1 }}>
+            <SheetHeader onDone={close} />
+            <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: insets.bottom + space.lg, gap: 6 }}>
+              <View style={{ alignItems: "center", gap: 3, paddingBottom: 8 }}>
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ marginBottom: 8 }}>
+                  <Tile symbol="laptopcomputer" glyph="⌘" tint={colors.isDark ? "#3a4654" : "#15212e"} size={56} />
+                </View>
+                <Txt variant="heading" accessibilityRole="header">
+                  {state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}
+                </Txt>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: state.kind === "connected" ? colors.go : colors.ink3 }} />
+                  <Txt variant="small" tone="ink2">
+                    {where}
+                  </Txt>
+                </View>
+                {state.kind === "connected" && (
+                  <Txt variant="tiny" tone="ink3">
+                    Lantern {state.welcome.app_version}
+                  </Txt>
+                )}
+              </View>
+              {state.kind === "connected" && onUsage && <UsageCard onPress={then(onUsage)} />}
+              <SettingsSection label="On your Mac">
+                {canTodos && <SettingsRow look={LOOKS.todos} title="To-dos" onPress={then(onTodos)} accessibilityHint="Shows the to-do list of each project on your Mac." />}
+                {canStorage && <SettingsRow look={LOOKS.storage} title="Storage" onPress={then(onStorage)} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
+                {canPair && <SettingsRow look={LOOKS.pair} title="Pair another device" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+              </SettingsSection>
+              <SettingsSection label="This phone">
+                <LockRow />
+                {onVoice && <VoiceRow onPress={then(onVoice)} />}
+              </SettingsSection>
+              <SettingsSection label="Lantern">
+                {onWhatsNew && <SettingsRow look={LOOKS.whatsNew} title="What's new" onPress={then(onWhatsNew)} />}
+                {onSupport && <SettingsRow look={LOOKS.support} title="Support development" onPress={then(onSupport)} />}
+              </SettingsSection>
+              <DangerButton label="Unpair this phone" onPress={then(onUnpair)} footer="Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control." />
+            </ScrollView>
+          </View>
         );
       }}
     </Sheet>

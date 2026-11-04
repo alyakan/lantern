@@ -157,12 +157,12 @@ describe("the to-do sheet", () => {
   it("is offered in the Mac sheet only by a Mac that has to-dos", async () => {
     const onTodos = jest.fn();
     await renderWith(<MacSheet state={connectedWith(["todos"])} onClose={jest.fn()} onUnpair={jest.fn()} onTodos={onTodos} />, {});
-    await fireEvent.press(screen.getByRole("button", { name: "Your to-dos" }));
+    await fireEvent.press(screen.getByRole("button", { name: "To-dos" }));
     expect(onTodos).toHaveBeenCalledTimes(1);
   });
 
   it("isn't offered by an older Mac", async () => {
     await renderWith(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} onTodos={jest.fn()} />, {});
-    expect(screen.queryByRole("button", { name: "Your to-dos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "To-dos" })).toBeNull();
   });
 });

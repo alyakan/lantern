@@ -117,14 +117,14 @@ describe("the Mac's sheet", () => {
     expect(screen.queryByRole("button", { name: "Support development" })).toBeNull();
   });
 
-  it("says that unpairing only forgets the Mac here, and unpairs or closes", async () => {
+  it("says that unpairing only forgets the Mac here, and unpairs or is done", async () => {
     const onClose = jest.fn();
     const onUnpair = jest.fn();
     await render(<MacSheet state={{ kind: "offline", reason: "x", retryInMs: 1 }} onClose={onClose} onUnpair={onUnpair} />);
     expect(screen.getByText("Not connected")).toBeTruthy();
     expect(screen.getByText(/also remove this phone in Lantern's Settings/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Done" }));
     expect(onUnpair).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
