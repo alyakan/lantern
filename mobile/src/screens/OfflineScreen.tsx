@@ -3,6 +3,7 @@ import { Animated, Easing, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
+import { useSyncState } from "../shell/hooks";
 import { useAppLock, useLockState } from "../shell/lockContext";
 import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
@@ -12,6 +13,8 @@ import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
+import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
+import { ProviderStrip } from "./ChatExtras";
 
 /** A lantern being lit: its glow swells and settles, over and over, while the phone finds the Mac. */
 function LitLantern() {
@@ -250,8 +253,24 @@ function LockRow() {
   );
 }
 
-/** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onStorage, onTodos, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens your to-do lists (kept on the Mac). Offered only to a Mac that lists "todos". */ onTodos?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
+/** Each provider's limit nearest its end, a line each with when it resets or runs out: the whole of it (the chart) on a press. */
+function UsageCard({ onPress }: { onPress: () => void }) {
+  const colors = useColors();
+  const { plan, providerUsage } = useSyncState();
+  const now = Date.now();
+  const shown = USAGE_PROVIDERS.map((p) => ({ ...p, windows: currentUsageWindows(readingOf(p.id, plan, providerUsage), now) })).filter((p) => p.windows.length > 0);
+  if (shown.length === 0) return null;
+  return (
+    <View accessibilityLabel="Usage" style={{ marginTop: 6, padding: 14, gap: 12, borderRadius: radius.inner, backgroundColor: colors.card }}>
+      {shown.map((p) => (
+        <ProviderStrip key={p.id} name={p.name} windows={p.windows} onPress={onPress} />
+      ))}
+    </View>
+  );
+}
+
+/** The Mac, as a sheet: its name, where the connection stands, its providers' usage, and unpairing this phone. */
+export function MacSheet({ state, onClose, onUnpair, onUsage, onSupport, onPairDevice, onStorage, onTodos, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the usage in full: every limit, and each day's highest. */ onUsage?: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens your to-do lists (kept on the Mac). Offered only to a Mac that lists "todos". */ onTodos?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
@@ -283,6 +302,7 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
               Lantern {state.welcome.app_version}
             </Txt>
           )}
+          {state.kind === "connected" && onUsage && <UsageCard onPress={then(onUsage)} />}
           <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>

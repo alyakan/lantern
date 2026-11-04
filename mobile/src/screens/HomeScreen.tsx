@@ -1,4 +1,4 @@
-import { claudeUsage, currentUsageWindows } from "../view/providerUsage";
+import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
@@ -28,14 +28,12 @@ import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
 import { ModeSwitch } from "./ModeSwitch";
-import { TopBar } from "../ui/TopBar";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT, TopBar } from "../ui/TopBar";
+import { UsageRing } from "../ui/UsageRing";
 import { WorkScreen } from "./WorkScreen";
 import { nextSteps } from "../view/work";
 import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
-import { Suggestions } from "./Suggestions";
-import { UsageSheet } from "./UsageSheet";
-import { ProviderStrip } from "./ChatExtras";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -341,7 +339,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // Holding a chat down also offers to pin it, and to mark it read or unread (on this phone only).
   const [acting, setActing] = useState<Row | null>(null);
   const pins = usePins();
-  const [usageOpen, setUsageOpen] = useState(false);
+  // How tall the bar floating over the list is, once it is measured.
+  const [barHeight, setBarHeight] = useState(0);
   // The chat whose swipe buttons are out (one at a time), and the search of the list (what is typed narrows it).
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -392,6 +391,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const head = headline(stack.length);
   const list = rows(chats, now, seen, workingSince, pins);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
+  // The limit nearest its end, across the providers, as a ring round the Mac's dot: drawn only once it runs low or will run out.
+  const usage = macName ? tightest(plan, providerUsage, now) : null;
+  const ringed = usage && usage.view.tone !== "ok" ? usage : null;
   // What is searched for narrows the list; while it is, the rest of Home (what waits on you) steps aside.
   const asked = searching ? query.trim() : "";
   const shown = asked ? list.filter((r) => matches(r, asked)) : list;
@@ -428,8 +430,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const top = (
     <TopBar>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-        <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, flexShrink: 1 }}>
-          {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
+        <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected${usage ? `. ${tightestText(usage)}` : ""}` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, flexShrink: 1 }}>
+          {/* The ring says enough while it is there: the dot stops pulsing inside it. */}
+          <UsageRing fill={ringed ? ringed.window.used : null} tone={ringed?.view.tone ?? "ok"}>
+            {!macName ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} /> : ringed ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} /> : <PulseDot color={colors.go} size={8} ms={2600} />}
+          </UsageRing>
           <Txt variant="small" tone="ink2" numberOfLines={1}>
             {macName ?? "Your Mac"}
           </Txt>
@@ -499,11 +504,10 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         // Buttons a swipe laid out go back in when the list moves.
         onScrollBeginDrag={() => setOpenSlot(null)}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }}
+        // The list starts under the bar floating over it, and scrolls under it.
+        contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {top}
-        {banner}
         {canDesk && onOpenDesk && (
           <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
@@ -518,10 +522,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        {/* A provider a line, the whole width: two side by side were too narrow for a limit and its reset. */}
-        <View style={{ gap: 10, paddingHorizontal: space.xl, paddingTop: 10 }}>
-          {["claude", "codex"].map(id => <ProviderStrip key={id} name={id === "claude" ? "Claude" : "Codex"} windows={currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now)} onPress={() => setUsageOpen(true)} />)}
-        </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -538,9 +538,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </Animated.View>
 
             {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
-            {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
-            {/* Not with One project: a suggestion can be about any project. */}
-            {stack.length === 0 && macName && !single && <Suggestions onPick={onNewChat} />}
             {stack.length > 1 && (
               <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
                 {stack.length - 1} more after this one
@@ -602,10 +599,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </>
         )}
       </Animated.ScrollView>
+      {/* The bar stays put, floating over the list, which scrolls under its glass. The status bar's own strip is paper, so rows don't run under the clock. */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
+      <View testID="home-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
+        {top}
+        {banner}
+      </View>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
       {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
-      {usageOpen && <UsageSheet plan={plan} providers={providerUsage} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet
           title={acting.title}
