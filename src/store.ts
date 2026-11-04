@@ -131,6 +131,8 @@ export interface ChangedFile {
   removed: number;
   /** Gone from disk since Claude changed it. */
   deleted?: boolean;
+  /** Where a branch or pull request moved it from (absolute). */
+  moved_from?: string;
 }
 
 /**

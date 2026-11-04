@@ -617,6 +617,7 @@ function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]
         <JumpBar path={relativeTo(current.path, folder)} folder={folder} />
         {current.created && <span className="tag">new</span>}
         {current.deleted && <span className="tag">deleted</span>}
+        {current.moved_from && <span className="tag" title={`Moved from ${relativeTo(current.moved_from, folder)}`}>moved</span>}
         <span className="chev down" aria-hidden />
       </button>
       {open && (
@@ -645,6 +646,7 @@ function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]
                   </span>
                   {f.created && <span className="tag">new</span>}
                   {f.deleted && <span className="tag">deleted</span>}
+                  {f.moved_from && <span className="tag" title={`Moved from ${relativeTo(f.moved_from, folder)}`}>moved</span>}
                   <Counts added={f.added} removed={f.removed} />
                 </button>
               );
