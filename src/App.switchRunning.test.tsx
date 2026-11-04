@@ -139,7 +139,7 @@ describe("a phone's change to a working chat", () => {
 
   it("stays on Ask, restarting nothing, when Auto was turned off while it waited, and says so once it is done", async () => {
     let allow = true;
-    const calls = await launch({ remote_settings: undefined });
+    const calls = await launch(settingsSaying(true));
     // Settings as they are when each is read: Auto allowed when the phone asks, turned off by the time it is applied.
     const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
     const before = internals.invoke;
