@@ -55,7 +55,7 @@ describe("StorageTab", () => {
   });
 
   it("says purgeable is measured by the next scan until one has, and ticks every safe item at once", () => {
-    const items = [item("a"), item("b", { kind: "archive", risk: "review", warning: "symbols" }), item("c", { kind: "temp" })];
+    const items = [item("a"), item("b", { kind: "archive", risk: "review", warning: "symbols" }), item("c", { kind: "temp" }), item("fresh", { kind: "build_output", warning: "Changed 0 day(s) ago: you may be working in this project." })];
     render(<StorageTab view={view({ items, purgeable_bytes: null })} onAsk={null} />);
     expect(screen.getByText("Measured by the next scan")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Xcode archives" })).toBeInTheDocument();
@@ -64,6 +64,8 @@ describe("StorageTab", () => {
     expect(screen.getByRole("checkbox", { name: "Delete a" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Delete c" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Delete b" })).not.toBeChecked();
+    // Safe, but the scan said it is being worked in: left for the user to tick.
+    expect(screen.getByRole("checkbox", { name: "Delete fresh" })).not.toBeChecked();
   });
 
   it("lists items by group with what the scan ticked, Claude's reason, and a blocked one that can't be ticked", () => {

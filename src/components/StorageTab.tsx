@@ -31,6 +31,9 @@ export const FREE_UP_SPACE_REQUEST = "Free up disk space: scan this Mac with the
 
 const SHOWN = 40;
 
+/** Safe, and nothing about it gives pause (not changed today, not a cache in use): what "Tick all safe" ticks. */
+const plainSafe = (i: StorageItem) => i.risk === "safe" && i.warning === null;
+
 interface Props {
   view: StorageView | null;
   /** Asks Claude, in this chat, to scan and suggest; null when there's no chat to ask. */
@@ -117,7 +120,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
             Ask Claude
           </button>
         )}
-        <button className="ghost" disabled={working || items.every((i) => i.risk !== "safe")} onClick={() => set(items.filter((i) => i.risk === "safe").map((i) => i.id), true)} title="Tick every safe item in every group">
+        <button className="ghost" disabled={working || !items.some(plainSafe)} onClick={() => set(items.filter(plainSafe).map((i) => i.id), true)} title="Tick every safe item nothing warns about, in every group">
           Tick all safe
         </button>
         {suggested > 0 && (

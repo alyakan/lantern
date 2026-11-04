@@ -38,6 +38,10 @@ fn try_remove(env: &Env, item: &Item) -> Result<u64, String> {
                 return Ok(0);
             }
             let canon = if item.kind == Kind::Temp { guard_temp(env, path)? } else { guard(env, item.kind, path)? };
+            // A CI job that started after the scan builds in it right now.
+            if item.kind == Kind::BuildOutput && scan::is_runner_cache(&env.home, &canon) && scan::runner_job_running() {
+                return Err("A CI job is running on this Mac: try again when it's done.".into());
+            }
             if item.kind == Kind::Repo {
                 if let Some(why) = scan::repo_blockers(&canon, env) {
                     return Err(why);
@@ -341,15 +345,17 @@ mod tests {
         let cache = base_path.join("C/big.cache");
         let tmp = base_path.join("T/live");
         let other = base_path.join("X/com.other.App.code_sign_clone/code_sign_clone.zzz");
+        let canary = base_path.join("X/com.google.Chrome.canary.code_sign_clone/code_sign_clone.can");
         let deep = base_path.join("C/big.cache2/inner");
-        for p in [&copy, &cache, &tmp, &other, &deep] {
+        for p in [&copy, &cache, &tmp, &other, &deep, &canary] {
             std::fs::create_dir_all(p).unwrap();
         }
         old(&copy);
+        old(&canary);
         let temp = |p: &Path| item(Kind::Temp, Removal::Permanent, p);
         assert!(remove(&env, &temp(&copy)).ok, "{:?}", remove(&env, &temp(&copy)).error);
         assert!(remove(&env, &temp(&cache)).ok);
-        for p in [&tmp, &other, &deep, &base_path] {
+        for p in [&tmp, &other, &deep, &canary, &base_path] {
             assert!(remove(&env, &temp(p)).error.is_some(), "{p:?}");
         }
         // Inside the home folder it isn't a temporary item either, and without the folder nothing is.

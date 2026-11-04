@@ -503,7 +503,7 @@ pub fn archives(env: &Env, cancel: &AtomicBool) -> Scanned {
 /// purpose so CI builds stay quick, and they only grow. Not ticked, and blocked while a job runs.
 pub fn runner_caches(env: &Env, cancel: &AtomicBool) -> Scanned {
     let mut out = Scanned::default();
-    let job_running = run_program("/usr/bin/pgrep", &["-x", "Runner.Worker"], Duration::from_secs(10)).is_ok();
+    let job_running = runner_job_running();
     for runner in top_level(&env.home, false).into_iter().filter(|p| file_name(p).starts_with("actions-runner")) {
         for dir in top_level(&runner.join("_work"), false).into_iter().filter(|p| file_name(p).starts_with("cargo-target")) {
             let u = usage(&dir, cancel);
@@ -579,7 +579,7 @@ pub fn clone_in_use(mtime: i64, now: i64) -> Option<String> {
     (mtime >= started - 120).then(|| "Chrome is running and may be using this copy: quit Chrome first.".into())
 }
 
-/// What is in the user's temporary folder: the copies Chrome makes of itself on every launch (X/com.google.Chrome*.
+/// What is in the user's temporary folder: the copies Chrome makes of itself on every launch (X/com.google.Chrome.
 /// code_sign_clone/code_sign_clone.*, 1.4 GB each, that neither a quit nor a crash removes), and the caches in C.
 pub fn temp_items(env: &Env, cancel: &AtomicBool) -> Scanned {
     let mut out = Scanned::default();
@@ -617,10 +617,15 @@ pub fn temp_items(env: &Env, cancel: &AtomicBool) -> Scanned {
     out
 }
 
-/// `X/com.google.Chrome….code_sign_clone`: the folder Chrome keeps its copies in.
+/// `X/com.google.Chrome.code_sign_clone`: the folder Chrome keeps its copies in. Only Chrome's own, not Beta's or Canary's:
+/// `chrome_started` can only tell whether Chrome itself is running.
 pub fn is_clone_holder(p: &Path) -> bool {
-    let n = file_name(p);
-    n.starts_with("com.google.Chrome") && n.ends_with(".code_sign_clone")
+    file_name(p) == "com.google.Chrome.code_sign_clone"
+}
+
+/// Whether a self-hosted runner is running a CI job on this Mac now.
+pub fn runner_job_running() -> bool {
+    run_program("/usr/bin/pgrep", &["-x", "Runner.Worker"], Duration::from_secs(10)).is_ok()
 }
 
 /// What macOS can free by itself (purgeable files, local snapshots): the room it reports for important use, less what is
@@ -1082,6 +1087,7 @@ pub(crate) mod tests {
         }
         let total: u64 = out.items.iter().filter(|i| i.within.is_none() && i.risk != Risk::Blocked).map(|i| i.bytes).sum();
         eprintln!("clearable: {} · notes: {:?}", crate::storage::size_text(total), out.notes);
+        eprintln!("purgeable: {:?}", purgeable_bytes(&env.home).map(crate::storage::size_text));
     }
 
     #[test]
@@ -1141,6 +1147,8 @@ pub(crate) mod tests {
         mk("X/com.google.Chrome.code_sign_clone/code_sign_clone.abc", 10_000);
         set_old(&base_path.join("X/com.google.Chrome.code_sign_clone/code_sign_clone.abc"), 30);
         mk("X/com.other.App.code_sign_clone/code_sign_clone.zzz", 10_000);
+        // Canary's: whether Canary runs isn't known, so its copies are left alone.
+        mk("X/com.google.Chrome.canary.code_sign_clone/code_sign_clone.can", 10_000);
         mk("C/big.cache", TEMP_MIN_BYTES as usize + 1);
         mk("C/small", 10);
         mk("T/anything", TEMP_MIN_BYTES as usize + 1);
