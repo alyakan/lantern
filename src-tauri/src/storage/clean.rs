@@ -6,6 +6,7 @@ use super::scan::{self, Env};
 use super::{is_protected, run_program, Item, Kind, Removal, Risk};
 use crate::git;
 use serde::Serialize;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -36,7 +37,11 @@ fn try_remove(env: &Env, item: &Item) -> Result<u64, String> {
             if std::fs::symlink_metadata(path).is_err() {
                 return Ok(0);
             }
-            let canon = guard(env, item.kind, path)?;
+            let canon = if item.kind == Kind::Temp { guard_temp(env, path)? } else { guard(env, item.kind, path)? };
+            // A CI job that started after the scan builds in it right now.
+            if item.kind == Kind::BuildOutput && scan::is_runner_cache(&env.home, &canon) && scan::runner_job_running() {
+                return Err("A CI job is running on this Mac: try again when it's done.".into());
+            }
             if item.kind == Kind::Repo {
                 if let Some(why) = scan::repo_blockers(&canon, env) {
                     return Err(why);
@@ -69,12 +74,14 @@ fn try_remove(env: &Env, item: &Item) -> Result<u64, String> {
 fn shape_ok(home: &Path, kind: Kind, canon: &Path) -> bool {
     let inside = |dir: &str| canon.starts_with(home.join(dir)) && canon != home.join(dir);
     match kind {
-        Kind::BuildOutput => canon.file_name().and_then(|n| n.to_str()).is_some_and(|n| scan::BUILD_DIRS.contains(&n)),
+        Kind::BuildOutput => canon.file_name().and_then(|n| n.to_str()).is_some_and(|n| scan::BUILD_DIRS.contains(&n)) || scan::is_runner_cache(home, canon),
+        Kind::Archive => canon.extension().is_some_and(|e| e == "xcarchive") && canon.parent().and_then(|p| p.parent()) == Some(home.join("Library/Developer/Xcode/Archives").as_path()),
         Kind::Cache => scan::known_cache_paths(home).iter().any(|p| canon == p.as_path()) || inside("Library/Caches") || inside("Library/Logs") || inside("Library/Developer/Xcode/DerivedData"),
         Kind::Download => inside("Downloads"),
         Kind::Trash => inside(".Trash"),
         Kind::Repo => canon.join(".git").is_dir(),
-        Kind::Worktree | Kind::Simulator => false,
+        // The temporary folder is outside the home folder: `guard_temp` is its only way in.
+        Kind::Worktree | Kind::Simulator | Kind::Temp => false,
     }
 }
 
@@ -99,6 +106,36 @@ fn guard(env: &Env, kind: Kind, path: &Path) -> Result<PathBuf, String> {
     }
     if !shape_ok(&home, kind, &canon) {
         return Err("It isn't where a scan finds this kind of thing.".into());
+    }
+    Ok(canon)
+}
+
+/// The real path of `path` if it may be removed from the user's temporary folder (outside the home folder, so `guard`
+/// can't take it): one of Chrome's copies of itself (`X/com.google.Chrome….code_sign_clone/code_sign_clone.*`) while no
+/// Chrome that may use it runs, or a cache straight inside `C`. A real folder or file the user owns, not a link nor reached
+/// through one, and nothing else.
+fn guard_temp(env: &Env, path: &Path) -> Result<PathBuf, String> {
+    let base = env.temp_base.as_deref().ok_or("Lantern couldn't find your temporary folder.")?;
+    let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() {
+        return Err("It is a link now: Lantern won't delete through a link.".into());
+    }
+    let canon = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    if canon != path {
+        return Err("It is reached through a link now: Lantern won't delete through a link.".into());
+    }
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err("It isn't yours.".into());
+    }
+    let rel: Vec<String> = canon.strip_prefix(base).map_err(|_| "It isn't in your temporary folder.")?.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    match rel.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["X", holder, clone] if scan::is_clone_holder(Path::new(holder)) && clone.starts_with("code_sign_clone.") => {
+            if let Some(why) = scan::clone_in_use(meta.mtime(), super::now_secs()) {
+                return Err(why);
+            }
+        }
+        ["C", name] if !name.is_empty() && name != "." && name != ".." => {}
+        _ => return Err("It isn't where a scan finds this kind of thing.".into()),
     }
     Ok(canon)
 }
@@ -139,7 +176,7 @@ mod tests {
     use super::*;
 
     fn env_of(home: &Path) -> Env {
-        Env { home: std::fs::canonicalize(home).unwrap(), path_env: None, now: now_secs(), in_use: vec![] }
+        Env { home: std::fs::canonicalize(home).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None }
     }
 
     fn item(kind: Kind, removal: Removal, path: &Path) -> Item {
@@ -256,7 +293,7 @@ mod tests {
         let wt = scan::worktrees(&w.repo, &w.env).into_iter().find(|t| std::fs::canonicalize(&t.path).ok().as_deref() == Some(&path)).unwrap();
         let mut it = scan::worktree_item(&w.repo, &wt, &w.env, &AtomicBool::new(false)).unwrap();
         it.risk = Risk::Safe;
-        let busy = Env { home: w.env.home.clone(), path_env: None, now: w.env.now, in_use: vec![path.clone()] };
+        let busy = Env { home: w.env.home.clone(), path_env: None, now: w.env.now, in_use: vec![path.clone()], temp_base: None };
         let out = remove(&busy, &it);
         assert!(!out.ok && out.error.unwrap().contains("working in it"));
         assert!(path.exists());
@@ -277,6 +314,59 @@ mod tests {
         holds.repo = Some(w.repo.clone());
         assert!(remove(&w.env, &holds).error.unwrap().contains("holds more"));
         assert!(stranger.join("keep.txt").exists());
+    }
+
+    #[test]
+    fn an_archive_and_a_runner_cache_are_deleted_only_where_a_scan_finds_them() {
+        let home = tempfile::tempdir().unwrap();
+        let env = env_of(home.path());
+        let archive = env.home.join("Library/Developer/Xcode/Archives/2026-10-01/App.xcarchive");
+        let runner = env.home.join("actions-runner-x/_work/cargo-target");
+        let stray = env.home.join("dev/App.xcarchive");
+        let deep = env.home.join("actions-runner-x/_work/lantern/cargo-target");
+        for p in [&archive, &runner, &stray, &deep] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        assert!(remove(&env, &item(Kind::Archive, Removal::Permanent, &archive)).ok);
+        assert!(remove(&env, &item(Kind::BuildOutput, Removal::Permanent, &runner)).ok);
+        assert!(remove(&env, &item(Kind::Archive, Removal::Permanent, &stray)).error.unwrap().contains("where a scan finds"));
+        assert!(remove(&env, &item(Kind::BuildOutput, Removal::Permanent, &deep)).error.unwrap().contains("where a scan finds"));
+        assert!(!archive.exists() && !runner.exists() && stray.exists() && deep.exists());
+    }
+
+    #[test]
+    fn the_temporary_folder_gives_up_only_chromes_copies_and_its_caches() {
+        let home = tempfile::tempdir().unwrap();
+        let base = tempfile::tempdir().unwrap();
+        let base_path = std::fs::canonicalize(base.path()).unwrap();
+        let env = Env { temp_base: Some(base_path.clone()), ..env_of(home.path()) };
+        let old = |p: &Path| std::fs::File::open(p).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(30 * 86_400)).unwrap();
+        let copy = base_path.join("X/com.google.Chrome.code_sign_clone/code_sign_clone.abc");
+        let cache = base_path.join("C/big.cache");
+        let tmp = base_path.join("T/live");
+        let other = base_path.join("X/com.other.App.code_sign_clone/code_sign_clone.zzz");
+        let canary = base_path.join("X/com.google.Chrome.canary.code_sign_clone/code_sign_clone.can");
+        let deep = base_path.join("C/big.cache2/inner");
+        for p in [&copy, &cache, &tmp, &other, &deep, &canary] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        old(&copy);
+        old(&canary);
+        let temp = |p: &Path| item(Kind::Temp, Removal::Permanent, p);
+        assert!(remove(&env, &temp(&copy)).ok, "{:?}", remove(&env, &temp(&copy)).error);
+        assert!(remove(&env, &temp(&cache)).ok);
+        for p in [&tmp, &other, &deep, &canary, &base_path] {
+            assert!(remove(&env, &temp(p)).error.is_some(), "{p:?}");
+        }
+        // Inside the home folder it isn't a temporary item either, and without the folder nothing is.
+        let in_home = env.home.join("Library/Caches/x");
+        std::fs::create_dir_all(&in_home).unwrap();
+        assert!(remove(&env, &temp(&in_home)).error.is_some());
+        assert!(remove(&Env { temp_base: None, ..env_of(home.path()) }, &temp(&tmp)).error.is_some());
+        // Nor through a link planted where a cache was.
+        std::os::unix::fs::symlink(&tmp, base_path.join("C/linked")).unwrap();
+        assert!(remove(&env, &temp(&base_path.join("C/linked"))).error.unwrap().contains("link"));
+        assert!(!copy.exists() && !cache.exists() && tmp.exists() && other.exists() && deep.exists());
     }
 
     #[test]

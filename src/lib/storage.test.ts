@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StorageItem } from "../types";
-import { GROUPS, groupOf, idleText, isTicked, kindColour, layout, MIN_SEGMENT, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText } from "./storage";
+import { diskBar, diskFigures, GROUPS, groupOf, idleText, isTicked, kindColour, layout, MIN_SEGMENT, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText } from "./storage";
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
   id,
@@ -16,6 +16,7 @@ const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
   idle_days: null,
   within: null,
   suggestion: null,
+  shared: false,
   ...over,
 });
 
@@ -137,9 +138,11 @@ describe("the stacked bar's segments", () => {
     expect([shareText(41), shareText(100), shareText(0)]).toEqual(["41%", "100%", "<1%"]);
   });
 
-  it("gives each kind its own colour token, --storage-1 to --storage-7 in the list's order", () => {
-    expect(KINDS.map(kindColour)).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--storage-${n})`));
-    expect(new Set(KINDS.map(kindColour)).size).toBe(7);
+  it("gives each kind its own colour: the first seven a token each, the later two a mix of two", () => {
+    const first = ["worktree", "repo", "build_output", "simulator", "cache", "download", "trash"] as const;
+    expect(first.map(kindColour)).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--storage-${n})`));
+    expect(kindColour("archive")).toMatch(/^color-mix\(/);
+    expect(new Set(KINDS.map(kindColour)).size).toBe(KINDS.length);
   });
 });
 
@@ -171,7 +174,7 @@ describe("an item's own bar", () => {
 });
 
 describe("the summary line", () => {
-  const sel = (over: Partial<ReturnType<typeof selection>>) => ({ ids: ["a"], bytes: 5 * GB, toTrashBytes: 0, permanent: 1, toTrash: 0, ...over });
+  const sel = (over: Partial<ReturnType<typeof selection>>) => ({ ids: ["a"], bytes: 5 * GB, toTrashBytes: 0, sharedBytes: 0, permanent: 1, toTrash: 0, ...over });
 
   it("says what was scanned, what is selected, what that frees and what goes to the Trash first", () => {
     expect(summaryText(41.2 * GB, sel({}))).toBe("Total scanned 41.2 GB, selected to delete 5.0 GB (frees 5.0 GB)");
@@ -180,5 +183,39 @@ describe("the summary line", () => {
 
   it("says nothing is selected when nothing is", () => {
     expect(summaryText(41.2 * GB, sel({ ids: [], bytes: 0 }))).toBe("Total scanned 41.2 GB, nothing selected to delete");
+  });
+
+  it("says \"up to\" when some of what is selected may share its space with what stays", () => {
+    expect(summaryText(41.2 * GB, sel({ sharedBytes: 1 * GB }))).toBe("Total scanned 41.2 GB, selected to delete 5.0 GB (frees up to 5.0 GB)");
+  });
+});
+
+describe("the disk's figures", () => {
+  const disk = (over: Partial<{ total_bytes: number | null; free_bytes: number | null; purgeable_bytes: number | null }> = {}) => ({ total_bytes: 500 * GB, free_bytes: 20 * GB, purgeable_bytes: 5 * GB, ...over });
+  const none = selection([], new Map());
+
+  it("are what is used, free and purgeable, and the free space once what is ticked is deleted", () => {
+    const items = [item("a", { bytes: 30 * GB, ticked: true }), item("r", { removal: "trash", bytes: 4 * GB, ticked: true }), item("c", { bytes: 2 * GB, ticked: true, shared: true })];
+    const f = diskFigures(disk(), selection(items, new Map()))!;
+    expect([f.total, f.used, f.free, f.purgeable]).toEqual([500 * GB, 480 * GB, 20 * GB, 5 * GB]);
+    // What goes to the Trash frees nothing yet.
+    expect([f.frees, f.freeAfter, f.upTo]).toEqual([32 * GB, 52 * GB, true]);
+    expect(diskFigures(disk(), none)!.upTo).toBe(false);
+  });
+
+  it("are unknown without the disk's size or free space, and purgeable is 0 before it is measured", () => {
+    expect(diskFigures(disk({ total_bytes: null }), none)).toBeNull();
+    expect(diskFigures(disk({ free_bytes: null }), none)).toBeNull();
+    expect(diskFigures(disk({ purgeable_bytes: null }), none)!.purgeable).toBe(0);
+  });
+
+  it("draw a bar of the whole disk whose pieces add up to 100 and never overlap", () => {
+    const f = diskFigures(disk(), selection([item("a", { bytes: 30 * GB, ticked: true })], new Map()))!;
+    const bar = diskBar(f);
+    expect(bar.stays + bar.selected + bar.purgeable + bar.free).toBeCloseTo(100, 5);
+    expect([bar.selected, bar.purgeable, bar.free]).toEqual([6, 1, 4]);
+    // A selection that takes up all that is used leaves no room for purgeable.
+    const all = diskBar(diskFigures(disk(), selection([item("a", { bytes: 480 * GB, ticked: true })], new Map()))!);
+    expect([all.stays, all.purgeable]).toEqual([0, 0]);
   });
 });

@@ -1671,7 +1671,31 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 /* Storage panel (a dialog from the title bar, sized like Settings): a bar of the whole scan split by kind, then the scan as a checklist
    grouped by kind, each row with a bar against the biggest item, and a bar at the bottom that deletes what is ticked. Each kind has its own colour (--storage-1…7). */
 .storage-bar { gap: 8px; }
-.storage-free { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+/* The disk at a glance: used of total, one bar (what stays, what is ticked, what macOS can purge, what is free), and four
+   numbers in large type, each with the colour of its piece of the bar. */
+.storage-hero { flex: none; padding: 12px 16px 14px; border-bottom: 1px solid var(--line); --tone-stays: color-mix(in srgb, var(--text) 32%, var(--bg-subtle)); --tone-selected: var(--del); --tone-purgeable: var(--warn); --tone-free: var(--add); --tone-after: var(--add); }
+.storage-hero-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.storage-hero-used { flex: 1; min-width: 0; font-size: calc(13px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.storage-hero-used strong { font-size: calc(22px * var(--font-scale)); font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+.storage-hero-found { flex: none; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.storage-meter { display: flex; height: 14px; overflow: hidden; border-radius: var(--radius-pill); background: var(--bg-subtle); }
+.storage-meter > span { flex: none; min-width: 0; height: 100%; transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.storage-meter-stays { background: var(--tone-stays); }
+.storage-meter-selected { background: var(--tone-selected); }
+.storage-meter-purgeable { background: var(--tone-purgeable); }
+.storage-meter-free { background: color-mix(in srgb, var(--tone-free) 30%, var(--bg-subtle)); }
+.storage-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 12px 0 0; }
+.storage-stat { min-width: 0; padding-left: 9px; border-left: 3px solid var(--tone); }
+.storage-stat.tone-free { --tone: var(--tone-free); }
+.storage-stat.tone-selected { --tone: var(--tone-selected); }
+.storage-stat.tone-purgeable { --tone: var(--tone-purgeable); }
+.storage-stat.tone-after { --tone: color-mix(in srgb, var(--tone-after) 45%, var(--line)); }
+.storage-stat dt { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.storage-stat dd { margin: 0; font-size: calc(24px * var(--font-scale)); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.storage-stat dd.storage-stat-sub { font-size: calc(11.5px * var(--font-scale)); font-weight: 400; letter-spacing: 0; line-height: 1.35; color: var(--muted-text); white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .storage-meter > span { transition: none; } }
+/* Expanded: nearly the whole window, for a long scan. Only this panel: .mode-guide's size is shared with Settings. */
+.mode-guide.storage-panel.big { width: calc(100vw - 32px); height: calc(100vh - 32px); max-width: none; max-height: none; }
 .storage-status { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1 !important; min-width: 0; }
 .storage-notes, .storage-result { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--text-2); }
 .storage-notes p, .storage-result p { margin: 2px 0; }
@@ -1701,6 +1725,7 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .storage-claude { font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 .storage-more { margin: 4px 12px 8px; }
 .storage-actions { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.storage-actions button { flex: none; white-space: nowrap; }
 .storage-confirm-list { margin: 4px 0 0; padding-left: 18px; font-size: calc(12px * var(--font-scale)); line-height: 1.45; overflow-wrap: anywhere; }
 .storage-selected { font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .storage-panel-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }

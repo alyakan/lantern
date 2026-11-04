@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { lastStorageTab, rememberStorageTab, type StorageTabName } from "../lib/memory";
+import { lastStorageBig, lastStorageTab, rememberStorageBig, rememberStorageTab, type StorageTabName } from "../lib/memory";
 import type { StorageView } from "../types";
 import { MemoryTab } from "./MemoryTab";
 import { StorageTab } from "./StorageTab";
@@ -22,11 +22,17 @@ interface Props {
 /**
  * The disk scan, opened from the title bar's Storage button. A dialog like Settings: the same size, Escape or a press on
  * the backdrop closes it, and focus stays inside while it is open. Not tied to a chat or a folder. Two tabs: Disk (the scan) and
- * Memory (how the RAM is used, view only); the one last used is the one it opens on.
+ * Memory (how the RAM is used, view only); the one last used is the one it opens on. Expand makes it nearly as big as the
+ * window, and it stays that way until it is shrunk again.
  */
 export function StoragePanel({ open, onClose, view, onAsk, busy }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState(lastStorageTab);
+  const [big, setBig] = useState(lastStorageBig);
+  const toggleBig = () => {
+    setBig(!big);
+    rememberStorageBig(!big);
+  };
   const pick = (next: StorageTabName) => {
     setTab(next);
     rememberStorageTab(next);
@@ -56,7 +62,7 @@ export function StoragePanel({ open, onClose, view, onAsk, busy }: Props) {
   return (
     <dialog
       ref={ref}
-      className="mode-guide storage-panel"
+      className={`mode-guide storage-panel${big ? " big" : ""}`}
       aria-label="Storage"
       onClose={onClose}
       // Escape in the delete confirmation answers that question only (it cancels itself): the dialog's own Escape, which
@@ -69,6 +75,9 @@ export function StoragePanel({ open, onClose, view, onAsk, busy }: Props) {
           <header className="storage-panel-head">
             <h2>Storage</h2>
             <div className="spacer" />
+            <button className="ghost" onClick={toggleBig} aria-pressed={big} title={big ? "Back to the usual size" : "Make the panel nearly as big as the window"}>
+              {big ? "Shrink" : "Expand"}
+            </button>
             <button onClick={onClose}>Close</button>
           </header>
           <div className="storage-tabs">

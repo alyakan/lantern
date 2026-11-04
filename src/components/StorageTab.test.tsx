@@ -4,16 +4,18 @@ import { StorageTab, suggestedCount } from "./StorageTab";
 import { api } from "../api";
 import type { StorageItem, StorageView } from "../types";
 
-vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn() } }));
+vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), menubarStats: vi.fn() } }));
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
-  id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
+  id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
 });
-const view = (over: Partial<StorageView> = {}): StorageView => ({ items: [], scanning: false, progress: "", scanned_at: Date.now() - 60_000, free_bytes: 8_300_000_000, snapshots: 0, notes: [], deleting: false, ...over });
+const view = (over: Partial<StorageView> = {}): StorageView => ({ items: [], scanning: false, progress: "", scanned_at: Date.now() - 60_000, free_bytes: 8_300_000_000, total_bytes: 494_000_000_000, purgeable_bytes: 2_600_000_000, snapshots: 0, notes: [], deleting: false, ...over });
 
 beforeEach(() => {
   vi.mocked(api.storageScan).mockResolvedValue(true);
   vi.mocked(api.storageDelete).mockResolvedValue([]);
+  // No live reading unless a test gives one: the view's own figures stand.
+  vi.mocked(api.menubarStats).mockReturnValue(new Promise(() => {}));
 });
 
 const GB = 1_000_000_000;
@@ -32,6 +34,59 @@ describe("StorageTab", () => {
     expect(screen.getByText(/Nothing is deleted until you tick it/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Scan this Mac" }));
     expect(api.storageScan).toHaveBeenCalled();
+  });
+
+  it("shows the disk in large numbers: used of total, free now, what deleting frees, purgeable, and free after deleting", () => {
+    const items = [item("a", { ticked: true, bytes: 10 * GB }), item("b", { bytes: 5 * GB }), item("copy", { kind: "temp", ticked: true, shared: true, bytes: 1 * GB })];
+    render(<StorageTab view={view({ items, free_bytes: 20 * GB, total_bytes: 500 * GB, purgeable_bytes: 3 * GB })} onAsk={null} />);
+    const disk = screen.getByRole("region", { name: "Disk" });
+    expect(within(disk).getByText("480.0 GB")).toBeInTheDocument();
+    expect(within(disk).getByText(/used of 500\.0 GB/)).toBeInTheDocument();
+    const stat = (label: string) => within(disk).getByText(label).closest(".storage-stat") as HTMLElement;
+    expect(within(stat("Free now")).getByText("20.0 GB")).toBeInTheDocument();
+    // A copy that may share its space makes the selection an upper bound.
+    expect(within(stat("Deleting frees")).getByText("up to 11.0 GB")).toBeInTheDocument();
+    expect(within(stat("Deleting frees")).getByText(/2 items ticked, some may share space/)).toBeInTheDocument();
+    expect(within(stat("Purgeable")).getByText("3.0 GB")).toBeInTheDocument();
+    expect(within(stat("Free after deleting")).getByText("up to 31.0 GB")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete 11.0 GB…" })).toBeEnabled();
+    // Unticking changes the numbers at once.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Delete copy" }));
+    expect(within(stat("Deleting frees")).getByText("10.0 GB")).toBeInTheDocument();
+    expect(within(stat("Free after deleting")).getByText("30.0 GB")).toBeInTheDocument();
+  });
+
+  it("reads the disk's free space again every few seconds while open, not only when a scan or a delete ends", async () => {
+    vi.useFakeTimers();
+    try {
+      let free = 20 * GB;
+      vi.mocked(api.menubarStats).mockImplementation(async () => ({ ram: null, disk_free: free, disk_total: 500 * GB }));
+      render(<StorageTab view={view({ items: [item("a")], free_bytes: 8 * GB, total_bytes: 500 * GB })} onAsk={null} />);
+      const freeNow = () => (screen.getByText("Free now").closest(".storage-stat") as HTMLElement).querySelector("dd")!.textContent;
+      await act(async () => {});
+      expect(freeNow()).toBe("20.0 GB");
+      free = 12 * GB;
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(freeNow()).toBe("12.0 GB");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says purgeable is measured by the next scan until one has, and ticks every safe item at once", () => {
+    const items = [item("a"), item("b", { kind: "archive", risk: "review", warning: "symbols" }), item("c", { kind: "temp" }), item("fresh", { kind: "build_output", warning: "Changed 0 day(s) ago: you may be working in this project." })];
+    render(<StorageTab view={view({ items, purgeable_bytes: null })} onAsk={null} />);
+    expect(screen.getByText("Measured by the next scan")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Xcode archives" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Temporary folder" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Tick all safe" }));
+    expect(screen.getByRole("checkbox", { name: "Delete a" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Delete c" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Delete b" })).not.toBeChecked();
+    // Safe, but the scan said it is being worked in: left for the user to tick.
+    expect(screen.getByRole("checkbox", { name: "Delete fresh" })).not.toBeChecked();
   });
 
   it("lists items by group with what the scan ticked, Claude's reason, and a blocked one that can't be ticked", () => {
@@ -61,7 +116,7 @@ describe("StorageTab", () => {
     render(<StorageTab view={view({ items })} onAsk={null} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Delete b" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Delete a" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete.*…$/ }));
     const dialog = screen.getByRole("alertdialog");
     expect(within(dialog).getByText(/1 will be deleted for good/)).toBeInTheDocument();
     expect(within(dialog).getByText(/1 \(1\.0 GB\) will be moved to the Trash/)).toBeInTheDocument();
@@ -79,7 +134,7 @@ describe("StorageTab", () => {
     ];
     render(<StorageTab view={view({ items })} onAsk={null} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "Delete iOS 16.4 simulator runtime" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete.*…$/ }));
     const dialog = screen.getByRole("alertdialog");
     expect(within(dialog).getByText(/Look at these first/)).toBeInTheDocument();
     expect(within(dialog).getByText("iOS 16.4 simulator runtime")).toBeInTheDocument();

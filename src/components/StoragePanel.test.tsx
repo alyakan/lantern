@@ -4,12 +4,12 @@ import { StoragePanel } from "./StoragePanel";
 import { api } from "../api";
 import type { MemorySnapshot, StorageItem, StorageView } from "../types";
 
-vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), memorySnapshot: vi.fn() } }));
+vi.mock("../api", () => ({ api: { storageScan: vi.fn(), storageCancel: vi.fn(), storageDelete: vi.fn(), menubarStats: vi.fn(), memorySnapshot: vi.fn() } }));
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
-  id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
+  id, kind: "cache", name: id, path: `/p/${id}`, bytes: 2_000_000_000, risk: "safe", removal: "permanent", note: "regenerates", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
 });
-const view = (over: Partial<StorageView> = {}): StorageView => ({ items: [], scanning: false, progress: "", scanned_at: Date.now() - 60_000, free_bytes: 8_300_000_000, snapshots: 0, notes: [], deleting: false, ...over });
+const view = (over: Partial<StorageView> = {}): StorageView => ({ items: [], scanning: false, progress: "", scanned_at: Date.now() - 60_000, free_bytes: 8_300_000_000, total_bytes: 494_000_000_000, purgeable_bytes: null, snapshots: 0, notes: [], deleting: false, ...over });
 
 const memory: MemorySnapshot = {
   total_bytes: 16 * 1024 ** 3, used_bytes: 8 * 1024 ** 3, cached_bytes: 4 * 1024 ** 3, free_bytes: 4 * 1024 ** 3, compressed_bytes: 1024 ** 3, swap_used_bytes: 0, pressure: "normal", pressure_source: "kernel", scaled: false,
@@ -20,6 +20,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(api.storageScan).mockResolvedValue(true);
   vi.mocked(api.storageDelete).mockResolvedValue([]);
+  // No live reading unless a test gives one: the view's own figures stand.
+  vi.mocked(api.menubarStats).mockReturnValue(new Promise(() => {}));
   vi.mocked(api.memorySnapshot).mockReset();
   vi.mocked(api.memorySnapshot).mockResolvedValue(memory);
 });
@@ -36,6 +38,21 @@ describe("StoragePanel", () => {
     expect(within(dialog).getByRole("region", { name: "Caches and logs" })).toBeInTheDocument();
     rerender(<StoragePanel open={false} onClose={() => {}} view={view()} onAsk={null} />);
     expect(screen.queryByRole("dialog", { name: "Storage" })).toBeNull();
+  });
+
+  it("expands to nearly the whole window and shrinks back, and opens the way it was left", () => {
+    const { unmount } = render(<StoragePanel open onClose={() => {}} view={view({ items: [item("a")] })} onAsk={null} />);
+    const dialog = screen.getByRole("dialog", { name: "Storage" });
+    expect(dialog).not.toHaveClass("big");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Expand" }));
+    expect(dialog).toHaveClass("big");
+    expect(within(dialog).getByRole("button", { name: "Shrink" })).toHaveAttribute("aria-pressed", "true");
+    unmount();
+    render(<StoragePanel open onClose={() => {}} view={view({ items: [item("a")] })} onAsk={null} />);
+    expect(screen.getByRole("dialog", { name: "Storage" })).toHaveClass("big");
+    fireEvent.click(screen.getByRole("button", { name: "Shrink" }));
+    expect(screen.getByRole("dialog", { name: "Storage" })).not.toHaveClass("big");
+    expect(localStorage.getItem("lantern.storageBig")).toBe("0");
   });
 
   it("closes from its Close button, from a press on the backdrop and from the dialog's own close (Escape), but not from a press inside", () => {
@@ -59,7 +76,7 @@ describe("StoragePanel", () => {
     // A browser closes a dialog on Escape unless that keydown's default is prevented (fireEvent says false then).
     const escape = (on: Element) => fireEvent.keyDown(on, { key: "Escape" });
     expect(escape(dialog)).toBe(true);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete…" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete.*…$/ }));
     const alert = within(dialog).getByRole("alertdialog");
     expect(alert).toBeInTheDocument();
     expect(escape(alert)).toBe(false);
@@ -76,7 +93,7 @@ describe("StoragePanel", () => {
     expect(onAsk).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Rescan" }));
     expect(api.storageScan).toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Delete…" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Delete.*…$/ }));
     expect(api.storageDelete).not.toHaveBeenCalled();
     const confirm = screen.getByRole("alertdialog");
     expect(within(confirm).getByText(/1 will be deleted for good/)).toBeInTheDocument();
