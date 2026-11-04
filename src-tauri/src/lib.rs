@@ -1156,13 +1156,25 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // And the todo_* tools (see todos.rs), for the chat's project, naming this chat on what it adds or ticks.
     let todo_store = state.todos.clone();
     let (chat_id, hub) = (slot_id.to_string(), state.remote.hub.clone());
+    // And enter_worktree (see workdir.rs): it sets what the chat's slot reads Git and Branch from, so the bridge shares the
+    // slot's two cells (not the slot itself, which owns the bridge).
+    let (pin, view_main) = (slot.pin.clone(), slot.view_main.clone());
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
         let dashboards = dashboards.clone();
         let (todo_store, chat_id, hub) = (todo_store.clone(), chat_id.clone(), hub.clone());
+        let (pin, view_main) = (pin.clone(), view_main.clone());
         Box::pin(async move {
+            if tool == workdir::TOOL {
+                let result = tauri::async_runtime::spawn_blocking(move || workdir::call(folder.as_deref(), &pin, &view_main, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+                let (allow, text) = match result {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             if todos::TOOLS.contains(&tool.as_str()) {
                 let chat = (chat_id.clone(), hub.chat(&chat_id).and_then(|c| c.title));
                 let result = tauri::async_runtime::spawn_blocking(move || todos::call(&todo_store, folder.as_deref(), chat, &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
@@ -2764,6 +2776,8 @@ struct WorkView {
     #[serde(flatten)]
     folder: workdir::WorkFolder,
     main: bool,
+    /// The chat was put in it (`enter_worktree`, or the user's pick), not found from where it edited.
+    pinned: bool,
 }
 
 #[tauri::command]
@@ -2775,10 +2789,31 @@ async fn work_folder(state: State<'_, AppState>, slot: String) -> Result<Option<
             s.view_main.store(false, std::sync::atomic::Ordering::Relaxed);
             return None;
         };
-        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed) })
+        let pinned = s.pin.lock().unwrap().as_deref() == Some(std::path::Path::new(&folder.path));
+        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed), pinned })
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The project's linked worktrees, for the Changes pane's picker.
+#[tauri::command]
+async fn list_worktrees(state: State<'_, AppState>, slot: String) -> Result<Vec<workdir::WorkFolder>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || s.folder().map(|f| workdir::list(&f)).unwrap_or_default()).await.map_err(|e| e.to_string())
+}
+
+/// The user's pick in the Changes pane: put the chat in this worktree (`path` must be one of the project's linked worktrees),
+/// or with none let its latest edit decide again. Checked as `enter_worktree`'s is.
+#[tauri::command]
+async fn pin_worktree(state: State<'_, AppState>, slot: String, path: Option<String>) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = s.folder()?;
+        workdir::call(folder.to_str(), &s.pin, &s.view_main, &serde_json::json!({ "path": path })).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Chooses between the worktree and the chat's own folder for the Changes pane.
@@ -4131,6 +4166,8 @@ pub fn run() {
             stop_task,
             branch_review,
             work_folder,
+            list_worktrees,
+            pin_worktree,
             set_view_main,
             set_model,
             recent_folders,

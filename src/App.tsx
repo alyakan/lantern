@@ -10,8 +10,9 @@ import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, w
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
+import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { worktreeCalls } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
@@ -1673,9 +1674,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       live = false;
     };
   }, [active, state.folder, state.changedFiles, state.status, turnAsked, turnTo, turnKnown]);
-  // The worktree this chat is working in, when Claude entered one itself: Git and Branch read from it (the backend
-  // decides from the chat's latest edit), and `worktreeKey` makes them read again when it, or the user's choice of the
-  // chat's own folder instead, changes.
+  // The worktree this chat is working in: one it was put in (Claude's enter_worktree, or the picker), else the one Claude
+  // entered itself (the backend decides from the chat's latest edit). Git and Branch read from it, and `worktreeKey` makes
+  // them read again when it, or the user's choice of the chat's own folder instead, changes. `worktreeCalls` changes as
+  // soon as Claude's enter_worktree has been answered, before any edit.
+  const pinCalls = worktreeCalls(state.items);
   const [worktree, setWorktree] = useState<{ slot: string; view: WorkView | null } | null>(null);
   useEffect(() => {
     if (!state.folder) return setWorktree(null);
@@ -1684,13 +1687,33 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return () => {
       live = false;
     };
-  }, [active, state.folder, state.changedFiles, state.status]);
+  }, [active, state.folder, state.changedFiles, state.status, pinCalls]);
   const shownWorktree = worktree?.slot === active ? worktree.view : null;
   const worktreeKey = shownWorktree ? `${shownWorktree.path}:${shownWorktree.main}` : "";
   const chooseWorktreeView = (main: boolean) => {
     if (!shownWorktree) return;
     const slot = active;
     api.setViewMain(slot, main).then(() => setWorktree((w) => (w?.slot === slot && w.view ? { slot, view: { ...w.view, main } } : w)), () => {});
+  };
+  // The project's worktrees, for the picker beside the chip.
+  const [worktreeList, setWorktreeList] = useState<{ slot: string; list: Worktree[] } | null>(null);
+  useEffect(() => {
+    if (!state.folder) return setWorktreeList(null);
+    let live = true;
+    api.listWorktrees(active).then((list) => live && setWorktreeList({ slot: active, list }), () => live && setWorktreeList(null));
+    return () => {
+      live = false;
+    };
+  }, [active, state.folder, state.status, pinCalls]);
+  const worktrees = worktreeList?.slot === active ? worktreeList.list : [];
+  // The user's pick: that worktree, or (null) whichever the chat's latest edit says again.
+  const pickWorktree = (path: string | null) => {
+    const slot = active;
+    api.pinWorktree(slot, path).then(
+      () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
+      // Only a worktree removed since the list was read is refused: read the list again.
+      () => api.listWorktrees(slot).then((list) => setWorktreeList({ slot, list }), () => {}),
+    );
   };
   // "Git": everything uncommitted, whoever changed it (an interrupted command, another editor). Asked for only while
   // it's the filter, since it reads git.
@@ -1714,7 +1737,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const peek = branchPeek?.slot === active ? branchPeek : null;
   const reviewing = ((flavour === "review" || reviewTarget !== null) && state.items.length > 0) || peek !== null;
   const reviewPr = peek || !reviewing ? null : reviewTarget ? reviewTarget.pr : prNumberOf(state.items);
-  const reviewBranch = reviewing && reviewPr === null;
+  // A worktree the chat was put in is looked at the same way: its branch since it left its base, without a review.
+  const pinnedBranch = !reviewing && shownWorktree !== null && shownWorktree.pinned && !shownWorktree.main;
+  const reviewBranch = (reviewing && reviewPr === null) || pinnedBranch;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
   const hintKey = hints.join("\n");
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
@@ -1728,6 +1753,16 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     prPicked.current = key;
     setChangeScope(reviewPr !== null ? "pr" : "branch");
   }, [active, reviewing, reviewPr]);
+  // Put in a worktree (by Claude, or by the user's pick): its branch is what the pane shows, once for each worktree.
+  const pinPicked = useRef<string | null>(null);
+  const pinnedPath = shownWorktree?.pinned && !shownWorktree.main ? shownWorktree.path : null;
+  useEffect(() => {
+    if (pinnedPath === null) return void (pinPicked.current = null);
+    const key = `${active}:${pinnedPath}`;
+    if (pinPicked.current === key) return;
+    pinPicked.current = key;
+    if (!reviewing) setChangeScope("branch");
+  }, [active, pinnedPath, reviewing]);
   const [branchFiles, setBranchFiles] = useState<{ key: string; review: BranchReview | null; files: ChangedFile[]; error: string | null } | null>(null);
   useEffect(() => {
     if (scope !== "branch" || !state.folder) return;
@@ -3230,6 +3265,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 scope={scope}
                 onScope={setChangeScope}
                 worktree={shownWorktree ? { name: shownWorktree.name, branch: shownWorktree.branch, main: shownWorktree.main, onToggle: () => chooseWorktreeView(!shownWorktree.main) } : undefined}
+                worktrees={worktrees.length > 0 ? { list: worktrees, current: shownWorktree && !shownWorktree.main ? shownWorktree.path : null, pinned: shownWorktree?.pinned ?? false, onPick: pickWorktree } : undefined}
                 scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
                 gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
                 pr={reviewPr}

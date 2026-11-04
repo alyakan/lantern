@@ -2760,6 +2760,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
 .worktree-chip { flex: 0 1 auto; min-width: 0; max-width: 130px; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); }
 .worktree-chip.off { opacity: 0.7; }
+.scope-anchor.worktree-anchor { margin-left: 2px; }
+.worktree-picker { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; font-size: calc(11.5px * var(--font-scale)); }
+.worktree-picker.pressed { background: var(--bg-hover); }
 .revert-all { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; white-space: nowrap; }
 /* Wide, it says Revert all; narrow, it's the arrow alone (named for VoiceOver and in its tooltip). */
 .revert-all svg { display: none; }
