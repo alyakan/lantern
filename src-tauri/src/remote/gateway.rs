@@ -1051,6 +1051,13 @@ impl<'a> Session<'a> {
                 events = merge_current_turn(events, live);
             }
         }
+        // What still waits on the user is Home's list (`waiting`), and the chat shows the same: a prompt the replay lost (a message came
+        // after it, or the hub let it go) is told again, last, where an open prompt belongs.
+        for p in self.gw.host.pending(slot).await {
+            if !events.iter().any(|e| matches!(e, RemoteEvent::PermissionRequested { request_id, .. } if *request_id == p.request_id)) {
+                events.push(RemoteEvent::PermissionRequested { request_id: p.request_id, tool_name: p.tool_name, input: protocol::trimmed(&p.input) });
+            }
+        }
         // What claude offers after a "/", its plan and the context it holds: the latest of each, since the kept events may not reach them.
         if extras {
             events.extend(self.gw.hub.extras(slot));
@@ -3104,6 +3111,21 @@ pub(crate) mod tests {
         assert!(err.is_none());
         let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
         assert_eq!(page.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_reset_still_carries_a_prompt_that_is_waiting_when_a_message_came_after_it() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.bus.publish("a", user("push the branch"));
+        r.bus.publish("a", UiEvent::PermissionRequested { request_id: "ap1".into(), tool_name: "Approval".into(), input: json!({"action": "Push"}) });
+        *r.host.pending.lock().unwrap() = vec![Pending { request_id: "ap1".into(), tool_name: "Approval".into(), input: json!({"action": "Push"}), at: 1 }];
+        // The user types while it waits: the live turn the reset replays now starts after the prompt.
+        r.bus.publish("a", user("and tell me when it is done"));
+        let (_, mut p) = paired(&r).await;
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        let asked = before.iter().any(|m| matches!(m, ServerMessage::Reset { events, .. } if events.iter().any(|e| matches!(e, RemoteEvent::PermissionRequested { request_id, .. } if request_id == "ap1"))));
+        assert!(asked, "the chat shows what Home shows");
     }
 
     #[tokio::test]
