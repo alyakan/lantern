@@ -466,6 +466,8 @@ export const api = {
   onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */
   onRemoteSetPreset: (cb: (r: RemoteSetPreset) => void): Promise<UnlistenFn> => listen<RemoteSetPreset>("remote-set-preset", (e) => cb(e.payload)),
+  /** A phone changed a working chat's settings (the backend checked it as it checks a change to an idle one): the window holds it. */
+  onRemoteQueueSwitch: (cb: (r: { slot: string; change: unknown; when: string }) => void): Promise<UnlistenFn> => listen<{ slot: string; change: unknown; when: string }>("remote-queue-switch", (e) => cb(e.payload)),
   /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
   remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
   /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */

@@ -313,3 +313,57 @@ it("sends the effort the slider is let go on", async () => {
   await fireEvent(effort, "valueChange", 0);
   expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { effort: "low" } });
 });
+
+describe("changing a working chat, on a Mac that can", () => {
+  const { Alert } = require("react-native") as typeof import("react-native");
+  // The question's buttons, pressed by name.
+  const answer = async (name: string) => {
+    const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)?.[2] as { text: string; onPress?: () => void }[];
+    await act(async () => buttons.find((b) => b.text === name)?.onPress?.());
+  };
+  beforeEach(() => jest.spyOn(Alert, "alert").mockImplementation(() => {}));
+  afterEach(() => (Alert.alert as jest.Mock).mockRestore());
+  // Fresh for each test: the rig may keep what it is given.
+  const busyOf = () => ({ allowAuto: true, features: ["controls", "close", "workflow", "switchbusy"], chatOver: { status: "working" as const, workflow: "chat" as const } });
+
+  it("offers every choice, and asks now or when it finishes before changing anything", async () => {
+    const { asked, lastOf } = await open(busyOf());
+    await openSheet();
+    expect(radio("Auto").props.accessibilityState).toMatchObject({ disabled: false });
+    expect(screen.queryByText("The agent is busy in this chat. Change it once it has finished.")).toBeNull();
+    await fireEvent.press(radio("Auto"));
+    expect(Alert.alert).toHaveBeenCalledWith("Change it now?", expect.stringContaining("Apply now stops its turn"), expect.any(Array));
+    expect(asked.some((r) => r.op === "set_permissions")).toBe(false);
+    await answer("Apply now");
+    await waitFor(() => expect(lastOf("set_permissions")).toEqual({ op: "set_permissions", slot: "a", permissions: "auto", when: "now" }));
+  });
+
+  it("holds it for when the turn ends without saying it didn't change, and sends nothing on Cancel", async () => {
+    const { asked, lastOf, onProblem } = await open({ ...busyOf(), waitMs: 80 });
+    await openSheet();
+    await fireEvent.press(radio("Step by step"));
+    await answer("Cancel");
+    expect(asked.some((r) => r.op === "set_workflow")).toBe(false);
+    await fireEvent.press(radio("Step by step"));
+    await answer("When it finishes");
+    await waitFor(() => expect(lastOf("set_workflow")).toEqual({ op: "set_workflow", slot: "a", workflow: "steps", when: "finished" }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 200))));
+    expect(onProblem).not.toHaveBeenCalled();
+  });
+
+  it("shows what the Mac holds for the chat, on its row and at the top", async () => {
+    await open({ ...busyOf(), chatOver: { status: "working", workflow: "chat", pending: { when: "finished", text: "Auto", permissions: "auto" } } });
+    await openSheet();
+    expect(screen.getByRole("menu", { name: "Permissions, Auto, after this turn" })).toBeTruthy();
+    expect(screen.getByText("Changes to Auto once Claude finishes.")).toBeTruthy();
+  });
+
+  it("asks first for the provider's settings too", async () => {
+    const busy = busyOf();
+    const { lastOf } = await open({ ...busy, features: [...busy.features, "conversation"], answers: { conversation_settings: codexConfiguration } });
+    await openSheet();
+    await fireEvent.press(await screen.findByRole("menuitem", { name: "gpt-example" }));
+    await answer("When it finishes");
+    await waitFor(() => expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" }, when: "finished" }));
+  });
+});

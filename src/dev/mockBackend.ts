@@ -842,6 +842,27 @@ async function playAside(aside: string, text: string) {
   await done();
 }
 
+/** A short turn that ends by itself ("quick"), with nothing asked. */
+async function playQuickTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(800);
+  await streamText(send, "q1:0", "Done.");
+  await send({ kind: "turn_done", is_error: false, result: "Done.", cost_usd: 0, duration_ms: 800, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
+/** A turn that works until it is stopped ("keep going"), then ends as a stopped one does. */
+async function playLongTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await send({ kind: "tool_started", parent: null, tool_use_id: "long-1", name: "Bash", summary: "npm test" });
+  await new Promise<void>((resolve) => (pendingInterrupt[slot] = resolve));
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "long-1", is_error: true, output: "interrupted" });
+  await send({ kind: "turn_done", is_error: true, result: null, cost_usd: 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -1880,7 +1901,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             turnCount[slot] = (turnCount[slot] ?? -1) + 1;
             return turnCount[slot];
           }
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : /\bkeep going\b/i.test(String(a.text)) ? playLongTurn(slot) : /\bquick\b|^\[Lantern: the user changed this chat's settings/i.test(String(a.text)) ? playQuickTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];

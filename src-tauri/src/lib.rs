@@ -635,6 +635,10 @@ impl remote::gateway::Host for RemoteHost {
         self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
     }
 
+    fn queue_switch(&self, slot: &str, change: serde_json::Value, when: remote::protocol::RemoteWhen) -> Result<(), String> {
+        self.app.emit("remote-queue-switch", serde_json::json!({ "slot": slot, "change": change, "when": when.as_str() })).map_err(|e| e.to_string())
+    }
+
     fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {

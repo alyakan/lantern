@@ -6,6 +6,7 @@
 import type { Request } from "../protocol/generated/Request";
 import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
+import type { RemoteWhen } from "../protocol/generated/RemoteWhen";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
@@ -352,9 +353,15 @@ export class Sync {
     return this.ask<RemoteUserTodos>({ op: "todo_edit", project, edit });
   }
 
-  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null): Promise<ConversationSettings> {
+  /** `when`, for a chat that is working (a Mac that lists "switchbusy"): stop it and change it now, or once it finishes. */
+  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null, when?: RemoteWhen): Promise<ConversationSettings> {
     if (!this.has("conversation")) return Promise.reject(new Error("Update Lantern on your Mac to change providers."));
-    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change });
+    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change, ...this.whenOf(when) });
+  }
+
+  /** `when` as it is sent: only to a Mac that knows it (an older one would refuse the chat as busy anyway). */
+  private whenOf(when: RemoteWhen | undefined): { when?: RemoteWhen } {
+    return when && this.has("switchbusy") ? { when } : {};
   }
 
   conversationAction(slot: string, action: "compact" | "clear") {
@@ -414,19 +421,19 @@ export class Sync {
     return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers };
   }
 
-  /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
-  setPermissions(slot: string, permissions: RemotePermissions) {
-    return this.ask({ op: "set_permissions", slot, permissions });
+  /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). `when`: see conversationSettings. */
+  setPermissions(slot: string, permissions: RemotePermissions, when?: RemoteWhen) {
+    return this.ask({ op: "set_permissions", slot, permissions, ...this.whenOf(when) });
   }
 
   /** Puts a chat on Chat or Step by step (a Mac that lists "workflow"); rejects with why not (a team, busy…). */
-  setWorkflow(slot: string, workflow: Exclude<RemoteWorkflow, "team">) {
-    return this.ask({ op: "set_workflow", slot, workflow });
+  setWorkflow(slot: string, workflow: Exclude<RemoteWorkflow, "team">, when?: RemoteWhen) {
+    return this.ask({ op: "set_workflow", slot, workflow, ...this.whenOf(when) });
   }
 
   /** Puts a chat on one of controls()' presets; rejects with why not. */
-  setPreset(slot: string, preset: string) {
-    return this.ask({ op: "set_preset", slot, preset });
+  setPreset(slot: string, preset: string, when?: RemoteWhen) {
+    return this.ask({ op: "set_preset", slot, preset, ...this.whenOf(when) });
   }
 
   /** A file's diff: the chat's change to it, or (`scope`, only for a Mac that lists "changescopes") what is uncommitted or the branch's change. */
