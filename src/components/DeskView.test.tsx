@@ -98,9 +98,12 @@ describe("the Desk", () => {
 
   it("lists the projects with what Lantern knows of each", () => {
     setup({ projects: [project("/p/lantern", { chats: 3, working: 2, waiting: 1, needs: 1, todos: { open: 3, overdue: 1 } }), project("/p/rayak", { chats: 0, todos: null })] });
-    expect(screen.getByText("✓ Nothing needs you")).toBeInTheDocument();
-    // With nothing waiting, the first tile sums the Desk up.
-    expect(screen.getByRole("region", { name: "Summary" })).toHaveTextContent("Projects2Chats open3Working2Unread0To-dos overdue1");
+    // With nothing waiting, one line above the board sums the Desk up.
+    const pulse = screen.getByRole("status", { name: "Where the Desk stands" });
+    expect(pulse).toHaveTextContent("✓ Nothing needs you");
+    expect(pulse).toHaveTextContent("3 chats open");
+    expect(pulse).toHaveTextContent("2 working");
+    expect(pulse).toHaveTextContent("1 to-do overdue");
     const [lantern, rayak] = within(screen.getByRole("region", { name: "Projects" })).getAllByRole("article");
     expect(lantern).toHaveTextContent("2 working · 1 needs you");
     expect(lantern).toHaveTextContent("3 · 1 overdue");
@@ -287,6 +290,17 @@ describe("the Desk", () => {
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(2);
     fireEvent.click(stand().getByRole("button", { name: "Show all" }));
     expect(stand().getAllByRole("list", { name: /^At / })).toHaveLength(3);
+  });
+
+  it("folds Next to its first steps, and opens it again", () => {
+    setup({ repos: [repo("/p/lantern", { prs: [pr(1, "fail"), pr(2, "fail")] })] });
+    const next = within(screen.getByRole("region", { name: "Next" }));
+    expect(next.getAllByRole("listitem").length).toBeGreaterThan(0);
+    fireEvent.click(next.getByRole("button", { name: "Collapse" }));
+    expect(next.queryAllByRole("listitem")).toHaveLength(0);
+    expect(next.getByText(/#1 PR 1/)).toBeInTheDocument();
+    fireEvent.click(next.getByRole("button", { name: "Expand" }));
+    expect(next.getAllByRole("listitem").length).toBeGreaterThan(0);
   });
 
   it("shows five of Next's steps, the rest on asking", () => {

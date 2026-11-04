@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { deskOf, HOME_ID, moveProject, removeDesk, renameDesk, type Desks } from "../lib/desks";
 import { requestText, type InboxItem } from "../lib/inbox";
@@ -198,27 +198,38 @@ function NeedsYou({ waiting, now, onGo, onDecide, onAnswer }: { waiting: InboxIt
 }
 
 /** The Desk's first tile when nothing waits on you: that nothing does, and the Desk in a few numbers. */
-function Summary({ projects }: { projects: ProjectRow[] }) {
+function Pulse({ needs, projects, repos }: { needs: InboxItem[]; projects: ProjectRow[]; repos: RepoStatus[] | null }) {
   const sum = (f: (p: ProjectRow) => number) => projects.reduce((n, p) => n + f(p), 0);
-  const facts: [string, number][] = [
-    ["Projects", projects.length],
-    ["Chats open", sum((p) => p.chats)],
-    ["Working", sum((p) => p.working)],
-    ["Unread", sum((p) => p.unread)],
-    ["To-dos overdue", sum((p) => p.todos?.overdue ?? 0)],
-  ];
+  const waiting = needs.filter((n) => n.needsYou).length;
+  const chats = sum((p) => p.chats);
+  const working = sum((p) => p.working);
+  const unread = sum((p) => p.unread);
+  const overdue = sum((p) => p.todos?.overdue ?? 0);
+  const prs = (repos ?? []).reduce((n, r) => n + r.prs.length, 0);
+  const failing = (repos ?? []).reduce((n, r) => n + r.prs.filter((p) => p.checks === "fail").length, 0);
+  const drafts = (repos ?? []).reduce((n, r) => n + r.drafts.length, 0);
   return (
-    <section className="desk-tile desk-summary" aria-label="Summary">
-      <div className="desk-clear">✓ Nothing needs you</div>
-      <dl className="desk-facts">
-        {facts.map(([label, n]) => (
-          <Fragment key={label}>
-            <dt>{label}</dt>
-            <dd className={label === "To-dos overdue" && n > 0 ? "desk-bad" : n ? undefined : "muted"}>{n}</dd>
-          </Fragment>
-        ))}
-      </dl>
-    </section>
+    <div className={`desk-pulse${waiting ? " wait" : ""}`} role="status" aria-label="Where the Desk stands">
+      <span className={`pulse-lead${waiting ? " wait" : ""}`}>{waiting ? `● ${waiting} need you` : "✓ Nothing needs you"}</span>
+      {chats > 0 && (
+        <span>
+          <b>{chats}</b> chat{chats === 1 ? "" : "s"} open
+        </span>
+      )}
+      {working > 0 && <span>{working} working</span>}
+      {unread > 0 && <span>{unread} unread</span>}
+      {prs > 0 && (
+        <span>
+          <b>{prs}</b> PR{prs === 1 ? "" : "s"} open{failing > 0 && <span className="pulse-bad"> · {failing} failing</span>}
+        </span>
+      )}
+      {drafts > 0 && (
+        <span>
+          {drafts} draft release{drafts === 1 ? "" : "s"}
+        </span>
+      )}
+      {overdue > 0 && <span className="pulse-bad">{overdue} to-do{overdue === 1 ? "" : "s"} overdue</span>}
+    </div>
   );
 }
 
@@ -281,6 +292,7 @@ export function DeskView(props: DeskViewProps) {
         <DeskTabs desks={props.desks} />
       </header>
       <div className="desk-main" ref={main}>
+        {!pageRow && <Pulse needs={props.needs} projects={props.projects} repos={props.repos} />}
         {pageRow ? (
           <>
           {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <div className="desk-clear">✓ Nothing needs you</div>}
@@ -300,7 +312,7 @@ export function DeskView(props: DeskViewProps) {
           </>
         ) : (
           <div className="desk-bento">
-            {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <Summary projects={props.projects} />}
+            {waiting.length > 0 && <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} />}
             <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} items={work} now={now} onOpen={onOpen} onPage={props.onPage} />
             <YourWork repos={props.repos} items={work} issues={issues} chats={props.chats} onStep={props.onStep} onRefresh={props.onRefreshRepos} nextOnly />
           </div>
