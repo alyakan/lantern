@@ -25,8 +25,6 @@ jest.mock("../prefs", () => ({
   saveFolded: jest.fn(async () => {}),
   loadSeen: jest.fn(async () => ({})),
   saveSeen: jest.fn(async () => {}),
-  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: true, dismissed: [] as string[] })),
-  saveSuggestionPrefs: jest.fn(async () => {}),
 }));
 jest.mock("../deskLog", () => ({ loadDeskLog: jest.fn(async () => []), saveDeskLog: jest.fn(async () => {}), forgetDeskLog: jest.fn(async () => {}) }));
 
