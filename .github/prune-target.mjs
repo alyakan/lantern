@@ -19,6 +19,8 @@ const manifest = process.env.PRUNE_MANIFEST || "src-tauri/Cargo.toml";
 const limitGb = Number(process.env.PRUNE_LIMIT_GB || 12);
 const marker = join(target, ".run-start");
 const empty = (why) => {
+  // Only a folder cargo made (it tags it), so a wrong CARGO_TARGET_DIR never empties someone's other folder.
+  if (!existsSync(join(target, "CACHEDIR.TAG"))) return console.log(`${why}, but ${target} has no CACHEDIR.TAG: left as it is`);
   console.log(`${why}: emptying ${target}`);
   for (const e of readdirSync(target)) rmSync(join(target, e), { recursive: true, force: true });
 };

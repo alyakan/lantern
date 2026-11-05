@@ -76,7 +76,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_WORKSPACE/../cargo-target"
           echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" >> "$GITHUB_ENV"
           echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-          node .github/prune-target.mjs start
+          node .github/prune-target.mjs start || echo "::warning::Couldn't check the target folder"
 
       - run: npm ci
 
@@ -106,10 +106,14 @@ jobs:
         run: LANTERN_FIXTURE_GATEWAY="${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/src-tauri/target}/debug/examples/fixture_gateway" npm test
         working-directory: mobile
 
-      # The kept target folder loses the builds this run replaced, failed run or not.
-      - name: Clean the target folder
+      # The kept target folder loses the builds this run replaced, failed run or not, and the node_modules go too (the
+      # next run's npm ci makes them again). Never what fails a run.
+      - name: Clean up after the run
         if: always() && runner.environment == 'self-hosted' && env.CARGO_TARGET_DIR != ''
-        run: node .github/prune-target.mjs end
+        continue-on-error: true
+        run: |
+          node .github/prune-target.mjs end
+          rm -rf node_modules mobile/node_modules
 
   # The phone app (mobile/): its tests (Noise against the Mac's transcripts and the published vectors, the sync, the
   # connection) and its types.
