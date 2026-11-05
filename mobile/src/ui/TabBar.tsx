@@ -3,7 +3,9 @@
  * and beside it a glass circle that starts a chat, as iOS 26 sets its search beside the tabs. It lives on the screen at the bottom of
  * the stack, so a chat pushed over it covers it: there is no tab bar in a chat.
  */
-import { View } from "react-native";
+import { Platform, View } from "react-native";
+import { Host, Image } from "@expo/ui/swift-ui";
+import type { SFSymbol } from "sf-symbols-typescript";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Tab } from "../prefs";
 import { Txt } from "./components";
@@ -24,8 +26,25 @@ export interface TabChoice {
   badge?: number;
 }
 
-/** A tab's picture, drawn: a speech bubble, a tick, three bars. */
-function Glyph({ id, color }: { id: Tab; color: string }) {
+/** Apple's own symbol for a tab (iOS), filled while it is the one shown. Insights keeps its drawn bars. */
+const SYMBOLS: Partial<Record<Tab, { off: SFSymbol; on: SFSymbol }>> = {
+  chats: { off: "bubble.left.and.bubble.right", on: "bubble.left.and.bubble.right.fill" },
+  work: { off: "checklist", on: "checklist" },
+};
+
+/** An SF Symbol, sized as the tab bar's pictures are. */
+function SFIcon({ name, color, size = 20 }: { name: SFSymbol; color: string; size?: number }) {
+  return (
+    <Host style={{ width: size + 6, height: size + 2 }} alignment="center">
+      <Image systemName={name} size={size} color={color} />
+    </Host>
+  );
+}
+
+/** A tab's picture: Apple's symbol on iOS, else drawn (a speech bubble, a tick); Insights' three bars are always drawn. */
+function Glyph({ id, color, on = false }: { id: Tab; color: string; on?: boolean }) {
+  const symbol = Platform.OS === "ios" ? SYMBOLS[id] : undefined;
+  if (symbol) return <SFIcon name={on ? symbol.on : symbol.off} color={color} />;
   if (id === "chats")
     return (
       <View style={{ width: 22, height: 20 }}>
@@ -48,8 +67,9 @@ function Glyph({ id, color }: { id: Tab; color: string }) {
   );
 }
 
-/** A plus, for starting a chat. */
+/** Starting a chat: Apple's compose symbol on iOS, else a plus. */
 function Plus({ color }: { color: string }) {
+  if (Platform.OS === "ios") return <SFIcon name="square.and.pencil" color={color} size={21} />;
   return (
     <View accessibilityElementsHidden style={{ width: 20, height: 20, alignItems: "center", justifyContent: "center" }}>
       <View style={{ position: "absolute", width: 20, height: 2.4, borderRadius: 1.2, backgroundColor: color }} />
@@ -69,7 +89,7 @@ export function TabBar({ tabs, value, onChange, onCompose, onComposeVoice }: { t
           const tone = on ? colors.cobalt : colors.ink2;
           return (
             <PressScale key={t.id} accessibilityRole="tab" accessibilityLabel={t.badge ? `${t.label}, ${t.badge} waiting` : t.label} accessibilityState={{ selected: on }} onPress={() => onChange(t.id)} haptic="select" scaleTo={0.92} style={{ flex: 1, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", gap: 2, backgroundColor: on ? colors.wash : "transparent" }}>
-              <Glyph id={t.id} color={tone} />
+              <Glyph id={t.id} color={tone} on={on} />
               <Txt variant="tiny" style={{ color: tone, fontWeight: "600" }}>
                 {t.label}
               </Txt>
