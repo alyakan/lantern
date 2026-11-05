@@ -532,7 +532,7 @@ mod tests {
         let mut cfg = config("/bin/claude".into(), dir.path(), Some("sess-1"));
         cfg.provider = crate::provider::ProviderId::Gateway;
         cfg.model = Some("qwen3-coder:30b".into());
-        cfg.endpoint = Some(GatewayLaunch { id: "ollama".into(), url: "http://localhost:11434".into(), key: Some(Secret::new("sk-secret-value".into())) });
+        cfg.endpoint = Some(GatewayLaunch { id: "ollama".into(), url: "http://localhost:11434".into(), key: Some(Secret::new("sk-secret-value".into())), auto_mode: false });
         let cmd = command(&cfg);
         let cmd = cmd.as_std();
         let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
@@ -573,7 +573,7 @@ mod tests {
         let mut cfg = config(claude.into(), dir.path(), None);
         cfg.provider = crate::provider::ProviderId::Gateway;
         cfg.model = Some(MODEL.into());
-        cfg.endpoint = Some(GatewayLaunch { id: "fake".into(), url, key: None });
+        cfg.endpoint = Some(GatewayLaunch { id: "fake".into(), url, key: None, auto_mode: false });
         let (sink, mut rx) = channel_sink();
         let hook: EditHook = Arc::new(|_: &str, _: Option<String>| {});
         let mut s = Session::spawn(&cfg, sink, hook).unwrap();

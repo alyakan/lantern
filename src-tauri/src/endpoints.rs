@@ -36,6 +36,10 @@ pub struct Endpoint {
     /// The model ids it serves, as it names them (the first is a new chat's); a chat on it never starts with none.
     #[serde(default)]
     pub models: Vec<String>,
+    /// The user lets its chats run on Auto. Claude Code's auto-mode classifier then runs on the endpoint's own model, so that
+    /// model approves its own actions: off unless the user turns it on for this endpoint.
+    #[serde(default)]
+    pub auto_mode: bool,
 }
 
 /// A secret that never prints: `SessionConfig` is Debug, and a key in a log or a panic message is a leak.
@@ -64,6 +68,8 @@ pub struct GatewayLaunch {
     pub id: String,
     pub url: String,
     pub key: Option<Secret>,
+    /// Its chats may run on Auto (see `Endpoint::auto_mode`), as the endpoint was saved when the chat started.
+    pub auto_mode: bool,
 }
 
 /// A model id as an endpoint names it ("qwen3-coder:30b", "openai/gpt-5", "claude-sonnet-4-5"): wider than Claude's aliases,
@@ -154,7 +160,7 @@ pub fn clean(e: Endpoint) -> Result<Endpoint, String> {
     if models.len() > MAX_MODELS {
         return Err(format!("An endpoint lists up to {MAX_MODELS} models."));
     }
-    Ok(Endpoint { id: e.id, name, url: parsed.as_str().trim_end_matches('/').to_string(), key_env, models })
+    Ok(Endpoint { id: e.id, name, url: parsed.as_str().trim_end_matches('/').to_string(), key_env, models, auto_mode: e.auto_mode })
 }
 
 /// An id from a name: lower-case letters and digits with '-', and made unique among `taken` by a number.
@@ -393,7 +399,7 @@ mod tests {
     use super::*;
 
     fn ep(name: &str, url: &str) -> Endpoint {
-        Endpoint { id: String::new(), name: name.into(), url: url.into(), key_env: None, models: vec![] }
+        Endpoint { id: String::new(), name: name.into(), url: url.into(), key_env: None, models: vec![], auto_mode: false }
     }
 
     #[test]
@@ -414,6 +420,19 @@ mod tests {
         for bad in ["", "1X", "lower", "A-B", "A B", "A=B", "$X", "A;B"] {
             assert!(!valid_key_env(bad), "{bad:?}");
         }
+    }
+
+    /// Auto is the user's to allow per endpoint: one saved before the switch existed is off, and saving keeps what was chosen.
+    #[test]
+    fn an_endpoints_auto_mode_is_off_until_allowed_and_kept_once_it_is() {
+        let old: Endpoint = serde_json::from_str(r#"{"id":"ollama","name":"Ollama","url":"http://localhost:11434","key_env":null,"models":["qwen3"]}"#).unwrap();
+        assert!(!old.auto_mode);
+        assert!(clean(Endpoint { auto_mode: true, ..ep("DeepSeek", "https://api.deepseek.com/anthropic") }).unwrap().auto_mode);
+        let store = EndpointStore::load(None);
+        let saved = store.replace(vec![Endpoint { auto_mode: true, ..ep("DeepSeek", "https://api.deepseek.com/anthropic") }, ep("Ollama", "http://localhost:11434")]).unwrap();
+        assert_eq!(saved.iter().map(|e| e.auto_mode).collect::<Vec<_>>(), vec![true, false]);
+        // Connecting a hosted provider again finds the endpoint as the user left it.
+        assert!(store.ensure(ep("DeepSeek", "https://api.deepseek.com/anthropic")).unwrap().auto_mode);
     }
 
     #[test]
@@ -437,7 +456,7 @@ mod tests {
     /// A key is never sent in the clear across the internet, but a local server (or one on the network) is fine without https.
     #[test]
     fn a_key_is_dropped_when_its_endpoint_moves_to_another_address_and_only_then() {
-        let ep = |id: &str, url: &str| Endpoint { id: id.into(), name: id.into(), url: url.into(), key_env: None, models: vec![] };
+        let ep = |id: &str, url: &str| Endpoint { id: id.into(), name: id.into(), url: url.into(), key_env: None, models: vec![], auto_mode: false };
         let (old, new) = (vec![ep("a", "https://one.test"), ep("b", "https://two.test"), ep("c", "https://three.test")], vec![ep("a", "https://elsewhere.test"), ep("b", "https://two.test")]);
         let keyed = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         // a moved; b stayed; c is gone altogether (its key is forgotten with it, elsewhere).
@@ -515,7 +534,7 @@ mod tests {
 
     #[test]
     fn a_key_never_prints() {
-        let g = GatewayLaunch { id: "x".into(), url: "https://x.test".into(), key: Some(Secret::new("sk-secret-value".into())) };
+        let g = GatewayLaunch { id: "x".into(), url: "https://x.test".into(), key: Some(Secret::new("sk-secret-value".into())), auto_mode: false };
         assert!(!format!("{g:?}").contains("sk-secret-value"));
     }
 
@@ -523,10 +542,10 @@ mod tests {
     /// `--settings` env block, which has no secret.
     #[test]
     fn a_gateway_launch_sets_the_token_in_the_environment_and_everything_else_in_settings() {
-        let keyed = gateway_env(&GatewayLaunch { id: "x".into(), url: "https://x.test".into(), key: Some(Secret::new("sk-secret-value".into())) }, "gpt-5");
+        let keyed = gateway_env(&GatewayLaunch { id: "x".into(), url: "https://x.test".into(), key: Some(Secret::new("sk-secret-value".into())), auto_mode: false }, "gpt-5");
         assert_eq!(keyed.set, vec![("ANTHROPIC_AUTH_TOKEN", "sk-secret-value".to_string())]);
         assert!(!keyed.settings.to_string().contains("sk-secret-value"));
-        let local = gateway_env(&GatewayLaunch { id: "x".into(), url: "http://localhost:11434".into(), key: None }, "qwen3");
+        let local = gateway_env(&GatewayLaunch { id: "x".into(), url: "http://localhost:11434".into(), key: None, auto_mode: false }, "qwen3");
         assert_eq!(local.set, vec![("ANTHROPIC_AUTH_TOKEN", PLACEHOLDER_TOKEN.to_string())], "never empty: an empty token falls back to the user's own login");
         let env = &local.settings["env"];
         assert_eq!(env["ANTHROPIC_BASE_URL"], "http://localhost:11434");

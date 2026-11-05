@@ -395,6 +395,24 @@ fn capabilities_of(provider: ProviderId) -> provider::Capabilities {
     provider.provider().capabilities()
 }
 
+/// What a chat on an endpoint can do: a gateway's, with Auto only where the user allowed it for that endpoint.
+fn endpoint_capabilities(auto_mode: bool) -> provider::Capabilities {
+    provider::Capabilities { supports_auto_mode: auto_mode, ..capabilities_of(ProviderId::Gateway) }
+}
+
+/// What chat `cfg` can do: its provider's, and on an endpoint what the user allowed there.
+fn chat_capabilities(cfg: &SessionConfig) -> provider::Capabilities {
+    match &cfg.endpoint {
+        Some(e) if cfg.provider == ProviderId::Gateway => endpoint_capabilities(e.auto_mode),
+        _ => capabilities_of(cfg.provider),
+    }
+}
+
+/// Chat `cfg`'s provider and what it can do, as the window is told.
+fn chat_info(cfg: &SessionConfig) -> ProviderInfo {
+    ProviderInfo { id: cfg.provider, capabilities: chat_capabilities(cfg) }
+}
+
 /// The providers a main agent on `own` may start workers on: its own, which is running, then every other whose CLI is found.
 async fn available_providers(own: ProviderId) -> Vec<ProviderId> {
     let mut available = vec![own];
@@ -431,10 +449,11 @@ fn carries_settings_note(text: &str) -> bool {
 }
 
 /// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker), and never Auto on a
-/// provider that has no auto mode, worker or not: Claude Code's auto mode on an endpoint's model would have that model approve
-/// its own commands, and a phone's Permissions switch (or an older window) asks for it as easily as any. True when that lowered them.
+/// provider that has no auto mode, worker or not: Claude Code's auto mode on an endpoint's model has that model approve its own
+/// commands, so an endpoint runs Auto only where the user allowed it, and a phone's Permissions switch (or an older window) asks
+/// for it as easily as any. True when that lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
-    let caps = capabilities_of(cfg.provider);
+    let caps = chat_capabilities(cfg);
     let (mode, auto) = match ceiling {
         Some(ceiling) => args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &caps),
         // No worker's ceiling: only a provider with no auto mode is held back, and Step by step stays Step by step, without its auto-approve.
@@ -1606,7 +1625,7 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         state.conversations.configure(id, &cfg);
     }
     slot.models.lock().unwrap().clear();
-    publish(app, id, ui_event::UiEvent::ProviderChanged { provider: cfg.provider.info(), key: cfg.endpoint.as_ref().map(|e|format!("gateway:{}",e.id)).unwrap_or_else(||cfg.provider.name().into()) });
+    publish(app, id, ui_event::UiEvent::ProviderChanged { provider: chat_info(&cfg), key: cfg.endpoint.as_ref().map(|e|format!("gateway:{}",e.id)).unwrap_or_else(||cfg.provider.name().into()) });
     *slot.config.lock().unwrap() = Some(cfg.clone());
     {
         let mut queued = startup.lock().unwrap();
@@ -1733,7 +1752,7 @@ async fn gateway_for(state: &AppState, id: Option<&str>, model: Option<String>, 
             Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} needs {name}, which isn't set in your login shell. Set it in ~/.zshrc or ~/.zprofile, then start the chat again.", endpoint.name))?))
         }
     };
-    Ok((GatewayLaunch { id: endpoint.id, url: endpoint.url, key }, model))
+    Ok((GatewayLaunch { id: endpoint.id, url: endpoint.url, key, auto_mode: endpoint.auto_mode }, model))
 }
 
 /// A chat's config from what the window sent. A worker's mode is no freer than its main agent allows now, whatever the
@@ -1878,7 +1897,7 @@ async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderListin
             })
             .collect();
         if all.iter().any(|p| p.info.id == ProviderId::Claude) {
-            all.extend(endpoints.into_iter().map(|e| ProviderListing { info: ProviderId::Gateway.info(), models: e.models, binary: None, endpoint: Some(EndpointRef { id: e.id, name: e.name }) }));
+            all.extend(endpoints.into_iter().map(|e| ProviderListing { info: ProviderInfo { id: ProviderId::Gateway, capabilities: endpoint_capabilities(e.auto_mode) }, models: e.models, binary: None, endpoint: Some(EndpointRef { id: e.id, name: e.name }) }));
         }
         all
     })
@@ -2039,7 +2058,7 @@ async fn hosted_provider_disconnect(state: State<'_, AppState>, id: String) -> R
 #[tauri::command]
 async fn fetch_endpoint_models(state: State<'_, AppState>, url: String, key_env: Option<String>, endpoint_id: Option<String>) -> Result<Vec<String>, String> {
     // The same checks as saving it: only an http or https URL, and a key only over https or a local network.
-    let probe = endpoints::clean(endpoints::Endpoint { id: String::new(), name: "probe".into(), url, key_env, models: vec![] })?;
+    let probe = endpoints::clean(endpoints::Endpoint { id: String::new(), name: "probe".into(), url, key_env, models: vec![], auto_mode: false })?;
     // A key saved for the endpoint (by its id) wins over a named variable, as it does when a chat starts.
     let saved = match endpoint_id.as_deref() {
         Some(id) => state.provider_keys.endpoint_key(id)?,
@@ -2068,7 +2087,7 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
     let asked = settings.mode;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
-    let provider = cfg.provider.info();
+    let provider = chat_info(&cfg);
     let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
     // A new conversation: its first message carries the pre-hook (see hooks.rs).
@@ -2121,13 +2140,14 @@ async fn conversation_settings_inner(app: &AppHandle, slot: &str, change: Option
             cfg.model = change.get("model").and_then(|v| v.as_str()).map(str::to_string);
             cfg.advisor = None;
             cfg.subagent_model = None;
-            let caps = capabilities_of(provider);
-            if !caps.supports_auto_mode { cfg.mode = if cfg.mode == Mode::Steps { Mode::Steps } else { Mode::Ask }; cfg.auto_approve = false; }
-            cfg.effort = if caps.supports_effort { checked_effort(change.get("effort").and_then(|v|v.as_str()).map(str::to_string))? } else { None };
             cfg.endpoint = if provider == ProviderId::Gateway {
                 let (endpoint, model) = gateway_for(&state, endpoint.as_deref(), cfg.model.clone(), &cfg.folder).await?;
                 cfg.model = Some(model); Some(endpoint)
             } else { None };
+            // After the endpoint is known: whether Auto is allowed on it is the user's choice for that endpoint.
+            let caps = chat_capabilities(&cfg);
+            if !caps.supports_auto_mode { cfg.mode = if cfg.mode == Mode::Steps { Mode::Steps } else { Mode::Ask }; cfg.auto_approve = false; }
+            cfg.effort = if caps.supports_effort { checked_effort(change.get("effort").and_then(|v|v.as_str()).map(str::to_string))? } else { None };
             // Context is data from the earlier conversation, not a new user instruction.
             let handoff = conversations::handoff_note("Conversation continued from another provider.", &context);
             cfg.helper.project_notes = conversations::notes_with(cfg.helper.project_notes.as_deref(), Some(&handoff));
@@ -2153,7 +2173,7 @@ async fn conversation_settings_inner(app: &AppHandle, slot: &str, change: Option
         }
         *s.config.lock().unwrap() = Some(cfg.clone());
         state.conversations.configure(slot, &cfg);
-        let provider = cfg.provider.info();
+        let provider = chat_info(&cfg);
         let id = cfg.endpoint.as_ref().map(|e| format!("gateway:{}", e.id)).unwrap_or_else(|| cfg.provider.name().into());
         let _ = app.emit("conversation-configured", serde_json::json!({"slot":slot,"provider":{"id":id,"capabilities":provider.capabilities},"mode":cfg.mode,"autoApprove":cfg.auto_approve,"model":cfg.model,"effort":cfg.effort}));
         let name = cfg.endpoint.as_ref().and_then(|e|state.endpoints.get(&e.id)).map(|e|e.name).unwrap_or_else(||if cfg.provider == ProviderId::Codex { "Codex".into() } else { "Claude".into() });
@@ -2163,7 +2183,7 @@ async fn conversation_settings_inner(app: &AppHandle, slot: &str, change: Option
     let offered = s.models.lock().unwrap().clone();
     let levels = offered.iter().find(|m|Some(m.value.as_str()) == cfg.model.as_deref()).or_else(||offered.first()).map(|m|m.effort_levels.clone()).unwrap_or_default();
     let models = if let Some(e) = &cfg.endpoint { state.endpoints.get(&e.id).map(|e|e.models).unwrap_or_default() } else if offered.is_empty() { cfg.provider.provider().models().iter().map(|s|s.to_string()).collect() } else { offered.iter().filter(|m|m.value != "default").map(|m|m.value.clone()).collect() };
-    serde_json::to_value(conversations::ConversationConfiguration { provider: id, capabilities: capabilities_of(cfg.provider), model: cfg.model, effort: cfg.effort, models, effort_levels: levels }).map_err(|e|e.to_string())
+    serde_json::to_value(conversations::ConversationConfiguration { provider: id, capabilities: chat_capabilities(&cfg), model: cfg.model, effort: cfg.effort, models, effort_levels: levels }).map_err(|e|e.to_string())
 }
 
 #[tauri::command]
@@ -2292,6 +2312,10 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.provider, role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
+    // An endpoint's Auto as it is saved now: switched off in Settings since the chat started, a restart doesn't keep it.
+    if let Some(e) = cfg.endpoint.as_mut() {
+        e.auto_mode = state.endpoints.get(&e.id).is_some_and(|saved| saved.auto_mode);
+    }
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
@@ -3976,7 +4000,7 @@ async fn open_session(
         cfg.helper.project_notes = conversations::notes_with(cfg.helper.project_notes.as_deref(), Some(handoff));
     }
     enroll(&state, &slot, &s, &cfg.helper.role);
-    let provider = cfg.provider.info();
+    let provider = chat_info(&cfg);
     if let Some(mut chat) = archived {
         let native_import = chat.provider == ProviderId::Codex && chat.events.iter().all(|e|matches!(e["kind"].as_str(), Some("user_text" | "assistant_text")));
         if let Some(w) = &worker { state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref(), w.role.clone()).await?; }
@@ -4885,6 +4909,29 @@ mod tests {
         assert_eq!((codex_steps.mode, codex_steps.auto_approve), (Mode::Steps, true));
     }
 
+    /// An endpoint the user allowed Auto on keeps it, and the window is told it can; one they didn't is lowered as before.
+    #[test]
+    fn a_chat_on_an_endpoint_runs_auto_only_where_the_user_allowed_it() {
+        let on = |auto_mode: bool, mode: Mode, auto_approve: bool| SessionConfig {
+            provider: ProviderId::Gateway,
+            endpoint: Some(endpoints::GatewayLaunch { id: "deepseek".into(), url: "https://api.deepseek.com/anthropic".into(), key: None, auto_mode }),
+            ..config(mode, auto_approve)
+        };
+        let mut allowed = on(true, Mode::Auto, false);
+        assert!(!cap_mode(&mut allowed, None));
+        assert_eq!((allowed.mode, allowed.auto_approve), (Mode::Auto, false));
+        let mut steps = on(true, Mode::Steps, true);
+        assert!(!cap_mode(&mut steps, None));
+        assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, true));
+        assert!(chat_info(&allowed).capabilities.supports_auto_mode);
+        let mut not = on(false, Mode::Auto, false);
+        assert!(cap_mode(&mut not, None));
+        assert_eq!((not.mode, not.auto_approve), (Mode::Ask, false));
+        assert!(!chat_info(&not).capabilities.supports_auto_mode);
+        // Allowing Auto changes nothing else an endpoint can't do.
+        assert_eq!(endpoint_capabilities(true), provider::Capabilities { supports_auto_mode: true, ..capabilities_of(ProviderId::Gateway) });
+    }
+
     /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat
     /// only once its agents are gone. A worker's role is its Lead's, whatever is asked.
     #[test]
@@ -4940,7 +4987,7 @@ mod tests {
 
     #[test]
     fn a_chat_on_an_endpoint_that_is_gone_or_has_no_model_never_starts_on_claude() {
-        let ep = |models: &[&str]| endpoints::Endpoint { id: "o".into(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: models.iter().map(|m| m.to_string()).collect() };
+        let ep = |models: &[&str]| endpoints::Endpoint { id: "o".into(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: models.iter().map(|m| m.to_string()).collect(), auto_mode: false };
         assert!(pick_endpoint(None, Some("opus".into())).unwrap_err().contains("won't start on Claude instead"));
         assert!(pick_endpoint(Some(ep(&[])), None).unwrap_err().contains("has no models yet"));
         assert!(pick_endpoint(Some(ep(&["qwen3:8b"])), Some("--bare".into())).unwrap_err().contains("not a model id"));
