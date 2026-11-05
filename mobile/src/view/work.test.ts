@@ -1,5 +1,5 @@
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
-import { lineUnder, linksOf, filterItems, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
+import { bucketOf, lineUnder, linksOf, filterItems, openBucket, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
 const step = { what: "Fix", yours: false, button: "Do it", warn: false };
@@ -90,5 +90,27 @@ describe("Your work on the phone", () => {
     expect(linksOf(item("a", { url: "https://github.com/aly/lantern/pull/7", issue_url: "https://linear.app/a/issue/ENG-1" }))).toEqual({ github: "https://github.com/aly/lantern/pull/7", linear: "https://linear.app/a/issue/ENG-1" });
     expect(linksOf(item("b", { url: "https://linear.app/a/issue/ENG-2" }))).toEqual({ github: null, linear: "https://linear.app/a/issue/ENG-2" });
     expect(linksOf(item("c", { url: "https://evil.example/", issue_url: "javascript:x" }))).toEqual({ github: null, linear: null });
+  });
+});
+
+describe("The tabs of a feature", () => {
+  it("puts blocked, your call and needs moving under Needs you, and shipped and folded work under Shipped", () => {
+    expect((["bad", "you", "move"] as const).map((tone) => bucketOf(item("a", { tone })))).toEqual(["attn", "attn", "attn"]);
+    expect(bucketOf(item("a", { tone: "todo" }))).toBe("start");
+    expect(bucketOf(item("a", { tone: "wait" }))).toBe("moving");
+    expect(bucketOf(item("a", { tone: "local" }))).toBe("moving");
+    expect(bucketOf(item("a", { tone: "ready" }))).toBe("shipped");
+    expect(bucketOf(item("a", { tone: "done" }))).toBe("shipped");
+    // An older Mac sends Ready as a waiting item with a fold.
+    expect(bucketOf(item("a", { tone: "wait", fold: "ready" }))).toBe("shipped");
+    // A state this app doesn't know is the quietest one, like toneOf.
+    expect(bucketOf(item("a", { tone: "newer" }))).toBe("moving");
+  });
+
+  it("opens on Needs you when something does, else on the first tab with anything in it", () => {
+    expect(openBucket([item("a", { tone: "wait" }), item("b", { tone: "you" })])).toBe("attn");
+    expect(openBucket([item("a", { tone: "todo" }), item("b", { tone: "done" })])).toBe("start");
+    expect(openBucket([item("a", { tone: "done" })])).toBe("shipped");
+    expect(openBucket([])).toBe("attn");
   });
 });

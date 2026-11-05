@@ -150,6 +150,39 @@ export function stateCounts(items: RemoteWorkItem[]): Partial<Record<Tone, numbe
 /** Only the items in these states; none chosen shows everything. */
 export const filterItems = (items: RemoteWorkItem[], only: Tone[]): RemoteWorkItem[] => (only.length === 0 ? items : items.filter((i) => only.includes(toneOf(i))));
 
+/** The tabs inside a feature: what needs you, what is moving, what isn't started, and what shipped (the same four on the Mac). */
+export type Bucket = "attn" | "moving" | "start" | "shipped";
+export const BUCKETS: { bucket: Bucket; label: string }[] = [
+  { bucket: "attn", label: "Needs you" },
+  { bucket: "moving", label: "Moving" },
+  { bucket: "start", label: "To start" },
+  { bucket: "shipped", label: "Shipped" },
+];
+
+/** Which tab an item is under. A state this app doesn't know (a newer Mac's) counts as moving, like `toneOf`. */
+export function bucketOf(item: RemoteWorkItem): Bucket {
+  // Merged and waiting for a release, or done, is shipped whatever tone an older Mac gave it.
+  if (foldOf(item)) return "shipped";
+  switch (toneOf(item)) {
+    case "bad":
+    case "you":
+    case "move":
+      return "attn";
+    case "todo":
+      return "start";
+    case "ready":
+    case "done":
+      return "shipped";
+    default:
+      return "moving";
+  }
+}
+
+/** The tab a feature opens on: Needs you when something does, else the first one with anything in it. */
+export function openBucket(items: RemoteWorkItem[]): Bucket {
+  return BUCKETS.find((b) => items.some((i) => bucketOf(i) === b.bucket))?.bucket ?? "attn";
+}
+
 /** How the list is grouped: what was chosen, or by feature with Linear and by project without it (features need Linear). */
 export function groupingFor(chosen: GroupBy | "auto", issues: boolean): GroupBy {
   return chosen === "auto" ? (issues ? "feature" : "project") : chosen === "feature" && !issues ? "project" : chosen;
