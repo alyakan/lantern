@@ -37,6 +37,9 @@ function setup(over: Partial<DeskViewProps> = {}) {
 const arm = () => act(() => void vi.advanceTimersByTime(400));
 const needs = () => screen.getByRole("region", { name: "Needs you" });
 
+/** The list layout of where things stand (the default is cards): these tests are about the list. */
+const list = () => localStorage.setItem("desk.work.layout", JSON.stringify("list"));
+
 /** What a row of where things stand is: a button that opens its details. */
 const ROW = "Details, links and the chat on it";
 
@@ -174,6 +177,7 @@ describe("the Desk", () => {
   });
 
   it("folds what is merged and waiting for a release into one line, which opens to a row each", () => {
+    list();
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);
     const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
@@ -189,6 +193,7 @@ describe("the Desk", () => {
   });
 
   it("puts your next steps first, yours to decide before what is blocked, and where each stands as nodes", () => {
+    list();
     const now = new Date(2026, 9, 31, 18, 0).getTime();
     vi.setSystemTime(now);
     const at = (h: number, day = 31) => new Date(2026, 9, day, h).toISOString();
@@ -237,6 +242,7 @@ describe("the Desk", () => {
   });
 
   it("opens an item's details from its row: the chat on its branch, its stack and its pages", () => {
+    list();
     const ready = { review: "APPROVED", merge_state: "CLEAN" };
     const repos = [repo("/p/lantern", { folders: [{ folder: "/p/lantern", branch: "s2", changed: 0 }], prs: [pr(1, "pass", { ...ready, branch: "s1" }), pr(2, "pass", { ...ready, branch: "s2", base: "s1" })] })];
     const { props } = setup({ repos, chats: [row(4, { folder: "/p/lantern", state: "working" })], page: "/p/lantern", projects: [project("/p/lantern")] });
@@ -300,6 +306,7 @@ describe("the Desk", () => {
   });
 
   it("sets Next apart in a card of its own, and groups where things stand by feature when Linear is connected", () => {
+    list();
     const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
     const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
     setup({ repos, linear: { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } }, page: "/p/lantern", projects: [project("/p/lantern")] });
@@ -323,6 +330,60 @@ describe("the Desk", () => {
     expect(within(stand).getByRole("region", { name: "No feature" })).toHaveTextContent("PR 8");
   });
 
+  const linearRepos = () => [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
+  const linearOf = () => {
+    const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
+    return { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues: [{ identifier: "ENG-1", ...issue }], error: null }, teamOf: { "/p/lantern": "ENG" } };
+  };
+
+  it("draws where things stand as a card for each feature, which opens to four tabs of rows that each show their pipeline, and goes back", () => {
+    setup({ repos: linearRepos(), linear: linearOf(), page: "/p/lantern", projects: [project("/p/lantern")] });
+    const stand = screen.getByRole("region", { name: "Where things stand" });
+    // No filter bar or grouping switch: the cards and their tabs are how it is looked at.
+    expect(within(stand).queryByRole("radiogroup", { name: "Group by" })).toBeNull();
+    expect(within(stand).getByRole("button", { name: /^No feature, 1 open/ })).toBeInTheDocument();
+    fireEvent.click(within(stand).getByRole("button", { name: /^Sync, 1 open/ }));
+    const sync = within(screen.getByRole("region", { name: "Sync" }));
+    expect(sync.getByRole("tab", { name: /^Needs you/ })).toHaveAttribute("aria-selected", "true");
+    for (const name of ["Moving", "To start", "Shipped"]) expect(sync.getByRole("tab", { name })).toBeInTheDocument();
+    // A row carries the item's pipeline and its step.
+    expect(sync.getByRole("button", { name: /#7 PR 7/ })).toBeInTheDocument();
+    expect(sync.getByLabelText(/^At Checks/)).toBeInTheDocument();
+    expect(sync.getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
+    fireEvent.click(sync.getByRole("tab", { name: "Moving" }));
+    expect(sync.getByText("Nothing here.")).toBeInTheDocument();
+    fireEvent.click(sync.getByRole("button", { name: "‹ Work" }));
+    expect(within(screen.getByRole("region", { name: "Where things stand" })).getByRole("button", { name: /^Sync, 1 open/ })).toBeInTheDocument();
+  });
+
+  it("opens an item's details from a row of a feature's page", () => {
+    setup({ repos: linearRepos(), linear: linearOf(), page: "/p/lantern", projects: [project("/p/lantern")] });
+    fireEvent.click(screen.getByRole("button", { name: /^Sync, 1 open/ }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Sync" })).getByRole("button", { name: /#7 PR 7/ }));
+    expect(within(screen.getByRole("dialog")).getByRole("link", { name: "GitHub" })).toHaveAttribute("href", "https://github.com/aly/lantern/pull/7");
+  });
+
+  it("switches between the cards and the list, and remembers which", () => {
+    setup({ repos: linearRepos(), linear: linearOf(), page: "/p/lantern", projects: [project("/p/lantern")] });
+    const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand().getByRole("button", { name: "Cards" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(stand().getByRole("button", { name: "List" }));
+    expect(stand().getByRole("radiogroup", { name: "Group by" })).toBeInTheDocument();
+    expect(localStorage.getItem("desk.work.layout")).toBe('"list"');
+    fireEvent.click(stand().getByRole("button", { name: "Cards" }));
+    expect(stand().queryByRole("radiogroup", { name: "Group by" })).toBeNull();
+    expect(localStorage.getItem("desk.work.layout")).toBe('"cards"');
+  });
+
+  it("opens straight to the page when everything is in one feature or project, with no card to go back to", () => {
+    setup({ repos: linearRepos(), page: "/p/lantern", projects: [project("/p/lantern")] });
+    const page = within(screen.getByRole("region", { name: "lantern" }));
+    expect(page.queryByRole("button", { name: "‹ Work" })).toBeNull();
+    expect(page.getByRole("tab", { name: /^Needs you/ })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(page.getByRole("tab", { name: "Moving" }));
+    expect(page.getByText(/PR 8/)).toBeInTheDocument();
+  });
+
   it("says when there is no work open, asks again on Refresh, and shows nothing before the Mac has said", () => {
     const { rerender, props } = setup();
     expect(screen.queryByRole("region", { name: "Next" })).toBeNull();
@@ -334,6 +395,7 @@ describe("the Desk", () => {
   });
 
   it("shows eight rows of where things stand, and the rest on asking", () => {
+    list();
     const prs = Array.from({ length: 11 }, (_, i) => pr(i + 1, "pending"));
     setup({ repos: [repo("/p/lantern", { prs })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const region = screen.getByRole("region", { name: "Where things stand" });
@@ -343,6 +405,7 @@ describe("the Desk", () => {
   });
 
   it("filters where things stand by state, and says when nothing is in the states chosen", () => {
+    list();
     const repos = [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "fail"), pr(9, "pass")] })];
     setup({ repos, page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
@@ -414,6 +477,7 @@ describe("the Desk", () => {
   });
 
   it("folds each feature to its name and the work in it, and opens them all at once", () => {
+    list();
     const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] })];
     const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
     setup({
@@ -477,6 +541,7 @@ describe("the Desk", () => {
   });
 
   it("lets a page's work be grouped by none, with Feature needing Linear", () => {
+    list();
     setup({ repos: [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
     expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
@@ -499,6 +564,7 @@ describe("the Desk", () => {
   });
 
   it("remembers which features are open, by grouping and feature", () => {
+    list();
     const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" })] })];
     const issue = { title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: "Sync", project_id: "p1", branch: null, links: [] };
     setup({

@@ -50,6 +50,7 @@ export const NOT_FOLDER_KEYED = [
   // The sidebar's list: Chats or Timeline.
   // How Your work is grouped (by feature, by project or not at all), which features are open, and whether Next is folded.
   "desk.work.groupBy",
+  "desk.work.layout",
   "desk.work.open",
   "desk.work.nextClosed",
   "sidebar.view",
