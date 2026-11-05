@@ -4,7 +4,8 @@ import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
 import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, workOfRepo, yourWork, type WorkItem } from "./yourWork";
 
-const NOW = new Date(2026, 10, 2, 18, 0).getTime();
+// A fixed moment in UTC, not local time: the fixtures' times are UTC strings, so "merged 6h ago" must not depend on the machine's zone.
+const NOW = Date.UTC(2026, 10, 2, 16, 0);
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
 const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, base: "main", draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
 const one = (p: RepoStatus["prs"][number]) => yourWork([repo({ prs: [p] })], NOW)[0];
