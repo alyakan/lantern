@@ -282,6 +282,22 @@ describe("the pull request loop", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("Fix it myself: a chat that couldn't start uses no try, and the next look starts it", async () => {
+    prWatch.mockResolvedValue(FAILED());
+    const { result, start, send, onFailed } = setup({ mode: "fix", tries: 3 }, [inFolder("s1"), inFolder("s2")]);
+    start.mockReturnValueOnce(null);
+    await settle();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(result.current.views[FOLDER].loop.tries).toBe(0);
+    expect(onFailed).not.toHaveBeenCalled();
+    // Claude is ready now: the same failure is still there and nothing was spent on it.
+    await act(async () => result.current.refresh(FOLDER));
+    await settle();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(result.current.views[FOLDER].loop.tries).toBe(1);
+  });
+
   it("Fix it myself: goes to the chat in the worktree on the branch even while another chat is on screen", async () => {
     prWatch.mockImplementation(async (place) => (place === FOLDER ? NO_PR : FAILED()));
     const { send, start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), chat(false, "s1")]);

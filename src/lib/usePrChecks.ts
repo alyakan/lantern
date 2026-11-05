@@ -228,11 +228,12 @@ export function usePrChecks(opts: PrChecksOptions) {
       if (!alive.current || now?.slot !== target?.slot || now?.busy || setting(folder).mode !== "fix") return;
       const note = `Lantern sent this on its own, because "Pull request checks" is set to "Fix it myself" for this project (try ${res.loop.tries} of ${s.tries}).`;
       const text = buildFailureMessage(snap.pr, failures, note);
-      // Counted before a chat is started, so a look while it starts doesn't start another.
-      commit(folder, snap.pr.number, res.loop);
       // No chat on it: a worktree is only looked at while a chat works there, so this is the project's folder.
       const slot = target ? target.slot : o.current.start(folder, text);
+      // None could start (Claude isn't ready): nothing was sent, so no try is used and the next look tries again.
       if (slot === null) return;
+      // Counted in the same step as the start (nothing awaits between them), so a look while the chat opens doesn't start another.
+      commit(folder, snap.pr.number, res.loop);
       owners.current[key] = slot;
       awaiting.current[place] = { slot, ran: false };
       if (target) o.current.send(slot, text);
