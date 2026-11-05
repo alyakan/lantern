@@ -20,10 +20,10 @@ describe("Settings → Hooks", () => {
     expect(screen.getByRole("textbox", { name: "After hook, everywhere" })).toHaveAttribute("placeholder", "Update the brain if needed.");
   });
 
-  it("says when each one runs, including that the post-hook is not sent after a failed turn or in Step by step", () => {
+  it("says when each one runs, including that the post-hook is not sent after an answer that only talked or a failed turn", () => {
     open();
     expect(screen.getByText(/first one after the chat is compacted/)).toBeInTheDocument();
-    expect(screen.getByText(/isn't sent after a turn that failed or was stopped, after a slash command, or in Step by step/)).toBeInTheDocument();
+    expect(screen.getByText(/isn't sent after an answer that only talked, a turn that failed or was stopped, or a slash command/)).toBeInTheDocument();
   });
 
   it("switches a hook on and changes its words, keeping the rest", () => {

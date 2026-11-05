@@ -358,6 +358,7 @@ fn route_hooks(s: &Arc<Slot>, event: ui_event::UiEvent, tell: impl Fn(ui_event::
         UiEvent::Compacted | UiEvent::ConversationReset => s.hooks.arm_pre(),
         UiEvent::SessionEnded { .. } => s.hooks.session_ended(),
         UiEvent::AssistantText { parent: None, ref text, .. } => s.hooks.said(text),
+        UiEvent::ToolStarted { .. } => s.hooks.used_tool(),
         UiEvent::TurnDone { .. } => {
             return match s.hooks.turn_ended(event) {
                 hooks::TurnEnd::Publish(end) => Some(*end),
@@ -4596,6 +4597,7 @@ mod hooks_flow_tests {
         let dir = tempfile::tempdir().unwrap();
         let (slot, _rx) = chat_with_fake_claude(dir.path()).await;
         slot.hooks.follow_with(Some("save".into()));
+        slot.hooks.used_tool();
         let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
         // Held, and the hook is sent into the fake claude, which answers it; but the chat ends first.
         assert!(route_hooks(&slot, done.clone(), |_| {}).is_none());
@@ -4612,6 +4614,7 @@ mod hooks_flow_tests {
         let gone = slot.session.lock().await.take().unwrap();
         gone.stop().await;
         slot.hooks.follow_with(Some("save".into()));
+        slot.hooks.used_tool();
         let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: Some(0.5), tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
         let (told, mut told_rx) = mpsc::unbounded_channel();
         assert!(route_hooks(&slot, done.clone(), move |ev| {
