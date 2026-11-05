@@ -209,9 +209,6 @@ impl EndpointStore {
 
     /// Replaces them all with `wanted`: one that names an id we have keeps it, any other is new and gets one.
     pub fn replace(&self, wanted: Vec<Endpoint>) -> Result<Vec<Endpoint>, String> {
-        if wanted.len() > MAX_ENDPOINTS {
-            return Err(format!("Up to {MAX_ENDPOINTS} endpoints."));
-        }
         let mut items = self.items.lock().unwrap();
         self.replace_locked(&mut items, wanted)
     }
@@ -231,6 +228,9 @@ impl EndpointStore {
     }
 
     fn replace_locked(&self, items: &mut std::sync::MutexGuard<'_, Vec<Endpoint>>, wanted: Vec<Endpoint>) -> Result<Vec<Endpoint>, String> {
+        if wanted.len() > MAX_ENDPOINTS {
+            return Err(format!("Up to {MAX_ENDPOINTS} endpoints."));
+        }
         let mut next: Vec<Endpoint> = Vec::new();
         for e in wanted {
             let known = !e.id.is_empty() && items.iter().any(|x| x.id == e.id) && !next.iter().any(|x| x.id == e.id);

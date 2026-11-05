@@ -113,6 +113,15 @@ mod tests {
     }
 
     #[test]
+    fn connecting_cant_go_past_the_endpoint_limit() {
+        let store = EndpointStore::load(None);
+        let many = (0..endpoints::MAX_ENDPOINTS).map(|i| Endpoint { id: String::new(), name: format!("Local {i}"), url: format!("http://localhost:{}", 2000 + i), key_env: None, models: vec![] }).collect();
+        store.replace(many).unwrap();
+        assert!(find("deepseek").unwrap().ensure_endpoint(&store).unwrap_err().contains("Up to"));
+        assert_eq!(store.list().len(), endpoints::MAX_ENDPOINTS);
+    }
+
+    #[test]
     fn a_provider_is_connected_only_with_a_saved_key() {
         let store = EndpointStore::load(None);
         assert!(!statuses(&store, &[])[0].connected);

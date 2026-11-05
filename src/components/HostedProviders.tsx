@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { HostedProvider } from "../types";
 
@@ -68,9 +69,9 @@ export function HostedProviders({ onChanged }: HostedProvidersProps) {
               <button type="button" disabled={busy || !(typed[p.id] ?? "").trim()} onClick={() => run(api.hostedProviderConnect(p.id, typed[p.id] ?? ""), () => setTyped((t) => ({ ...t, [p.id]: "" })))}>
                 Connect
               </button>
-              <a className="link-button" href={p.key_page} target="_blank" rel="noreferrer">
+              <button type="button" className="link-button" onClick={() => void openUrl(p.key_page).catch(() => {})}>
                 Get a key
-              </a>
+              </button>
             </div>
           )}
         </section>
