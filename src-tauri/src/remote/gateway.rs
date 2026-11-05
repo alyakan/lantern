@@ -3435,6 +3435,7 @@ pub(crate) mod tests {
             issue_url: None,
             branch: None,
             stack: None,
+            chat: None,
         };
         crate::remote::work::WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("/p/app:pr:7", true), item("/p/app:pr:8", false)] }
     }

@@ -161,7 +161,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
           </View>
         </TopBar>
       );
-      return showingWork ? <WorkScreen wide top={top} /> : <DeskScreen wide onOpenChat={onOpenChat} onReview={onReview} top={top} />;
+      return showingWork ? <WorkScreen wide onOpenChat={onOpenChat} top={top} /> : <DeskScreen wide onOpenChat={onOpenChat} onReview={onReview} top={top} />;
     })()
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>

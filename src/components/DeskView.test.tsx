@@ -4,7 +4,7 @@ import type { InboxItem } from "../lib/inbox";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
-import { forgetSent } from "./YourWork";
+import { forgetSent, PastChats } from "./YourWork";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
@@ -252,6 +252,26 @@ describe("the Desk", () => {
     fireEvent.click(detail.getByRole("button", { name: "Open chat" }));
     expect(props.onOpen).toHaveBeenCalledWith("s4");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("finds the last chat about an item by its branch, then its issue, and opens it", async () => {
+    vi.useRealTimers();
+    const hit = { id: "sess-1", title: [{ text: "Fix sync retries", hit: false }], folder: "/p/wt", project: "lantern", updated_ms: Date.now() - 3_600_000, snippets: [] };
+    const find = vi.fn(async (q: string) => ({ chats: q === "ENG-1" ? [hit] : [], partial: false, cancelled: false }));
+    const open = vi.fn();
+    const issue = { identifier: "ENG-1", title: "Sync it", url: "https://linear.app/a/issue/ENG-1", priority: 3, due: null, state: "In Progress", state_type: "started", team: "ENG", project: null, project_id: null, branch: null, links: [] };
+    const props = { chats: [], projects: [project("/p/lantern")], needs: [], page: "/p/lantern", onPage: vi.fn(), onNewChat: vi.fn(), onOpen: vi.fn(), onGo: vi.fn(), onDecide: vi.fn(), onStep: vi.fn(() => true), onRefreshRepos: vi.fn(), onAsk: vi.fn() };
+    const repos = [repo("/p/lantern", { prs: [pr(7, "pending", { branch: "aly/eng-1-sync" })] })];
+    render(
+      <PastChats.Provider value={{ find, open }}>
+        <DeskView {...props} repos={repos} linear={{ work: { connected: true, viewer: "Aly", org: "A", teams: [], issues: [issue], error: null }, teamOf: { "/p/lantern": "ENG" } }} />
+      </PastChats.Provider>,
+    );
+    fireEvent.click(within(screen.getByRole("region", { name: "Where things stand" })).getByRole("button", { name: /#7 PR 7/ }));
+    const last = await within(screen.getByRole("dialog")).findByRole("button", { name: /^Last chat · Fix sync retries/ });
+    expect(find.mock.calls.map((c) => c[0])).toEqual(["aly/eng-1-sync", "ENG-1"]);
+    fireEvent.click(last);
+    expect(open).toHaveBeenCalledWith("sess-1", "/p/wt");
   });
 
   it("doesn't send to a chat on the branch that is busy", () => {

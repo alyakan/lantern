@@ -4,7 +4,7 @@
 //! The window is trusted for what it says, but what it says is kept small and plain: so many items, each word cut short, only the
 //! stages and states the phone draws, and a link only when it is an https page on GitHub or Linear.
 
-use super::protocol::{RemoteWork, RemoteWorkItem, RemoteWorkNext, RemoteWorkStack};
+use super::protocol::{RemoteWork, RemoteWorkChat, RemoteWorkItem, RemoteWorkNext, RemoteWorkStack};
 use serde::Deserialize;
 use std::sync::Mutex;
 
@@ -90,6 +90,7 @@ fn tidy(item: RemoteWorkItem) -> Option<RemoteWorkItem> {
         issue_url: item.issue_url.filter(|u| link_ok(u)),
         branch: cut_opt(item.branch, 120),
         stack: item.stack.filter(|s| s.pos >= 1 && s.pos <= s.of && s.of <= 50).map(|s| RemoteWorkStack { id: s.id, pos: s.pos, of: s.of, on: s.on }),
+        chat: item.chat.filter(|c| key_ok(&c.slot) && c.slot.len() <= 80).map(|c| RemoteWorkChat { slot: c.slot, title: cut(&c.title, 80) }),
     })
 }
 
@@ -148,6 +149,7 @@ mod tests {
             issue_url: Some("https://linear.app/a/issue/ENG-1".into()),
             branch: Some("aly/eng-1".into()),
             stack: None,
+            chat: Some(RemoteWorkChat { slot: "s1".into(), title: "Fix\nit".into() }),
         }
     }
 
@@ -164,6 +166,7 @@ mod tests {
         assert_eq!(items[0].stack, Some(RemoteWorkStack { id: 4, pos: 2, of: 3, on: Some(4) }));
         assert_eq!((items[0].issue_url.as_deref(), items[0].branch.as_deref()), (Some("https://linear.app/a/issue/ENG-1"), Some("aly/eng-1")));
         assert_eq!((items[1].stack.as_ref(), items[1].issue_url.as_ref()), (None, None));
+        assert_eq!(items[0].chat, Some(RemoteWorkChat { slot: "s1".into(), title: "Fix it".into() }));
     }
 
     #[test]

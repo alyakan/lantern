@@ -17,6 +17,8 @@ export interface WorkProps {
   top: ReactNode;
   /** A tablet's main area: the page is held to a column that reads well. */
   wide?: boolean;
+  /** Opens a chat on the Mac (an item's details offer the one on its branch). */
+  onOpenChat?: (slot: string) => void;
 }
 
 /** How many of Next's steps show before "Show N more" (which opens them all in a sheet), and how many rows of a group (all of it when there is one list). */
@@ -181,7 +183,7 @@ function Dotted({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false }: WorkProps) {
+export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -564,6 +566,17 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
                   </View>
                 )}
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {onOpenChat && shown.chat && (
+                    <Action
+                      label="Open chat"
+                      hint={`Opens “${shown.chat.title}”, the chat on its branch`}
+                      onPress={() => {
+                        const slot = shown.chat!.slot;
+                        close();
+                        onOpenChat(slot);
+                      }}
+                    />
+                  )}
                   {github && <Action label="GitHub" hint="Opens the pull request" onPress={() => open(github)} />}
                   {linear && <Action label="Linear" hint="Opens the issue" onPress={() => open(linear)} />}
                 </View>

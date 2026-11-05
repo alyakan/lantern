@@ -825,6 +825,17 @@ pub struct RemoteWorkItem {
     /// Where it sits in a stack of pull requests.
     #[serde(default)]
     pub stack: Option<RemoteWorkStack>,
+    /// The chat open on the Mac in a folder on its branch: the one working on it, which the phone can open.
+    #[serde(default)]
+    pub chat: Option<RemoteWorkChat>,
+}
+
+/// A chat open on the Mac, by its slot and title.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkChat {
+    pub slot: String,
+    pub title: String,
 }
 
 /// A pull request's place in a stack: each is based on the branch of the one below.

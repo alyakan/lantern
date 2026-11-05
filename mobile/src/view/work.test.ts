@@ -1,7 +1,7 @@
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { lineUnder, linksOf, filterItems, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
 
-const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, ...over });
+const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
 const step = { what: "Fix", yours: false, button: "Do it", warn: false };
 
 describe("Your work on the phone", () => {

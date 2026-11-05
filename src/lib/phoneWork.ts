@@ -4,7 +4,9 @@
  * goes to a chat only when a step is asked for, on the Mac, from an item the phone saw as it is now (its `sig`).
  */
 import { safeIssueUrl } from "./linear";
-import { nextSteps, whereThingsStand, type WorkItem } from "./yourWork";
+import type { InboxRow } from "./deskBoard";
+import type { RepoStatus } from "../types";
+import { chatsOn, nextSteps, whereThingsStand, type WorkItem } from "./yourWork";
 
 export interface WindowWorkItem {
   key: string;
@@ -28,6 +30,8 @@ export interface WindowWorkItem {
   issue_url: string | null;
   branch: string | null;
   stack: { id: number; pos: number; of: number; on: number | null } | null;
+  /** The chat open in a folder on its branch, which the phone can open. */
+  chat: { slot: string; title: string } | null;
 }
 
 export interface WindowWork {
@@ -56,7 +60,7 @@ function linkOf(item: WorkItem): string | null {
 const quiet = (i: WorkItem): string => (i.bare !== undefined ? [i.issue?.identifier, i.bare].filter(Boolean).join(" · ") : i.meta);
 
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
-export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
+export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[], chats: InboxRow[] = [], repos: RepoStatus[] | null = null): WindowWork {
   const standing = whereThingsStand(items);
   // The phone is told only so many items: what is done (a feature's finished issues can be many) goes last, after the steps with no row of their own.
   const listed = standing.filter((i) => i.tone !== "done");
@@ -86,6 +90,7 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       issue_url: i.issue && safeIssueUrl(i.issue.url) ? i.issue.url : null,
       branch: i.branch,
       stack: i.stack ?? null,
+      chat: (([c]) => (c ? { slot: c.slot, title: c.title } : null))(chatsOn(i, chats, repos)),
     })),
   };
 }

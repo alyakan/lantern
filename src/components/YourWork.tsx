@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
-import { chatsOn, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
-import type { RepoStatus } from "../types";
+import { chatsOn, searchTerms, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
+import type { ChatHit, ChatSearchResults, RepoStatus } from "../types";
 import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
@@ -26,6 +26,38 @@ export interface YourWorkProps {
   /** Opens a chat on the Desk (an item's details offer the one on its branch). */
   onOpen?: (slot: string) => void;
 }
+
+/** History's search over every past chat, and opening one of them: an item's details find the last chat about it with them. */
+export const PastChats = createContext<{ find?: (query: string) => Promise<ChatSearchResults>; open?: (id: string, folder: string) => void }>({});
+
+/** The newest past chat about `item`, by its branch, then its issue, then its pull request (undefined while it looks; null: none). */
+function useLastChat(item: WorkItem): ChatHit | null | undefined {
+  const { find } = useContext(PastChats);
+  const [last, setLast] = useState<ChatHit | null | undefined>(find ? undefined : null);
+  const terms = searchTerms(item).join("\n");
+  useEffect(() => {
+    if (!find) return;
+    let live = true;
+    void (async () => {
+      for (const term of terms.split("\n").filter(Boolean)) {
+        const found = await find(term).catch(() => null);
+        if (!live) return;
+        const hit = found && !found.cancelled ? found.chats[0] : undefined;
+        if (hit) return setLast(hit);
+      }
+      setLast(null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [find, terms]);
+  return last;
+}
+
+const ago = (ms: number) => {
+  const m = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`;
+};
 
 /** Opens an item's details: every row and step can. */
 const Pick = createContext<(item: WorkItem) => void>(() => {});
@@ -152,6 +184,9 @@ function WorkDetail({ item, issues, chats, repos, onStep, onOpen, onClose }: { i
     else el.setAttribute("open", "");
   }, []);
   const on = chatsOn(item, chats, repos);
+  const past = useContext(PastChats);
+  const last = useLastChat(item);
+  const lastTitle = last ? last.title.map((p) => p.text).join("") || "Untitled chat" : "";
   const pr = item.number !== null && item.github ? `https://github.com/${item.github}/pull/${item.number}` : null;
   const linear = item.issue && safeIssueUrl(item.issue.url) ? item.issue.url : null;
   const facts = [item.name, item.branch, item.stack ? stackWord(item.stack) : null].filter(Boolean).join(" · ");
@@ -193,6 +228,22 @@ function WorkDetail({ item, issues, chats, repos, onStep, onOpen, onClose }: { i
               }}
             >
               Open chat
+            </button>
+          )}
+          {past.open && last === undefined && (
+            <button disabled title="Searching your past chats for its branch, issue and pull request">
+              Finding its last chat…
+            </button>
+          )}
+          {past.open && last && (
+            <button
+              title={`"${lastTitle}", ${ago(last.updated_ms)}: the newest chat that mentions it`}
+              onClick={() => {
+                onClose();
+                past.open!(last.id, last.folder);
+              }}
+            >
+              Last chat · {lastTitle.length > 32 ? `${lastTitle.slice(0, 31)}…` : lastTitle}
             </button>
           )}
           {pr && <ExternalLink className="yw-detail-link" href={pr}>GitHub</ExternalLink>}

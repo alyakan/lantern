@@ -418,6 +418,15 @@ export function chatsOn(item: WorkItem, chats: InboxRow[], repos: RepoStatus[] |
   return chats.filter((c) => onBranch.includes(c.folder));
 }
 
+/** What finds the chats about an item in History's search, most telling first: its branch (a long one, not a base branch), its
+ * Linear issue, its pull request's link. Only what reads as a branch, an identifier or a number is searched for. */
+export function searchTerms(item: WorkItem): string[] {
+  const branch = safeRef(item.branch) && item.branch.length >= 5 && !["main", "master", "develop", "trunk"].includes(item.branch) ? item.branch : null;
+  const issue = item.issue && safeIssueId(item.issue.identifier) ? item.issue.identifier : null;
+  const pull = item.number !== null && item.github ? `${item.github}/pull/${item.number}` : null;
+  return [branch, issue, pull].filter((t): t is string => !!t);
+}
+
 /** A stack's place in words: "stack 2 of 3 · on #410". */
 export const stackWord = (s: StackPlace): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
 
