@@ -2185,6 +2185,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return undefined;
         case "memory_snapshot":
           return mockMemory();
+        case "insights":
+          return mockInsights(a.range as "today" | "week" | "month");
         case "set_menu_bar":
         case "menubar_fit":
         case "remote_settings":
@@ -2563,4 +2565,28 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
     },
     { shouldMockEvents: true },
   );
+}
+
+/** Insights as a week of real use looks: shaped like the user's, the numbers made up. */
+function mockInsights(range: "today" | "week" | "month") {
+  const n = range === "today" ? 24 : range === "week" ? 7 : 30;
+  const now = Date.now();
+  return {
+    range,
+    from: now - n * (range === "today" ? 3_600_000 : 86_400_000),
+    to: now,
+    before: range === "today" ? "yesterday" : range === "week" ? "the week before" : "the month before",
+    usage: {
+      headline: "lantern takes 71%. You use the most between 2 pm and 6 pm.",
+      weighted: 54_000_000,
+      tokens: 910_000_000,
+      bars: Array.from({ length: n }, (_, i) => ({ label: range === "week" ? ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"][i] : `${i + 1}`, weighted: Math.round(4_000_000 + 3_000_000 * Math.sin(i)) })),
+      projects: [{ name: "lantern", weighted: 38_000_000, share: 0.71 }, { name: "rayak", weighted: 10_000_000, share: 0.18 }, { name: "lumiform", weighted: 6_000_000, share: 0.11 }],
+      models: [{ name: "Sonnet 5.5", weighted: 44_000_000, share: 0.81 }, { name: "Opus 5.5", weighted: 8_000_000, share: 0.15 }, { name: "Haiku 5.5", weighted: 2_000_000, share: 0.04 }],
+      heavy: [{ title: "Release 0.1.107", project: "lantern", weighted: 9_100_000, why: "410k context" }, { title: "Review team", project: "rayak", weighted: 7_400_000, why: "5 agents" }],
+    },
+    savings: { headline: "Each call sends 29% less than the week before.", per_call: { now: 175_000, before: 248_000 }, chat_start: { now: 54_000, before: 54_300 }, cached: { now: 0.91, before: 0.88 }, note: "Chats still start at 54k: a preset with plugins off starts lighter." },
+    done: { headline: "14 pull requests merged, 3 releases, 52 commits, most in lantern.", chats: 61, commits: 52, added: 4_120, removed: 960, merged: 14, releases: 3, projects: [{ name: "lantern", weighted: 40, share: 0.77 }, { name: "rayak", weighted: 12, share: 0.23 }] },
+    habits: { headline: "You write most around 3 pm. A finished chat waits about 6 min for you.", hours: Array.from({ length: 24 }, (_, h) => (h >= 9 && h <= 23 ? Math.round(10 + 8 * Math.sin(h / 3)) : 0)), reply_ms: 6 * 60_000, away: 0.38 },
+  };
 }

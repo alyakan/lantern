@@ -20,7 +20,7 @@ it("puts the sheet away first, and opens the chat only once it has gone (iOS's s
   const onClose = jest.fn();
   const onStarted = jest.fn();
   await renderWith(<NewChatSheet onClose={onClose} onStarted={onStarted} />, {}, controller);
-  await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
   await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix it");
   await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
   await waitFor(() => expect(mockSheet.close).toHaveBeenCalled());

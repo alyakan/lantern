@@ -86,6 +86,9 @@ pub struct NewChatRequest {
     pub workflow: &'static str,
     /// The id of one of the providers the window listed, or None for the project's own.
     pub provider: Option<String>,
+    /// The phone sent pictures with the first message: the window starts the chat without sending `text`, and the backend sends it,
+    /// pictures and all, once the chat is ready (the pictures never pass through the window).
+    pub hold_first: bool,
 }
 
 /// What the window is asked when a phone asks for a step of the user's work (a button of Your work). The gateway has checked the item

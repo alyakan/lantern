@@ -1,3 +1,5 @@
+import type { Insights } from "../mobile/src/protocol/generated/Insights";
+import type { InsightsRange } from "../mobile/src/protocol/generated/InsightsRange";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
@@ -417,6 +419,8 @@ export const api = {
   storageCancel: () => invoke<void>("storage_cancel"),
   /** Deletes the items with these ids (from the last scan), each checked again first; the outcome says what each came to. */
   storageDelete: (ids: string[]) => invoke<StorageOutcome[]>("storage_delete", { ids }),
+  /** Insights for a stretch of time, worked out from Claude Code's logs and git (reads weeks of logs: may take a few seconds the first time). */
+  insights: (range: InsightsRange) => invoke<Insights>("insights", { range }),
   /** How the RAM is used and by which apps (read-only: process names, sizes and counts; nothing is stopped). */
   memorySnapshot: () => invoke<MemorySnapshot>("memory_snapshot"),
   /** The menu bar item as the user chose it (mode, readout, alerts): pushed at launch and on every change. */

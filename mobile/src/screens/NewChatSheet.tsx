@@ -16,7 +16,13 @@ import { ProjectsSkeleton } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
 import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
-import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
+import { loadLastProject, loadNewChatPermissions, saveLastProject, saveNewChatPermissions } from "../prefs";
+import { useAttachments } from "../ui/useAttachments";
+import { useDictation } from "../ui/useDictation";
+import { guessProject } from "../view/compose";
+import { MicButton, SendButton, Thumbnails } from "./ChatParts";
+import { MarkupSheet } from "./MarkupSheet";
+import type { PickedImage } from "../view/attachments";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -25,6 +31,8 @@ export interface Draft {
   /** The project by its folder's name, when only that is known (a chat's): the sheet finds its folder in the Mac's list. */
   projectName?: string | null;
   continueChat?: { slot: string; title: string };
+  /** Opened by holding the compose button: the microphone starts at once. */
+  voice?: boolean;
 }
 
 export interface NewChatProps {
@@ -36,6 +44,8 @@ export interface NewChatProps {
   initialProject?: string;
   /** Send the draft to this open chat instead of starting a new one (a suggestion to carry on). */
   continueChat?: { slot: string; title: string };
+  /** Start listening at once (the compose button was held down). */
+  listen?: boolean;
   onClose: () => void;
   /** The chat was started on the Mac: its slot. */
   onStarted: (slot: string) => void;
@@ -47,7 +57,7 @@ export interface NewChatProps {
  * The models are the project's own unless a preset is chosen. Only a project the user already works in on the Mac is
  * offered (the Mac decides, whatever is sent).
  */
-export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, onClose, onStarted }: NewChatProps) {
+export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, listen = false, onClose, onStarted }: NewChatProps) {
   const colors = useColors();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
@@ -62,6 +72,21 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const list = useListInput(text, setText);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Talking instead of typing, and photos to go with the first message (a Mac that takes them).
+  const dictation = useDictation(text, setText);
+  const attach = useAttachments();
+  const canPhotos = useMacCan("newchatimages") && !continueChat;
+  const [marking, setMarking] = useState<PickedImage | null>(null);
+  useEffect(() => {
+    if (listen) void dictation.start();
+    // Once, as the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The project follows the words until one is picked by hand (or the sheet was opened on one): a project they name, else the one
+  // this phone last started in, else the Mac's first.
+  const byHand = useRef(!!initialProject || !!initialProjectName);
+  const [last, setLast] = useState<string | null>(null);
+  const [choosingProject, setChoosingProject] = useState(false);
   // What it runs on: Ask unless chosen, and the project's own models unless a preset is.
   const { supported, controls } = useControls();
   // Ask or Auto as the last chat was started with, from this phone (Ask until one was).
@@ -112,6 +137,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
         // Listed by name so the list stays put; the one used last (the Mac's first) is still the one picked.
         setProjects([...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
         setProject((now) => (now && list.some((p) => p.id === now) ? now : (list.find((p) => p.name === initialProjectName)?.id ?? list[0]?.id ?? null)));
+        if (initialProjectName && !list.some((p) => p.name === initialProjectName)) byHand.current = false;
       },
       (e: Error) => {
         if (!live) return;
@@ -124,7 +150,25 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     };
   }, [sync, continueChat]);
 
-  const ready = (!!continueChat || !!project) && text.trim().length > 0 && !busy;
+  useEffect(() => {
+    let live = true;
+    void loadLastProject().then((p) => live && setLast(p));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const guess = projects && !byHand.current ? guessProject(text, projects, last) : null;
+  useEffect(() => {
+    if (guess && guess.project.id !== project) setProject(guess.project.id);
+  }, [guess?.project.id]);
+  const guessed = !!guess?.guessed && guess.project.id === project;
+  const pickProject = (id: string) => {
+    byHand.current = true;
+    setProject(id);
+    setChoosingProject(false);
+  };
+
+  const ready = (!!continueChat || !!project) && text.trim().length > 0 && !busy && !attach.busy;
   const start = async () => {
     if (!ready) return;
     if (continueChat) {
@@ -138,7 +182,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     try {
       // Only what was chosen is sent, and only to a Mac that can take it.
       // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
-      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {});
+      dictation.cancel();
+      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {}, canPhotos ? attach.images : []);
+      void saveLastProject(project);
       // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
       if (supported && !note) void saveNewChatPermissions(permissions);
       finish(slot);
@@ -195,29 +241,73 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               </Txt>
             ) : null}
 
+            {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
             <TextInput
               accessibilityLabel="What to start with"
               value={text}
               {...list}
-              placeholder={chosen ? `What should ${chosen.name} start with?` : "What should the agent start with?"}
+              onChangeText={(t) => {
+                dictation.edited();
+                list.onChangeText(t);
+              }}
+              autoFocus={!listen}
+              placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
               placeholderTextColor={colors.ink3}
               multiline
               editable={!busy}
-              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 96, maxHeight: 200, color: colors.ink, fontSize: 16, textAlignVertical: "top" }}
             />
 
-            {continueChat ? null : projects === null ? (
-              <ProjectsSkeleton />
-            ) : projects.length === 0 ? (
-              <Txt variant="body" tone="ink2">
-                {error ?? "No projects yet. Open a folder in Lantern on your Mac first, then it is here."}
+            {/* One row: where it goes (a guess until picked), photos, the options, the microphone, and send. */}
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {continueChat ? null : projects === null ? (
+                <View style={{ flex: 1 }}>
+                  <ProjectsSkeleton />
+                </View>
+              ) : projects.length === 0 ? (
+                <Txt variant="small" tone="ink2" style={{ flex: 1 }}>
+                  {error ?? "No projects yet. Open a folder in Lantern on your Mac first."}
+                </Txt>
+              ) : (
+                <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 36, borderRadius: radius.pill, backgroundColor: colors.wash }}>
+                  <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(projects.find((p) => p.id === project)?.name ?? "") }} />
+                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1 }}>
+                    {projects.find((p) => p.id === project)?.name ?? "Pick a project"}
+                  </Txt>
+                  {guessed && (
+                    <Txt variant="tiny" tone="ink3">
+                      guessed
+                    </Txt>
+                  )}
+                </PressScale>
+              )}
+              {canPhotos && (
+                <PressScale accessibilityRole="button" accessibilityLabel="Add photos" accessibilityHint="Hold to take a photo" disabled={attach.busy || attach.full} opacity={attach.busy || attach.full ? 0.4 : 1} onPress={() => void attach.add("library")} onLongPress={() => void attach.add("camera")} accessibilityActions={[{ name: "longpress", label: "Take a photo" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && void attach.add("camera")} haptic="light" scaleTo={0.88} style={{ width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.wash }}>
+                  <PhotoGlyph color={colors.ink2} />
+                </PressScale>
+              )}
+              {!continueChat && supported && controls && (
+                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.88} style={{ width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: opened ? colors.ink : colors.wash }}>
+                  <Txt variant="body" style={{ fontWeight: "900", color: opened ? colors.onInk : colors.ink2, marginTop: -6 }}>
+                    ⋯
+                  </Txt>
+                </PressScale>
+              )}
+              <View style={{ flex: 1 }} />
+              {dictation.available && !busy && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+              <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={() => void start()} />
+            </View>
+            {(dictation.problem ?? attach.problem) && (
+              <Txt variant="small" tone="stop" accessibilityRole="alert">
+                {(dictation.problem ?? attach.problem)!.words}
               </Txt>
-            ) : (
-              <FadeSlideIn from={8}>
-                <Caption>Project</Caption>
+            )}
+
+            {choosingProject && projects && projects.length > 0 && (
+              <FadeSlideIn from={6} ms={180}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
                   {projects.map((p) => (
-                    <Pill key={p.id} label={p.name} on={p.id === project} dot={colorOf(p.name)} onPress={() => setProject(p.id)} />
+                    <Pill key={p.id} label={p.name} on={p.id === project} dot={colorOf(p.name)} onPress={() => pickProject(p.id)} />
                   ))}
                 </ScrollView>
               </FadeSlideIn>
@@ -225,23 +315,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
 
             {!continueChat && supported && controls && (
               <FadeSlideIn from={8}>
-                {/* One line says what it runs on; the options are behind it. */}
-                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.wash, borderRadius: 14, paddingHorizontal: 14, minHeight: 48 }}>
-                  <View style={{ flexShrink: 1 }}>
-                    <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
-                      Runs on
-                    </Txt>
-                    <Txt variant="body" style={{ fontWeight: "600" }} numberOfLines={1}>
-                      {summary}
-                    </Txt>
-                  </View>
-                  <Chevron open={opened} />
-                </PressScale>
-                {note && !opened && (
-                  <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                    {note}
-                  </Txt>
-                )}
+                <Txt variant="tiny" tone="ink2">
+                  {note && !opened ? note : `Runs on ${summary}`}
+                </Txt>
                 {opened && (
                   <FadeSlideIn from={6} ms={180}>
                     <View style={{ gap: 12, paddingTop: 12 }}>
@@ -304,12 +380,27 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                 {error}
               </Txt>
             )}
-            <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
+            {busy && (
+              <Txt variant="small" tone="ink2" accessibilityLiveRegion="polite">
+                {continueChat ? "Sending…" : "Starting…"}
+              </Txt>
+            )}
           </ScrollView>
+          {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
         </View>
         );
       }}
     </Sheet>
+  );
+}
+
+/** A photo, drawn: a frame with a sun and a hill. */
+function PhotoGlyph({ color }: { color: string }) {
+  return (
+    <View accessibilityElementsHidden style={{ width: 18, height: 14, borderRadius: 3, borderWidth: 1.8, borderColor: color, overflow: "hidden" }}>
+      <View style={{ position: "absolute", left: 3, top: 2, width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
+      <View style={{ position: "absolute", left: 4, bottom: -6, width: 12, height: 12, backgroundColor: color, transform: [{ rotate: "45deg" }] }} />
+    </View>
   );
 }
 

@@ -5,6 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
 import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
+import { PhoneTabs } from "../screens/PhoneTabs";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
 import { RememberChats } from "./RememberChats";
@@ -293,7 +294,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     : stack.map((route, i) => {
         switch (route.name) {
           case "home":
-            return { key: `${i}:home`, kind: "push", element: homeScreen() };
+            // A phone's bottom screen is its tabs: the chats, Your work and Insights, with the button that starts a chat.
+            return { key: `${i}:home`, kind: "push", element: <PhoneTabs onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} onComposeNew={(voice) => setNewChat({ text: "", voice })} /> };
           case "chat":
             return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} onStartNew={startNew} /> };
           case "decide":
@@ -346,6 +348,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
           initialText={newChat.text}
           initialProject={newChat.project}
           initialProjectName={newChat.projectName}
+          listen={newChat.voice}
           continueChat={newChat.continueChat}
           onClose={() => setNewChat(null)}
           onStarted={(slot) => {

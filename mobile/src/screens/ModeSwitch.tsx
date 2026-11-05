@@ -1,8 +1,10 @@
 import { View } from "react-native";
-import type { HomeMode } from "../prefs";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { radius, useColors } from "../ui/theme";
+
+/** What a tablet's main area shows: the Desk or Your work. */
+export type HomeMode = "desk" | "work";
 
 export interface ModeChoice {
   id: HomeMode;
@@ -12,8 +14,8 @@ export interface ModeChoice {
 }
 
 /**
- * Home as the Desk (every chat at once, and a box that finds the chat), Your work (where things stand, and what to do next) or the
- * list of chats. It sits in the page's top bar (which is the glass), so it is only its chosen segment, filled.
+ * A tablet's main area as the Desk (every chat at once, and a box that finds the chat) or Your work (where things stand, and what
+ * to do next). (A phone has tabs instead.) It sits in the page's top bar (which is the glass), so it is only its chosen segment, filled.
  */
 export function ModeSwitch({ value, modes, onChange }: { value: HomeMode; modes: ModeChoice[]; onChange: (m: HomeMode) => void }) {
   const colors = useColors();

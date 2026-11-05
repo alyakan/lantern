@@ -957,7 +957,7 @@ function StopButton({ onPress }: { onPress: () => void }) {
  * The send button: grey until there is something to send, then it takes its colour with a little spring; pressing it
  * sends the arrow up and out, and a fresh one rises into place.
  */
-function SendButton({ ready, queues = false, onPress }: { ready: boolean; /** Claude is working: what is sent waits for the turn to end. */ queues?: boolean; onPress: () => void }) {
+export function SendButton({ ready, queues = false, onPress, label = "Send" }: { ready: boolean; /** Claude is working: what is sent waits for the turn to end. */ queues?: boolean; onPress: () => void; /** What a screen reader calls it (a new chat's is "Start the chat"). */ label?: string }) {
   const colors = useColors();
   const accent = useAccent();
   const tint = useRef(new Animated.Value(ready ? 1 : 0)).current;
@@ -987,7 +987,7 @@ function SendButton({ ready, queues = false, onPress }: { ready: boolean; /** Cl
   };
   return (
     <Animated.View style={{ transform: [{ scale: spring }] }}>
-      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityHint={queues ? "Sends it once Claude has finished" : undefined} accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={queues ? "Sends it once Claude has finished" : undefined} accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
         <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
             <Txt variant="heading" tone={colors.isDark ? "on-ink" : "white"}>
@@ -1005,7 +1005,7 @@ function SendButton({ ready, queues = false, onPress }: { ready: boolean; /** Cl
  * breathes (not for someone who has asked for less motion).
  */
 /** The microphone: a stop square once it is on, grey while it gets ready and red, breathing, once it hears. */
-function MicButton({ listening, ready, onPress }: { listening: boolean; ready: boolean; onPress: () => void }) {
+export function MicButton({ listening, ready, onPress }: { listening: boolean; ready: boolean; onPress: () => void }) {
   const colors = useColors();
   const breath = useRef(new Animated.Value(0)).current;
   const hearing = listening && ready;
@@ -1068,7 +1068,7 @@ function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onP
 }
 
 /** The pictures attached so far, as small squares above the box, each with a × that takes it off. */
-function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
+export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
   const colors = useColors();
   return (
     <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }} style={{ flexGrow: 0 }}>

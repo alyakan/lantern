@@ -4,15 +4,11 @@ import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, renderWith, waiting } from "../test/render";
 import { toKeep, type DeskEntry } from "../view/desk";
+import { DeskScreen } from "./DeskScreen";
 import { HomeScreen } from "./HomeScreen";
 
-let mockMode: "desk" | "chats" = "desk";
 jest.mock("../prefs", () => ({
   ...jest.requireActual("../prefs"),
-  loadHomeMode: jest.fn(async () => mockMode),
-  saveHomeMode: jest.fn(async (m: "desk" | "chats") => {
-    mockMode = m;
-  }),
   loadGrouping: jest.fn(async () => "recent"),
   saveGrouping: jest.fn(async () => {}),
   loadFolded: jest.fn(async () => []),
@@ -31,7 +27,6 @@ jest.mock("../deskLog", () => ({
 }));
 
 beforeEach(() => {
-  mockMode = "desk";
   mockLog = [];
 });
 
@@ -52,7 +47,7 @@ async function open(route: RemoteDeskRoute | Error, more: Record<string, unknown
   const { controller } = makeController();
   const session = attachSession(controller, { desk, desk_route: route, send: null, ...more }, ["desk"]);
   const h = handlers();
-  await renderWith(<HomeScreen {...h} />, { connection: connectedWith(["desk"]), chats, waiting: [waiting({ slot: "w", request_id: "p1" })] }, controller);
+  await renderWith(<DeskScreen top={null} onOpenChat={h.onOpenChat} onReview={h.onReview} />, { connection: connectedWith(["desk"]), chats, waiting: [waiting({ slot: "w", request_id: "p1" })] }, controller);
   await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
   return { h, session, controller };
 }
@@ -143,11 +138,18 @@ describe("the Desk on the phone", () => {
     expect(session.lastOf("send")).toBeUndefined();
   });
 
-  it("goes back to the list of chats when asked, and stays there", async () => {
-    await open({ kind: "chat", slot: "a" });
-    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
-    await waitFor(() => expect(screen.getByText("All chats")).toBeTruthy());
-    expect(mockMode).toBe("chats");
+  it("is not a phone's Home any more: its Chats tab lists what finished on every Desk under what needs you, and no box to message it", async () => {
+    const { controller } = makeController();
+    attachSession(controller, { desk }, ["desk"]);
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} tabbed />, { connection: connectedWith(["desk"]), chats, waiting: [waiting({ slot: "w", request_id: "p1" })] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    expect(screen.getByText("All chats")).toBeTruthy();
+    expect(screen.queryByLabelText("Message the Desk")).toBeNull();
+    expect(screen.getByLabelText("Just finished")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Release: Shipped 4.2." })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Phone notifications: Only approvals buzz now." }));
+    expect(h.onOpenChat).toHaveBeenCalledWith("a");
   });
 
   describe("with a Mac whose Desk talks", () => {
@@ -155,7 +157,7 @@ describe("the Desk on the phone", () => {
       const { controller } = makeController();
       const session = attachSession(controller, { desk, send: null, ...responses }, ["desk", "desktalk"]);
       const h = handlers();
-      await renderWith(<HomeScreen {...h} />, { connection: connectedWith(["desk", "desktalk"]), chats, waiting: [] }, controller);
+      await renderWith(<DeskScreen top={null} onOpenChat={h.onOpenChat} onReview={h.onReview} />, { connection: connectedWith(["desk", "desktalk"]), chats, waiting: [] }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
       return { h, session, controller };
     }
@@ -210,16 +212,16 @@ describe("the Desk on the phone", () => {
 });
 
 describe("the Desk with the Mac's One project", () => {
-  it("shows the banner, and only that project's finished answers and what its chats wait on", async () => {
+  it("shows only that project's finished answers and what its chats wait on", async () => {
     const { controller } = makeController();
     const twoProjects = [chat({ slot: "a", title: "Phone notifications", project: "lantern" }), chat({ slot: "b", title: "Native sheets", project: "lantern", status: "needs_you" }), chat({ slot: "x", title: "Other", project: "nahar" })];
     const both = { ...desk, desks: [{ ...desk.desks[0], slots: ["a", "b", "x"] }, desk.desks[1]], cards: [...desk.cards, { key: "x:t1", desk: "home", slot: "x", title: "Other", project: "nahar", at: 30, asked: "Week view", auto: false, said: "Drag works.", outcome: "done" }] };
     attachSession(controller, { desk: both, send: null }, ["desk", "single"]);
-    await renderWith(<HomeScreen {...handlers()} />, { connection: connectedWith(["desk", "single"]), chats: twoProjects, waiting: [waiting({ slot: "b", request_id: "p1" }), waiting({ slot: "x", request_id: "p2", input: { command: "rm -rf build", description: "Clean" } })] }, controller);
+    const hs = handlers();
+    await renderWith(<DeskScreen top={null} onOpenChat={hs.onOpenChat} onReview={hs.onReview} />, { connection: connectedWith(["desk", "single"]), chats: twoProjects, waiting: [waiting({ slot: "b", request_id: "p1" }), waiting({ slot: "x", request_id: "p2", input: { command: "rm -rf build", description: "Clean" } })] }, controller);
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(screen.getByRole("button", { name: "Other: Drag works." })).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "single", single: { project: "/w/lantern", name: "lantern", color: "#5b5bd6" } } }));
-    expect(screen.getByLabelText("Only lantern")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Phone notifications: Only approvals buzz now." })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Other: Drag works." })).toBeNull();
     expect(screen.queryByText(/rm -rf build/)).toBeNull();

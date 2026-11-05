@@ -10,6 +10,7 @@ pub mod endpoints;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod insights;
 pub mod history_search;
 pub mod hermes;
 pub mod hooks;
@@ -617,9 +618,9 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<remote::protocol::RemoteImage>) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
-        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
+        Box::pin(async move { request_new_chat(&app, folder, text, by, permissions, preset, workflow, provider, images).await })
     }
 
     fn work_step(&self, key: String, sig: String) -> remote::gateway::BoxFut<Result<(String, String), String>> {
@@ -629,6 +630,11 @@ impl remote::gateway::Host for RemoteHost {
 
     fn work_refresh(&self) -> Result<(), String> {
         self.app.emit("remote-work-refresh", ()).map_err(|e| e.to_string())
+    }
+
+    fn insights(&self, range: insights::InsightsRange) -> remote::gateway::BoxFut<Result<insights::Insights, String>> {
+        let app = self.app.clone();
+        Box::pin(async move { insights_for(&app, range).await })
     }
 
     fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
@@ -3306,10 +3312,12 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
-async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> Result<String, String> {
+#[allow(clippy::too_many_arguments)]
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<remote::protocol::RemoteImage>) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider };
+    let hold_first = !images.is_empty();
+    let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());
@@ -3329,7 +3337,26 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, permiss
         }
     })
     .await;
-    listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
+    listed.map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())?;
+    if hold_first {
+        // The window held the first message back: it goes from here, with its pictures, once the chat's agent is running.
+        let ready = tokio::time::timeout(NEW_CHAT_WAIT, async {
+            loop {
+                if let Ok(s) = state.slots.get(&slot) {
+                    if s.session.lock().await.is_some() {
+                        break;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            }
+        })
+        .await;
+        if ready.is_err() {
+            return Err("The chat started, but your message and photos didn't go. Open the chat and send them again.".into());
+        }
+        send_user_message(app, &state, &slot, &text, &format!("{by}:first"), &images, true).await?;
+    }
+    Ok(slot)
 }
 
 /// A phone asked for a step of the user's work: the window is asked (it knows what the item is and where the chat for it is), and
@@ -3679,6 +3706,19 @@ async fn export_text(app: AppHandle, file_name: String, text: String) -> Result<
 }
 
 /// Where Claude Code keeps transcripts (it honours CLAUDE_CONFIG_DIR, so we do too).
+/// Insights for `range` (the window's panel and a phone's tab): weeks of logs are read, off the async threads.
+async fn insights_for(app: &AppHandle, range: insights::InsightsRange) -> Result<insights::Insights, String> {
+    let root = projects_root()?;
+    // A Finder-launched app's PATH is thin: git is found on the login shell's.
+    let path_env = login_path(&app.state::<AppState>()).await;
+    tokio::task::spawn_blocking(move || insights::insights(&root, range, now_ms().unwrap_or(0), path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn insights(app: AppHandle, range: insights::InsightsRange) -> Result<insights::Insights, String> {
+    insights_for(&app, range).await
+}
+
 fn projects_root() -> Result<std::path::PathBuf, String> {
     let base = match std::env::var_os("CLAUDE_CONFIG_DIR") {
         Some(dir) => std::path::PathBuf::from(dir),
@@ -4322,6 +4362,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            insights,
             remote_window_chats,
             remote_window_desk,
             remote_window_work,

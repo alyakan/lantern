@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -109,6 +109,12 @@ pub const PHONE_EXTRAS: &str = "extras";
 pub const PHONE_DESK: &str = "desk";
 /// A Mac whose Desk talks back (Request::DeskTalk) and sums up what came back (Request::DeskReply).
 pub const DESK_TALK: &str = "desktalk";
+/// A phone may ask for Insights (Request::Insights): the Mac works them out from Claude Code's logs and git.
+pub const INSIGHTS: &str = "insights";
+
+/// A phone may send pictures with the first message of a chat it starts (Request::NewChat's `images`).
+pub const NEW_CHAT_IMAGES: &str = "newchatimages";
+
 /// A phone that shows Your work (the Work tab): it is pushed ServerMessage::Work, may ask for it (Request::Work), run one of its steps
 /// (Request::WorkStep) and ask the Mac to look again (Request::WorkRefresh).
 pub const PHONE_WORK: &str = "work";
@@ -1060,6 +1066,11 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional)]
         provider: Option<String>,
+        /// Pictures to go with the first message: only sent to a Mac whose Welcome lists "newchatimages" (left out, not null, when
+        /// there are none, as `provider` is).
+        #[serde(default)]
+        #[ts(optional)]
+        images: Option<Vec<RemoteImage>>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
@@ -1215,6 +1226,9 @@ pub enum Request {
     WorkStep { key: String, sig: String },
     /// Asks the Mac to look at git, GitHub and Linear again (it won't more than every 15 seconds).
     WorkRefresh,
+    /// Insights for a stretch of time (crate::insights::Insights): where the usage goes, what got done, how the user works, whether
+    /// the savings work. Only sent to a Mac whose Welcome lists "insights".
+    Insights { range: crate::insights::InsightsRange },
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
@@ -1397,7 +1411,7 @@ mod tests {
     fn what_an_older_phone_or_mac_says_still_reads() {
         // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
         let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
-        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None });
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None });
         // An older Mac's chat list and Welcome have neither field.
         let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
         assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow, chat.provider), (None, None, None, None, None));

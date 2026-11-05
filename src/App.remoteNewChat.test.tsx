@@ -73,6 +73,15 @@ describe("a chat a paired phone starts", () => {
     expect(String(done?.slot)).toMatch(/^s\d+$/);
   });
 
+  it("starts the chat but leaves the first message to the backend when the phone sent photos with it", async () => {
+    const calls = await launch();
+    const before = sessions(calls).length;
+    await fromPhone(ask({ hold_first: true }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    await waitFor(() => expect(answers(calls)[0]).toMatchObject({ id: "req-1", error: null }));
+    expect(sent(calls).some((t) => t.includes("add a dark mode toggle"))).toBe(false);
+  });
+
   it("starts on Ask even when the project was left on Auto", async () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     const calls = await launch();

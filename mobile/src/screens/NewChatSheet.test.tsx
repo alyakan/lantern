@@ -30,18 +30,25 @@ async function open(answers: Parameters<typeof attachSession>[1] = { projects, n
 /** The line that says what it runs on opens its options. */
 const openOptions = (summary: string | RegExp = /^Runs on/) => fireEvent.press(screen.getByRole("button", { name: summary }));
 const write = (text: string) => fireEvent.changeText(screen.getByLabelText("What to start with"), text);
+/** The chip that says which project it starts in (a guess until one is picked), and picking another from it. */
+const chip = (name: string) => screen.getByRole("button", { name: new RegExp(`^Project: ${name}`) });
+const projectsHere = () => waitFor(() => expect(screen.getByRole("button", { name: /^Project: / })).toBeTruthy());
+async function pick(name: string) {
+  await fireEvent.press(screen.getByRole("button", { name: /^Project: / }));
+  await fireEvent.press(screen.getByRole("radio", { name }));
+}
 
 describe("while the projects are coming", () => {
-  it("shows the shape of the project picker, and then the projects in its place", async () => {
+  it("shows the shape of the project chip, and then the project in its place", async () => {
     const { controller } = makeController();
     let release: (v: unknown) => void = () => {};
     controller.sync.onSession({ welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 }, ask: () => new Promise((r) => (release = r)) } as never);
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, {}, controller);
     expect(screen.getByLabelText("Looking at your projects")).toBeTruthy();
     expect(screen.queryByText("Looking at your projects…")).toBeNull();
-    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Project: / })).toBeNull();
     release(projects);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await projectsHere();
     expect(screen.queryByLabelText("Looking at your projects")).toBeNull();
   });
 
@@ -53,12 +60,11 @@ describe("while the projects are coming", () => {
 
 describe("starting a chat from the phone", () => {
 
-  it("says it starts on Ask, offers the projects, and starts in the first one by default", async () => {
+  it("says it starts on Ask, and starts in the first project by default", async () => {
     const { lastOf, onStarted } = await open();
     expect(screen.getByText(/starts on Ask/)).toBeTruthy();
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
-    expect(screen.getByRole("radio", { name: "website" })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "lantern" }).props.accessibilityState).toMatchObject({ selected: true });
+    await projectsHere();
+        expect(chip("lantern")).toBeTruthy();
     await write("Fix the login bug");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s9"));
@@ -67,9 +73,9 @@ describe("starting a chat from the phone", () => {
 
   it("starts in the project that was picked, with the text trimmed", async () => {
     const { lastOf, onStarted } = await open();
-    await waitFor(() => screen.getByRole("radio", { name: "website" }));
-    await fireEvent.press(screen.getByRole("radio", { name: "website" }));
-    expect(screen.getByRole("radio", { name: "website" }).props.accessibilityState).toMatchObject({ selected: true });
+    await projectsHere();
+    await pick("website");
+    expect(chip("website")).toBeTruthy();
     await write("  Update the footer  \n");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
@@ -78,7 +84,7 @@ describe("starting a chat from the phone", () => {
 
   it("starts in the project a chat belongs to when only its folder's name is known (the Done page's Start something new)", async () => {
     const { lastOf, onStarted } = await open(undefined, { initialProjectName: "website" });
-    await waitFor(() => expect(screen.getByRole("radio", { name: "website" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await waitFor(() => expect(chip("website")).toBeTruthy());
     await write("Add a footer");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
@@ -87,12 +93,12 @@ describe("starting a chat from the phone", () => {
 
   it("falls back to the first project when that name isn't one the Mac lists", async () => {
     await open(undefined, { initialProjectName: "gone" });
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await waitFor(() => expect(chip("lantern")).toBeTruthy());
   });
 
   it("can't start without something written, or while it is starting", async () => {
     const { asked } = await open();
-    await waitFor(() => screen.getByRole("radio", { name: "lantern" }));
+    await projectsHere();
     expect(screen.getByRole("button", { name: "Start the chat" })).toBeDisabled();
     await write("   ");
     expect(screen.getByRole("button", { name: "Start the chat" })).toBeDisabled();
@@ -102,8 +108,8 @@ describe("starting a chat from the phone", () => {
 
   it("begins from a suggestion's draft and project, which can still be changed", async () => {
     const { lastOf } = await open(undefined, { initialText: "Continue with the release notes", initialProject: "/Users/me/website" });
-    await waitFor(() => screen.getByRole("radio", { name: "website" }));
-    expect(screen.getByRole("radio", { name: "website" }).props.accessibilityState).toMatchObject({ selected: true });
+    await projectsHere();
+    expect(chip("website")).toBeTruthy();
     expect(screen.getByLabelText("What to start with").props.value).toBe("Continue with the release notes");
     await write("Continue with the release notes, short");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
@@ -112,13 +118,13 @@ describe("starting a chat from the phone", () => {
 
   it("falls back to the first project when the draft's isn't one the Mac lists", async () => {
     await open(undefined, { initialProject: "/Users/me/gone" });
-    await waitFor(() => screen.getByRole("radio", { name: "lantern" }));
-    expect(screen.getByRole("radio", { name: "lantern" }).props.accessibilityState).toMatchObject({ selected: true });
+    await projectsHere();
+    expect(chip("lantern")).toBeTruthy();
   });
 
   it("says why when the Mac wouldn't start it, and keeps what was written", async () => {
     const { onStarted } = await open({ projects, new_chat: new Error("This phone has started a lot of chats just now. Try again in a few minutes.") });
-    await waitFor(() => screen.getByRole("radio", { name: "lantern" }));
+    await projectsHere();
     await write("one more");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(screen.getByText(/started a lot of chats/)).toBeTruthy());
@@ -130,7 +136,7 @@ describe("starting a chat from the phone", () => {
   it("says so when there are no projects, and when they couldn't be fetched", async () => {
     await open({ projects: [] });
     await waitFor(() => expect(screen.getByText(/No projects yet/)).toBeTruthy());
-    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Project: / })).toBeNull();
     expect(screen.getByRole("button", { name: "Start the chat" })).toBeDisabled();
   });
 
@@ -146,7 +152,7 @@ describe("starting a chat from the phone", () => {
       const { asked, lastOf, onStarted } = await open({}, { continueChat: carry, initialText: "Write the release notes." });
       expect(screen.getByText("Carry on")).toBeTruthy();
       expect(screen.getByText(/Release 0\.1\.53/)).toBeTruthy();
-      expect(screen.queryByRole("radio")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Project: / })).toBeNull();
       expect(asked.filter((r) => r.op === "projects")).toEqual([]);
       await write("Write the release notes, short.");
       await fireEvent.press(screen.getByRole("button", { name: "Send" }));
@@ -178,7 +184,7 @@ describe("choosing what a new chat runs on", () => {
     const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, ...controls(allowAuto) }, ["controls", "workflow"]);
     const onStarted = jest.fn();
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={onStarted} />, { connection: connectedWithControls }, controller);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await projectsHere();
     return { onStarted, ...session };
   }
 
@@ -222,7 +228,7 @@ describe("choosing what a new chat runs on", () => {
     loadPermissions.mockImplementation(async () => "auto");
     const { lastOf } = await openWithControls(true);
     await waitFor(() => expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Project's own" })).toBeTruthy());
-    await fireEvent.press(screen.getByRole("radio", { name: "website" }));
+    await pick("website");
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ project: "/Users/me/website", permissions: "auto" }));
@@ -242,7 +248,7 @@ describe("choosing what a new chat runs on", () => {
 
   it("offers nothing to choose from a Mac that can't say, and starts as before", async () => {
     const { lastOf } = await open();
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await projectsHere();
     expect(screen.queryByRole("radio", { name: "Auto" })).toBeNull();
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
@@ -259,7 +265,7 @@ describe("choosing where a new chat runs", () => {
     const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls }, ["controls", "workflow"]);
     const onStarted = jest.fn();
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={onStarted} />, { connection: connectedWithControls }, controller);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await projectsHere();
     return { onStarted, ...session };
   }
   const start = async (lastOf: (op: "new_chat") => unknown) => {
@@ -341,7 +347,7 @@ describe("starting a chat as Step by step", () => {
     const { controller } = makeController();
     const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls: { allow_auto: false, presets: [] } }, ["controls", "workflow"]);
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, { connection: connectedWithControls }, controller);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await projectsHere();
     expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
     await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Step by step" })).toBeTruthy());

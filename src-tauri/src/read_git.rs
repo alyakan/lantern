@@ -260,6 +260,15 @@ pub fn run(repo: &Path, args: &[String], path_env: Option<&str>) -> Result<Strin
     run_within(repo, args, path_env, TIMEOUT)
 }
 
+/// `args` as `validate` takes them, run in `repo` with the same guards: git's own output alone, for Lantern to read (Insights),
+/// or None when git refused, failed or said more than MAX_OUTPUT.
+pub fn stdout(repo: &Path, args: &[&str], path_env: Option<&str>) -> Option<String> {
+    let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    let argv = validate(&args).ok()?;
+    let out = execute(repo, &argv, path_env, TIMEOUT).ok()?;
+    (out.status == Some(0) && !out.cut).then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 fn run_within(repo: &Path, args: &[String], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
     let argv = validate(args)?;
     // `blame` has no `--no-textconv`, and runs the program a repository's config names as a file's textconv driver.

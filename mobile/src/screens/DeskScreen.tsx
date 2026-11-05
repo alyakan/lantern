@@ -37,7 +37,7 @@ const TALK_MAX = 640;
 const PANEL_WIDTH = 360;
 
 /** The answers that finished on this Desk, one quiet line each, newest first: a few, the rest on asking. A line opens its chat. */
-function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen: (slot: string) => void }) {
+export function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen: (slot: string) => void }) {
   const colors = useColors();
   const { chats } = useSyncState();
   const [all, setAll] = useState(false);
