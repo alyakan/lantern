@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { McpServer, SkillEntry } from "../types";
+import { NOTIFY_DEFAULTS } from "../lib/notifyPrefs";
+import { CUSTOM_DEFAULT } from "../lib/themes";
 
 const claudeRequest = vi.fn();
 const skillIndex = vi.fn();
@@ -26,7 +28,7 @@ const openUrl = vi.fn();
 const revealItemInDir = vi.fn();
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (...a: unknown[]) => openUrl(...a), revealItemInDir: (...a: unknown[]) => revealItemInDir(...a) }));
 
-import { SettingsView } from "./SettingsView";
+import { SettingsView, type GeneralSettingsProps } from "./SettingsView";
 
 const SERVERS: McpServer[] = [
   { name: "claude.ai Linear", status: "connected", serverInfo: { title: "Linear" }, config: { type: "claudeai-proxy" }, scope: "claudeai", source: "claudeai" },
@@ -333,5 +335,59 @@ describe("SettingsView", () => {
     // The other pages are still one click away.
     fireEvent.click(screen.getByRole("button", { name: "Skills" }));
     expect(await screen.findByLabelText("Filter skills and commands")).toBeInTheDocument();
+  });
+});
+
+describe("Settings' nav", () => {
+  const general: GeneralSettingsProps = {
+    keepAwake: true,
+    onKeepAwake: () => {},
+    notify: { ...NOTIFY_DEFAULTS },
+    onNotify: () => {},
+    theme: "system",
+    customTheme: CUSTOM_DEFAULT,
+    onTheme: () => {},
+    onCustomTheme: () => {},
+    textSize: "default",
+    onTextSize: () => {},
+  };
+  const updates = { version: "0.1.106", state: { kind: "idle" as const }, onCheck: () => {}, ready: null };
+  // Open MCP, so General's own page (and its settings) isn't drawn; the nav still lists what the app gave it.
+  const view = (over = {}) => render(<SettingsView open="mcp" {...props} general={general} updates={updates} {...over} />);
+
+  it("groups the pages, and leaves out a group with nothing in it", () => {
+    view();
+    const nav = screen.getByRole("navigation", { name: "Settings" });
+    expect(within(nav).getByRole("group", { name: "Lantern" })).toHaveTextContent("General");
+    expect(within(nav).getByRole("group", { name: "Claude" })).toHaveTextContent("Allow rules");
+    expect(within(nav).getByRole("group", { name: "Connected" })).toHaveTextContent("MCP servers");
+    // No routines, hooks or pull-request settings were given, so Automation has nothing to offer.
+    expect(within(nav).queryByRole("group", { name: "Automation" })).toBeNull();
+  });
+
+  it("finds a page by name or by what it sets, and says when nothing matches", async () => {
+    view();
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await act(async () => fireEvent.change(search, { target: { value: "notif" } }));
+    expect(screen.getByRole("button", { name: "General" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "MCP servers" })).toBeNull();
+    await act(async () => fireEvent.change(search, { target: { value: "zzz" } }));
+    expect(screen.getByText(/No settings match/)).toBeInTheDocument();
+  });
+
+  it("focuses the search with ⌘F and opens the first match with Enter", async () => {
+    view();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "f", metaKey: true });
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    expect(search).toHaveFocus();
+    await act(async () => fireEvent.change(search, { target: { value: "skills" } }));
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(await screen.findByLabelText("Filter skills and commands")).toBeInTheDocument();
+  });
+
+  it("wears the MCP problem and the waiting update on their rows", () => {
+    view({ mcpIssues: ["sentry needs you to log in"], updates: { ...updates, ready: { version: "0.2.0", busy: 0, onRestart: () => {}, onLater: () => {} } } });
+    expect(screen.getByRole("button", { name: "MCP servers" }).querySelector(".dot.warn")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Updates" }).querySelector(".dot")).not.toBeNull();
   });
 });

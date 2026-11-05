@@ -436,7 +436,7 @@ The **disk button** in the title bar, just before the Settings gear, opens **Sto
 
 ## Settings
 
-**⌘,** opens Settings, with seven tabs:
+**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Updates), **Claude** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Linear, Remote control) — with a search at the top that finds one by name or by what it sets (⌘F):
 
 ![Settings, on the General tab](images/settings.png)
 

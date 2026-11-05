@@ -2295,6 +2295,14 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .mode-guide-tab .mode-icon { margin-top: 0; }
 .mode-guide-tab:hover:not(.active) { background: var(--bg-hover); }
 .mode-guide-tab.active { background: var(--bg-active); color: var(--text); font-weight: 500; }
+/* Settings' sidebar: a search, then the pages in groups, rather than one flat list. */
+.settings-search { width: 100%; height: 27px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--field); color: var(--text); font-size: calc(12px * var(--font-scale)); }
+.settings-search::placeholder { color: var(--muted); }
+.settings-search:focus { outline: none; border-color: var(--text-2); }
+.settings-search-none { margin: 0; padding: 0 8px; font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; color: var(--muted); }
+.settings-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mode-guide-tab .dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.mode-guide-tab .dot.warn { background: var(--attn); }
 .mode-guide-now { margin-left: auto; padding: 0 6px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-text); font-size: calc(10px * var(--font-scale)); font-weight: 600; line-height: 16px; }
 .mode-guide-page { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 26px 18px; overflow-y: auto; }
 .mode-guide-eyebrow { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }

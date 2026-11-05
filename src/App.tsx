@@ -3539,6 +3539,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           slot={state.folder ? active : null}
           live={state.status === "idle" || state.status === "running"}
           mcpTools={state.mcpTools}
+          mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}

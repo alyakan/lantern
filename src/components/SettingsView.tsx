@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand } from "../types";
@@ -30,9 +30,61 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
+import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, HexIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, ServerIcon, ShieldIcon, SparkIcon } from "./icons";
 
 export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "linear";
 export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", linear: "Linear" };
+
+/** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
+const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
+  { title: "Lantern", tabs: ["general", "updates"] },
+  { title: "Claude", tabs: ["harness", "permissions", "skills"] },
+  { title: "Automation", tabs: ["routines", "hooks", "prs"] },
+  { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "linear", "remote"] },
+];
+
+/** What else a page can be found by: the search matches these as well as its name. */
+const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
+  general: ["notifications", "sound", "theme", "appearance", "text size", "menu bar", "memory", "sleep", "awake"],
+  updates: ["version", "update", "release"],
+  harness: ["models", "presets", "advisor", "subagents", "effort"],
+  permissions: ["allow", "rules", "always allow", "deny"],
+  skills: ["plugins", "agents"],
+  routines: ["schedule", "prompts", "cron"],
+  hooks: ["pre", "post", "prompts"],
+  prs: ["pull request", "checks", "merge", "tests"],
+  mcp: ["servers", "tools"],
+  endpoints: ["api", "provider", "url"],
+  apikeys: ["api", "key", "keys", "token"],
+  linear: ["issues", "teams"],
+  remote: ["phone", "iphone", "ipad", "pair"],
+};
+
+/** The small line icon each page wears in the nav. */
+const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
+  general: GearIcon,
+  updates: DownloadIcon,
+  harness: SparkIcon,
+  permissions: ShieldIcon,
+  skills: LearnIcon,
+  routines: ClockIcon,
+  hooks: LinkIcon,
+  prs: BranchIcon,
+  mcp: ServerIcon,
+  endpoints: GlobeIcon,
+  apikeys: KeyIcon,
+  linear: HexIcon,
+  remote: PhoneIcon,
+};
+
+function TabIcon({ tab }: { tab: SettingsTab }) {
+  const Icon = TAB_ICON[tab];
+  return (
+    <span className="mode-icon">
+      <Icon />
+    </span>
+  );
+}
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -70,16 +122,30 @@ interface Props {
   linear?: LinearSettingsProps;
   /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
   provider?: ProviderInfo | null;
+  /** MCP servers that are down or need a login ("sentry needs you to log in"): the MCP row wears a warning dot. */
+  mcpIssues?: string[];
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, linear, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
   // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
   const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor);
   const tab = offered(picked) ? picked : "general";
+  // The search narrows the nav; ⌘F focuses it and Enter opens the first match.
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
+  const available = (t: SettingsTab) =>
+    (t !== "linear" || linear) && (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+  const q = query.trim().toLowerCase();
+  const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
+  const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
+  const firstMatch = groups.flatMap((g) => g.tabs)[0];
+  // A search from last time doesn't narrow the next visit.
+  useEffect(() => setQuery(""), [open]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -96,20 +162,54 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
   }, [open]);
 
   return (
-    <dialog ref={ref} className="mode-guide settings" aria-label="Settings" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <dialog ref={ref} className="mode-guide settings" aria-label="Settings" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()} onKeyDown={(e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    }}>
       {open && (
         <div className="mode-guide-body">
           <nav className="mode-guide-nav" aria-label="Settings">
-            <div className="mode-guide-group">
-              <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "endpoints", "apikeys", "routines", "hooks", "mcp", "skills", "permissions", "prs", "linear", "remote", "updates"] as const)
-                .filter((t) => (t !== "linear" || linear) && (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t))
-                .map((t) => (
-                  <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
-                    {TAB_LABEL[t]}
+            <input
+              ref={searchRef}
+              type="search"
+              className="settings-search"
+              placeholder="Search settings"
+              aria-label="Search settings"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && query) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setQuery("");
+                } else if (e.key === "Enter" && firstMatch) {
+                  e.preventDefault();
+                  setTab(firstMatch);
+                  setQuery("");
+                }
+              }}
+            />
+            {groups.map((g) => (
+              <div key={g.title} className="mode-guide-group" role="group" aria-label={g.title}>
+                <div className="mode-guide-group-title">{g.title}</div>
+                {g.tabs.map((t) => (
+                  <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} title={t === "mcp" && mcpIssues.length > 0 ? `MCP servers: ${mcpIssues.join(" · ")}` : undefined} onClick={() => { setTab(t); setQuery(""); }}>
+                    <TabIcon tab={t} />
+                    <span className="settings-tab-label">{TAB_LABEL[t]}</span>
+                    {t === "mcp" && mcpIssues.length > 0 && <span className="dot warn" aria-hidden="true" />}
+                    {t === "updates" && updates?.ready && <span className="dot ready" aria-hidden="true" />}
                   </button>
                 ))}
-            </div>
+              </div>
+            ))}
+            {q !== "" && groups.length === 0 && (
+              <p className="settings-search-none" role="status">
+                No settings match “{query.trim()}”.
+              </p>
+            )}
           </nav>
           <article className="mode-guide-page settings-page">
             {tab === "general" && general ? (

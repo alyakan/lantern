@@ -315,3 +315,58 @@ export const BackIcon = () => (
     <path d="M12 7H2.5M6.5 2.8 2.3 7l4.2 4.2" />
   </svg>
 );
+
+// A download arrow: the Updates page in Settings.
+export const DownloadIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M7 1.8v7.4M4 6.4l3 3 3-3M2 12.2h10" />
+  </svg>
+);
+
+// A chain link: the Hooks page (prompts run around a message).
+export const LinkIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M5.6 8.4l2.8-2.8" />
+    <path d="M4.6 9.4a2.2 2.2 0 0 1 0-3.1l1.3-1.3M9.4 4.6a2.2 2.2 0 0 1 0 3.1L8.1 9" />
+  </svg>
+);
+
+// Two stacked server bays: MCP servers.
+export const ServerIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <rect x="2" y="2.2" width="10" height="4" rx="1" />
+    <rect x="2" y="7.8" width="10" height="4" rx="1" />
+    <path d="M4.2 4.2h.01M4.2 9.8h.01" />
+  </svg>
+);
+
+// A globe: an endpoint of your own.
+export const GlobeIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="7" cy="7" r="5" />
+    <path d="M2 7h10M7 2c1.8 1.8 1.8 8.2 0 10M7 2c-1.8 1.8-1.8 8.2 0 10" />
+  </svg>
+);
+
+// A hexagon: Linear.
+export const HexIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M7 1.6l4.7 2.7v5.4L7 12.4 2.3 9.7V4.3z" />
+  </svg>
+);
+
+// A phone: Remote control.
+export const PhoneIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <rect x="4.2" y="1.6" width="5.6" height="10.8" rx="1.4" />
+    <path d="M6.2 3.4h1.6" />
+  </svg>
+);
+
+// A key: the API keys a provider can run on.
+export const KeyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="4.9" cy="4.9" r="2.6" />
+    <path d="M6.8 6.8 12 12M10.1 10.1l1.1-1.1M11.4 11.4l1-1" />
+  </svg>
+);
