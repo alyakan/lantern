@@ -6,6 +6,7 @@ describe("insights figures", () => {
     expect(tokens(54_318)).toBe("54k");
     expect(tokens(9_140_000)).toBe("9.1M");
     expect(tokens(57_545_000)).toBe("58M");
+    expect(tokens(1_120_000_000)).toBe("1.1B");
   });
 
   it("says a change and whether it is good", () => {
@@ -13,6 +14,7 @@ describe("insights figures", () => {
     expect(change({ now: 60_000, before: 54_000 }, true)).toEqual({ text: "▲ 11%", good: false });
     expect(change({ now: 54_300, before: 54_000 }, true)).toEqual({ text: "same", good: true });
     expect(change({ now: 0.91, before: 0.88 }, false, true)).toEqual({ text: "▲ 3 pts", good: true });
+    expect(change({ now: 0.98, before: 0.97 }, false, true)).toEqual({ text: "▲ 1 pt", good: true });
     expect(change({ now: 1, before: null }, true)).toBeNull();
   });
 

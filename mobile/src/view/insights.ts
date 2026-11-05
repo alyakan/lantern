@@ -1,8 +1,9 @@
 /** How Insights' figures are said. Pure, so they are tested without a screen. */
 import type { InsightsCompare } from "../protocol/generated/InsightsCompare";
 
-/** A count of tokens, short: "820", "54k", "9.1M". */
+/** A count of tokens, short: "820", "54k", "9.1M", "1.1B". */
 export function tokens(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1000) return `${Math.round(n / 1000)}k`;
   return `${Math.round(n)}`;
@@ -17,7 +18,7 @@ export function change(c: InsightsCompare, lowerIsBetter: boolean, asPoints = fa
   const diff = asPoints ? Math.round((c.now - c.before) * 100) : Math.round(((c.now - c.before) / c.before) * 100);
   if (Math.abs(diff) < (asPoints ? 1 : 3)) return { text: "same", good: true };
   const up = diff > 0;
-  return { text: `${up ? "▲" : "▼"} ${Math.abs(diff)}${asPoints ? " pts" : "%"}`, good: up !== lowerIsBetter };
+  return { text: `${up ? "▲" : "▼"} ${Math.abs(diff)}${asPoints ? (Math.abs(diff) === 1 ? " pt" : " pts") : "%"}`, good: up !== lowerIsBetter };
 }
 
 /** A wait, in its largest unit: "40 s", "6 min", "2 h". */
