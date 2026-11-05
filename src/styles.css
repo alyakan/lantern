@@ -4265,7 +4265,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 /* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
 /* A narrow bar, centred. It sits over the cards, which are the pane's colour too, so it has a border of its own (1px, the strong line) and its own lift: the bar's old hairline vanished against them. */
-.desk-ask-bar { flex: none; display: flex; align-items: center; align-self: center; gap: 10px; width: min(520px, calc(100% - 48px)); margin: 0 0 16px; height: 44px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.1); }
+.desk-ask-bar { flex: none; display: flex; align-items: center; align-self: center; gap: 10px; width: min(520px, calc(100% - 48px)); margin: 0 0 16px; height: 44px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
 .desk-ask-bar:hover { color: var(--text-2); }
 .desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
