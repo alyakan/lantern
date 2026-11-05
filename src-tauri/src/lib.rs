@@ -11,6 +11,7 @@ pub mod files;
 pub mod git;
 pub mod history;
 pub mod history_search;
+pub mod hermes;
 pub mod hooks;
 pub mod hosted_providers;
 pub mod mcp_config;
@@ -1945,6 +1946,22 @@ async fn save_endpoints(state: State<'_, AppState>, endpoints: Vec<endpoints::En
 #[tauri::command]
 fn provider_auth_state(state: State<'_, AppState>) -> provider_keys::AuthState {
     state.provider_keys.state()
+}
+
+/// Whether Hermes Agent is installed, and whether it runs on the user's Claude subscription (see hermes.rs).
+#[tauri::command]
+async fn hermes_status(state: State<'_, AppState>) -> Result<hermes::HermesStatus, String> {
+    let path = login_path(&state).await;
+    let found = tauri::async_runtime::spawn_blocking(cli_locator::locate_hermes).await.map_err(|e| e.to_string())?;
+    Ok(hermes::status(found.ok().as_deref(), path.as_deref()).await)
+}
+
+/// Sets Hermes Agent to run on the user's Claude subscription through its plugin, or back off it.
+#[tauri::command]
+async fn hermes_set(state: State<'_, AppState>, on: bool) -> Result<hermes::HermesStatus, String> {
+    let path = login_path(&state).await;
+    let found = tauri::async_runtime::spawn_blocking(cli_locator::locate_hermes).await.map_err(|e| e.to_string())??;
+    hermes::set(&found, on, path.as_deref()).await
 }
 
 /// Saves Claude Code's API key in the Keychain. The key is not sent back.
@@ -4333,6 +4350,8 @@ pub fn run() {
             save_endpoints,
             fetch_endpoint_models,
             provider_auth_state,
+            hermes_status,
+            hermes_set,
             provider_claude_key_set,
             provider_claude_key_clear,
             provider_claude_use_key,

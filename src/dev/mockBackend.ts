@@ -38,6 +38,7 @@ const mockHosted = () => {
   return [{ id: "deepseek", name: "DeepSeek", ...MOCK_DEEPSEEK, key_hint: "sk-…", key_page: "https://platform.deepseek.com/api_keys", endpoint_id: endpoint?.id ?? null, connected: !!endpoint && mockAuth.endpoint_keys.includes(endpoint.id) }];
 };
 /** The API keys (never a key: only that one is saved) and the switch, as Settings → API keys shows them. */
+let mockHermes = { installed: true, on: false };
 let mockAuth = { claude: { use_key: false, has_key: false }, endpoint_keys: [] as string[], not_yet: "Codex's own sign-in is used for now: how its app-server takes an API key without replacing your saved sign-in couldn't be checked yet." };
 const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : slotProvider[slot] === "gateway" ? (mockEndpoints[0]?.models[0] ?? "qwen3:8b") : "claude-opus-5-5");
 /** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex and an endpoint only tokens. */
@@ -1649,6 +1650,10 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null, saved_key: mockAuth.endpoint_keys.includes(e.id) }));
         case "provider_auth_state":
           return mockAuth;
+        case "hermes_status":
+          return mockHermes;
+        case "hermes_set":
+          return (mockHermes = { installed: true, on: Boolean(a.on) });
         case "provider_claude_key_set":
           if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
           mockAuth = { ...mockAuth, claude: { ...mockAuth.claude, has_key: true } };

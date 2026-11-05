@@ -11,7 +11,7 @@ import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
-import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -94,6 +94,9 @@ export const api = {
   fetchEndpointModels: (url: string, keyEnv: string | null, endpointId: string | null = null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv, endpointId }),
   /** Which providers run on an API key and which keys are saved. Never a key. */
   providerAuthState: () => invoke<AuthState>("provider_auth_state"),
+  /** Hermes Agent: installed, and running on the Claude subscription plugin (see hermes.rs). */
+  hermesStatus: () => invoke<HermesStatus>("hermes_status"),
+  hermesSet: (on: boolean) => invoke<HermesStatus>("hermes_set", { on }),
   /** Saves Claude Code's API key in the Keychain; the key is not sent back. Rejects, in words, for a key that isn't one. */
   providerClaudeKeySet: (key: string) => invoke<AuthState>("provider_claude_key_set", { key }),
   providerClaudeKeyClear: () => invoke<AuthState>("provider_claude_key_clear"),

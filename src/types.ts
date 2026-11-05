@@ -118,6 +118,12 @@ export interface AuthState {
   not_yet: string;
 }
 
+/** Hermes Agent (the backend's `HermesStatus`): its CLI is installed, and it runs on the Claude subscription plugin. */
+export interface HermesStatus {
+  installed: boolean;
+  on: boolean;
+}
+
 export type UiEvent =
   | { kind: "provider_changed"; provider: ProviderInfo; key: string }
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
