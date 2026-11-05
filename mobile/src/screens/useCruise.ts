@@ -21,7 +21,9 @@ export function useCruise({ slot, available, status, turnKey, disabled, sync, se
   sync: Pick<Sync, "cruise">;
   send: (text: string) => void;
 }) {
-  const [on, setOn] = useState(false);
+  // The chat Cruise was turned on for: another chat is off from its first render, so it can't ask before anything resets.
+  const [onFor, setOnFor] = useState<string | null>(null);
+  const on = onFor === slot;
   const [asking, setAsking] = useState(false);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [at, setAt] = useState(0);
@@ -40,10 +42,11 @@ export function useCruise({ slot, available, status, turnKey, disabled, sync, se
     setError(null);
   }, []);
 
-  // Another chat starts with Cruise off and none of this one's drafts.
+  // Another chat starts with none of this one's drafts (and no ask answered late counts), and coming back to a chat doesn't
+  // find Cruise still on.
   useEffect(() => {
     asked.current = null;
-    setOn(false);
+    setOnFor(null);
     clear();
   }, [slot, clear]);
 
@@ -81,7 +84,7 @@ export function useCruise({ slot, available, status, turnKey, disabled, sync, se
   }, [available, on, asking, disabled, status, turnKey, ask]);
 
   const stop = useCallback(() => {
-    setOn(false);
+    setOnFor(null);
     clear();
   }, [clear]);
 
@@ -94,7 +97,7 @@ export function useCruise({ slot, available, status, turnKey, disabled, sync, se
       if (on) stop();
       else {
         setError(null);
-        setOn(true);
+        setOnFor(slot);
       }
     },
     stop,

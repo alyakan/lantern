@@ -129,6 +129,17 @@ describe("useCruise", () => {
     expect(result.current.draft).toBeNull();
   });
 
+  it("doesn't spend an ask on the chat it switches to, which starts with Cruise off", async () => {
+    const { result, rerender, asks } = await setup();
+    await act(async () => result.current.toggle());
+    await act(async () => asks[0].resolve([step("1")]));
+    await rerender({ slot: "b", turnKey: "u1" });
+    expect(result.current.on).toBe(false);
+    expect(asks).toHaveLength(1);
+    await rerender({ slot: "b", turnKey: "u1" });
+    expect(asks).toHaveLength(1);
+  });
+
   it("says why when the Mac couldn't, and tries again only at the next turn", async () => {
     const { result, rerender, asks } = await setup();
     await act(async () => result.current.toggle());
