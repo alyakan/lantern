@@ -1,19 +1,22 @@
+import { tabBarRoom } from "../ui/TabBar";
 import { useState, type ReactNode } from "react";
 import { Linking, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
-import { Txt } from "../ui/components";
+import { ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, space, useColors, type Palette } from "../ui/theme";
-import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
+import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
   /** Above the page: Home's top on a phone (the Mac's name, the Desk, Work and Chats switch), the page's own header on a tablet. */
   top: ReactNode;
+  /** A phone's Work tab: the tab bar floats over its bottom. */
+  tabbed?: boolean;
   /** A tablet's main area: the page is held to a column that reads well. */
   wide?: boolean;
   /** Opens a chat on the Mac (an item's details offer the one on its branch). */
@@ -154,11 +157,12 @@ function Pieces({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
+export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: WorkProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
-  const { work } = useSyncState();
+  const { work, chats } = useSyncState();
+  const colorOf = projectColors(chats);
   // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
   const [page, setPage] = useState<string | null>(null);
   const [tab, setTab] = useState<Bucket | null>(null);
@@ -346,12 +350,15 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
   const row = (i: RemoteWorkItem, heading: string | null, n: number) => {
     const attn = bucketOf(i) === "attn";
     const hue = hueOf(i, colors);
-    const line = lineUnder(i, now, heading);
+    // Its project as the chats' chip, unless the page it is on is that project.
+    const chip = !!i.repo && heading !== i.repo;
+    const line = lineUnder(i, now, heading, chip);
+    const said = lineUnder(i, now, heading);
     return (
       <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
         <PressScale
           accessibilityRole="button"
-          accessibilityLabel={`${i.number !== null ? `#${i.number} ` : ""}${i.title}, ${i.word}${line ? `, ${line}` : ""}`}
+          accessibilityLabel={`${i.number !== null ? `#${i.number} ` : ""}${i.title}, ${i.word}${said ? `, ${said}` : ""}`}
           accessibilityHint="Opens its details"
           onPress={() => setDetail(i.key)}
           scaleTo={0.99}
@@ -367,10 +374,13 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
               )}
               {i.title}
             </Txt>
-            <Txt variant="small" tone="ink3" numberOfLines={1}>
-              {attn ? <Txt variant="small" style={{ color: hue, fontWeight: "700" }}>{i.word}</Txt> : i.word}
-              {line ? ` · ${line}` : ""}
-            </Txt>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              {chip && <ProjectTag name={i.repo} color={colorOf.get(i.repo) ?? null} />}
+              <Txt variant="small" tone="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>
+                {attn ? <Txt variant="small" style={{ color: hue, fontWeight: "700" }}>{i.word}</Txt> : i.word}
+                {line ? ` · ${line}` : ""}
+              </Txt>
+            </View>
             {bucketOf(i) !== "shipped" && <Path item={i} issues={issues} named tone={attn ? hue : colors.ink2} />}
           </View>
         </PressScale>
@@ -456,7 +466,7 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
       <ScrollView
         accessibilityLabel="Your work"
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) }}
+        contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
         {work === null ? (
