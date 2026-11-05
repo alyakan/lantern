@@ -3,9 +3,7 @@
  * and beside it a glass circle that starts a chat, as iOS 26 sets its search beside the tabs. It lives on the screen at the bottom of
  * the stack, so a chat pushed over it covers it: there is no tab bar in a chat.
  */
-import { Platform, View } from "react-native";
-import { Host, Image } from "@expo/ui/swift-ui";
-import type { SFSymbol } from "sf-symbols-typescript";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Tab } from "../prefs";
 import { Txt } from "./components";
@@ -26,54 +24,46 @@ export interface TabChoice {
   badge?: number;
 }
 
-/** Apple's own symbol for a tab (iOS), filled while it is the one shown. Insights keeps its drawn bars. */
-const SYMBOLS: Partial<Record<Tab, { off: SFSymbol; on: SFSymbol }>> = {
-  chats: { off: "bubble.left.and.bubble.right", on: "bubble.left.and.bubble.right.fill" },
-  work: { off: "checklist", on: "checklist" },
-};
-
-/** An SF Symbol, sized as the tab bar's pictures are. */
-function SFIcon({ name, color, size = 20 }: { name: SFSymbol; color: string; size?: number }) {
-  return (
-    <Host style={{ width: size + 6, height: size + 2 }} alignment="center">
-      <Image systemName={name} size={size} color={color} />
-    </Host>
-  );
+/** A rounded bar, the stroke every tab picture is drawn with. */
+function Bar({ x, y, w, h = 4, color }: { x: number; y: number; w: number; h?: number; color: string }) {
+  return <View style={{ position: "absolute", left: x, top: y, width: w, height: h, borderRadius: 2, backgroundColor: color }} />;
 }
 
-/** A tab's picture: Apple's symbol on iOS, else drawn (a speech bubble, a tick); Insights' three bars are always drawn. */
-function Glyph({ id, color, on = false }: { id: Tab; color: string; on?: boolean }) {
-  const symbol = Platform.OS === "ios" ? SYMBOLS[id] : undefined;
-  if (symbol) return <SFIcon name={on ? symbol.on : symbol.off} color={color} />;
-  if (id === "chats")
-    return (
-      <View style={{ width: 22, height: 20 }}>
-        <View style={{ width: 22, height: 16, borderRadius: 6, borderWidth: 2, borderColor: color }} />
-        <View style={{ position: "absolute", left: 4, bottom: 0, width: 6, height: 6, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: color, transform: [{ skewY: "-30deg" }] }} />
-      </View>
-    );
-  if (id === "work")
-    return (
-      <View style={{ width: 22, height: 20, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ width: 13, height: 7, borderLeftWidth: 2.4, borderBottomWidth: 2.4, borderColor: color, transform: [{ rotate: "-45deg" }], marginTop: -4 }} />
-      </View>
-    );
+/** A tab's picture, drawn in rounded bars: the chats as lines of a conversation, Work as a list with one done and one to do,
+ * Insights as a bar chart. */
+function Glyph({ id, color }: { id: Tab; color: string }) {
   return (
-    <View style={{ width: 22, height: 20, flexDirection: "row", alignItems: "flex-end", justifyContent: "center", gap: 3 }}>
-      {[10, 18, 13].map((h, i) => (
-        <View key={i} style={{ width: 4, height: h, borderRadius: 2, backgroundColor: color }} />
-      ))}
+    <View accessibilityElementsHidden style={{ width: 22, height: 20 }}>
+      {id === "chats" ? (
+        <>
+          <Bar x={1} y={2} w={16} color={color} />
+          <Bar x={5} y={8} w={16} color={color} />
+          <Bar x={1} y={14} w={11} color={color} />
+        </>
+      ) : id === "work" ? (
+        <>
+          <View style={{ position: "absolute", left: 1, top: 2.5, width: 5, height: 5, borderRadius: 2.5, backgroundColor: color }} />
+          <Bar x={8} y={3} w={13} color={color} />
+          <View style={{ position: "absolute", left: 0.6, top: 12.1, width: 5.8, height: 5.8, borderRadius: 2.9, borderWidth: 1.8, borderColor: color }} />
+          <Bar x={8} y={13} w={9} color={color} />
+        </>
+      ) : (
+        <>
+          <Bar x={3.5} y={10} w={4} h={10} color={color} />
+          <Bar x={9} y={2} w={4} h={18} color={color} />
+          <Bar x={14.5} y={7} w={4} h={13} color={color} />
+        </>
+      )}
     </View>
   );
 }
 
-/** Starting a chat: Apple's compose symbol on iOS, else a plus. */
+/** Starting a chat: a plus of the same bars, centred in its circle. */
 function Plus({ color }: { color: string }) {
-  if (Platform.OS === "ios") return <SFIcon name="square.and.pencil" color={color} size={21} />;
   return (
-    <View accessibilityElementsHidden style={{ width: 20, height: 20, alignItems: "center", justifyContent: "center" }}>
-      <View style={{ position: "absolute", width: 20, height: 2.4, borderRadius: 1.2, backgroundColor: color }} />
-      <View style={{ position: "absolute", width: 2.4, height: 20, borderRadius: 1.2, backgroundColor: color }} />
+    <View accessibilityElementsHidden style={{ width: 18, height: 18 }}>
+      <Bar x={7} y={0} w={4} h={18} color={color} />
+      <Bar x={0} y={7} w={18} h={4} color={color} />
     </View>
   );
 }
@@ -89,7 +79,7 @@ export function TabBar({ tabs, value, onChange, onCompose, onComposeVoice }: { t
           const tone = on ? colors.cobalt : colors.ink2;
           return (
             <PressScale key={t.id} accessibilityRole="tab" accessibilityLabel={t.badge ? `${t.label}, ${t.badge} waiting` : t.label} accessibilityState={{ selected: on }} onPress={() => onChange(t.id)} haptic="select" scaleTo={0.92} style={{ flex: 1, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", gap: 2, backgroundColor: on ? colors.wash : "transparent" }}>
-              <Glyph id={t.id} color={tone} on={on} />
+              <Glyph id={t.id} color={tone} />
               <Txt variant="tiny" style={{ color: tone, fontWeight: "600" }}>
                 {t.label}
               </Txt>
