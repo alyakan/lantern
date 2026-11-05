@@ -10,6 +10,7 @@ vi.mock("../api", () => ({ api: {} }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
 
 import { SettingsView, type GeneralSettingsProps } from "./SettingsView";
+import type { HarnessSettingsProps } from "./HarnessSettings";
 
 describe("Settings' General page", () => {
   let general: GeneralSettingsProps;
@@ -204,7 +205,8 @@ describe("Settings' General page", () => {
 
 describe("Settings' Teams section: quiet agents and the plan's limit", () => {
   const props = (): GeneralSettingsProps => ({ keepAwake: true, onKeepAwake: vi.fn(), notify: { ...NOTIFY_DEFAULTS }, onNotify: vi.fn(), theme: "system", customTheme: CUSTOM_DEFAULT, onTheme: vi.fn(), onCustomTheme: vi.fn(), textSize: "default", onTextSize: vi.fn() });
-  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
+  const harness: HarnessSettingsProps = { saved: [], onSave: () => {}, folder: null, folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null };
+  const view = () => render(<SettingsView open="harness" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} harness={harness} />);
   beforeEach(() => localStorage.clear());
 
   it("sets how long an agent may be quiet, 3 minutes until chosen", () => {

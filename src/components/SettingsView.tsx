@@ -5,10 +5,6 @@ import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand }
 import { capabilitiesOf } from "../lib/provider";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
-import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
-import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
-import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
-import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { setMenuBar, useMenuBar, type MenuBarMode } from "../lib/menuBar";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
@@ -284,10 +280,6 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how it behaves while you're away. */
 function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
   const sound = useChimeOn();
-  const agentLimit = useAgentLimit();
-  const quiet = useQuietMinutes();
-  const tidy = useTidyMode();
-  const pauseAt = usePauseAtPercent();
   const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
   const sleepAfter = useSleepMinutes();
@@ -366,54 +358,10 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWa
           <span>Play a sound with the toasts (the speaker on a toast does the same)</span>
         </label>
       </section>
-      <section className="general-section" aria-labelledby="general-agents">
-        <h3 id="general-agents" className="general-title">
-          Teams
+      <section className="general-section" aria-labelledby="general-behaviour">
+        <h3 id="general-behaviour" className="general-title">
+          Behaviour
         </h3>
-        <label className="general-option">
-          <span>Agents running at once (all teams)</span>
-          <select aria-label="Agents running at once (all teams)" value={agentLimit} onChange={(e) => setAgentLimit(Number(e.target.value))}>
-            {Array.from({ length: AGENT_LIMIT_MAX - AGENT_LIMIT_MIN + 1 }, (_, i) => AGENT_LIMIT_MIN + i).map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
-        <label className="general-option">
-          <span>Say an agent is quiet after</span>
-          <select aria-label="Say an agent is quiet after" value={quiet} onChange={(e) => setQuietMinutes(Number(e.target.value))}>
-            {QUIET_MINUTES.map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? "1 minute" : `${n} minutes`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card.</span>
-        <label className="general-option">
-          <span>Tidy up an agent after its merge</span>
-          <select aria-label="Tidy up an agent after its merge" value={tidy} onChange={(e) => setTidyMode(e.target.value as (typeof TIDY_MODES)[number]["value"])}>
-            {TIDY_MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Once you approve an agent's merge and it goes through, "Tidy up" on its merge card closes the agent and removes its worktree and branch. Ask me puts the question on the card; Automatically does it by itself when the agent has nothing left to lose.</span>
-        <label className="general-option">
-          <span>Pause agents when their provider's usage reaches</span>
-          <select aria-label="Pause agents when their provider's usage reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
-            {PAUSE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n === 0 ? "Off" : `${n}%`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Pauses working team agents on the provider that reaches this percentage. Other providers keep working. Resume continues the paused agents; the hold also ends when that provider’s window resets. You get a heads-up 5 points before.</span>
         <label className="general-option">
           <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
           <span>Run tests when a merge is proposed</span>
