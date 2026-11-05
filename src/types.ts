@@ -330,8 +330,12 @@ export interface FileDiff {
 export interface ModelCost {
   model: string;
   cost_usd: number;
+  /** Every input token: fresh, read from the cache and written to it. */
   input_tokens: number;
   output_tokens: number;
+  /** The part of the input read from the prompt cache, and the part written to it. */
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
 }
 
 /** A slash command claude offers: built-in, custom (.claude/commands) or a skill. */

@@ -4,7 +4,7 @@ import { weekSentence } from "../lib/weekUsage";
 import { providerName } from "../lib/provider";
 import { DAY_SECS, HOUR_SECS, windowMarks, type Mark, type Marks } from "../lib/usageMarks";
 import { usageLine } from "../lib/cost";
-import { modelLine, type ModelShare, type UsageRow, type UsageState } from "../lib/usage";
+import { modelLine, promptLine, type ModelShare, type UsageRow, type UsageState } from "../lib/usage";
 import { usePopover } from "../lib/usePopover";
 import { ChevronIcon } from "./icons";
 
@@ -165,6 +165,7 @@ function Row({ row, onOpen, expanded, onToggle, member }: { row: UsageRow; onOpe
   const spent = usageLine(row.cost > 0 ? row.cost : null, row.tokens > 0 ? row.tokens : null);
   const agents = row.members ? row.members.length - 1 : 0;
   const where = [!member && !row.members ? row.project : null, row.members ? (agents === 0 ? "Lead only" : `Lead and ${agents} ${agents === 1 ? "agent" : "agents"}`) : null].filter(Boolean).join(" · ");
+  const prompt = promptLine(row);
   return (
     <div className={`usage-row${member ? " member" : ""}`}>
       {expanded === undefined ? (
@@ -183,6 +184,11 @@ function Row({ row, onOpen, expanded, onToggle, member }: { row: UsageRow; onOpe
           {where && `${where}${row.models.length > 0 ? " · " : ""}`}
           <Models models={row.models} />
         </span>
+        {prompt && (
+          <span className="usage-sub usage-prompt" title="What each message starts from (the prompt, tools, skills and plugins), and how much of what the chat sends is read from the cache, which costs a tenth of fresh input. The share leaves out each session's first turn, where most of the cache is written, so it reads a little high">
+            {prompt}
+          </span>
+        )}
       </span>
       <span className="usage-figures">
         <span className="usage-state">{STATE_LABEL[row.state]}</span>

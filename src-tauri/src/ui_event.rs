@@ -78,8 +78,14 @@ pub struct Hunk {
 pub struct ModelCost {
     pub model: String,
     pub cost_usd: f64,
+    /// Every input token: fresh, read from the cache and written to it.
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// The part of `input_tokens` read from the prompt cache (cheap), and the part written to it (dearer than fresh input).
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
