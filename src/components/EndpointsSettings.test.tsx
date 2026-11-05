@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { EndpointsSettings } from "./EndpointsSettings";
 
-type Saved = { id: string; name: string; url: string; key_env: string | null; models: string[] };
+type Saved = { id: string; name: string; url: string; key_env: string | null; models: string[]; auto_mode?: boolean };
 let calls: [string, Record<string, unknown>][] = [];
 let listed: (Saved & { key_set: boolean | null; saved_key?: boolean })[] = [];
 let answers: Record<string, unknown> = {};
@@ -136,7 +136,21 @@ describe("Settings → Endpoints", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     // The id is the backend's to make; the key is a variable's NAME, and nothing else about a key goes.
-    expect(sent("save_endpoints")).toEqual([{ endpoints: [{ id: "", name: "OpenRouter", url: "https://openrouter.ai/api", key_env: "OPENROUTER_API_KEY", models: ["openai/gpt-5", "anthropic/claude-sonnet-4-5"] }] }]);
+    expect(sent("save_endpoints")).toEqual([{ endpoints: [{ id: "", name: "OpenRouter", url: "https://openrouter.ai/api", key_env: "OPENROUTER_API_KEY", models: ["openai/gpt-5", "anthropic/claude-sonnet-4-5"], auto_mode: false }] }]);
+  });
+
+  it("has Auto off for an endpoint until it is allowed, says its model approves its own actions, and saves the choice", async () => {
+    backend();
+    const onSaved = vi.fn();
+    render(<EndpointsSettings onSaved={onSaved} />);
+    const allow = await screen.findByRole("checkbox", { name: "Allow Auto mode" });
+    expect(allow).not.toBeChecked();
+    expect(screen.getByText(/runs on this endpoint's model, so that model approves its own actions/)).toBeInTheDocument();
+    fireEvent.click(allow);
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(sent("save_endpoints")).toEqual([{ endpoints: [{ id: "ollama", name: "Ollama", url: "http://localhost:11434", key_env: "OLLAMA_API_KEY", models: ["qwen3:8b"], auto_mode: true }] }]);
   });
 
   it("shows why saving was refused, in the backend's words, and doesn't tell the window", async () => {

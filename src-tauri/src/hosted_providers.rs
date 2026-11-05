@@ -37,7 +37,7 @@ pub fn find(id: &str) -> Option<&'static HostedProvider> {
 
 impl HostedProvider {
     fn endpoint(&self) -> Endpoint {
-        Endpoint { id: String::new(), name: self.name.into(), url: self.url.into(), key_env: None, models: self.models.iter().map(|m| m.to_string()).collect() }
+        Endpoint { id: String::new(), name: self.name.into(), url: self.url.into(), key_env: None, models: self.models.iter().map(|m| m.to_string()).collect(), auto_mode: false }
     }
 
     /// The endpoint the user already has for this provider: the one at its address.
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn connecting_adds_the_endpoint_once_and_leaves_the_others() {
         let store = EndpointStore::load(None);
-        store.replace(vec![Endpoint { id: String::new(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: vec!["qwen3".into()] }]).unwrap();
+        store.replace(vec![Endpoint { id: String::new(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: vec!["qwen3".into()], auto_mode: false }]).unwrap();
         let p = find("deepseek").unwrap();
         let first = p.ensure_endpoint(&store).unwrap();
         let again = p.ensure_endpoint(&store).unwrap();
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn connecting_cant_go_past_the_endpoint_limit() {
         let store = EndpointStore::load(None);
-        let many = (0..endpoints::MAX_ENDPOINTS).map(|i| Endpoint { id: String::new(), name: format!("Local {i}"), url: format!("http://localhost:{}", 2000 + i), key_env: None, models: vec![] }).collect();
+        let many = (0..endpoints::MAX_ENDPOINTS).map(|i| Endpoint { id: String::new(), name: format!("Local {i}"), url: format!("http://localhost:{}", 2000 + i), key_env: None, models: vec![], auto_mode: false }).collect();
         store.replace(many).unwrap();
         assert!(find("deepseek").unwrap().ensure_endpoint(&store).unwrap_err().contains("Up to"));
         assert_eq!(store.list().len(), endpoints::MAX_ENDPOINTS);

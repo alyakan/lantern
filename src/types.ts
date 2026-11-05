@@ -85,6 +85,8 @@ export interface Endpoint {
   /** The NAME of the environment variable that holds its key (never the key). */
   key_env: string | null;
   models: string[];
+  /** Its chats may run on Auto, where the endpoint's own model approves their actions. Missing (an older backend) is off. */
+  auto_mode?: boolean;
 }
 
 /** An endpoint with whether its key variable is set in the login shell (null: it has none). */

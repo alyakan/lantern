@@ -15,9 +15,10 @@ impl Provider for GatewayProvider {
         ProviderId::Gateway
     }
 
-    /// What it keeps of Claude Code (skills, Lantern's tools: they are Claude Code's own) and what it loses: Auto's classifier,
-    /// the advisor and effort are Anthropic's models, and the dollars Claude Code reports are priced for Claude's. A Lead is
-    /// Claude's for now: a team's Lead starting agents on any model comes with mixed presets.
+    /// What it keeps of Claude Code (skills, Lantern's tools: they are Claude Code's own) and what it loses: the advisor and
+    /// effort are Anthropic's models, and the dollars Claude Code reports are priced for Claude's. Auto is off here because its
+    /// classifier would run on the endpoint's own model: an endpoint the user allows it on has it (lib.rs `endpoint_capabilities`).
+    /// A Lead is Claude's for now: a team's Lead starting agents on any model comes with mixed presets.
     fn capabilities(&self) -> Capabilities {
         Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true, supports_images: true, supports_compact: true, supports_clear: true, publishes_artifacts: false, supports_recap: false }
     }

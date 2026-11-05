@@ -39,7 +39,7 @@ const parseModels = (text: string) => [...new Set(text.split(/[\s,]+/).filter(Bo
 let nextKey = 0;
 
 const rowOf = (e: Endpoint, keySet: boolean | null, savedKey = false): Row => ({ ...e, key: `row-${nextKey++}`, modelsText: e.models.join("\n"), keySet, savedKey, savedUrl: e.url, keyDraft: "", keyError: null, fetchError: null, fetching: false });
-const endpointOf = (r: Row): Endpoint => ({ id: r.id, name: r.name, url: r.url, key_env: r.key_env?.trim() ? r.key_env.trim() : null, models: parseModels(r.modelsText) });
+const endpointOf = (r: Row): Endpoint => ({ id: r.id, name: r.name, url: r.url, key_env: r.key_env?.trim() ? r.key_env.trim() : null, models: parseModels(r.modelsText), auto_mode: r.auto_mode ?? false });
 
 /**
  * Settings → Endpoints: where a chat can run besides Anthropic's. Claude Code is sent to the endpoint (a LiteLLM or OpenRouter
@@ -123,7 +123,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
         <div>
           <h2 className="mode-guide-title">Endpoints</h2>
           <p className="mode-guide-summary">
-            Run a chat on a model that isn't Anthropic's: Claude Code is sent to an endpoint that speaks Anthropic's Messages API (/v1/messages), such as LiteLLM, OpenRouter, Ollama or LM Studio. A chat on an endpoint sends its messages to the endpoint, not to Anthropic, and has no Auto mode, advisor, effort level or price; skills and Lantern's tools stay. Anthropic doesn't support non-Claude models in Claude Code, so some things may not work on every model.
+            Run a chat on a model that isn't Anthropic's: Claude Code is sent to an endpoint that speaks Anthropic's Messages API (/v1/messages), such as LiteLLM, OpenRouter, Ollama or LM Studio. A chat on an endpoint sends its messages to the endpoint, not to Anthropic, and has no advisor, effort level or price, and no Auto mode unless you allow it below; skills and Lantern's tools stay. Anthropic doesn't support non-Claude models in Claude Code, so some things may not work on every model.
           </p>
         </div>
       </div>
@@ -178,6 +178,11 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
                   <textarea rows={3} value={r.modelsText} placeholder={"qwen3-coder:30b\nopenai/gpt-5"} spellCheck={false} onChange={(e) => change(r.key, { modelsText: e.target.value })} />
                 </label>
                 {r.fetchError && <span className="settings-row-sub endpoint-fetch-error">{r.fetchError}</span>}
+                <label className="general-option wide">
+                  <input type="checkbox" checked={r.auto_mode ?? false} onChange={(e) => change(r.key, { auto_mode: e.target.checked })} />
+                  <span>Allow Auto mode</span>
+                </label>
+                <span className="settings-row-sub wide">Auto's safety check runs on this endpoint's model, so that model approves its own actions. A chat that is already open picks up a change when you reopen it.</span>
                 <div className="endpoint-actions">
                   <button type="button" disabled={!r.url.trim() || r.fetching} onClick={() => fetchModels(r)} title="Ask the endpoint which models it serves">
                     {r.fetching ? "Fetching…" : "Fetch models"}
