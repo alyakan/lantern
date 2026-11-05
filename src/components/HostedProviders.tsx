@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { HostedProvider } from "../types";
+import { SettingsHint } from "./SettingsRow";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -53,9 +54,9 @@ export function HostedProviders({ onChanged }: HostedProvidersProps) {
       {providers.map((p) => (
         <section key={p.id} className="settings-section">
           <h3 className="settings-subhead">{p.name}</h3>
-          <p className="settings-muted">
+          <SettingsHint>
             Runs a chat on {p.name}'s models ({p.models.join(", ")}) through Claude Code, sent to {p.url}. Your messages and the files Claude reads go to {p.name}, not to Anthropic. A chat on it has no Auto mode, advisor or effort level, and some things may not work on every model. It appears in New chat beside Claude.
-          </p>
+          </SettingsHint>
           {p.connected ? (
             <div className="endpoint-keybox">
               <span className="settings-row-sub">Connected: a key is saved in your Mac's Keychain.</span>

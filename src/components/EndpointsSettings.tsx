@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { Endpoint, EndpointStatus } from "../types";
+import { SettingsHint } from "./SettingsRow";
 
 export interface EndpointsSettingsProps {
   /** The list was saved: the window asks again which providers there are. */
@@ -126,7 +127,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
           </p>
         </div>
       </div>
-      <p className="settings-muted">A key goes either in a field here, kept in your Mac's Keychain and sent only to this endpoint (over https, or to this Mac's own network), or in an environment variable you name and set in your shell (~/.zshrc or ~/.zprofile). A saved key wins over the variable.</p>
+      <SettingsHint>A key goes either in a field here, kept in your Mac's Keychain and sent only to this endpoint (over https, or to this Mac's own network), or in an environment variable you name and set in your shell (~/.zshrc or ~/.zprofile). A saved key wins over the variable.</SettingsHint>
       {error && (
         <div className="settings-error" role="alert">
           {error}

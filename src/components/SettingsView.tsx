@@ -976,7 +976,7 @@ function AddServerForm({ slot, edit, onAdded, onCancel }: { slot: string; edit?:
   };
   return (
     <form className="mcp-add" onSubmit={submit} aria-label={edit ? "Edit an MCP server" : "Add an MCP server"}>
-      {edit && <div className="wide settings-muted">{loaded ? "Secret values show as •••. Leave one as it is to keep what's saved." : "Reading the server's settings…"}</div>}
+      {edit && <div className="wide"><SettingsHint>{loaded ? "Secret values show as •••. Leave one as it is to keep what's saved." : "Reading the server's settings…"}</SettingsHint></div>}
       <label>
         Name
         <input value={spec.name} onChange={(e) => set({ name: e.target.value })} placeholder="sentry" autoFocus required autoCapitalize="off" autoCorrect="off" spellCheck={false} />
