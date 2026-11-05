@@ -1191,6 +1191,7 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 /* While Claude works, a soft highlight travels around the box's border (a rotating gradient masked to the edge). */
 @property --sweep { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 .composer-box.working { border-color: var(--line-strong); }
+.composer-box.dropping { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer-box.working::before {
   content: "";
   position: absolute;
