@@ -61,7 +61,13 @@ export function useCruise({ slot, available, status, turnKey, disabled, sync, se
         (r) => {
           if (mine !== generation.current) return;
           // Only a next step for this very chat is ever offered, whatever the Mac sent.
-          setItems(r.items.filter((i) => i.target.kind === "continue" && i.target.slot === slot));
+          const next = r.items.filter((i) => i.target.kind === "continue" && i.target.slot === slot);
+          // "Another" with nothing new to offer keeps the draft on screen instead of emptying the card.
+          if (refresh && !next.length) {
+            setAsking(false);
+            return;
+          }
+          setItems(next);
           setAt(0);
           setAsking(false);
         },

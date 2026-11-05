@@ -261,15 +261,27 @@ pub fn cruise_digest(hub: &SessionHub, slot: &str) -> Option<CruiseDigest> {
     Some(CruiseDigest { slot: slot.to_string(), title, project, turns })
 }
 
-/// What Cruise asks, from the chat and its last turns.
-pub fn cruise_prompt(d: &CruiseDigest) -> String {
+/// What Cruise asks, from the chat and its last turns. `offered` is what the developer has already been shown for this
+/// very state of the chat and passed over ("Another"): the same prompt would give the same answer, so they are named.
+pub fn cruise_prompt(d: &CruiseDigest, offered: &[(String, String)]) -> String {
     let mut out = String::from("The developer's open chat, its last few turns oldest first. What should be done next?\n\n");
     out.push_str(&format!("[chat id={} | project={}]\ntitle: {}\n\n", d.slot, d.project, d.title));
     for (developer, text) in &d.turns {
         out.push_str(&format!("{}: \"{text}\"\n", if *developer { "developer" } else { "claude" }));
     }
+    if !offered.is_empty() {
+        out.push_str("\nThe developer was already offered these next steps and wants something different. Do not repeat or reword any of them:\n");
+        for (title, message) in offered {
+            out.push_str(&format!("- {title}: \"{message}\"\n"));
+        }
+    }
     out.push_str("\nReply with the next step only, as the JSON the system prompt asks for.");
     out
+}
+
+/// Whether `s` is one of the steps already `offered` (same message or same title, whatever the case).
+fn was_offered(s: &Suggestion, offered: &[(String, String)]) -> bool {
+    offered.iter().any(|(title, message)| message.eq_ignore_ascii_case(&s.message) || title.eq_ignore_ascii_case(&s.title))
 }
 
 /// The drafts in Cruise's reply: only a well-formed `continue` for this very chat is kept, at most three, each field cut
@@ -308,6 +320,8 @@ struct CruiseKept {
     key: u64,
     at: u64,
     items: Vec<Suggestion>,
+    /// Every (title, message) shown for this `key`, across "Another" asks: they are told to the model and never offered again.
+    offered: Vec<(String, String)>,
 }
 
 type CruiseSlot = std::sync::Arc<tokio::sync::Mutex<Option<CruiseKept>>>;
@@ -345,9 +359,21 @@ impl Cruiser {
         if let Some(k) = kept.as_ref().filter(|k| !refresh && k.key == key && now.saturating_sub(k.at) < CRUISE_TTL_MS) {
             return Ok(Suggestions { items: k.items.clone(), generated_at: k.at });
         }
-        let reply = run(cruise_prompt(d)).await?;
-        let items = cruise_parse(&reply, &d.slot);
-        *kept = (!items.is_empty()).then(|| CruiseKept { key, at: now, items: items.clone() });
+        // Only for the chat as it still is: after a turn ends, what was offered is for what was done, not what is next.
+        let mut offered = kept.as_ref().filter(|k| k.key == key).map(|k| k.offered.clone()).unwrap_or_default();
+        let reply = run(cruise_prompt(d, &offered)).await?;
+        let mut items = cruise_parse(&reply, &d.slot);
+        // The model may still repeat itself: what was shown before is dropped, so "Another" is never the same step.
+        items.retain(|s| !was_offered(s, &offered));
+        if items.is_empty() {
+            // Nothing new: the kept drafts and what was offered stay, so the next "Another" is told the same and tries again.
+            if offered.is_empty() {
+                *kept = None;
+            }
+            return Ok(Suggestions { items, generated_at: now });
+        }
+        offered.extend(items.iter().map(|s| (s.title.clone(), s.message.clone())));
+        *kept = Some(CruiseKept { key, at: now, items: items.clone(), offered });
         Ok(Suggestions { items, generated_at: now })
     }
 }
@@ -633,7 +659,7 @@ mod tests {
         assert_eq!(d.slot, "a");
         assert!(d.turns.is_empty());
         assert!(cruise_digest(&remote.hub, "nobody").is_none());
-        assert!(cruise_prompt(&d).contains("[chat id=a"));
+        assert!(cruise_prompt(&d, &[]).contains("[chat id=a"));
     }
 
     #[test]
@@ -698,6 +724,50 @@ mod tests {
         // And a failure is said, and not kept either.
         let failed = c.get(5_000, &cruising(&["x"]), false, |_| async { Err("Claude didn't answer in time.".to_string()) }).await;
         assert_eq!(failed.unwrap_err(), "Claude didn't answer in time.");
+    }
+
+    #[tokio::test]
+    async fn another_names_what_was_offered_and_never_offers_it_again() {
+        let c = Cruiser::default();
+        let d = cruising(&["fix it", "done"]);
+        let prompts = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let ask = |refresh: bool, reply: &'static str| {
+            let prompts = prompts.clone();
+            let (c, d) = (&c, &d);
+            async move {
+                c.get(1_000, d, refresh, move |p| async move {
+                    prompts.lock().unwrap().push(p);
+                    Ok(reply.to_string())
+                })
+                .await
+                .unwrap()
+            }
+        };
+        ask(false, NEXT).await;
+        // The model says the same step again: it is told what was shown, and the repeat is dropped.
+        assert!(ask(true, NEXT).await.items.is_empty());
+        {
+            let p = prompts.lock().unwrap();
+            assert!(!p[0].contains("already offered"));
+            assert!(p[1].contains("Do not repeat") && p[1].contains("Re-run the tests."));
+        }
+        // A different step comes through, and the third ask is told about both.
+        let other = r#"[{"kind":"continue","slot":"a","title":"Add a test","why":"No coverage.","message":"Add a test for it."}]"#;
+        let got = ask(true, other).await;
+        assert_eq!(got.items.len(), 1);
+        assert!(got.items[0].message == "Add a test for it.");
+        ask(true, NEXT).await;
+        let last = prompts.lock().unwrap().last().cloned().unwrap();
+        assert!(last.contains("Re-run the tests.") && last.contains("Add a test for it."));
+        // A turn ending starts over: the chat moved on, so nothing is held against the new ask.
+        let after = cruising(&["fix it", "done", "Re-run the tests.", "green"]);
+        let fresh = c.get(2_000, &after, true, |p| async move {
+            assert!(!p.contains("already offered"));
+            Ok(NEXT.to_string())
+        })
+        .await
+        .unwrap();
+        assert_eq!(fresh.items.len(), 1);
     }
 
     #[tokio::test]

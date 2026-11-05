@@ -100,6 +100,17 @@ describe("useCruise", () => {
     expect(result.current.draft?.id).toBe("3");
   });
 
+  it("keeps the draft on screen when Another finds nothing new", async () => {
+    const { result, asks } = await setup();
+    await act(async () => result.current.toggle());
+    await act(async () => asks[0].resolve([step("1")]));
+    await act(async () => result.current.another());
+    expect(asks[1].refresh).toBe(true);
+    await act(async () => asks[1].resolve([]));
+    expect(result.current.asking).toBe(false);
+    expect(result.current.draft?.id).toBe("1");
+  });
+
   it("drops an answer that comes after Stop, and doesn't bring it back when Cruise is turned on again", async () => {
     const { result, asks } = await setup();
     await act(async () => result.current.toggle());
