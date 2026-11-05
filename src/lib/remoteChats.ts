@@ -137,6 +137,8 @@ export interface RemoteNewChat {
   workflow?: string | null;
   /** The id of one of the providers the window listed, or null (missing too) for the project's own. */
   provider?: string | null;
+  /** The phone sent pictures with it: the chat starts without `text`, which the backend sends with them once the chat is ready. */
+  hold_first?: boolean;
 }
 
 /**

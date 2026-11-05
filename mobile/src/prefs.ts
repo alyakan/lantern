@@ -17,23 +17,24 @@ export async function loadGrouping(): Promise<Grouping> {
 }
 
 
-const MODE_KEY = "lantern.home-mode";
+const TAB_KEY = "lantern.tab";
 
-export type HomeMode = "desk" | "work" | "chats";
+/** The phone's tabs: the chats, Your work, and Insights. */
+export type Tab = "chats" | "work" | "insights";
 
-/** Whether Home is the Desk, Your work or the list of chats; the Desk when nothing was chosen or it can't be read. */
-export async function loadHomeMode(): Promise<HomeMode> {
+/** The tab the phone was last on; the chats when nothing was chosen or it can't be read. */
+export async function loadTab(): Promise<Tab> {
   try {
-    const mode = await SecureStore.getItemAsync(MODE_KEY, OPTIONS);
-    return mode === "chats" || mode === "work" ? mode : "desk";
+    const tab = await SecureStore.getItemAsync(TAB_KEY, OPTIONS);
+    return tab === "work" || tab === "insights" ? tab : "chats";
   } catch {
-    return "desk";
+    return "chats";
   }
 }
 
-export async function saveHomeMode(mode: HomeMode): Promise<void> {
+export async function saveTab(tab: Tab): Promise<void> {
   try {
-    await SecureStore.setItemAsync(MODE_KEY, mode, OPTIONS);
+    await SecureStore.setItemAsync(TAB_KEY, tab, OPTIONS);
   } catch {
     // Not remembered: it holds until the app closes.
   }
@@ -226,3 +227,22 @@ export async function saveVoiceEngine(engine: VoiceEngine): Promise<void> {
 
 /** For tests: forgets the choice made while the app is open. */
 export const resetVoiceChoice = () => void (voiceChosen = null);
+
+const LAST_PROJECT_KEY = "lantern.last-project";
+
+/** The project (its folder) this phone last started a chat in: a new chat starts there unless its words name another. */
+export async function loadLastProject(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(LAST_PROJECT_KEY, OPTIONS);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLastProject(project: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(LAST_PROJECT_KEY, project, OPTIONS);
+  } catch {
+    // Not remembered: the Mac's first is picked next time.
+  }
+}

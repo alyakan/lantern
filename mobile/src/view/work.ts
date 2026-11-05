@@ -4,7 +4,7 @@
  */
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import type { RemoteWorkStack } from "../protocol/generated/RemoteWorkStack";
-import { ago } from "./home";
+import { ago, projectColorOf } from "./home";
 
 export type Tone = "bad" | "wait" | "you" | "move" | "local" | "todo" | "ready" | "done";
 export type GroupBy = "feature" | "project" | "none";
@@ -49,17 +49,18 @@ export function metaOf(item: RemoteWorkItem, now: number): string {
   return item.meta.replace("{ago}", t);
 }
 
-/** An item's line without a part the heading above it already says (its feature, or its project). */
-export function metaUnder(item: RemoteWorkItem, now: number, heading: string | null): string {
+/** An item's line without a part the heading above it already says (its feature, or its project), nor its project when a chip
+ * beside it says that (`chip`). */
+export function metaUnder(item: RemoteWorkItem, now: number, heading: string | null, chip = false): string {
   const meta = metaOf(item, now);
-  return heading === null ? meta : meta.split(" · ").filter((part) => part !== heading).join(" · ");
+  return heading === null && !chip ? meta : meta.split(" · ").filter((part) => part !== heading && !(chip && part === item.repo)).join(" · ");
 }
 
 /** A stack's place in words: "stack 2 of 3 · on #410". */
 export const stackWord = (s: RemoteWorkStack): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
 
 /** A row's quiet line: what `metaUnder` says, and its place in a stack. */
-export const lineUnder = (item: RemoteWorkItem, now: number, heading: string | null): string => [metaUnder(item, now, heading), item.stack ? stackWord(item.stack) : ""].filter(Boolean).join(" · ");
+export const lineUnder = (item: RemoteWorkItem, now: number, heading: string | null, chip = false): string => [metaUnder(item, now, heading, chip), item.stack ? stackWord(item.stack) : ""].filter(Boolean).join(" · ");
 
 /** An item's pages: its pull request on GitHub and its issue on Linear, each only when it is one this phone opens. */
 export function linksOf(item: RemoteWorkItem): { github: string | null; linear: string | null } {
@@ -73,6 +74,13 @@ export function linksOf(item: RemoteWorkItem): { github: string | null; linear: 
 const ORDER: Record<Tone, number> = { you: 0, bad: 1, move: 2, local: 3, todo: 4, wait: 5, ready: 6, done: 7 };
 export function nextSteps(items: RemoteWorkItem[]): RemoteWorkItem[] {
   return items.filter((i) => i.next).sort((a, b) => ORDER[toneOf(a)] - ORDER[toneOf(b)]);
+}
+
+/** Each project's colour, from the chats the Mac lists (the one its sidebar gives the project); a project no chat is in has none. */
+export function projectColors(chats: { project: string | null; project_color: unknown }[]): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const c of chats) if (c.project && !out.get(c.project)) out.set(c.project, projectColorOf(c.project_color));
+  return out;
 }
 
 /** The rows of "Where things stand" (the Mac lists them in order; a release step has no row of its own). */

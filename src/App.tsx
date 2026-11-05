@@ -20,6 +20,7 @@ import { summarizeRequest } from "./lib/network";
 import { refreshArtifact } from "./lib/artifacts";
 import { FREE_UP_SPACE_REQUEST, suggestedCount, useStorageView } from "./components/StorageTab";
 import { StoragePanel } from "./components/StoragePanel";
+import { InsightsPanel } from "./components/InsightsPanel";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
@@ -1028,7 +1029,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         // Claude here (the chat would stop at its first one). Never written down as the project's choice: it is this chat's alone.
         const own = providerFor(r.folder);
         const providerId = r.provider ?? (capabilitiesOf(infoOf(own)).phone_approvals ? own : CLAUDE);
-        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" }, providerId);
+        // (With pictures, the backend sends the first message itself once the chat is ready: they never come through here.)
+        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" }, providerId);
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -2474,6 +2476,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The disk scan: a panel like Settings, from the title bar's Storage button (or the palette), for the whole app. Claude's
   // suggestions on it wear a dot on the button.
   const [storageOpen, setStorageOpen] = useState(false);
+  // Insights: a panel like Storage, from the title bar's chart button or the palette.
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const storage = useStorageView();
   // Sent now when Claude is free, queued behind the turn when it's working.
   const askStorage = state.status === "idle" || state.status === "running" ? () => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, FREE_UP_SPACE_REQUEST] }) : sendIn(active, FREE_UP_SPACE_REQUEST)) : null;
@@ -2498,9 +2502,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
     // History with its search box ready: what was said in any past chat.
     const storageEntry: PaletteEntry = { id: "storage", title: "Storage", group: "View", shortcut: null, run: () => setStorageOpen(true) };
+    const insightsEntry: PaletteEntry = { id: "insights", title: "Insights", group: "View", shortcut: null, run: () => setInsightsOpen(true) };
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
-    return [...availableActions(), searchChats, storageEntry, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
+    return [...availableActions(), searchChats, storageEntry, insightsEntry, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -3312,6 +3317,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onToggleReview={deskShown ? () => setAskSheet((open) => !open) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
+          insights={{ onOpen: () => setInsightsOpen(true), open: insightsOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
           branch={branch}
@@ -3613,6 +3619,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             fallbackModel: defaultModel,
           }}
         />
+        <InsightsPanel open={insightsOpen} onClose={() => setInsightsOpen(false)} />
         <StoragePanel open={storageOpen} onClose={() => setStorageOpen(false)} view={storage} onAsk={askStorage} busy={state.status === "running"} />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}

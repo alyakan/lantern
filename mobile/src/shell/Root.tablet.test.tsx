@@ -93,6 +93,42 @@ describe("a tablet with the chats pinned", () => {
     expect(screen.queryByRole("button", { name: "Show chats" })).toBeNull();
   });
 
+  describe("with no Desk", () => {
+    const item = { key: "pr7", repo: "lantern", title: "Retry fetchJson", stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: 7, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: { what: "Fix failing checks on", yours: false, button: "Do it", warn: false }, issue_url: null, branch: null, stack: null, chat: null };
+    const withFeatures = async (features: string[]) => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(features) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, features);
+      await render(<Root controller={controller} />);
+      await settle();
+    };
+
+    it("opens on Your work where no chat is open, for a Mac that has it, and lists Work, not a Desk, above the chats", async () => {
+      await withFeatures(["desk", "work"]);
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+      expect(screen.queryByTestId("pick-a-chat")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Desk/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+    });
+
+    it("shows a chat in its place when one is picked, and Work again from its row", async () => {
+      await withFeatures(["desk", "work"]);
+      await press(/Release 0.1.53/);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: false });
+      await press("Work, 1 waiting");
+      await settle();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+    });
+
+    it("asks to pick a chat, with no Desk to open, for a Mac with a Desk and no work", async () => {
+      await withFeatures(["desk"]);
+      expect(screen.getByTestId("pick-a-chat")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^(Desk|Work)/ })).toBeNull();
+    });
+  });
+
   it("keeps them beside the chat upright too: pinned is the user's choice, not the window's", async () => {
     mockLayout = "overlay";
     await open({ chats: two });

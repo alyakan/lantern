@@ -273,7 +273,7 @@ impl Host for FixtureHost {
         Ok(())
     }
 
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<super::protocol::RemoteImage>) -> BoxFut<Result<String, String>> {
         let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
         self.hub.opened(&slot, &folder);
         // A chat that isn't on Claude carries the provider's name, as the window sends it for a real one.
@@ -283,7 +283,7 @@ impl Host for FixtureHost {
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
         self.hub.flow(&slot, workflow.as_str());
         self.hub.titled(&slot, &title_of(&text));
-        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: 0 });
+        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: images.len() as u32 });
         self.reply(&slot, text);
         Box::pin(async move { Ok(slot) })
     }

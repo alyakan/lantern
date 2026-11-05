@@ -48,6 +48,10 @@ export interface BarSearch {
   /** -1: on to the older match, 1: the newer. */
   onStep: (dir: 1 | -1) => void;
   onCancel: () => void;
+  /** What the empty field says ("Search this chat" unless told). */
+  placeholder?: string;
+  /** What it searches is a list (Home's chats): it says how many there are, and has no arrows to step between them. */
+  list?: boolean;
 }
 
 /** The circle's size until the bar has been measured; it then takes the bar's own height, which is the same number at rest. */
@@ -122,7 +126,7 @@ export function SearchContents({ search, input, onFocused, onCancel }: { search:
           onFocused();
         }}
         blurOnSubmit={false}
-        placeholder="Search this chat"
+        placeholder={search.placeholder ?? "Search this chat"}
         placeholderTextColor={colors.ink3}
         autoCorrect={false}
         autoCapitalize="none"
@@ -131,18 +135,22 @@ export function SearchContents({ search, input, onFocused, onCancel }: { search:
         style={{ flex: 1, fontSize: 15, color: colors.ink, paddingVertical: 8 }}
       />
       <Txt accessibilityLiveRegion="polite" variant="tiny" tone="ink2" style={{ minWidth: 44, textAlign: "right" }}>
-        {typed ? (none ? "No match" : `${search.position} of ${search.count}`) : ""}
+        {typed ? (none ? "No match" : search.list ? (search.count === 1 ? "1 chat" : `${search.count} chats`) : `${search.position} of ${search.count}`) : ""}
       </Txt>
-      <RoundButton label="Older match" onPress={() => search.onStep(-1)} disabled={search.count === 0}>
-        <View style={{ transform: [{ rotate: "-90deg" }] }}>
-          <Chevron open={false} color={colors.ink} size={7} />
-        </View>
-      </RoundButton>
-      <RoundButton label="Newer match" onPress={() => search.onStep(1)} disabled={search.count === 0}>
-        <View style={{ transform: [{ rotate: "90deg" }] }}>
-          <Chevron open={false} color={colors.ink} size={7} />
-        </View>
-      </RoundButton>
+      {!search.list && (
+        <>
+          <RoundButton label="Older match" onPress={() => search.onStep(-1)} disabled={search.count === 0}>
+            <View style={{ transform: [{ rotate: "-90deg" }] }}>
+              <Chevron open={false} color={colors.ink} size={7} />
+            </View>
+          </RoundButton>
+          <RoundButton label="Newer match" onPress={() => search.onStep(1)} disabled={search.count === 0}>
+            <View style={{ transform: [{ rotate: "90deg" }] }}>
+              <Chevron open={false} color={colors.ink} size={7} />
+            </View>
+          </RoundButton>
+        </>
+      )}
       <RoundButton label="Cancel search" onPress={onCancel}>
         <Cross />
       </RoundButton>
@@ -424,12 +432,12 @@ export function SearchBar({ search, tools, working = false, onStop, circle = tru
     else if (hasTools) setTray(true);
     else openSearch();
   };
-  const label = stops ? "Stop" : hasTools ? "Tools" : "Search this chat";
+  const label = stops ? "Stop" : hasTools ? "Tools" : search?.list ? "Search chats" : "Search this chat";
   const hint = stops ? (hasTools ? "Stops what Claude is doing. Hold for the tools." : "Stops what Claude is doing. Hold to search.") : hasTools ? "Search, compact and more" : undefined;
 
   return (
     <View>
-      {active && none && (
+      {active && none && !search?.list && (
         <Txt variant="tiny" tone="ink2" style={{ marginBottom: 6, marginHorizontal: 8 }}>
           Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
         </Txt>

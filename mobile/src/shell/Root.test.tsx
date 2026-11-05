@@ -42,9 +42,9 @@ describe("the glass of the chats", () => {
     const was = motion.instant;
     motion.instant = false;
     try {
-      // Four chats, so Home has its glass search circle: neither it nor anything it is in starts from nothing.
+      // The tab bar's glass compose button: neither it nor anything it is in starts from nothing.
       await open({ connection: connected, chats: ["a", "b", "c", "d"].map((slot) => chat({ slot, title: `Chat ${slot}` })) });
-      let node = screen.getByRole("button", { name: "Search chats" }).parent;
+      let node = screen.getByRole("button", { name: "New chat" }).parent;
       while (node) {
         const o = StyleSheet.flatten(node.props.style)?.opacity;
         if (typeof o === "number") expect(o).toBe(1);
@@ -129,7 +129,7 @@ describe("starting a chat from Home", () => {
   it("opens the sheet, starts the chat on the Mac, and goes into it", async () => {
     const { lastOf } = await open({ chats: [chat()] }, {}, answers);
     await press("New chat");
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
     await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
     await press("Start the chat");
     await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeTruthy());

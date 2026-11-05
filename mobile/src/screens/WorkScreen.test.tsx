@@ -4,14 +4,14 @@ import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, NOW, renderWith } from "../test/render";
-import { HomeScreen } from "./HomeScreen";
+import { PhoneTabs } from "./PhoneTabs";
 
-let mockMode: "desk" | "work" | "chats" = "work";
+let mockTab: "chats" | "work" | "insights" = "work";
 jest.mock("../prefs", () => ({
   ...jest.requireActual("../prefs"),
-  loadHomeMode: jest.fn(async () => mockMode),
-  saveHomeMode: jest.fn(async (m: "desk" | "work" | "chats") => {
-    mockMode = m;
+  loadTab: jest.fn(async () => mockTab),
+  saveTab: jest.fn(async (t: "chats" | "work" | "insights") => {
+    mockTab = t;
   }),
   loadGrouping: jest.fn(async () => "recent"),
   saveGrouping: jest.fn(async () => {}),
@@ -23,7 +23,7 @@ jest.mock("../prefs", () => ({
 jest.mock("../deskLog", () => ({ loadDeskLog: jest.fn(async () => []), saveDeskLog: jest.fn(async () => {}), forgetDeskLog: jest.fn(async () => {}) }));
 
 beforeEach(() => {
-  mockMode = "work";
+  mockTab = "work";
 });
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
@@ -44,7 +44,7 @@ const work: RemoteWork = {
 async function open(answers: Record<string, unknown> = {}, features = ["desk", "work"], onOpenChat = jest.fn()) {
   const { controller } = makeController();
   const session = attachSession(controller, { work, ...answers }, features);
-  await renderWith(<HomeScreen onOpenChat={onOpenChat} onReview={jest.fn()} onOpenMac={jest.fn()} onCompose={jest.fn()} onNewChat={jest.fn()} onSupport={jest.fn()} />, { connection: connectedWith(features), chats: [chat({ slot: "a" })] }, controller);
+  await renderWith(<PhoneTabs onOpenChat={onOpenChat} onReview={jest.fn()} onOpenMac={jest.fn()} onCompose={jest.fn()} onNewChat={jest.fn()} onSupport={jest.fn()} onComposeNew={jest.fn()} />, { connection: connectedWith(features), chats: [chat({ slot: "a" })] }, controller);
   await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
   return { session, controller };
 }
@@ -56,9 +56,9 @@ async function openCard(name: string) {
 }
 
 describe("Your work on the phone", () => {
-  it("is a switch beside the Desk and the chats for a Mac that has it, with how many steps wait, and not for one that doesn't", async () => {
+  it("is a tab beside the chats for a Mac that has it, with how many steps wait", async () => {
     await open();
-    expect(screen.getByRole("tab", { name: "Work, 3 to do" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Work, 3 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(screen.getByLabelText("Your work")).toBeTruthy();
   });
 
@@ -74,11 +74,32 @@ describe("Your work on the phone", () => {
     expect(before).not.toBe(132);
   });
 
-  it("is not offered by a Mac that lists no work, which keeps the Desk", async () => {
+  it("is not offered by a Mac that lists no work, which opens on the chats", async () => {
     await open({}, ["desk"]);
     expect(screen.queryByRole("tab", { name: /^Work/ })).toBeNull();
     expect(screen.queryByLabelText("Your work")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Desk" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^Chats/ }).props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it("goes to the chats from the tab bar, and is remembered there", async () => {
+    await open();
+    await fireEvent.press(screen.getByRole("tab", { name: /^Chats/ }));
+    expect(screen.queryByLabelText("Your work")).toBeNull();
+    expect(mockTab).toBe("chats");
+  });
+
+  it("says each item's project as the chats' chip, unless the page it is on is that project", async () => {
+    await open();
+    const page = await openCard("Reliability");
+    // The chip says the project, so the quiet line doesn't.
+    expect(page.getAllByLabelText("lantern").length).toBeGreaterThan(0);
+    expect(page.getByText(/ENG-1 Retry on 429$/)).toBeTruthy();
+  });
+
+  it("leaves room under the list for the tab bar floating over it", async () => {
+    await open();
+    const { paddingBottom } = StyleSheet.flatten(screen.getByLabelText("Your work").props.contentContainerStyle);
+    expect(paddingBottom).toBeGreaterThan(40);
   });
 
   it("is a card for each feature, with what it holds and the one thing that needs you, and how many things need you", async () => {
@@ -122,7 +143,8 @@ describe("Your work on the phone", () => {
     await open();
     const page = await openCard("No feature");
     expect(page.getByRole("tab", { name: "Shipped" }).props.accessibilityState).toMatchObject({ selected: true });
-    expect(page.getByText(/web · merged 2 h ago/)).toBeTruthy();
+    // Its project is a chip, so the line doesn't say it.
+    expect(page.getByText(/merged 2 h ago/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "‹ Work" }));
     const dashboard = await openCard("Dashboard");
     expect(dashboard.getByRole("tab", { name: "To start" }).props.accessibilityState).toMatchObject({ selected: true });

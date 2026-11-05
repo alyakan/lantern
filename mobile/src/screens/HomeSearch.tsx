@@ -79,3 +79,4 @@ export function HomeSearch({ active, query, found, lift = 0, onOpen, onChange, o
     </KeyboardStickyView>
   );
 }
+

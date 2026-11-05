@@ -27,6 +27,8 @@ import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { RemoteChanges } from "../protocol/generated/RemoteChanges";
 import type { RemoteChangeScope } from "../protocol/generated/RemoteChangeScope";
+import type { Insights } from "../protocol/generated/Insights";
+import type { InsightsRange } from "../protocol/generated/InsightsRange";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { artifactList, type Artifact } from "../view/artifacts";
 import { newShellId } from "../view/shell";
@@ -348,11 +350,19 @@ export class Sync {
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
    * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string } = {}): Promise<string> {
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string } = {}, images: PickedImage[] = []): Promise<string> {
+    if (images.length > 0 && !this.has("newchatimages")) throw new Error("This Mac can't take photos with a new chat yet. Update Lantern on it.");
     // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider
-    // is left out altogether, not sent empty, when none was chosen.
-    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}) });
+    // and the pictures are left out altogether, not sent empty, when there are none.
+    const request: Request = { op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
+    const started = await (images.length > 0 ? this.ask<StartedChat>(request, UPLOAD_WAIT) : this.ask<StartedChat>(request));
     return started.slot;
+  }
+
+  /** Insights for a stretch of time, worked out on the Mac (it reads weeks of logs the first time: it may take a while). Only for a Mac that lists "insights". */
+  insights(range: InsightsRange) {
+    if (!this.has("insights")) return Promise.reject(new Error("This Mac can't show insights yet. Update Lantern on it."));
+    return this.ask<Insights>({ op: "insights", range }, UPLOAD_WAIT);
   }
 
   /** The user's own to-do list for a project (one of projects()' ids, or the project a reminder named). Only for a Mac that lists "todos". */

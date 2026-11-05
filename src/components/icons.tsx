@@ -266,6 +266,13 @@ export const DiskIcon = () => (
   </svg>
 );
 
+// Three bars of a chart: Insights.
+export const ChartIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M2.5 12V7.5M7 12V2.5M11.5 12V5.5M1.5 12.2h11" />
+  </svg>
+);
+
 // Xcode's "show/hide navigator": a window with its left-hand pane marked.
 export const SidebarIcon = () => (
   <svg width="15" height="13" viewBox="0 0 16 14" {...base}>
