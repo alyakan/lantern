@@ -5,7 +5,6 @@ import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand }
 import { capabilitiesOf } from "../lib/provider";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
-import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { setMenuBar, useMenuBar, type MenuBarMode } from "../lib/menuBar";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
 import { SLEEP_MINUTES, setSleepMinutes, useSleepMinutes } from "../lib/idleSleep";
@@ -280,7 +279,6 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how it behaves while you're away. */
 function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
   const sound = useChimeOn();
-  const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
   const sleepAfter = useSleepMinutes();
   const paused = notify.pausedUntil > Date.now();
@@ -362,11 +360,6 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWa
         <h3 id="general-behaviour" className="general-title">
           Behaviour
         </h3>
-        <label className="general-option">
-          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
-          <span>Run tests when a merge is proposed</span>
-        </label>
-        <span className="settings-muted">Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests.</span>
         <label className="general-option">
           <input type="checkbox" checked={restorePoints} onChange={(e) => setRestorePoints(e.target.checked)} />
           <span>Keep restore points before each message</span>

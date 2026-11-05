@@ -6,7 +6,7 @@ import { CUSTOM_DEFAULT, THEMES } from "../lib/themes";
 import { autoMergeTests } from "../lib/mergeTests";
 import { api } from "../api";
 
-vi.mock("../api", () => ({ api: {} }));
+vi.mock("../api", () => ({ api: { ghAccess: () => Promise.resolve("ready") } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
 
 import { SettingsView, type GeneralSettingsProps } from "./SettingsView";
@@ -32,6 +32,7 @@ describe("Settings' General page", () => {
     };
   });
   const view = (tab: "general" | "appearance" = "general") => render(<SettingsView open={tab} onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
+  const prView = () => render(<SettingsView open="prs" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} prChecks={{ folders: [], saved: {}, onChange: () => {} }} />);
 
   it("is the first tab, and opens on it", () => {
     view();
@@ -52,7 +53,7 @@ describe("Settings' General page", () => {
   it("offers running the tests when a merge is proposed, off until chosen, and tells the backend", () => {
     const set = vi.fn(() => Promise.resolve());
     (api as unknown as { setAutoMergeTests: typeof set }).setAutoMergeTests = set;
-    view();
+    prView();
     const box = screen.getByRole("checkbox", { name: "Run tests when a merge is proposed" });
     expect(box).not.toBeChecked();
     fireEvent.click(box);
@@ -64,7 +65,7 @@ describe("Settings' General page", () => {
   });
 
   it("warns that merge tests run the project's own command without asking", () => {
-    view();
+    prView();
     expect(screen.getByText(/comes from the project, including code the agent has just written/)).toBeInTheDocument();
     expect(screen.getByText(/without asking you/)).toBeInTheDocument();
   });
