@@ -2765,31 +2765,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       live = false;
     };
   }, [workKey]);
-  // A chat started for a failure works in the worktree the pull request was found in: put it there once it runs.
-  const pinOnStart = useRef<Record<string, string>>({});
-  useEffect(() => {
-    for (const [slot, work] of Object.entries(pinOnStart.current)) {
-      const s = chats.slots[slot];
-      if (!s) delete pinOnStart.current[slot];
-      else if (liveSlot(s)) {
-        delete pinOnStart.current[slot];
-        void api.pinWorktree(slot, work).catch(() => {});
-      }
-    }
-  }, [workKey]);
   const prChecks = usePrChecks({
     chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, work: workBySlot[slot] ?? s.folder, live: liveSlot(s), busy: isBusy(s) }] : [])),
     active,
     settings: prSettings,
     send: (slot, text) => sendIn(slot, text),
-    start: (folder, work, text) => {
+    start: (folder, text) => {
       if (!agentReady) return null;
       const slot = `s${++slotSeq.current}`;
       dispatchChats({ type: "add", slot });
-      if (work !== folder) {
-        pinOnStart.current[slot] = work;
-        setWorkBySlot((all) => ({ ...all, [slot]: work }));
-      }
       startIn(slot, folder, false, false, text);
       return slot;
     },

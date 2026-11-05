@@ -26,8 +26,8 @@ export interface PrChecksOptions {
   settings: Record<string, Partial<PrSetting> | undefined>;
   /** Sends a message to a chat, as Lantern's own (the chat shows it like any other message). */
   send: (slot: string, text: string) => void;
-  /** Starts a chat in the project's `folder` that works in `work`, with `text` as its first message; its slot, or null when none could start. */
-  start: (folder: string, work: string, text: string) => string | null;
+  /** Starts a chat in the project's `folder` with `text` as its first message; its slot, or null when none could start. */
+  start: (folder: string, text: string) => string | null;
   /** Checks finished failed and nothing is dealing with them: the user should hear of it. */
   onFailed: (folder: string, slot: string, snap: PrSnap) => void;
 }
@@ -76,16 +76,12 @@ async function collectFailures(folder: string, checks: PrCheck[]): Promise<Faile
   return out;
 }
 
-/** The first message of a chat Lantern starts for a failure, when no chat works on the pull request's branch. */
-const startNote = (work: string, folder: string) =>
-  work === folder ? "" : `\n\nThe pull request's branch is checked out in the worktree \`${work}\`: work, commit and push there.`;
-
 /**
  * Watches the pull request of each place a chat works in (its project's folder, or a worktree of it) while its checks
  * aren't done (every 30 seconds at first, then less often, for up to an hour), and runs the project's choice: Off, Tell me
  * (the card and an inbox row) or Fix it myself (see `step`). Looking only reads, through the GitHub CLI; the one thing sent
  * is the failure, once per failing run, to the chat working on the pull request: the one that had the last try, else one
- * in a worktree where the pull request was found, else a new chat Lantern starts where it was found. A chat in the project's own folder
+ * in a worktree where the pull request was found, else a new chat Lantern starts in the project. A chat in the project's own folder
  * isn't sent to unless it had the last try: being in the project doesn't make a chat the pull request's.
  */
 export function usePrChecks(opts: PrChecksOptions) {
@@ -139,7 +135,7 @@ export function usePrChecks(opts: PrChecksOptions) {
     const inWorktrees = live().filter((c) => c.folder === folder && c.work !== folder);
     const on = inWorktrees.filter((c) => looksRef.current[c.work]?.snap?.pr.number === number);
     const chat = on.find((c) => c.slot === o.current.active) ?? on[on.length - 1] ?? null;
-    return { chat, pending: !chat && inWorktrees.some((c) => looksRef.current[c.work] === undefined) };
+    return { chat, pending: !chat && inWorktrees.some((c) => lastLook.current[c.work] === undefined) };
   };
   const loopOf = (folder: string, number: number) => loopsRef.current[folder]?.[String(number)] ?? freshLoop();
   const commit = (folder: string, number: number, loop: LoopState) => {
@@ -230,7 +226,8 @@ export function usePrChecks(opts: PrChecksOptions) {
       const text = buildFailureMessage(snap.pr, failures, note);
       // Counted before a chat is started, so a look while it starts doesn't start another.
       commit(folder, snap.pr.number, res.loop);
-      const slot = target ? target.slot : o.current.start(folder, place, text + startNote(place, folder));
+      // No chat on it: a worktree is only looked at while a chat works there, so this is the project's folder.
+      const slot = target ? target.slot : o.current.start(folder, text);
       if (slot === null) return;
       owners.current[key] = slot;
       awaiting.current[place] = { slot, ran: false };

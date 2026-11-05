@@ -274,7 +274,7 @@ describe("the pull request loop", () => {
     await settle();
     expect(send).not.toHaveBeenCalled();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0]).toEqual([FOLDER, FOLDER, expect.stringContaining("try 1 of 3")]);
+    expect(start.mock.calls[0]).toEqual([FOLDER, expect.stringContaining("try 1 of 3")]);
     // The started chat (s9) is the pull request's from here: the same failure isn't sent again, nor another chat started.
     rerender(props([inFolder("s1"), inFolder("s2"), inFolder("s9", true)], "s2"));
     await act(async () => void (await vi.advanceTimersByTimeAsync(30_000)));
@@ -304,5 +304,12 @@ describe("the pull request loop", () => {
     rerender(props([chat(false), other], "s4"));
     await settle();
     expect(send.mock.calls.map((c) => c[0])).toEqual(["s1", "s1"]);
+  });
+  it("Fix it myself: a worktree gh can't look at doesn't hold the project's failure back for ever", async () => {
+    // The worktree was removed while a chat still works there: gh fails in it every time.
+    prWatch.mockImplementation(async (place) => (place === FOLDER ? FAILED() : Promise.reject("no such directory")));
+    const { start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), chat(false, "s1")]);
+    await settle();
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
