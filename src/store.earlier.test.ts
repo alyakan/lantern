@@ -34,6 +34,20 @@ describe("a long session that opens with its last turns", () => {
     expect(unique(second)).toBe(true);
   });
 
+  it("closes a card on an earlier page that never saw an end, and keeps an answered one's answer", () => {
+    const page: UiEvent[] = [
+      ...turn(6),
+      { kind: "permission_requested", request_id: "codex-2", tool_name: "Bash", input: { command: "xcrun devicectl list devices" } },
+      { kind: "permission_requested", request_id: "codex-3", tool_name: "Bash", input: { command: "ls" } },
+      { kind: "permission_resolved", request_id: "codex-3", allow: true, by: "desktop" },
+    ];
+    const loaded = reducer(opened(7), { type: "earlier_loaded", sessionId: "s1", events: page, expected: 7, hidden: 6 });
+    expect(loaded.items.filter((it) => it.type === "permission")).toMatchObject([
+      { id: "codex-2", decision: "denied" },
+      { id: "codex-3", decision: "allowed" },
+    ]);
+  });
+
   it("lets go of a page that is for another session or that was already loaded", () => {
     const s = opened(7);
     expect(reducer(s, { type: "earlier_loaded", sessionId: "other", events: turn(6), expected: 7, hidden: 6 })).toBe(s);

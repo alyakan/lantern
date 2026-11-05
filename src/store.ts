@@ -896,14 +896,17 @@ export function reducer(state: State, action: Action): State {
       const was = state.sessionId === action.sessionId ? state.items.find((it) => it.type === "user" && !it.auto) : undefined;
       const name = state.asleepTitle ?? (was?.type === "user" ? was.text.split("\n")[0] || null : null);
       const first = !action.earlier && items.some((it) => it.type === "user" && !it.auto);
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : name };
+      // A card the saved copy never saw end (Lantern quit while it waited, or an older build didn't save the answer) has
+      // nothing waiting on it any more: no claude of the run that asked it is left to take an answer.
+      return { ...replayed, status: "starting", thinking: false, items: denyPending(settleRunning(withoutTimes(items))), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : name };
     }
     case "earlier_loaded": {
       // A page for a chat that has moved on (another session, or loaded further since) is let go.
       if (state.sessionId !== action.sessionId || state.earlierTurns !== action.expected) return state;
       // Numbered on their own, apart from the messages the chat has, so no two share an id.
       const scratch = action.events.reduce(applyEvent, { ...freshSession(state, state.folder), seq: -(action.hidden + 1) * 100_000 });
-      const older = settleRunning(withoutTimes(scratch.items));
+      // As a reopened chat's last turns do (history_loaded): a card these turns never saw end has nothing left waiting on it.
+      const older = denyPending(settleRunning(withoutTimes(scratch.items)));
       const runs = scratch.testRuns.filter((r) => !state.testRuns.some((t) => t.id === r.id));
       return { ...state, items: [...older, ...state.items], testRuns: [...runs, ...state.testRuns], earlierTurns: action.hidden };
     }
