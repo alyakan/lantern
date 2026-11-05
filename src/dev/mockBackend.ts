@@ -32,6 +32,13 @@ const slotProvider: Record<string, string> = {};
 /** The endpoints saved (with `endpoints`: one to begin with, as Settings → Endpoints lists them). */
 type MockEndpoint = { id: string; name: string; url: string; key_env: string | null; models: string[] };
 let mockEndpoints: MockEndpoint[] = [];
+const MOCK_DEEPSEEK = { url: "https://api.deepseek.com/anthropic", models: ["deepseek-v4-pro", "deepseek-flash"] };
+const mockHosted = () => {
+  const endpoint = mockEndpoints.find((e) => e.url === MOCK_DEEPSEEK.url);
+  return [{ id: "deepseek", name: "DeepSeek", ...MOCK_DEEPSEEK, key_hint: "sk-…", key_page: "https://platform.deepseek.com/api_keys", endpoint_id: endpoint?.id ?? null, connected: !!endpoint && mockAuth.endpoint_keys.includes(endpoint.id) }];
+};
+/** The API keys (never a key: only that one is saved) and the switch, as Settings → API keys shows them. */
+let mockAuth = { claude: { use_key: false, has_key: false }, endpoint_keys: [] as string[], not_yet: "Codex's own sign-in is used for now: how its app-server takes an API key without replacing your saved sign-in couldn't be checked yet." };
 const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : slotProvider[slot] === "gateway" ? (mockEndpoints[0]?.models[0] ?? "qwen3:8b") : "claude-opus-5-5");
 /** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex and an endpoint only tokens. */
 const usedBy = (slot: string, tokens: number) =>
@@ -1630,7 +1637,37 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             ...mockEndpoints.map((e) => ({ ...GATEWAY_INFO, models: e.models, binary: null, endpoint: { id: e.id, name: e.name } })),
           ];
         case "list_endpoints":
-          return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null }));
+          return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null, saved_key: mockAuth.endpoint_keys.includes(e.id) }));
+        case "provider_auth_state":
+          return mockAuth;
+        case "provider_claude_key_set":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          mockAuth = { ...mockAuth, claude: { ...mockAuth.claude, has_key: true } };
+          return mockAuth;
+        case "provider_claude_key_clear":
+          mockAuth = { ...mockAuth, claude: { use_key: false, has_key: false } };
+          return mockAuth;
+        case "provider_claude_use_key":
+          if (a.on && !mockAuth.claude.has_key) return Promise.reject("Save an API key first.");
+          mockAuth = { ...mockAuth, claude: { ...mockAuth.claude, use_key: !!a.on } };
+          return mockAuth;
+        case "endpoint_key_set":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          mockAuth = { ...mockAuth, endpoint_keys: [...new Set([...mockAuth.endpoint_keys, String(a.id)])] };
+          return mockAuth;
+        case "endpoint_key_clear":
+          mockAuth = { ...mockAuth, endpoint_keys: mockAuth.endpoint_keys.filter((x) => x !== a.id) };
+          return mockAuth;
+        case "hosted_provider_list":
+          return mockHosted();
+        case "hosted_provider_connect":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          if (!mockEndpoints.some((e) => e.url === MOCK_DEEPSEEK.url)) mockEndpoints = [...mockEndpoints, { id: "deepseek", name: "DeepSeek", url: MOCK_DEEPSEEK.url, key_env: null, models: MOCK_DEEPSEEK.models }];
+          mockAuth = { ...mockAuth, endpoint_keys: [...new Set([...mockAuth.endpoint_keys, "deepseek"])] };
+          return mockHosted();
+        case "hosted_provider_disconnect":
+          mockAuth = { ...mockAuth, endpoint_keys: mockAuth.endpoint_keys.filter((x) => x !== "deepseek") };
+          return mockHosted();
         // Like the backend: ids made once from the first name; a name given twice is refused, in words.
         case "save_endpoints": {
           const wanted = a.endpoints as MockEndpoint[];

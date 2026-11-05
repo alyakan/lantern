@@ -248,6 +248,7 @@ const check = (name: string, bucket: PrCheck["bucket"]): PrCheck => ({ name, sta
 const MIXED = [check("build", "pass"), check("lint", "pass"), check("test", "fail"), check("e2e", "pending")];
 const prView = (checks: PrCheck[], over: { setting?: PrView["setting"]; state?: "OPEN" | "MERGED"; loop?: Partial<LoopState> } = {}): PrView => ({
   folder: "/p",
+  place: "/p",
   setting: over.setting ?? { mode: "tell", tries: 3 },
   snap: { pr: { number: 57, url: "https://github.com/o/r/pull/57", state: over.state ?? "OPEN", branch: "feat/x", base: "main", head_sha: "aaa" }, checks },
   access: "ok",

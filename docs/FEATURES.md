@@ -77,6 +77,7 @@ In the box:
 - Type `/` for skills, commands and MCP prompts, and `@` to point Claude at a file.
 - Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message (the hint under the box says so, and that backspace leaves the terminal). Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
+- Dropping files anywhere on the window puts their paths in the box, at the cursor, as dropping them into a terminal does (a path with spaces in quotes). Claude reads them, images and PDFs included.
 - Send while Claude is working and the message is queued until its turn ends.
 
 ### Side chat

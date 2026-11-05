@@ -13,16 +13,23 @@ const FOLDER = "/p";
 const run = (name: string, bucket: PrCheck["bucket"], id = "1"): PrCheck => ({ name, state: bucket.toUpperCase(), bucket, link: `https://github.com/o/r/actions/runs/${id}/job/9`, workflow: "CI", run_id: id });
 const found = (checks: PrCheck[], head = "aaa", state: "OPEN" | "MERGED" | "CLOSED" = "OPEN"): PrWatch => ({ kind: "found", pr: { number: 5, url: "https://github.com/o/r/pull/5", state, branch: "feat/x", base: "main", head_sha: head }, checks });
 const FAILED = (id = "1", head = "aaa") => found([run("build", "pass", id), run("test", "fail", id)], head);
+const NO_PR: PrWatch = { kind: "no_pr" };
 const PASSED = (id = "2", head = "bbb") => found([run("build", "pass", id), run("test", "pass", id)], head);
 
-const chat = (busy = false): PrChat => ({ slot: "s1", folder: FOLDER, live: true, busy });
+/** A worktree of the project, with the pull request's branch checked out. */
+const WT = "/wt/x";
+/** A chat working on the pull request's branch, in its worktree. */
+const chat = (busy = false, slot = "s1", work = WT): PrChat => ({ slot, folder: FOLDER, work, live: true, busy });
+/** A chat in the project's own folder. */
+const inFolder = (slot: string, busy = false): PrChat => chat(busy, slot, FOLDER);
 
-function setup(setting: PrSetting, first: PrChat = chat()) {
+function setup(setting: PrSetting, first: PrChat | PrChat[] = chat()) {
   const send = vi.fn();
   const onFailed = vi.fn();
-  const props = (chats: PrChat[]): PrChecksOptions => ({ chats, active: "s1", settings: { [FOLDER]: setting }, send, onFailed });
-  const hook = renderHook((p: PrChecksOptions) => usePrChecks(p), { initialProps: props([first]) });
-  return { ...hook, send, onFailed, props };
+  const start = vi.fn((): string | null => "s9");
+  const props = (chats: PrChat[], active = "s1"): PrChecksOptions => ({ chats, active, settings: { [FOLDER]: setting }, send, start, onFailed });
+  const hook = renderHook((p: PrChecksOptions) => usePrChecks(p), { initialProps: props(Array.isArray(first) ? first : [first]) });
+  return { ...hook, send, start, onFailed, props };
 }
 
 /** Lets the pending look (and the log reads after it) finish. */
@@ -71,7 +78,7 @@ describe("the pull request loop", () => {
 
   it("polls every 30 seconds while checks run, and stops once they pass", async () => {
     prWatch.mockResolvedValueOnce(found([run("build", "pending")])).mockResolvedValue(PASSED());
-    setup({ mode: "tell", tries: 3 });
+    setup({ mode: "tell", tries: 3 }, inFolder("s1"));
     await settle();
     expect(prWatch).toHaveBeenCalledTimes(1);
     await act(async () => void (await vi.advanceTimersByTimeAsync(30_000)));
@@ -82,7 +89,7 @@ describe("the pull request loop", () => {
 
   it("keeps what it knew when gh fails for a reason that may pass, and tries again", async () => {
     prWatch.mockResolvedValueOnce(found([run("build", "pending")])).mockRejectedValueOnce("network").mockResolvedValue(PASSED());
-    const { result } = setup({ mode: "tell", tries: 3 });
+    const { result } = setup({ mode: "tell", tries: 3 }, inFolder("s1"));
     await settle();
     await act(async () => void (await vi.advanceTimersByTimeAsync(30_000)));
     expect(result.current.views[FOLDER].snap?.checks[0].bucket).toBe("pending");
@@ -160,11 +167,11 @@ describe("the pull request loop", () => {
   });
 
   it("Fix it myself: a turn that ends while gh fails or finds no pull request still counts at the next look", async () => {
-    for (const miss of [() => prWatch.mockRejectedValueOnce("network"), () => prWatch.mockResolvedValueOnce({ kind: "no_pr" })]) {
+    for (const miss of [() => prWatch.mockRejectedValueOnce("network"), () => prWatch.mockResolvedValueOnce(NO_PR)]) {
       cleanup();
       localStorage.clear();
       prWatch.mockReset();
-      prWatch.mockResolvedValue(FAILED());
+      prWatch.mockImplementation(async (place) => (place === FOLDER ? NO_PR : FAILED()));
       const { result, send, onFailed, rerender, props } = setup({ mode: "fix", tries: 3 });
       await settle();
       expect(send).toHaveBeenCalledTimes(1);
@@ -176,17 +183,17 @@ describe("the pull request loop", () => {
       await settle();
       expect(send).toHaveBeenCalledTimes(1);
       // ...so the next one (a refresh: with no pull request found there is no poll) sees the same failure on the same commit, and stops.
-      await act(async () => result.current.refresh(FOLDER));
+      await act(async () => result.current.refresh(WT));
       await settle();
       expect(send).toHaveBeenCalledTimes(1);
-      expect(result.current.views[FOLDER].loop.status).toBe("stalled");
+      expect(result.current.views[WT].loop.status).toBe("stalled");
       expect(onFailed).toHaveBeenCalledTimes(1);
     }
   });
 
   it("Fix it myself: each new failure after a push is another try, up to the limit, then Out of tries", async () => {
     let n = 0;
-    prWatch.mockImplementation(async () => FAILED(String(++n), `c${n}`));
+    prWatch.mockImplementation(async (place) => place === FOLDER ? NO_PR : FAILED(String(++n), `c${n}`));
     const { result, send, onFailed, rerender, props } = setup({ mode: "fix", tries: 2 });
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
@@ -197,7 +204,7 @@ describe("the pull request loop", () => {
       await settle();
     }
     expect(send).toHaveBeenCalledTimes(2);
-    expect(result.current.views[FOLDER].loop).toMatchObject({ tries: 2, status: "out" });
+    expect(result.current.views[WT].loop).toMatchObject({ tries: 2, status: "out" });
     expect(onFailed).toHaveBeenCalledTimes(1);
     await act(async () => void (await vi.advanceTimersByTimeAsync(5 * 60_000)));
     expect(send).toHaveBeenCalledTimes(2);
@@ -205,18 +212,18 @@ describe("the pull request loop", () => {
 
   it("Stop ends Fix it myself for the pull request, and nothing more is sent", async () => {
     let n = 0;
-    prWatch.mockImplementation(async () => FAILED(String(++n), `c${n}`));
+    prWatch.mockImplementation(async (place) => place === FOLDER ? NO_PR : FAILED(String(++n), `c${n}`));
     const { result, send, rerender, props } = setup({ mode: "fix", tries: 3 });
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
-    act(() => result.current.stop(FOLDER));
-    expect(result.current.views[FOLDER].loop.status).toBe("stopped");
+    act(() => result.current.stop(WT));
+    expect(result.current.views[WT].loop.status).toBe("stopped");
     rerender(props([chat(true)]));
     await settle();
     rerender(props([chat(false)]));
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(result.current.views[FOLDER].needsYou).toBe(true);
+    expect(result.current.views[WT].needsYou).toBe(true);
   });
 
   it("sends nothing and stops looking once the pull request is merged", async () => {
@@ -259,5 +266,73 @@ describe("the pull request loop", () => {
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][1]).toContain("No log could be read for this check");
+  });
+  it("Fix it myself: never sends to chats that are only in the project's folder, and starts one for the pull request instead", async () => {
+    // The folder itself is on the pull request's branch, and the two chats there are about something else.
+    prWatch.mockResolvedValue(FAILED());
+    const { send, start, rerender, props } = setup({ mode: "fix", tries: 3 }, [inFolder("s1"), inFolder("s2")]);
+    await settle();
+    expect(send).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]).toEqual([FOLDER, expect.stringContaining("try 1 of 3")]);
+    // The started chat (s9) is the pull request's from here: the same failure isn't sent again, nor another chat started.
+    rerender(props([inFolder("s1"), inFolder("s2"), inFolder("s9", true)], "s2"));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(30_000)));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("Fix it myself: a chat that couldn't start uses no try, and the next look starts it", async () => {
+    prWatch.mockResolvedValue(FAILED());
+    const { result, start, send, onFailed } = setup({ mode: "fix", tries: 3 }, [inFolder("s1"), inFolder("s2")]);
+    start.mockReturnValueOnce(null);
+    await settle();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(result.current.views[FOLDER].loop.tries).toBe(0);
+    expect(onFailed).not.toHaveBeenCalled();
+    // Claude is ready now: the same failure is still there and nothing was spent on it.
+    await act(async () => result.current.refresh(FOLDER));
+    await settle();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(result.current.views[FOLDER].loop.tries).toBe(1);
+  });
+
+  it("Fix it myself: goes to the chat in the worktree on the branch even while another chat is on screen", async () => {
+    prWatch.mockImplementation(async (place) => (place === FOLDER ? NO_PR : FAILED()));
+    const { send, start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), chat(false, "s1")]);
+    await settle();
+    expect(start).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toBe("s1");
+  });
+
+  it("Fix it myself: the next try goes to the chat that had the last one, wherever the user is", async () => {
+    let n = 0;
+    prWatch.mockImplementation(async (place) => (place === FOLDER ? NO_PR : FAILED(String(++n), `c${n}`)));
+    const other = chat(false, "s4");
+    const { send, rerender, props } = setup({ mode: "fix", tries: 3 }, [chat(), other]);
+    await settle();
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["s1"]);
+    // s1 works and pushes; meanwhile the user is looking at s4, in the same worktree.
+    rerender(props([chat(true), other], "s4"));
+    await settle();
+    rerender(props([chat(false), other], "s4"));
+    await settle();
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["s1", "s1"]);
+  });
+  it("Fix it myself: a worktree gh can't look at doesn't hold the project's failure back for ever", async () => {
+    // The worktree was removed while a chat still works there: gh fails in it every time.
+    prWatch.mockImplementation(async (place) => (place === FOLDER ? FAILED() : Promise.reject("no such directory")));
+    const { start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), inFolder("s3"), chat(false, "s1")]);
+    await settle();
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+  it("Fix it myself: with no worktrees, the project's folder's only chat is the one on its branch", async () => {
+    prWatch.mockResolvedValue(FAILED());
+    const { send, start } = setup({ mode: "fix", tries: 3 }, inFolder("s1"));
+    await settle();
+    expect(start).not.toHaveBeenCalled();
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["s1"]);
   });
 });

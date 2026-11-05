@@ -13,6 +13,7 @@ const check = (name: string, bucket: PrCheck["bucket"]): PrCheck => ({ name, sta
 const pr = (over: Partial<PullRequest> = {}): PullRequest => ({ number: 57, url: "https://github.com/o/r/pull/57", state: "OPEN", branch: "feat/x", base: "main", head_sha: "aaa", ...over });
 const view = (checks: PrCheck[], over: { setting?: PrSetting; loop?: Partial<LoopState>; pr?: Partial<PullRequest> } = {}): PrView => ({
   folder: "/p",
+  place: "/p",
   setting: over.setting ?? { mode: "tell", tries: 3 },
   snap: { pr: pr(over.pr), checks },
   access: "ok",

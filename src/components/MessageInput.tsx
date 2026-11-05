@@ -6,6 +6,7 @@ import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
 import { listKey } from "../lib/listKey";
+import { insertPaths, onFileDrop } from "../lib/drop";
 import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, nextNumber, placeholder as pasteToken, tokenBefore, type Pastes } from "../lib/paste";
 import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
@@ -317,6 +318,22 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 
   // After the menu puts something in the box, the caret goes after it.
   const caretTo = useRef<number | null>(null);
+  // Files dropped on the window go into the box as their paths, at the caret, as in a terminal (see lib/drop.ts).
+  const [dropping, setDropping] = useState(false);
+  const dropInto = useRef<(paths: string[]) => void>(() => {});
+  dropInto.current = (paths) => {
+    if (!canType) return;
+    // In terminal mode the box shows the text without its "!".
+    const shift = terminal ? 1 : 0;
+    const el = area.current;
+    const from = (el?.selectionStart ?? shown.length) + shift;
+    const to = (el?.selectionEnd ?? shown.length) + shift;
+    const next = insertPaths(text, from, to, paths);
+    caretTo.current = next.caret - shift;
+    setText(next.text);
+    el?.focus();
+  };
+  useEffect(() => onFileDrop({ over: setDropping, drop: (paths) => dropInto.current(paths) }), []);
   useLayoutEffect(() => {
     if (caretTo.current === null || !area.current) return;
     area.current.setSelectionRange(caretTo.current, caretTo.current);
@@ -451,7 +468,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           <SideChat onClose={closeAside} />
         </div>
       )}
-      <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}`} onClick={() => area.current?.focus()}>
+      <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu
             kind={open.kind}

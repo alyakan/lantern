@@ -90,6 +90,32 @@ export interface Endpoint {
 /** An endpoint with whether its key variable is set in the login shell (null: it has none). */
 export interface EndpointStatus extends Endpoint {
   key_set: boolean | null;
+  /** A key is saved for it in Settings (kept in the Keychain; never sent back). It wins over the variable. */
+  saved_key: boolean;
+}
+
+/** A hosted provider (the backend's `HostedStatus`): a company whose Anthropic-compatible API a chat can run on, such as DeepSeek. */
+export interface HostedProvider {
+  id: string;
+  name: string;
+  url: string;
+  models: string[];
+  key_hint: string;
+  /** Where the user makes a key. */
+  key_page: string;
+  /** The endpoint made for it, once connected. */
+  endpoint_id: string | null;
+  /** A key is saved for it. */
+  connected: boolean;
+}
+
+/** What Settings → API keys shows (the backend's `AuthState`): which providers run on a key and which keys exist. Never a key. */
+export interface AuthState {
+  claude: { use_key: boolean; has_key: boolean };
+  /** The ids of the endpoints that have a saved key. */
+  endpoint_keys: string[];
+  /** Why Codex has no key yet. */
+  not_yet: string;
 }
 
 export type UiEvent =
