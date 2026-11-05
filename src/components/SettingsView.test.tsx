@@ -399,4 +399,22 @@ describe("Settings' nav", () => {
     await act(async () => fireEvent.change(search, { target: { value: "linear" } }));
     expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
   });
+
+  it("finds a setting inside a page, not only the page", async () => {
+    view();
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await act(async () => fireEvent.change(search, { target: { value: "awake" } }));
+    const found = within(screen.getByRole("group", { name: "Settings found" })).getByRole("button", { name: /Keep my Mac awake/ });
+    fireEvent.click(found);
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveValue("");
+  });
+
+  it("moves between pages with the arrow keys", () => {
+    view();
+    const general = screen.getByRole("button", { name: "General" });
+    general.focus();
+    fireEvent.keyDown(general, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: "Appearance" })).toHaveFocus();
+  });
 });

@@ -436,7 +436,7 @@ The **disk button** in the title bar, just before the Settings gear, opens **Sto
 
 ## Settings
 
-**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Appearance, Updates), **Claude** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Integrations, Remote control) — with a search at the top that finds one by name or by what it sets (⌘F):
+**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Appearance, Updates), **Claude** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Integrations, Remote control) — with a search at the top that finds a page by name or by what it sets, or a setting inside one ("awake" offers Keep my Mac awake). Enter opens the first match, and ⌘F focuses the search. Each setting's help is a line or two; **More** opens the rest.
 
 ![Settings, on the General tab](images/settings.png)
 

@@ -1,6 +1,7 @@
 import { PR_MODES, settingFor, type PrMode, type PrSetting } from "../lib/prChecks";
 import { projectLabels } from "../lib/sidebar";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
+import { SettingsRow } from "./SettingsRow";
 import { FIX_NOTE, GH_NOTE, TRIES_OPTIONS, useGhAccess } from "./PrChecksDialog";
 
 export interface PrChecksSettingsProps {
@@ -28,11 +29,12 @@ export function PrChecksSettings({ folders, saved, onChange }: PrChecksSettingsP
         <h3 id="prs-merge-tests" className="general-title">
           Merges
         </h3>
-        <label className="general-option">
-          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
-          <span>Run tests when a merge is proposed</span>
-        </label>
-        <span className="settings-muted">Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests.</span>
+        <SettingsRow
+          lead
+          label="Run tests when a merge is proposed"
+          control={<input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />}
+          hint="Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests."
+        />
       </section>
       {access !== null && access !== "ready" && (
         <div className="ship-warning" role="note">
