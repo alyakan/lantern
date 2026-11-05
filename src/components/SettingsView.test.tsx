@@ -89,7 +89,8 @@ describe("SettingsView", () => {
   it("shows a server's details without its secrets, with its tools", async () => {
     render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });
-    fireEvent.click(within(list).getByText("sentry"));
+    // The list fills once claude has said its servers.
+    fireEvent.click(await within(list).findByText("sentry"));
     expect(within(list).getByText("Authorization: •••")).toBeInTheDocument();
     expect(list.textContent).not.toContain("Bearer secret");
     fireEvent.click(within(list).getByText("Linear"));
