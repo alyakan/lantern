@@ -478,6 +478,25 @@ describe("reducer", () => {
     expect(ev(started, { kind: "assistant_text", parent: null, block_id: "m:0", text: "Hi" } as UiEvent).activityAt).not.toBeNull();
   });
 
+  it("a card replayed with no answer, and no word that it was withdrawn, comes back closed, and an answered one keeps its answer", () => {
+    const s = reducer(running, {
+      type: "history_loaded",
+      sessionId: "past-1",
+      events: [
+        { kind: "user_text", text: "Merge it" },
+        { kind: "permission_requested", request_id: "perm-1", tool_name: "Approval", input: { action: "Merge PR #12" } },
+        { kind: "permission_resolved", request_id: "perm-1", allow: true, by: "desktop" },
+        { kind: "permission_requested", request_id: "perm-4", tool_name: "Approval", input: { action: "Push the tag" } },
+        { kind: "session_started", session_id: "past-1", model: "opus", cwd: "/p", permission_mode: "default", claude_version: "" },
+      ],
+    });
+    const cards = s.items.filter((i) => i.type === "permission");
+    expect(cards).toMatchObject([
+      { id: "perm-1", decision: "allowed" },
+      { id: "perm-4", decision: "denied" },
+    ]);
+  });
+
   it("history_loaded replaces the conversation with the replayed session", () => {
     const old = ev({ ...running, status: "idle", items: [{ type: "user", id: "u9", text: "old" }] }, tool("old"));
     const hunks = [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, lines: ["-a", "+b"] }];
