@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
-import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, workOfRepo, yourWork, type WorkItem } from "./yourWork";
+import { askOf, bucketOf, byFeature, filterWork, openBucket, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, workOfRepo, yourWork, type WorkItem } from "./yourWork";
 
 // A fixed moment in UTC, not local time: the fixtures' times are UTC strings, so "merged 6h ago" must not depend on the machine's zone.
 const NOW = Date.UTC(2026, 10, 2, 16, 0);
@@ -370,5 +370,31 @@ describe("Your work with Linear", () => {
     // Someone else's pull requests don't count, however many.
     const theirs = repo({ prs: [pr(1, { author: "sara", branch: "web-1-a" }), pr(2, { author: "sara", branch: "web-2-b" }), pr(3, { branch: "eng-9-mine" })] });
     expect(teamOfRepo([theirs], work([]), {})).toEqual({ "/p/lantern": "ENG" });
+  });
+});
+
+describe("the tabs of a feature", () => {
+  const of = (over: Partial<WorkItem>): WorkItem => ({ ...one(pr(1)), ...over });
+
+  it("puts blocked, your call and needs moving under Needs you, and Ready, done and anything folded under Shipped", () => {
+    expect((["bad", "you", "move"] as const).map((tone) => bucketOf(of({ tone })))).toEqual(["attn", "attn", "attn"]);
+    expect(bucketOf(of({ tone: "todo" }))).toBe("start");
+    expect(bucketOf(of({ tone: "wait" }))).toBe("moving");
+    expect(bucketOf(of({ tone: "local" }))).toBe("moving");
+    expect(bucketOf(of({ tone: "ready" }))).toBe("shipped");
+    expect(bucketOf(of({ tone: "done" }))).toBe("shipped");
+    expect(bucketOf(of({ tone: "wait", fold: "ready" }))).toBe("shipped");
+  });
+
+  it("opens on Needs you when something does, else on the first tab with anything in it", () => {
+    expect(openBucket([of({ tone: "wait" }), of({ tone: "you" })])).toBe("attn");
+    expect(openBucket([of({ tone: "todo" }), of({ tone: "done" })])).toBe("start");
+    expect(openBucket([of({ tone: "done" })])).toBe("shipped");
+    expect(openBucket([])).toBe("attn");
+  });
+
+  it("names what needs you most pressing first: your call, then blocked, then a ticket to move", () => {
+    const items = [of({ key: "m", tone: "move" }), of({ key: "b", tone: "bad" }), of({ key: "w", tone: "wait" }), of({ key: "y", tone: "you" })];
+    expect(askOf(items).map((i) => i.key)).toEqual(["y", "b", "m"]);
   });
 });

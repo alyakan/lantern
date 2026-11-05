@@ -749,6 +749,42 @@ export function byFeature(items: WorkItem[]): FeatureGroup[] {
 /** The states a filter offers, in the order shown, with how many items are in each (done included: it is listed, only quieter). */
 export const FILTER_TONES: Tone[] = ["bad", "you", "move", "wait", "local", "todo", "ready", "done"];
 
+/** The tabs inside a feature: what needs you, what is moving, what isn't started, and what shipped (the phone has the same four). */
+export type Bucket = "attn" | "moving" | "start" | "shipped";
+export const BUCKETS: { bucket: Bucket; label: string }[] = [
+  { bucket: "attn", label: "Needs you" },
+  { bucket: "moving", label: "Moving" },
+  { bucket: "start", label: "To start" },
+  { bucket: "shipped", label: "Shipped" },
+];
+
+/** Which tab an item is under: blocked, your call and needs moving need you; Ready and done, or anything folded, shipped. */
+export function bucketOf(item: WorkItem): Bucket {
+  if (item.fold) return "shipped";
+  switch (item.tone) {
+    case "bad":
+    case "you":
+    case "move":
+      return "attn";
+    case "todo":
+      return "start";
+    case "ready":
+    case "done":
+      return "shipped";
+    default:
+      return "moving";
+  }
+}
+
+/** The tab a feature opens on: Needs you when something does, else the first one with anything in it. */
+export function openBucket(items: WorkItem[]): Bucket {
+  return BUCKETS.find((b) => items.some((i) => bucketOf(i) === b.bucket))?.bucket ?? "attn";
+}
+
+/** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
+const ASK_ORDER: Tone[] = ["you", "bad", "move"];
+export const askOf = (items: WorkItem[]): WorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(a.tone) - ASK_ORDER.indexOf(b.tone));
+
 export function stateCounts(items: WorkItem[]): Partial<Record<Tone, number>> {
   const n: Partial<Record<Tone, number>> = {};
   for (const i of items) if (!i.stepOnly) n[i.tone] = (n[i.tone] ?? 0) + 1;

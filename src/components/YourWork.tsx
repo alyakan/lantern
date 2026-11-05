@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useId, useRef, useState, type CSS
 import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
 import { PROJECT_COLORS } from "../lib/projectColors";
-import { chatsOn, searchTerms, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
+import { askOf, bucketOf, BUCKETS, chatsOn, openBucket, searchTerms, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Bucket, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
 import type { ChatHit, ChatSearchResults, RepoStatus } from "../types";
 import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
@@ -362,6 +362,124 @@ function Group({ group, by, issues, fold, folded, onFold }: { group: WorkGroup; 
   );
 }
 
+/** How "Where things stand" is drawn: a card for each feature that opens into tabs, or the list of every piece with its filters. */
+type Layout = "cards" | "list";
+
+function ViewToggle({ layout, onLayout }: { layout: Layout; onLayout: (l: Layout) => void }) {
+  return (
+    <span className="yw-view" role="group" aria-label="Layout">
+      {(["cards", "list"] as const).map((l) => (
+        <button key={l} aria-pressed={layout === l} className={layout === l ? "on" : ""} onClick={() => onLayout(l)} title={l === "cards" ? "A card for each feature, with its work under tabs" : "Every piece of work in one list, with filters"}>
+          {l === "cards" ? "Cards" : "List"}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** A feature as a card: its name, its pieces as dots (colour only on what needs you), and the one thing that does. It opens to the feature's page. */
+function FeatureCard({ group, onOpen }: { group: WorkGroup; onOpen: () => void }) {
+  const live = group.items.filter((i) => bucketOf(i) !== "shipped");
+  const shipped = group.items.length - live.length;
+  const ask = askOf(group.items);
+  const top = ask[0];
+  const sum = [live.length > 0 && `${live.length} open`, shipped > 0 && `${shipped} shipped`].filter(Boolean).join(" · ");
+  return (
+    <button className="yw-fcard" onClick={onOpen} aria-label={`${group.label}, ${sum || "nothing open"}${top ? `, ${top.word}` : ""}`} title="Open its work">
+      <span className="yw-fcard-head">
+        <b>{group.label}</b>
+        <span className="yw-quiet">{sum}</span>
+        <span className="yw-go" aria-hidden>›</span>
+      </span>
+      {live.length > 0 && (
+        <span className="yw-pieces" aria-hidden>
+          {live.map((i) => (
+            <i key={i.key} className={`yw-pdot yw-b-${bucketOf(i)}${bucketOf(i) === "attn" ? ` yw-tone-${i.tone}${i.next?.warn ? " yw-warn" : ""}` : ""}`} />
+          ))}
+        </span>
+      )}
+      {top ? (
+        <span className={`yw-ask yw-tone-${top.tone}${top.next?.warn ? " yw-warn" : ""}`}>
+          <b>{top.next?.warn ? "Bypasses review" : top.word}</b> {top.next ? `${top.next.what} ` : ""}
+          {top.number !== null ? `#${top.number} ` : ""}
+          {top.title}
+        </span>
+      ) : (
+        <span className="yw-quiet">Nothing needs you.</span>
+      )}
+      {ask.length > 1 && <span className="yw-quiet">and {ask.length - 1} more</span>}
+    </button>
+  );
+}
+
+/** One piece of work on a feature's page: its name, a quiet line, and its pipeline (issue to release). Taller than a list row, since it carries the pipeline. */
+function FeatureRow({ item, issues, heading, dropName, chats, repos, onStep }: { item: WorkItem; issues: boolean; heading: string | null; dropName: boolean; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"] }) {
+  const pick = useContext(Pick);
+  const bucket = bucketOf(item);
+  const attn = bucket === "attn";
+  const line = lineOf(item, heading, dropName);
+  return (
+    <li className={`yw-frow yw-b-${bucket}${attn ? ` yw-tone-${item.tone}` : ""}${item.next?.warn ? " yw-warn" : ""}`}>
+      <i className="yw-pdot" aria-hidden />
+      <button className="yw-open yw-fmain" onClick={() => pick(item)} aria-haspopup="dialog" title="Details, links and the chat on it">
+        <span className="yw-fname">
+          {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
+        </span>
+        <span className="yw-fline">
+          {attn ? <b className="yw-word">{item.word}</b> : item.word}
+          {line ? ` · ${line}` : ""}
+        </span>
+        {bucket !== "shipped" && <Nodes item={item} issues={issues} />}
+      </button>
+      {attn && item.next && (
+        <span className="yw-fstep">
+          <StepButton item={item} chats={chats} repos={repos} onStep={onStep} />
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** A feature's page: its name, its tabs (Needs you, Moving, To start, Shipped), and the rows under the one chosen. */
+function FeatureDetail({ group, issues, dropName, tab, onTab, onBack, chats, repos, onStep }: { group: WorkGroup; issues: boolean; dropName: boolean; tab: Bucket | null; onTab: (b: Bucket) => void; onBack: (() => void) | null; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"] }) {
+  const on = tab ?? openBucket(group.items);
+  const rows = group.items.filter((i) => bucketOf(i) === on);
+  const live = group.items.filter((i) => bucketOf(i) !== "shipped").length;
+  return (
+    <section className="yw-fpage" aria-label={group.label}>
+      {onBack && (
+        <button className="desk-back" onClick={onBack}>
+          ‹ Work
+        </button>
+      )}
+      <h3 className="yw-ftitle">{group.label}</h3>
+      <p className="yw-quiet">
+        {live} open, {group.items.length - live} shipped
+      </p>
+      <div className="yw-tabs" role="tablist" aria-label={`${group.label} work`}>
+        {BUCKETS.map(({ bucket, label }) => {
+          const n = group.items.filter((i) => bucketOf(i) === bucket).length;
+          return (
+            <button key={bucket} role="tab" aria-selected={bucket === on} className={`yw-tab${bucket === on ? " on" : ""}${n === 0 ? " zero" : ""}`} onClick={() => onTab(bucket)}>
+              {label}
+              {bucket === "attn" && n > 0 && <i className="yw-tab-n">{n}</i>}
+            </button>
+          );
+        })}
+      </div>
+      {rows.length === 0 ? (
+        <p className="yw-quiet yw-empty">Nothing here.</p>
+      ) : (
+        <ul className="yw-flist">
+          {rows.map((i) => (
+            <FeatureRow key={i.key} item={i} issues={issues} heading={group.plain ? null : group.label} dropName={dropName} chats={chats} repos={repos} onStep={onStep} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 const GROUPS: { by: GroupBy; label: string }[] = [
   { by: "feature", label: "Feature" },
   { by: "project", label: "Project" },
@@ -431,6 +549,10 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const [open, setOpen] = usePersistentState<string[]>("desk.work.open", []);
   // Next can be folded to its count and the first steps: useful when the board below is what you came for.
   const [nextClosed, setNextClosed] = usePersistentState("desk.work.nextClosed", false);
+  // Cards (a card per feature that opens into tabs) or the list; the feature whose page is open, by its group key, and its tab.
+  const [layout, setLayout] = usePersistentState<Layout>("desk.work.layout", "cards");
+  const [cardPage, setCardPage] = useState<string | null>(null);
+  const [cardTab, setCardTab] = useState<Bucket | null>(null);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
   const nextShown = allNext ? next : next.slice(0, SHOWN_NEXT);
@@ -455,7 +577,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         title="Next"
         count={next.length}
         heading="h2"
-        className="yw-card yw-next"
+        className={`yw-card yw-next${layout === "cards" ? " yw-calm" : ""}`}
         action={
           <span className="yw-next-actions">
             <button className="desk-more" aria-expanded={!nextClosed} onClick={() => setNextClosed(!nextClosed)}>
@@ -524,8 +646,38 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         )}
       </Card>
   );
-  const standCard = items.length > 0 ? (
-        <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand">
+  const viewToggle = <ViewToggle layout={layout} onLayout={setLayout} />;
+  // The cards ignore the list's state filter (the tabs are the filter) and its grouping: a card is a feature with Linear, a project without.
+  const cardGroups = groupWork(items, issues ? "feature" : "project");
+  // One feature (or project) needs no card to open it: its page is the list.
+  const alone = cardGroups.length === 1;
+  const cardOpen = alone ? cardGroups[0] : cardPage !== null ? cardGroups.find((g) => g.key === cardPage) : undefined;
+  const cardsCard = (
+    <section className="yw-cards" aria-label="Where things stand">
+      <header className="yw-cards-head">
+        <h2 className="desk-h">Where things stand</h2>
+        {viewToggle}
+      </header>
+      {cardOpen ? (
+        <FeatureDetail group={cardOpen} issues={issues} dropName={!tagged} tab={cardTab} onTab={setCardTab} onBack={alone ? null : () => setCardPage(null)} chats={chats} repos={repos} onStep={onStep} />
+      ) : (
+        <div className="yw-fgrid">
+          {cardGroups.map((g) => (
+            <FeatureCard
+              key={g.key}
+              group={g}
+              onOpen={() => {
+                setCardPage(g.key);
+                setCardTab(null);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+  const standCard = items.length > 0 && layout === "cards" ? cardsCard : items.length > 0 ? (
+        <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand" action={viewToggle}>
           <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} grouped={!flat && groups.length > 1} allOpen={allOpen} onAll={toggleAll} />
           {groups.length === 0 ? (
             <p className="dp-note">Nothing is {only.map((t) => TONE_WORD[t]).join(" or ")}.</p>

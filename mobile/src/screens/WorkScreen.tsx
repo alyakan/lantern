@@ -1,8 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Linking, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
-import { loadWorkGrouping, saveWorkGrouping } from "../prefs";
 import { useController, useSyncState } from "../shell/hooks";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -10,7 +9,7 @@ import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, space, useColors, type Palette } from "../ui/theme";
-import { FILTER_TONES, filterItems, foldRows, foldWord, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, pathOf, stackWord, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup, type WorkRow } from "../view/work";
+import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
   /** Above the page: Home's top on a phone (the Mac's name, the Desk, Work and Chats switch), the page's own header on a tablet. */
@@ -21,14 +20,9 @@ export interface WorkProps {
   onOpenChat?: (slot: string) => void;
 }
 
-/** How many of Next's steps show before "Show N more" (which opens them all in a sheet), and how many rows of a group (all of it when there is one list). */
-const NEXT_SHOWN = 3;
-const GROUP_SHOWN = 4;
-const LIST_SHOWN = 8;
 const COLUMN_MAX = 640;
 
-/** A state's colour, the Mac's: only what needs you is loud (red blocked, blue your call, amber a ticket to move); slate on its way,
- * purple local only, grey not started, teal Ready, green done. */
+/** A state's colour. Only what needs you is loud (red blocked, blue your call, amber a ticket to move); the rest is quiet. */
 function toneColor(tone: Tone, c: Palette): string {
   switch (tone) {
     case "bad":
@@ -60,31 +54,38 @@ interface Outcome {
   bad: boolean;
 }
 
-/** An item's path, a node a stage: green behind it, ringed in its colour where it is, grey ahead. */
-function Path({ item, issues }: { item: RemoteWorkItem; issues: boolean }) {
+/** Its pipeline, a node a stage (issue, branch, pull request, checks, review, merge, release): green behind it, ringed where it is, grey ahead. */
+function Path({ item, issues, named = false, tone }: { item: RemoteWorkItem; issues: boolean; /** Says the stage it is at, after the nodes. */ named?: boolean; tone?: string }) {
   const colors = useColors();
-  const tone = hueOf(item, colors);
+  const ring = tone ?? hueOf(item, colors);
   const nodes = pathOf(item, issues);
   const at = nodes.find((n) => n.state === "now") ?? nodes[nodes.length - 1];
   return (
-    <View accessible accessibilityLabel={`At ${at.label}, ${TONE_WORD[toneOf(item)]}`} style={{ flexDirection: "row", alignItems: "center", marginTop: 8, marginRight: 6 }}>
-      {nodes.map((n, i) => (
-        <View key={n.stage} style={{ flexDirection: "row", alignItems: "center", flex: i === 0 ? 0 : 1 }}>
-          {i > 0 && <View style={{ flex: 1, height: 2, backgroundColor: n.state === "past" || n.state === "now" ? colors.go : colors.rule }} />}
-          <View
-            style={
-              n.state === "now"
-                ? { width: 15, height: 15, borderRadius: 8, borderWidth: 3, borderColor: tone, backgroundColor: colors.card }
-                : { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderStyle: n.state === "skip" ? "dashed" : "solid", borderColor: n.state === "past" ? colors.go : colors.rule, backgroundColor: n.state === "past" ? colors.go : colors.card }
-            }
-          />
-        </View>
-      ))}
+    <View accessible accessibilityLabel={`At ${at.label}, ${TONE_WORD[toneOf(item)]}`} style={{ flexDirection: "row", alignItems: "center", marginTop: 8, marginRight: 6, gap: named ? 10 : 0 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+        {nodes.map((n, i) => (
+          <View key={n.stage} style={{ flexDirection: "row", alignItems: "center", flex: i === 0 ? 0 : 1 }}>
+            {i > 0 && <View style={{ flex: 1, height: 2, backgroundColor: n.state === "past" || n.state === "now" ? colors.go : colors.rule }} />}
+            <View
+              style={
+                n.state === "now"
+                  ? { width: 15, height: 15, borderRadius: 8, borderWidth: 3, borderColor: ring, backgroundColor: colors.card }
+                  : { width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderStyle: n.state === "skip" ? "dashed" : "solid", borderColor: n.state === "past" ? colors.go : colors.rule, backgroundColor: n.state === "past" ? colors.go : colors.card }
+              }
+            />
+          </View>
+        ))}
+      </View>
+      {named && (
+        <Txt variant="tiny" tone="ink3" style={{ fontWeight: "600" }}>
+          {at.label}
+        </Txt>
+      )}
     </View>
   );
 }
 
-/** One item: its dot and name (which opens its details), a quiet line, and under it what the caller adds. */
+/** One of Next's steps: its dot and name (which opens its details), a quiet line, and under it what the caller adds. */
 function Item({ item, meta, lead, onOpen, children }: { item: RemoteWorkItem; meta: string; lead?: string; onOpen: () => void; children?: ReactNode }) {
   const colors = useColors();
   const tone = hueOf(item, colors);
@@ -115,17 +116,6 @@ function Item({ item, meta, lead, onOpen, children }: { item: RemoteWorkItem; me
   );
 }
 
-/** The rail down the left of a stack's rows: it joins each to the one under it, and stops at the top and the bottom. */
-function StackRail({ pos, of, color }: { pos: number; of: number; color: string }) {
-  const colors = useColors();
-  return (
-    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={{ position: "absolute", left: 13, top: 0, bottom: 0, width: 10, alignItems: "center" }}>
-      <View style={{ position: "absolute", top: pos === 1 ? "50%" : 0, bottom: pos === of ? "50%" : 0, width: 2, backgroundColor: colors.rule }} />
-      <View style={{ position: "absolute", top: "50%", marginTop: -5, width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: color, backgroundColor: colors.card }} />
-    </View>
-  );
-}
-
 /** A button on an item's details: a page to open, or a chat. */
 const Action = ({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) => {
   const colors = useColors();
@@ -138,46 +128,27 @@ const Action = ({ label, hint, onPress }: { label: string; hint: string; onPress
   );
 };
 
-/** A card with a heading and a count, and what goes in it. */
-function Card({ title, count, edge, action, children }: { title: string; count: number; edge?: string; action?: ReactNode; children: ReactNode }) {
-  const colors = useColors();
-  return (
-    <View accessibilityLabel={title} style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: edge ?? colors.rule, overflow: "hidden" }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, backgroundColor: edge ? `${edge}14` : "transparent" }}>
-        <Txt variant="heading">{title}</Txt>
-        <Txt variant="small" tone="ink3">
-          {count}
-        </Txt>
-        <View style={{ marginLeft: "auto" }}>{action}</View>
-      </View>
-      {children}
-    </View>
-  );
-}
-
-const Link = ({ label, onPress }: { label: string; onPress: () => void }) => (
-  <PressScale accessibilityRole="button" onPress={onPress} hitSlop={8} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+const Link = ({ label, onPress, hint }: { label: string; onPress: () => void; hint?: string }) => (
+  <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} hitSlop={8} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
     <Txt variant="small" tone="cobalt" style={{ fontWeight: "600" }}>
       {label}
     </Txt>
   </PressScale>
 );
 
-/** A row of dots and counts, one for each state: a group's work at a glance. */
-function Dotted({ items }: { items: RemoteWorkItem[] }) {
+/** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
+const ASK_ORDER: Tone[] = ["you", "bad", "move"];
+const askOf = (items: RemoteWorkItem[]): RemoteWorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(toneOf(a)) - ASK_ORDER.indexOf(toneOf(b)));
+
+/** The feature's pieces as dots, one each (shipped work has none): colour only on what needs you, a ring for what isn't started. */
+function Pieces({ items }: { items: RemoteWorkItem[] }) {
   const colors = useColors();
-  const counts = stateCounts(items);
-  const shown = FILTER_TONES.filter((t) => t !== "done" && counts[t]);
   return (
-    <View accessible accessibilityLabel={shown.map((t) => `${counts[t]} ${TONE_WORD[t]}`).join(", ")} style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-      {shown.map((t) => (
-        <View key={t} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: toneColor(t, colors) }} />
-          <Txt variant="tiny" tone="ink2">
-            {counts[t]}
-          </Txt>
-        </View>
-      ))}
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+      {items.map((i) => {
+        const b = bucketOf(i);
+        return <View key={i.key} style={b === "start" ? { width: 9, height: 9, borderRadius: 5, borderWidth: 1.5, borderColor: colors.ink3 } : { width: 9, height: 9, borderRadius: 5, backgroundColor: b === "attn" ? hueOf(i, colors) : colors.ink3, opacity: b === "attn" ? 1 : 0.55 }} />;
+      })}
     </View>
   );
 }
@@ -188,12 +159,9 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
   const insets = useSafeAreaInsets();
   const controller = useController();
   const { work } = useSyncState();
-  const [chosen, setChosen] = useState<GroupBy | "auto">("auto");
-  const [only, setOnly] = useState<Tone[]>([]);
-  const [folded, setFolded] = useState<string[]>([]);
-  const [open, setOpen] = useState<string[]>([]);
-  // The folded lines (Ready, or done) that were opened.
-  const [openFolds, setOpenFolds] = useState<string[]>([]);
+  // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
+  const [page, setPage] = useState<string | null>(null);
+  const [tab, setTab] = useState<Bucket | null>(null);
   const [nextOpen, setNextOpen] = useState(false);
   // The item whose details are open, by key: they follow it as it moves on, and close if it goes.
   const [detail, setDetail] = useState<string | null>(null);
@@ -202,31 +170,21 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  useEffect(() => {
-    let live = true;
-    void loadWorkGrouping().then((g) => live && setChosen(g));
-    return () => {
-      live = false;
-    };
-  }, []);
   const now = Date.now();
   const items = work?.items ?? [];
   const issues = work?.issues === true;
   const looked = work?.looked === true;
   const blind = work?.blind ?? [];
-  const by = groupingFor(chosen, issues);
+  // Features with Linear; the projects without it.
+  const by = groupingFor("auto", issues);
   const next = nextSteps(items);
-  const nextShown = next.slice(0, NEXT_SHOWN);
   const listed = standing(items);
-  const groups = groupItems(filterItems(listed, only), by);
-  const flat = by === "none" || (groups.length === 1 && (by === "project" || groups[0].plain));
-  const counts = stateCounts(listed);
+  const groups = groupItems(listed, by);
+  const needing = listed.filter((i) => bucketOf(i) === "attn").length;
+  // One group needs no card to open: its page is the screen.
+  const alone = groups.length === 1;
+  const open: WorkGroup | undefined = alone ? groups[0] : page !== null ? groups.find((g) => g.key === page) : undefined;
 
-  const pick = (g: GroupBy) => {
-    setChosen(g);
-    void saveWorkGrouping(g);
-  };
-  const toggle = (list: string[], set: (l: string[]) => void, key: string) => set(list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
   const refresh = () => {
     setRefreshing(true);
     controller.sync.workRefresh().then(
@@ -293,7 +251,7 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
     );
   };
 
-  /** One of Next's steps, in the card and in the sheet that lists them all (its outcome and busy state are this screen's, so they carry across). */
+  /** One of Next's steps, in the sheet that lists them all (its outcome and busy state are this screen's, so they carry across). */
   const nextRow = (i: RemoteWorkItem, n: number) => (
     <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
       <Item item={i} lead={i.next?.what} meta={`${i.word} · ${lineUnder(i, now, null)}`} onOpen={() => {
@@ -306,72 +264,87 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
     </View>
   );
 
-  const nextCard = (
-    <Card title="Next" count={next.length} edge={colors.cobalt} action={<Link label="Refresh" onPress={refresh} />}>
-      {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
-      {blind.length > 0 && (
-        <Txt variant="small" tone="ink2" style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-          Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
-        </Txt>
-      )}
-      {next.length === 0 ? (
-        <Txt variant="small" tone="ink2" style={{ paddingHorizontal: 14, paddingBottom: 12 }}>
-          {!looked
-            ? "Your Mac hasn't looked yet: open a project on it to see its work."
-            : items.length === 0
-              ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.`
-              : "Nothing to do right now: everything open is on its way."}
-        </Txt>
-      ) : (
-        <>
-          {nextShown.map(nextRow)}
-          {next.length > nextShown.length && (
-            <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-              <Link label={`Show ${next.length - nextShown.length} more`} onPress={() => setNextOpen(true)} />
-            </View>
-          )}
-        </>
-      )}
-    </Card>
-  );
+  /** One feature as a card: its name, its pieces as dots, and the one thing that needs you. It opens to the feature's page. */
+  const featureCard = (g: WorkGroup) => {
+    const live = g.items.filter((i) => bucketOf(i) !== "shipped");
+    const shipped = g.items.length - live.length;
+    const ask = askOf(g.items);
+    const top = ask[0];
+    const sum = [live.length > 0 && `${live.length} open`, shipped > 0 && `${shipped} shipped`].filter(Boolean).join(" · ");
+    return (
+      <PressScale
+        key={g.key}
+        accessibilityRole="button"
+        accessibilityLabel={`${g.label}, ${sum || "nothing open"}${top ? `, ${top.word}` : ""}`}
+        accessibilityHint="Opens its work"
+        onPress={() => {
+          setPage(g.key);
+          setTab(null);
+        }}
+        scaleTo={0.985}
+        style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: colors.rule, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 16, gap: 12 }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <Txt variant="heading" style={{ flexShrink: 1 }}>
+            {g.label}
+          </Txt>
+          <Txt variant="small" tone="ink3">
+            {sum}
+          </Txt>
+          <Txt variant="body" tone="ink3" style={{ marginLeft: "auto" }}>
+            ›
+          </Txt>
+        </View>
+        {live.length > 0 && <Pieces items={live} />}
+        {top ? (
+          <Txt variant="small" tone="ink2">
+            <Txt variant="small" style={{ color: hueOf(top, colors), fontWeight: "700" }}>
+              {top.next?.warn ? "Bypasses review" : top.word}
+            </Txt>
+            {"  "}
+            {top.next ? `${top.next.what} ` : ""}
+            {top.number !== null ? `#${top.number} ` : ""}
+            {top.title}
+          </Txt>
+        ) : (
+          <Txt variant="small" tone="ink3">
+            Nothing needs you.
+          </Txt>
+        )}
+        {ask.length > 1 && (
+          <Txt variant="small" tone="ink3">
+            and {ask.length - 1} more
+          </Txt>
+        )}
+      </PressScale>
+    );
+  };
 
-  const bar = (
-    <View style={{ gap: 8, paddingHorizontal: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.rule }}>
-      <View accessibilityRole="radiogroup" accessibilityLabel="Group by" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Txt variant="tiny" tone="ink3">
-          Group by
-        </Txt>
-        {(["feature", "project", "none"] as const).map((g) => {
-          const off = g === "feature" && !issues;
-          return (
-            <PressScale key={g} accessibilityRole="radio" accessibilityLabel={g === "feature" ? "Feature" : g === "project" ? "Project" : "None"} accessibilityHint={off ? "Needs Linear on your Mac" : undefined} accessibilityState={{ checked: by === g, disabled: off }} disabled={off} onPress={() => pick(g)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 11, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: by === g ? colors.ink : "transparent", borderWidth: 1, borderColor: by === g ? colors.ink : colors.rule, opacity: off ? 0.4 : 1 }}>
-              <Txt variant="small" tone={by === g ? "on-ink" : "ink2"} style={{ fontWeight: "600" }}>
-                {g === "feature" ? "Feature" : g === "project" ? "Project" : "None"}
+  /** The tabs of a feature: what needs you (with how many), what is moving, what isn't started, and what shipped. One with nothing in it is dimmed, not gone, so the row never moves. */
+  const tabs = (g: WorkGroup, on: Bucket) => (
+    <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 16, borderBottomWidth: 1, borderBottomColor: colors.rule, marginTop: 16 }}>
+      {BUCKETS.map(({ bucket, label }) => {
+        const n = g.items.filter((i) => bucketOf(i) === bucket).length;
+        const selected = bucket === on;
+        return (
+          <PressScale key={bucket} accessibilityRole="tab" accessibilityLabel={bucket === "attn" && n > 0 ? `${label}, ${n}` : label} accessibilityState={{ selected }} onPress={() => setTab(bucket)} haptic="select" scaleTo={0.96} style={{ paddingBottom: 10, marginBottom: -1, borderBottomWidth: 2, borderBottomColor: selected ? colors.ink : "transparent", flexDirection: "row", gap: 4 }}>
+            <Txt variant="small" tone={selected ? "ink" : "ink3"} style={{ fontWeight: "600", opacity: n === 0 && !selected ? 0.5 : 1 }}>
+              {label}
+            </Txt>
+            {bucket === "attn" && n > 0 && (
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                {n}
               </Txt>
-            </PressScale>
-          );
-        })}
-      </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        {FILTER_TONES.filter((t) => counts[t]).map((t) => {
-          const on = only.includes(t);
-          return (
-            <PressScale key={t} accessibilityRole="button" accessibilityLabel={`${TONE_WORD[t]} ${counts[t]}`} accessibilityState={{ selected: on }} onPress={() => setOnly(on ? only.filter((x) => x !== t) : [...only, t])} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, borderWidth: 1, borderColor: on ? toneColor(t, colors) : colors.rule, backgroundColor: on ? `${toneColor(t, colors)}22` : "transparent" }}>
-              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: toneColor(t, colors) }} />
-              <Txt variant="small">
-                {TONE_WORD[t]} {counts[t]}
-              </Txt>
-            </PressScale>
-          );
-        })}
-        {only.length > 0 && <Link label="Show all" onPress={() => setOnly([])} />}
-      </View>
+            )}
+          </PressScale>
+        );
+      })}
     </View>
   );
 
-  /** One piece of work where it stands, in two quiet lines (its name and state, then its issue, where it is and its place in a
-   * stack). Its path, pages and step are in its details, which a tap opens. */
+  /** One piece of work on a feature's page: its name, a quiet line, and its pipeline. Taller than a list row, since it carries the pipeline. A tap opens its details. */
   const row = (i: RemoteWorkItem, heading: string | null, n: number) => {
+    const attn = bucketOf(i) === "attn";
     const hue = hueOf(i, colors);
     const line = lineUnder(i, now, heading);
     return (
@@ -382,119 +355,102 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
           accessibilityHint="Opens its details"
           onPress={() => setDetail(i.key)}
           scaleTo={0.99}
-          style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingVertical: 10, paddingRight: 14, paddingLeft: i.stack ? 32 : 14 }}
+          style={{ flexDirection: "row", alignItems: "flex-start", gap: 12, paddingTop: 16, paddingBottom: attn && i.next ? 6 : 16 }}
         >
-          {i.stack && <StackRail pos={i.stack.pos} of={i.stack.of} color={hue} />}
-          {!i.stack && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: hue, marginTop: 7 }} />}
-          <View style={{ flex: 1, gap: 2 }}>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-              <Txt variant="body" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
-                {i.number !== null && (
-                  <Txt variant="small" tone="ink3">
-                    #{i.number}{" "}
-                  </Txt>
-                )}
-                {i.title}
-              </Txt>
-              <Txt variant="tiny" numberOfLines={1} style={{ color: hue, fontWeight: "700", maxWidth: "45%" }}>
-                {i.word}
-              </Txt>
-            </View>
-            {!!line && (
-              <Txt variant="small" tone="ink3" numberOfLines={1}>
-                {line}
-              </Txt>
-            )}
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={bucketOf(i) === "start" ? { width: 9, height: 9, borderRadius: 5, borderWidth: 1.5, borderColor: colors.ink3, marginTop: 7 } : { width: 9, height: 9, borderRadius: 5, backgroundColor: attn ? hue : colors.ink3, opacity: attn ? 1 : 0.55, marginTop: 7 }} />
+          <View style={{ flex: 1, gap: 3 }}>
+            <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
+              {i.number !== null && (
+                <Txt variant="small" tone="ink3">
+                  #{i.number}{" "}
+                </Txt>
+              )}
+              {i.title}
+            </Txt>
+            <Txt variant="small" tone="ink3" numberOfLines={1}>
+              {attn ? <Txt variant="small" style={{ color: hue, fontWeight: "700" }}>{i.word}</Txt> : i.word}
+              {line ? ` · ${line}` : ""}
+            </Txt>
+            {bucketOf(i) !== "shipped" && <Path item={i} issues={issues} named tone={attn ? hue : colors.ink2} />}
           </View>
         </PressScale>
+        {attn && <View style={{ paddingLeft: 9, paddingBottom: 14 }}>{step(i)}</View>}
       </View>
     );
   };
 
-  /** Several quiet pieces of work (Ready, or done) in one line that opens to a row for each. */
-  const foldRow = (r: Extract<WorkRow, { kind: "fold" }>, scope: string, heading: string | null, n: number) => {
-    const key = `${scope}|${r.fold}`;
-    const isOpen = openFolds.includes(key);
+  /** A feature's page: its name, its tabs, and the rows under the one chosen. */
+  const featurePage = (g: WorkGroup) => {
+    const on = tab ?? openBucket(g.items);
+    const rows = g.items.filter((i) => bucketOf(i) === on);
+    const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
     return (
-      <View key={key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
-        <PressScale accessibilityRole="button" accessibilityLabel={foldWord(r.fold, r.items.length)} accessibilityState={{ expanded: isOpen }} onPress={() => toggle(openFolds, setOpenFolds, key)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 }}>
-          <Txt variant="small" tone="ink3" style={{ width: 10 }}>
-            {isOpen ? "▾" : "▸"}
+      <View accessibilityLabel={g.label}>
+        {!alone && <Link label="‹ Work" hint="Back to every feature" onPress={() => setPage(null)} />}
+        <Txt variant="title" style={{ marginTop: alone ? 0 : 6 }}>
+          {g.label}
+        </Txt>
+        <Txt variant="small" tone="ink3" style={{ marginTop: 4 }}>
+          {live} open, {g.items.length - live} shipped
+        </Txt>
+        {tabs(g, on)}
+        {rows.length === 0 ? (
+          <Txt variant="body" tone="ink3" style={{ paddingTop: 18 }}>
+            Nothing here.
           </Txt>
-          <Txt variant="small" tone="ink2" style={{ fontWeight: "600" }}>
-            {foldWord(r.fold, r.items.length)}
-          </Txt>
-        </PressScale>
-        {isOpen && r.items.map((i, k) => row(i, heading, k + 1))}
-      </View>
-    );
-  };
-  /** A list as rows: Ready and done pieces fold into a line each, unless a state was chosen to be looked at. */
-  const rowsOf = (items: RemoteWorkItem[]): WorkRow[] => (only.length === 0 ? foldRows(items) : items.map((item) => ({ kind: "item" as const, item })));
-  const drawRow = (r: WorkRow, scope: string, heading: string | null, n: number) => (r.kind === "item" ? row(r.item, heading, n) : foldRow(r, scope, heading, n));
-
-  const group = (g: WorkGroup) => {
-    const key = `${by}:${g.key}`;
-    const isFolded = folded.includes(key);
-    const all = open.includes(key);
-    const rows = rowsOf(g.items);
-    const shown = all ? rows : rows.slice(0, GROUP_SHOWN);
-    return (
-      <View key={key} style={{ borderTopWidth: 1, borderTopColor: colors.rule }}>
-        <PressScale accessibilityRole="button" accessibilityLabel={g.label} accessibilityState={{ expanded: !isFolded }} onPress={() => toggle(folded, setFolded, key)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.wash }}>
-          <Txt variant="small" tone="ink3" style={{ width: 10 }}>
-            {isFolded ? "▸" : "▾"}
-          </Txt>
-          <Txt variant="small" style={{ fontWeight: "700" }}>
-            {g.label}
-          </Txt>
-          <Dotted items={g.items} />
-          {(g.doing > 0 || g.todo > 0) && (
-            <Txt variant="tiny" tone="ink3" style={{ marginLeft: "auto" }}>
-              {[g.doing > 0 && `${g.doing} doing`, g.todo > 0 && `${g.todo} to start`].filter(Boolean).join(" · ")}
-            </Txt>
-          )}
-        </PressScale>
-        {!isFolded && (
-          <>
-            {shown.map((r, n) => drawRow(r, key, g.plain ? null : g.label, n))}
-            {rows.length > shown.length && (
-              <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-                <Link label={`Show ${rows.length - shown.length} more`} onPress={() => setOpen([...open, key])} />
-              </View>
-            )}
-          </>
+        ) : (
+          rows.map((i, n) => row(i, g.plain ? null : g.label, n))
         )}
       </View>
     );
   };
 
-  const shown = detail ? items.find((i) => i.key === detail) : undefined;
-  const metaOfShown = shown ? metaUnder(shown, now, null) : "";
-  const flatRows = flat ? rowsOf(groups[0]?.items ?? []) : [];
-  const flatShown = open.includes("all") ? flatRows : flatRows.slice(0, LIST_SHOWN);
-  const standCard = (
-    <Card title="Where things stand" count={listed.length}>
-      {bar}
-      {groups.length === 0 ? (
-        <Txt variant="small" tone="ink2" style={{ padding: 14 }}>
-          Nothing is {only.map((t) => TONE_WORD[t]).join(" or ")}.
-        </Txt>
-      ) : flat ? (
-        <>
-          {flatShown.map((r, n) => drawRow(r, "all", null, n))}
-          {flatRows.length > flatShown.length && (
-            <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>
-              <Link label={`Show ${flatRows.length - flatShown.length} more`} onPress={() => setOpen([...open, "all"])} />
-            </View>
-          )}
-        </>
-      ) : (
-        groups.map(group)
-      )}
-    </Card>
+  /** The Work screen: how many things need you, and a card for each feature. */
+  const overview = (
+    <View style={{ gap: 18 }}>
+      <View style={{ gap: 4 }}>
+        <Txt variant="title">Work</Txt>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Txt variant="body" tone="ink2" style={{ flexShrink: 1 }}>
+            {!looked
+              ? "Your Mac hasn't looked yet: open a project on it to see its work."
+              : items.length === 0
+                ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.`
+                : needing === 0
+                  ? "Nothing needs you right now."
+                  : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
+          </Txt>
+          {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
+          <View style={{ marginLeft: "auto" }}>
+            <Link label="Refresh" onPress={refresh} />
+          </View>
+        </View>
+        {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
+        {blind.length > 0 && (
+          <Txt variant="small" tone="ink2">
+            Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
+          </Txt>
+        )}
+      </View>
+      {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map(featureCard)}</View>}
+    </View>
   );
 
+  /** With one feature (or one project) there are no cards: the screen opens on its page, under the same line of how many things need you. */
+  const overviewNote = () => (
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+      <Txt variant="small" tone="ink3" style={{ flexShrink: 1 }}>
+        {needing === 0 ? "Nothing needs you right now." : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
+      </Txt>
+      {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
+      <View style={{ marginLeft: "auto" }}>
+        <Link label="Refresh" onPress={refresh} />
+      </View>
+    </View>
+  );
+
+  const shown = detail ? items.find((i) => i.key === detail) : undefined;
+  const metaOfShown = shown ? metaUnder(shown, now, null) : "";
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <ScrollView
@@ -507,11 +463,13 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
           <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
             <Dots />
           </View>
-        ) : (
+        ) : open ? (
           <>
-            {nextCard}
-            {items.length > 0 && standCard}
+            {alone && <View style={{ marginBottom: 4 }}>{overviewNote()}</View>}
+            {featurePage(open)}
           </>
+        ) : (
+          overview
         )}
       </ScrollView>
       {/* The bar floats over the list, which scrolls under it. The status bar's own strip is paper, so words don't run under the clock. */}
@@ -524,7 +482,7 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
           {(close, scroll) => {
             const { github, linear } = linksOf(shown);
             const facts = [shown.repo, shown.branch, shown.stack ? stackWord(shown.stack) : null].filter(Boolean).join(" · ");
-            const open = (url: string) => void Linking.openURL(url).catch(() => {});
+            const openUrl = (url: string) => void Linking.openURL(url).catch(() => {});
             return (
               <ScrollView ref={scroll} accessibilityLabel="Details" contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }}>
                 <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
@@ -546,7 +504,7 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
                     </Txt>
                   )}
                 </View>
-                <Path item={shown} issues={issues} />
+                <Path item={shown} issues={issues} named />
                 {(shown.issue || shown.feature) && (
                   <Txt variant="small" tone="ink2">
                     {[shown.issue, shown.feature && `in ${shown.feature}`].filter(Boolean).join(" ")}
@@ -577,15 +535,15 @@ export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
                       }}
                     />
                   )}
-                  {github && <Action label="GitHub" hint="Opens the pull request" onPress={() => open(github)} />}
-                  {linear && <Action label="Linear" hint="Opens the issue" onPress={() => open(linear)} />}
+                  {github && <Action label="GitHub" hint="Opens the pull request" onPress={() => openUrl(github)} />}
+                  {linear && <Action label="Linear" hint="Opens the issue" onPress={() => openUrl(linear)} />}
                 </View>
               </ScrollView>
             );
           }}
         </Sheet>
       )}
-      {/* All of Next's steps, which can be many, in a sheet of their own. A step is asked from it as from the card. */}
+      {/* Every step to take, which can be many, in a sheet of their own. A step is asked from it as from a row. */}
       {nextOpen && (
         <Sheet size="large" onClose={() => setNextOpen(false)}>
           {(close, scroll) => (

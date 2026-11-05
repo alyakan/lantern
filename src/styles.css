@@ -3975,7 +3975,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
 .yw-row.yw-warn, .yw-detail.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */
-.yw-card, .desk-tile, .yw-detail { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
+.yw-card, .yw-cards, .desk-tile, .yw-detail { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
@@ -4070,6 +4070,55 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .linear-error { color: var(--del); }
 .linear-teams-title { margin: 18px 0 6px; font-size: calc(12.5px * var(--font-scale)); font-weight: 650; }
 .yw-project { overflow-wrap: anywhere; }
+/* Where things stand as cards: a card per feature that opens into tabs. Calm on purpose: no boxes inside boxes, and colour only on what needs you. */
+.yw-cards { display: flex; flex-direction: column; gap: 6px; }
+.yw-cards-head { display: flex; align-items: center; gap: 12px; }
+.yw-cards-head .desk-h { margin: 0; }
+.yw-view { margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
+.yw-view button { height: 22px; padding: 0 11px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(11.5px * var(--font-scale)) var(--ui); }
+.yw-view button.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.yw-card .yw-view { margin: 0 0 0 4px; }
+.yw-quiet { margin: 0; color: var(--muted-text); font-size: calc(12.5px * var(--font-scale)); }
+.yw-fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
+.yw-fcard { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; padding: 16px 16px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-float); background: var(--pane); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.yw-fcard:hover { border-color: var(--line-strong); background: color-mix(in srgb, var(--text) 2.5%, var(--pane)); }
+.yw-fcard-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.yw-fcard-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 calc(16px * var(--font-scale)) var(--ui); letter-spacing: -0.01em; }
+.yw-fcard-head .yw-quiet { white-space: nowrap; }
+.yw-go { margin-left: auto; color: var(--muted-text); }
+.yw-pieces { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.yw-pdot { display: inline-block; flex: none; box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; background: var(--muted-text); opacity: 0.5; }
+.yw-pdot.yw-b-attn, .yw-frow.yw-b-attn > .yw-pdot { background: var(--yw); opacity: 1; }
+.yw-pdot.yw-b-start, .yw-frow.yw-b-start > .yw-pdot { background: transparent; border: 1.5px solid var(--muted-text); opacity: 1; }
+.yw-ask { font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); overflow-wrap: anywhere; }
+.yw-ask b { color: var(--yw); font-weight: 650; }
+.yw-fpage { --yw: var(--muted-text); display: flex; flex-direction: column; padding: 4px 2px 0; }
+.yw-fpage .desk-back { align-self: flex-start; }
+.yw-ftitle { margin: 6px 0 2px; font: 700 calc(22px * var(--font-scale)) var(--ui); letter-spacing: -0.015em; color: var(--text); }
+.yw-tabs { display: flex; gap: 22px; margin-top: 14px; border-bottom: 0.5px solid var(--line); }
+.yw-tab { margin-bottom: -0.5px; padding: 0 0 9px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--muted-text); font: 600 calc(13px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-tab.on { border-bottom-color: var(--text); color: var(--text); }
+.yw-tab.zero:not(.on) { opacity: 0.5; }
+.yw-tab-n { margin-left: 5px; font-style: normal; font-weight: 700; color: var(--accent); }
+.yw-empty { padding: 18px 0; }
+.yw-flist { margin: 0; padding: 0; list-style: none; }
+/* A piece of work here is taller than a list row: it carries its pipeline. */
+.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 16px 2px 18px; border-top: 0.5px solid var(--line); }
+.yw-frow:first-child { border-top: none; }
+.yw-frow > .yw-pdot { margin-top: 6px; }
+.yw-frow.yw-warn { --yw: var(--warn); }
+.yw-fmain { flex: 1; min-width: 0; gap: 4px; }
+.yw-fname { font: 600 calc(14.5px * var(--font-scale)) var(--ui); overflow-wrap: anywhere; }
+.yw-fmain:hover .yw-fname { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
+.yw-fline { font-size: calc(12.5px * var(--font-scale)); color: var(--muted-text); }
+.yw-fline b { color: var(--yw); font-weight: 650; }
+.yw-fmain .yw-nodes { max-width: 560px; margin: 10px 0 0; }
+.yw-fstep { flex: none; align-self: center; }
+/* Next beside the cards: the same quiet rows (no colour bar, no tinted pill); colour stays on the state's word. */
+.yw-calm.yw-next > .dp-card-head { background: none; border-bottom-color: var(--line); }
+.yw-calm .yw-row { padding: 14px 14px 14px 14px; border-left: none; }
+.yw-calm .yw-row .yw-word { padding: 0; background: none; font-weight: 650; }
+.yw-calm .yw-tags { gap: 8px; }
 .desk-chat { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: none; color: var(--text); font-size: calc(13px * var(--font-scale)); font-weight: 650; text-align: left; }
 .desk-chat:hover { text-decoration: underline; }
 .desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
@@ -4215,7 +4264,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .desk-pulse .pulse-bad { color: var(--del); }
 
 /* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
-.desk-ask-bar { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 24px 16px; height: 44px; padding: 0 14px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--card-shadow); }
+/* A narrow bar, centred. It sits over the cards, which are the pane's colour too, so it has a border of its own (1px, the strong line) and its own lift: the bar's old hairline vanished against them. */
+.desk-ask-bar { flex: none; display: flex; align-items: center; align-self: center; gap: 10px; width: min(520px, calc(100% - 48px)); margin: 0 0 16px; height: 44px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
 .desk-ask-bar:hover { color: var(--text-2); }
 .desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
