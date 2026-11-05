@@ -8,7 +8,10 @@ import { freshLoop, needsYou as needsYouFor, PR_LOOP_KEY, pollDelay, pruneLoops,
 /** A chat the loop may talk to: where it is, and whether a message could go to it now. */
 export interface PrChat {
   slot: string;
+  /** Its project's folder (where the setting and the loop's state are kept). */
   folder: string;
+  /** Where it works: a worktree of the project it is in, or `folder` itself. */
+  work: string;
   /** Its claude is running (a message can be sent). */
   live: boolean;
   /** It is in the middle of a turn, or waits on an answer or has messages queued. */
@@ -23,13 +26,18 @@ export interface PrChecksOptions {
   settings: Record<string, Partial<PrSetting> | undefined>;
   /** Sends a message to a chat, as Lantern's own (the chat shows it like any other message). */
   send: (slot: string, text: string) => void;
+  /** Starts a chat in the project's `folder` that works in `work`, with `text` as its first message; its slot, or null when none could start. */
+  start: (folder: string, work: string, text: string) => string | null;
   /** Checks finished failed and nothing is dealing with them: the user should hear of it. */
   onFailed: (folder: string, slot: string, snap: PrSnap) => void;
 }
 
-/** What the loop knows about a project's pull request, for the card and the inbox. */
+/** What the loop knows about the pull request of a place (a project's folder, or a worktree a chat works in), for the card and the inbox. */
 export interface PrView {
+  /** The project the place belongs to. */
   folder: string;
+  /** Where the pull request was looked up: its branch is checked out there. */
+  place: string;
   setting: PrSetting;
   /** The pull request and its checks; null: none found (or gh can't be used: see `access`). */
   snap: PrSnap | null;
@@ -68,10 +76,17 @@ async function collectFailures(folder: string, checks: PrCheck[]): Promise<Faile
   return out;
 }
 
+/** The first message of a chat Lantern starts for a failure, when no chat works on the pull request's branch. */
+const startNote = (work: string, folder: string) =>
+  work === folder ? "" : `\n\nThe pull request's branch is checked out in the worktree \`${work}\`: work, commit and push there.`;
+
 /**
- * Watches each project's pull request while its checks aren't done (every 30 seconds at first, then less often, for up to an
- * hour), and runs the project's choice: Off, Tell me (the card and an inbox row) or Fix it myself (see `step`). Looking only
- * reads, through the GitHub CLI; the one thing sent is the failure, to a chat in the project, once per failing run.
+ * Watches the pull request of each place a chat works in (its project's folder, or a worktree of it) while its checks
+ * aren't done (every 30 seconds at first, then less often, for up to an hour), and runs the project's choice: Off, Tell me
+ * (the card and an inbox row) or Fix it myself (see `step`). Looking only reads, through the GitHub CLI; the one thing sent
+ * is the failure, once per failing run, to the chat working on the pull request: the one that had the last try, else one
+ * in a worktree where the pull request was found, else a new chat Lantern starts where it was found. A chat in the project's own folder
+ * isn't sent to unless it had the last try: being in the project doesn't make a chat the pull request's.
  */
 export function usePrChecks(opts: PrChecksOptions) {
   const o = useRef(opts);
@@ -86,8 +101,12 @@ export function usePrChecks(opts: PrChecksOptions) {
   const startedAt = useRef<Record<string, number>>({});
   const lastLook = useRef<Record<string, number>>({});
   const turnEnded = useRef<Record<string, boolean>>({});
-  /** A failure Lantern sent, whose chat has not finished its turn yet. */
+  /** A failure Lantern sent, by place, whose chat has not finished its turn yet. */
   const awaiting = useRef<Record<string, { slot: string; ran: boolean }>>({});
+  /** The chat each pull request's last try went to (by project and number): the next try goes there too. */
+  const owners = useRef<Record<string, string>>({});
+  /** Pull requests whose failure is being sent (its logs read), so a second place finding the same one waits. */
+  const sending = useRef(new Set<string>());
   const wasBusy = useRef<Record<string, boolean>>({});
   const alive = useRef(true);
   useEffect(() => {
@@ -98,12 +117,29 @@ export function usePrChecks(opts: PrChecksOptions) {
     };
   }, []);
 
+  const live = () => o.current.chats.filter((c) => c.live);
+  /** The project a place belongs to: the folder of a live chat that is, or works, there. */
+  const folderOf = (place: string) => live().find((c) => c.folder === place)?.folder ?? live().find((c) => c.work === place)?.folder ?? null;
+  const places = () => [...new Set(live().flatMap((c) => [c.folder, c.work]))];
   const setting = (folder: string) => settingFor(o.current.settings, folder);
-  const watched = (folder: string) => setting(folder).mode !== "off" && o.current.chats.some((c) => c.folder === folder && c.live);
-  /** The chat a message goes to: the one on screen if it is in the project, else the project's last live chat. */
-  const targetOf = (folder: string) => {
-    const inFolder = o.current.chats.filter((c) => c.folder === folder && c.live);
-    return inFolder.find((c) => c.slot === o.current.active) ?? inFolder[inFolder.length - 1] ?? null;
+  const watched = (place: string) => {
+    const folder = folderOf(place);
+    return folder !== null && setting(folder).mode !== "off";
+  };
+  const prKey = (folder: string, number: number) => `${folder}\u0000${number}`;
+  /**
+   * The chat a failure of pull request `number` goes to: the one its last try went to while it is open, else a chat working
+   * in a worktree of the project where that pull request was found (the one on screen if it is one of them, else the last).
+   * `pending`: a chat's worktree hasn't been looked at yet, so it may still turn out to be on the pull request.
+   */
+  const targetOf = (folder: string, number: number): { chat: PrChat | null; pending: boolean } => {
+    const owner = owners.current[prKey(folder, number)];
+    const had = live().find((c) => c.slot === owner);
+    if (had) return { chat: had, pending: false };
+    const inWorktrees = live().filter((c) => c.folder === folder && c.work !== folder);
+    const on = inWorktrees.filter((c) => looksRef.current[c.work]?.snap?.pr.number === number);
+    const chat = on.find((c) => c.slot === o.current.active) ?? on[on.length - 1] ?? null;
+    return { chat, pending: !chat && inWorktrees.some((c) => looksRef.current[c.work] === undefined) };
   };
   const loopOf = (folder: string, number: number) => loopsRef.current[folder]?.[String(number)] ?? freshLoop();
   const commit = (folder: string, number: number, loop: LoopState) => {
@@ -112,94 +148,116 @@ export function usePrChecks(opts: PrChecksOptions) {
     loopsRef.current = all;
     setLoops(all);
   };
-  const show = (folder: string, look: Look) => {
-    looksRef.current = { ...looksRef.current, [folder]: look };
+  const show = (place: string, look: Look) => {
+    looksRef.current = { ...looksRef.current, [place]: look };
     setLooks(looksRef.current);
   };
 
-  const schedule = (folder: string) => {
-    clearTimeout(timers.current[folder]);
-    const snap = looksRef.current[folder]?.snap;
-    if (!watched(folder) || !snap || !worthWatching(snap)) return;
-    const wait = pollDelay(Date.now() - (startedAt.current[folder] ?? Date.now()));
-    if (wait !== null) timers.current[folder] = setTimeout(() => void look(folder), wait);
+  const schedule = (place: string) => {
+    clearTimeout(timers.current[place]);
+    const snap = looksRef.current[place]?.snap;
+    if (!watched(place) || !snap || !worthWatching(snap)) return;
+    const wait = pollDelay(Date.now() - (startedAt.current[place] ?? Date.now()));
+    if (wait !== null) timers.current[place] = setTimeout(() => void look(place), wait);
   };
 
-  async function look(folder: string) {
-    if (inFlight.current.has(folder)) {
-      again.current.add(folder);
+  async function look(place: string) {
+    if (inFlight.current.has(place)) {
+      again.current.add(place);
       return;
     }
-    clearTimeout(timers.current[folder]);
-    inFlight.current.add(folder);
+    clearTimeout(timers.current[place]);
+    inFlight.current.add(place);
     // A turn that ended before this look counts for it; one that ends during it needs a look of its own. The signal is kept
     // until a look decides with it (gh failing or no pull request found leaves it for the next look).
-    const ended = turnEnded.current[folder] === true;
-    turnEnded.current[folder] = false;
+    const ended = turnEnded.current[place] === true;
+    turnEnded.current[place] = false;
     let decided = false;
     try {
       let found = null;
       try {
-        found = await api.prWatch(folder);
+        found = await api.prWatch(place);
       } catch {
         // gh failed for a reason that may pass: what was known stays, and the next look tries again
       }
-      if (!alive.current || !watched(folder)) return;
-      lastLook.current[folder] = Date.now();
+      if (!alive.current || !watched(place)) return;
+      lastLook.current[place] = Date.now();
       if (!found) return;
       if (found.kind !== "found") {
-        show(folder, { snap: null, access: found.kind === "no_gh" ? "no_gh" : found.kind === "logged_out" ? "logged_out" : "ok" });
+        show(place, { snap: null, access: found.kind === "no_gh" ? "no_gh" : found.kind === "logged_out" ? "logged_out" : "ok" });
         return;
       }
       const snap: PrSnap = { pr: found.pr, checks: found.checks };
-      const before = looksRef.current[folder]?.snap;
-      if (!before || before.pr.number !== snap.pr.number || before.pr.head_sha !== snap.pr.head_sha) startedAt.current[folder] = Date.now();
-      show(folder, { snap, access: "ok" });
+      const before = looksRef.current[place]?.snap;
+      if (!before || before.pr.number !== snap.pr.number || before.pr.head_sha !== snap.pr.head_sha) startedAt.current[place] = Date.now();
+      show(place, { snap, access: "ok" });
       decided = true;
-      await decide(folder, snap, ended);
+      await decide(place, snap, ended);
     } finally {
-      if (ended && !decided) turnEnded.current[folder] = true;
-      inFlight.current.delete(folder);
-      if (again.current.delete(folder)) void look(folder);
-      else schedule(folder);
+      if (ended && !decided) turnEnded.current[place] = true;
+      inFlight.current.delete(place);
+      if (again.current.delete(place)) void look(place);
+      else schedule(place);
+      // A worktree's look may have been what the project's folder waited for (see targetOf's `pending`).
+      const folder = folderOf(place);
+      const waiting = folder !== null && folder !== place ? looksRef.current[folder]?.snap : null;
+      if (folder && waiting && alive.current && watched(folder) && !inFlight.current.has(folder)) void decide(folder, waiting, false);
     }
   }
 
-  async function decide(folder: string, snap: PrSnap, ended: boolean) {
+  async function decide(place: string, snap: PrSnap, ended: boolean) {
+    const folder = folderOf(place);
+    if (folder === null) return;
+    const key = prKey(folder, snap.pr.number);
+    if (sending.current.has(key)) return;
     const s = setting(folder);
-    const target = targetOf(folder);
-    const res = step({ setting: s, snap, loop: loopOf(folder, snap.pr.number), busy: !target || target.busy, turnEnded: ended });
+    const { chat: target, pending } = targetOf(folder, snap.pr.number);
+    // With no chat on the pull request a new one is started, so there is nothing to wait for, unless a worktree's look may
+    // still find one: the look that ends there decides.
+    const res = step({ setting: s, snap, loop: loopOf(folder, snap.pr.number), busy: target ? target.busy : pending, turnEnded: ended });
     if (!res.send) {
       commit(folder, snap.pr.number, res.loop);
       if (res.notify) o.current.onFailed(folder, target?.slot ?? "", snap);
       return;
     }
-    if (!target) return;
-    const failures = await collectFailures(folder, snap.checks);
-    // The chat may have started a turn, or the setting changed, while the logs were read: then nothing is sent or counted yet.
-    const now = targetOf(folder);
-    if (!alive.current || !now || now.busy || now.slot !== target.slot || setting(folder).mode !== "fix") return;
-    commit(folder, snap.pr.number, res.loop);
-    awaiting.current[folder] = { slot: target.slot, ran: false };
-    const note = `Lantern sent this on its own, because "Pull request checks" is set to "Fix it myself" for this project (try ${res.loop.tries} of ${s.tries}).`;
-    o.current.send(target.slot, buildFailureMessage(snap.pr, failures, note));
+    sending.current.add(key);
+    try {
+      const failures = await collectFailures(place, snap.checks);
+      // The chat may have started a turn, or the setting changed, while the logs were read: then nothing is sent or counted yet.
+      const now = targetOf(folder, snap.pr.number).chat;
+      if (!alive.current || now?.slot !== target?.slot || now?.busy || setting(folder).mode !== "fix") return;
+      const note = `Lantern sent this on its own, because "Pull request checks" is set to "Fix it myself" for this project (try ${res.loop.tries} of ${s.tries}).`;
+      const text = buildFailureMessage(snap.pr, failures, note);
+      // Counted before a chat is started, so a look while it starts doesn't start another.
+      commit(folder, snap.pr.number, res.loop);
+      const slot = target ? target.slot : o.current.start(folder, place, text + startNote(place, folder));
+      if (slot === null) return;
+      owners.current[key] = slot;
+      awaiting.current[place] = { slot, ran: false };
+      if (target) o.current.send(slot, text);
+    } finally {
+      sending.current.delete(key);
+    }
   }
 
-  // Watching starts when a project gets a live chat and a setting that isn't Off, and stops when it loses them.
-  const watchKey = [...new Set(opts.chats.filter((c) => c.live).map((c) => c.folder))].map((f) => `${f}\u0000${setting(f).mode}`).sort().join("\n");
+  // Watching starts when a place gets a live chat in a project whose setting isn't Off, and stops when it loses them.
+  const watchKey = places()
+    .map((p) => `${p}\u0000${watched(p) ? 1 : 0}`)
+    .sort()
+    .join("\n");
   useEffect(() => {
     const now = Date.now();
-    const folders = [...new Set(o.current.chats.map((c) => c.folder))];
-    for (const folder of folders) {
-      if (watched(folder)) {
-        if (looksRef.current[folder] === undefined && !inFlight.current.has(folder)) {
-          startedAt.current[folder] = now;
-          void look(folder);
+    const on = places();
+    for (const place of new Set([...on, ...Object.keys(looksRef.current)])) {
+      if (on.includes(place) && watched(place)) {
+        if (looksRef.current[place] === undefined && !inFlight.current.has(place)) {
+          startedAt.current[place] = now;
+          void look(place);
         }
       } else {
-        clearTimeout(timers.current[folder]);
-        if (looksRef.current[folder]) {
-          const { [folder]: _gone, ...rest } = looksRef.current;
+        clearTimeout(timers.current[place]);
+        if (looksRef.current[place]) {
+          const { [place]: _gone, ...rest } = looksRef.current;
           looksRef.current = rest;
           setLooks(rest);
         }
@@ -207,32 +265,38 @@ export function usePrChecks(opts: PrChecksOptions) {
     }
   }, [watchKey]);
 
-  // A turn that ends may have pushed or opened a pull request: look again at once. After a failure Lantern sent, the end of
-  // that turn is what tells whether the fix was pushed.
+  // A turn that ends may have pushed or opened a pull request: look again at once where the chat is and works. After a
+  // failure Lantern sent, the end of that chat's turn is what tells whether the fix was pushed.
   const busyKey = opts.chats.map((c) => `${c.slot}:${c.busy ? 1 : 0}`).join(",");
   useEffect(() => {
     for (const c of o.current.chats) {
       const was = wasBusy.current[c.slot] ?? false;
       wasBusy.current[c.slot] = c.busy;
-      const wait = awaiting.current[c.folder];
-      if (c.busy && wait?.slot === c.slot) wait.ran = true;
-      if (!was || c.busy || !watched(c.folder)) continue;
-      if (wait?.slot === c.slot && wait.ran) {
-        delete awaiting.current[c.folder];
-        turnEnded.current[c.folder] = true;
+      const waits = Object.entries(awaiting.current).filter(([, w]) => w.slot === c.slot);
+      if (c.busy) for (const [, w] of waits) w.ran = true;
+      if (!was || c.busy) continue;
+      for (const [place, w] of waits) {
+        if (!w.ran) continue;
+        delete awaiting.current[place];
+        turnEnded.current[place] = true;
+        startedAt.current[place] = Date.now();
+        void look(place);
       }
-      startedAt.current[c.folder] = Date.now();
-      void look(c.folder);
+      for (const place of new Set([c.folder, c.work])) {
+        if (!watched(place) || waits.some(([p]) => p === place)) continue;
+        startedAt.current[place] = Date.now();
+        void look(place);
+      }
     }
   }, [busyKey]);
 
   // Back to the window, or to another chat: a push made elsewhere shows up.
   const refreshIfStale = useCallback(() => {
     const now = Date.now();
-    for (const folder of new Set(o.current.chats.map((c) => c.folder))) {
-      if (watched(folder) && !inFlight.current.has(folder) && now - (lastLook.current[folder] ?? 0) > REFRESH_AFTER_MS) {
-        startedAt.current[folder] = now;
-        void look(folder);
+    for (const place of places()) {
+      if (watched(place) && !inFlight.current.has(place) && now - (lastLook.current[place] ?? 0) > REFRESH_AFTER_MS) {
+        startedAt.current[place] = now;
+        void look(place);
       }
     }
   }, []);
@@ -243,31 +307,35 @@ export function usePrChecks(opts: PrChecksOptions) {
   useEffect(refreshIfStale, [opts.active]);
 
   const views: Record<string, PrView> = {};
-  for (const [folder, l] of Object.entries(looks)) {
+  for (const [place, l] of Object.entries(looks)) {
+    const folder = folderOf(place);
+    if (folder === null) continue;
     const s = setting(folder);
     const loop = l.snap ? loopOf(folder, l.snap.pr.number) : freshLoop();
-    views[folder] = { folder, setting: s, snap: l.snap, access: l.access, loop, needsYou: l.snap ? needsYouFor(s, l.snap, loop) : false };
+    views[place] = { folder, place, setting: s, snap: l.snap, access: l.access, loop, needsYou: l.snap ? needsYouFor(s, l.snap, loop) : false };
   }
 
-  /** The user stops Fix it myself for this pull request: it is Tell me from here. */
-  const stop = (folder: string) => {
-    const snap = looksRef.current[folder]?.snap;
-    if (snap) commit(folder, snap.pr.number, stopLoop(loopOf(folder, snap.pr.number)));
+  /** The user stops Fix it myself for the pull request found at `place`: it is Tell me from here. */
+  const stop = (place: string) => {
+    const snap = looksRef.current[place]?.snap;
+    const folder = folderOf(place);
+    if (snap && folder !== null) commit(folder, snap.pr.number, stopLoop(loopOf(folder, snap.pr.number)));
   };
 
-  /** The user's button: the failure goes to `slot` in one message, and counts as dealt with. */
-  const sendFailure = async (folder: string, slot: string): Promise<void> => {
-    const snap = looksRef.current[folder]?.snap;
-    if (!snap) return;
-    const failures = await collectFailures(folder, snap.checks);
+  /** The user's button: the failure found at `place` goes to `slot` in one message, and counts as dealt with. */
+  const sendFailure = async (place: string, slot: string): Promise<void> => {
+    const snap = looksRef.current[place]?.snap;
+    const folder = folderOf(place);
+    if (!snap || folder === null) return;
+    const failures = await collectFailures(place, snap.checks);
     if (!alive.current) return;
     commit(folder, snap.pr.number, sentByUser(loopOf(folder, snap.pr.number), failureSig(snap)));
     o.current.send(slot, buildFailureMessage(snap.pr, failures));
   };
 
-  const refresh = (folder: string) => {
-    startedAt.current[folder] = Date.now();
-    void look(folder);
+  const refresh = (place: string) => {
+    startedAt.current[place] = Date.now();
+    void look(place);
   };
 
   /** A folder moved: its saved state was copied to the new path in storage, so read it again (the next save would write the old back). */

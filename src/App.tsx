@@ -27,7 +27,7 @@ import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
 import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
-import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
+import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend, type Chats } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
@@ -2748,11 +2748,51 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
   const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
   const [prDialog, setPrDialog] = useState<string | null>(null);
+  // Where each chat works (a worktree it is in, else its folder): a pull request's failure goes to a chat on its branch.
+  const [workBySlot, setWorkBySlot] = useState<Record<string, string>>({});
+  const liveSlot = (s: Chats["slots"][string]) => s.status === "idle" || s.status === "running";
+  const workKey = Object.entries(chats.slots).map(([slot, s]) => `${slot}:${s.folder}:${s.status}:${s.changedFiles.length}:${worktreeCalls(s.items)}`).join(",");
+  useEffect(() => {
+    let live = true;
+    for (const [slot, s] of Object.entries(chats.slots)) {
+      if (!s.folder || !liveSlot(s)) continue;
+      api.workFolder(slot).then(
+        (view) => live && setWorkBySlot((all) => (all[slot] === (view?.path ?? s.folder!) ? all : { ...all, [slot]: view?.path ?? s.folder! })),
+        () => {},
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [workKey]);
+  // A chat started for a failure works in the worktree the pull request was found in: put it there once it runs.
+  const pinOnStart = useRef<Record<string, string>>({});
+  useEffect(() => {
+    for (const [slot, work] of Object.entries(pinOnStart.current)) {
+      const s = chats.slots[slot];
+      if (!s) delete pinOnStart.current[slot];
+      else if (liveSlot(s)) {
+        delete pinOnStart.current[slot];
+        void api.pinWorktree(slot, work).catch(() => {});
+      }
+    }
+  }, [workKey]);
   const prChecks = usePrChecks({
-    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, live: s.status === "idle" || s.status === "running", busy: isBusy(s) }] : [])),
+    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, work: workBySlot[slot] ?? s.folder, live: liveSlot(s), busy: isBusy(s) }] : [])),
     active,
     settings: prSettings,
     send: (slot, text) => sendIn(slot, text),
+    start: (folder, work, text) => {
+      if (!agentReady) return null;
+      const slot = `s${++slotSeq.current}`;
+      dispatchChats({ type: "add", slot });
+      if (work !== folder) {
+        pinOnStart.current[slot] = work;
+        setWorkBySlot((all) => ({ ...all, [slot]: work }));
+      }
+      startIn(slot, folder, false, false, text);
+      return slot;
+    },
     onFailed: (folder, slot, snap) => {
       const body = `${basename(folder)}: pull request #${snap.pr.number}`;
       const wanted = shouldNotify(notifyPrefs, "failed");
@@ -2768,13 +2808,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const list = (recent: RecentFolder[]) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => p.folder);
     loadRecentFolders().then((recent) => setPrFolders(list(recent)), () => setPrFolders(list([])));
   }, [settingsAt]);
+  // One row per pull request: the folder and a worktree may both have found it. Its chat: one working where it was found.
   const prRows = checkItems(
-    Object.values(prChecks.views).flatMap((v) => {
-      const slot = Object.entries(chats.slots).filter(([, s]) => s.folder === v.folder && (s.status === "idle" || s.status === "running")).map(([id]) => id);
-      const target = slot.includes(active) ? active : slot[slot.length - 1];
-      return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
-    }),
+    Object.values(prChecks.views)
+      .filter((v, i, all) => !v.snap || all.findIndex((w) => w.folder === v.folder && w.snap?.pr.number === v.snap!.pr.number) === i)
+      .flatMap((v) => {
+        const slot = Object.entries(chats.slots).filter(([id, s]) => s.folder === v.folder && liveSlot(s) && (workBySlot[id] ?? s.folder) === v.place).map(([id]) => id);
+        const target = slot.includes(active) ? active : slot[slot.length - 1];
+        return v.needsYou && v.snap && target ? [{ folder: v.place, slot: target, where: basename(v.place), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
+      }),
   );
+  // The pull request the chat on screen is on: the one found where it works.
+  const activeWork = state.folder ? (workBySlot[active] ?? state.folder) : null;
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
   const deskShown = desk && Object.keys(openByProject).length > 0;
@@ -3418,7 +3463,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
-                prChecks={state.folder ? { view: prChecks.views[state.folder], busy: isBusy(state), onSend: () => prChecks.sendFailure(state.folder!, active), onStop: () => prChecks.stop(state.folder!) } : undefined}
+                prChecks={state.folder ? { view: prChecks.views[activeWork!], busy: isBusy(state), onSend: () => prChecks.sendFailure(activeWork!, active), onStop: () => prChecks.stop(activeWork!) } : undefined}
                 onShip={state.folder ? () => setShipping(true) : undefined}
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
