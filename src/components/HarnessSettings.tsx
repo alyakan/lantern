@@ -127,9 +127,17 @@ function HarnessEditor({ h, fallbackModel, onChange, onRemove }: { h: Harness; f
       </label>
       <ModelSelect label="Advisor" value={h.advisor} options={advisors} none="No advisor" onChange={(advisor) => set({ advisor })} />
       <ModelSelect label="Subagents" value={h.subagent} options={[...FAMILIES, SUBAGENTS_OFF]} none="Each subagent's own" labels={{ [SUBAGENTS_OFF]: "Off: main model and advisor only" }} onChange={(subagent) => set({ subagent })} />
+      <label>
+        Plugins
+        <select value={h.plugins === false ? "off" : "on"} onChange={(e) => set({ plugins: e.target.value !== "off" })}>
+          <option value="on">Your plugins</option>
+          <option value="off">Off: a leaner start</option>
+        </select>
+      </label>
       <p className="settings-muted wide">
         An advisor has to be at least as strong as the main model, so only those are offered. Subagents can't take an effort of their own; their model applies to every subagent, unless one asks
-        for a specific model itself. Off starts Claude without subagents, so only the main model and its advisor do the work.
+        for a specific model itself. Off starts Claude without subagents, so only the main model and its advisor do the work. Plugins off starts Claude without your plugins: their skills,
+        agents and hooks are often half of what every message sends, so a chat starts much smaller, but their skills and commands aren't there.
       </p>
       {usesFable(h) && <p className="settings-notice wide">Fable on some plans needs a one-time consent first: run /model fable in Claude Code and choose to continue.</p>}
       {onRemove && (

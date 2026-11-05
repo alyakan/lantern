@@ -9,6 +9,8 @@ export interface Harness {
   effort: string | null;
   advisor: string | null;
   subagent: string | null;
+  /** False starts claude without the user's plugins (their skills, agents and hooks are most of a chat's starting prompt); unset or true keeps them. */
+  plugins?: boolean;
   /** Custom only: the preset it was made from, so the chip can say "Balanced, changed" rather than just "Custom". */
   from?: string;
 }
@@ -22,7 +24,7 @@ export const CUSTOM_HARNESS = "custom";
 export const BUILT_IN: Harness[] = [
   { id: DEFAULT_HARNESS, name: "Standard", model: null, effort: null, advisor: null, subagent: null },
   { id: "balanced", name: "Balanced", model: "sonnet", effort: "high", advisor: "opus", subagent: "haiku" },
-  { id: "thrifty", name: "Thrifty", model: "haiku", effort: "medium", advisor: "opus", subagent: "haiku" },
+  { id: "thrifty", name: "Thrifty", model: "haiku", effort: "medium", advisor: "opus", subagent: "haiku", plugins: false },
   { id: "max", name: "Max", model: "opus", effort: "high", advisor: "fable", subagent: "sonnet" },
 ];
 
@@ -64,8 +66,8 @@ export function validAdvisor(h: Harness, fallback: string | null): boolean {
 
 /** What a chat starts claude with: Default follows the app's model and effort and passes no harness flags. */
 export function settingsOf(h: Harness, app: { model: string | null; effort: string | null }) {
-  if (h.id === DEFAULT_HARNESS) return { model: app.model, effort: app.effort, advisor: null, subagent_model: null };
-  return { model: h.model, effort: h.effort, advisor: h.advisor, subagent_model: h.subagent };
+  if (h.id === DEFAULT_HARNESS) return { model: app.model, effort: app.effort, advisor: null, subagent_model: null, plugins_off: false };
+  return { model: h.model, effort: h.effort, advisor: h.advisor, subagent_model: h.subagent, plugins_off: h.plugins === false };
 }
 
 /** A model as people say it: "Sonnet" for "sonnet" or "claude-sonnet-5-5", else as given. */
@@ -78,7 +80,7 @@ const name = modelName;
 /** One line about what it does: "Sonnet · Opus advisor · Haiku subagents". */
 export function summary(h: Harness): string {
   if (h.id === DEFAULT_HARNESS) return "Your model and effort, Claude Code's own settings";
-  const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent === SUBAGENTS_OFF ? "no subagents" : h.subagent ? `${name(h.subagent)} subagents` : null];
+  const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent === SUBAGENTS_OFF ? "no subagents" : h.subagent ? `${name(h.subagent)} subagents` : null, h.plugins === false ? "no plugins" : null];
   return parts.filter(Boolean).join(" · ");
 }
 
@@ -90,9 +92,12 @@ export function customOf(h: Harness, patch: Partial<Harness>): Harness {
   return { ...h, ...patch, id: CUSTOM_HARNESS, name: "Custom", from: h.id === CUSTOM_HARNESS ? h.from : h.name };
 }
 
-/** The presets to offer: Default first, then the saved ones (built-ins as edited, then your own). */
+/**
+ * The presets to offer: Default first, then the saved ones (built-ins as edited, then your own). A built-in saved before a
+ * setting existed takes that setting from the built-in (Thrifty saved before Plugins gets Plugins off).
+ */
 export function presetsOf(saved: Harness[]): Harness[] {
-  return [BUILT_IN[0], ...saved.filter((h) => h.id !== DEFAULT_HARNESS)];
+  return [BUILT_IN[0], ...saved.filter((h) => h.id !== DEFAULT_HARNESS).map((h) => ({ ...BUILT_IN.find((b) => b.id === h.id), ...h }))];
 }
 
 export const findHarness = (presets: Harness[], id: string | undefined | null) => presets.find((h) => h.id === id) ?? BUILT_IN[0];

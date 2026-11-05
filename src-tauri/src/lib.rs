@@ -1642,6 +1642,9 @@ struct Settings {
     advisor: Option<String>,
     #[serde(default)]
     subagent_model: Option<String>,
+    /// The harness's Plugins off: claude starts without the user's plugins.
+    #[serde(default)]
+    plugins_off: bool,
     /// Start the chat as the main agent of an orchestra: it can spawn workers (see orchestra.rs).
     #[serde(default)]
     orchestrator: bool,
@@ -1766,6 +1769,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         effort: if gateway { None } else { checked_effort(settings.effort)? },
         advisor: if gateway { None } else { checked_model(settings.advisor)? },
         subagent_model: if gateway { None } else { checked_model(settings.subagent_model)? },
+        plugins_off: !gateway && settings.plugins_off,
         helper: helper_config(
             slot,
             settings.provider,
@@ -2259,7 +2263,8 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
 
 /// Restarts a chat's claude on the same session with another harness: main model and effort, advisor, subagents' model.
 #[tauri::command]
-async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String, model: Option<String>, effort: Option<String>, advisor: Option<String>, subagent_model: Option<String>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String, model: Option<String>, effort: Option<String>, advisor: Option<String>, subagent_model: Option<String>, plugins_off: Option<bool>) -> Result<(), String> {
     let s = state.slots.get(&slot)?;
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
@@ -2270,6 +2275,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.effort = checked_effort(effort)?;
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
+    cfg.plugins_off = plugins_off.unwrap_or(false);
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
@@ -4492,6 +4498,7 @@ mod hooks_flow_tests {
             effort: None,
             advisor: None,
             subagent_model: None,
+            plugins_off: false,
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
@@ -4727,6 +4734,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
+            plugins_off: false,
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,

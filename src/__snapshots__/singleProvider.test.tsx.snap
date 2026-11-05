@@ -1104,7 +1104,7 @@ exports[`single provider: the menus > models, with Claude's list and with the bu
         <span
           class="menu-row-meta"
         >
-          Haiku · Opus advisor · Haiku subagents
+          Haiku · Opus advisor · Haiku subagents · no plugins
         </span>
       </button>
       <button

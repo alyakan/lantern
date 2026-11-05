@@ -497,11 +497,7 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
             }
             a.push("--disallowedTools".into());
             a.push(denied.join(","));
-            if !plugins.is_empty() {
-                let off: serde_json::Map<String, serde_json::Value> = plugins.iter().map(|p| (p.clone(), false.into())).collect();
-                a.push("--settings".into());
-                a.push(serde_json::json!({ "enabledPlugins": off }).to_string());
-            }
+            without_plugins(&mut a, plugins);
         }
         role => {
             if advisor.is_some() {
@@ -520,6 +516,14 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
         }
     }
     a
+}
+
+/// `a` with each of `plugins` (see `enabled_plugins`) turned off in its `--settings`, the one already there or a new one.
+pub fn without_plugins(a: &mut Vec<String>, plugins: &[String]) {
+    if !plugins.is_empty() {
+        let off: serde_json::Map<String, serde_json::Value> = plugins.iter().map(|p| (p.clone(), false.into())).collect();
+        add_settings(a, serde_json::json!({ "enabledPlugins": off }));
+    }
 }
 
 /// The tools that start other agents: a subagent inline, or a workflow's.
@@ -545,6 +549,22 @@ pub fn without_subagents(a: &mut Vec<String>) {
 mod tests {
     use super::*;
     use crate::provider::ProviderId;
+
+    #[test]
+    fn plugins_off_turns_each_plugin_off_in_the_one_settings() {
+        let plugins = vec!["superpowers@official".to_string(), "axiom@axiom".into()];
+        // A chat with an advisor already has a --settings (its subagent hook): the plugins go into it, and there is still one.
+        let mut a = launch_args(Mode::Auto, false, None, None, None, Some("opus"), &helper(), &[]);
+        without_plugins(&mut a, &plugins);
+        assert_eq!(a.iter().filter(|x| x.as_str() == "--settings").count(), 1);
+        let settings: serde_json::Value = serde_json::from_str(value_after(&a, "--settings").unwrap()).unwrap();
+        assert_eq!(settings["enabledPlugins"], serde_json::json!({"superpowers@official": false, "axiom@axiom": false}));
+        assert!(settings["hooks"]["SubagentStart"].is_array(), "what was there is kept");
+        // None turned on: nothing is added.
+        let mut b = vec!["--model".to_string(), "sonnet".into()];
+        without_plugins(&mut b, &[]);
+        assert_eq!(b, vec!["--model".to_string(), "sonnet".into()]);
+    }
 
     #[test]
     fn subagents_off_adds_their_tools_to_the_one_disallowed_list() {

@@ -403,6 +403,8 @@ export interface Settings {
   /** The harness: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
   advisor?: string | null;
   subagent_model?: string | null;
+  /** Start claude without the user's plugins (a harness preset's Plugins: Off). */
+  plugins_off?: boolean;
   /** Start the chat as the main agent of an orchestra: it can spawn workers. */
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */

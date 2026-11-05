@@ -25,8 +25,17 @@ describe("harness", () => {
 
   it("starts claude with the preset's models, or the app's for Default", () => {
     const app = { model: "opus", effort: "xhigh" };
-    expect(settingsOf(def, app)).toEqual({ model: "opus", effort: "xhigh", advisor: null, subagent_model: null });
-    expect(settingsOf(balanced, app)).toEqual({ model: "sonnet", effort: "high", advisor: "opus", subagent_model: "haiku" });
+    expect(settingsOf(def, app)).toEqual({ model: "opus", effort: "xhigh", advisor: null, subagent_model: null, plugins_off: false });
+    expect(settingsOf(balanced, app)).toEqual({ model: "sonnet", effort: "high", advisor: "opus", subagent_model: "haiku", plugins_off: false });
+    // Thrifty starts without the user's plugins; a preset saved before the setting existed keeps them.
+    expect(settingsOf(BUILT_IN.find((h) => h.id === "thrifty")!, app).plugins_off).toBe(true);
+    expect(summary(BUILT_IN.find((h) => h.id === "thrifty")!)).toBe("Haiku · Opus advisor · Haiku subagents · no plugins");
+    expect(settingsOf({ ...balanced, plugins: undefined }, app).plugins_off).toBe(false);
+    // A Thrifty saved before the setting existed gets it; one set back to your plugins keeps that.
+    const { plugins: _, ...oldThrifty } = BUILT_IN.find((h) => h.id === "thrifty")!;
+    expect(presetsOf([oldThrifty]).find((h) => h.id === "thrifty")!.plugins).toBe(false);
+    expect(presetsOf([{ ...oldThrifty, plugins: true }]).find((h) => h.id === "thrifty")!.plugins).toBe(true);
+    expect(presetsOf([{ ...oldThrifty, id: "mine" }]).find((h) => h.id === "mine")!.plugins).toBeUndefined();
   });
 
   it("describes each preset in a line, and flags Fable", () => {

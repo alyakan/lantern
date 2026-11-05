@@ -113,8 +113,8 @@ export const api = {
   onConversationConfigured: (f: (r: { slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }) => void) => listen<{ slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }>("conversation-configured", (e) => f(e.payload)),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
-  applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>
-    invoke<void>("apply_harness", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model }),
+  applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null; plugins_off?: boolean }) =>
+    invoke<void>("apply_harness", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model, pluginsOff: h.plugins_off ?? false }),
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
