@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { wantsRecap, type RecapChat } from "../lib/recap";
+import { onWindowFocus } from "../lib/windowFocus";
 
 /**
  * The recap for the chat on screen (see lib/recap.ts), or null. A chat is away from the moment it leaves the screen (another
@@ -39,15 +40,8 @@ export function useRecap(slot: string, chat: RecapChat, folder: string | null, c
     };
   }, [slot, back]);
 
-  useEffect(() => {
-    const away = () => leftAt.current.set(latest.current.slot, Date.now());
-    window.addEventListener("blur", away);
-    window.addEventListener("focus", back);
-    return () => {
-      window.removeEventListener("blur", away);
-      window.removeEventListener("focus", back);
-    };
-  }, [back]);
+  // The app's own idea of focus (the page's focus and blur aren't reliable in its web view; see lib/windowFocus.ts).
+  useEffect(() => onWindowFocus((focused) => (focused ? back() : leftAt.current.set(latest.current.slot, Date.now()))), [back]);
 
   const mine = recaps[slot];
   return mine && mine.at === chat.items && chat.idle ? mine.text : null;

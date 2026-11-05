@@ -8,11 +8,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 let focused = typeof document === "undefined" || document.hasFocus();
 const waiting = new Set<() => void>();
+const watchers = new Set<(focused: boolean) => void>();
 
 function set(next: boolean) {
   if (next === focused) return;
   focused = next;
   if (focused) for (const run of [...waiting]) run();
+  for (const watch of [...watchers]) watch(focused);
 }
 
 if (typeof window !== "undefined") {
@@ -43,4 +45,10 @@ export function whenFocused(fn: () => void): () => void {
   };
   waiting.add(run);
   return () => waiting.delete(run);
+}
+
+/** Calls `fn` each time the window comes to the front (true) or goes to the back (false). Returns a stop. */
+export function onWindowFocus(fn: (focused: boolean) => void): () => void {
+  watchers.add(fn);
+  return () => watchers.delete(fn);
 }

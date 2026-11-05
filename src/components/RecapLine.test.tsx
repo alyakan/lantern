@@ -30,6 +30,8 @@ describe("useRecap", () => {
     vi.useFakeTimers();
     recapSession.mockReset();
     recapSession.mockResolvedValue("Adding retries. Next: pick the backoff.");
+    // The window starts in front, as when you're using the app.
+    window.dispatchEvent(new Event("focus"));
   });
   afterEach(() => vi.useRealTimers());
 
