@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usageLine } from "../lib/cost";
 import { shortTokens } from "../lib/contextShare";
+import { useMenuShift } from "../lib/menuShift";
+import { useMenuKeys } from "./useMenuKeys";
 
 /** "4.2s", "38s", "2m 05s". */
 export function formatDuration(ms: number): string {
@@ -24,7 +26,7 @@ interface Props {
   window: number | null;
   running: boolean;
   lastTurnMs: number | null;
-  /** Compact, Clear and Continue fresh, shown when the meter warns, the chat is long, or the meter is clicked; only while Claude isn't working. */
+  /** Compact, Clear and Continue fresh, in a menu that opens from the meter (never shown unasked); only while Claude isn't working. */
   actions?: { onCompact: () => void; onClear: () => void; onFresh?: () => void };
   /** What the session has cost and used so far, for the tooltip (each known or not, see lib/cost.ts). */
   session?: { cost: number | null; tokens: number };
@@ -35,6 +37,22 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   const [started, setStarted] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLSpanElement>(null);
+  const { ref: menu, style: menuStyle } = useMenuShift(open);
+  const keys = useMenuKeys(open, root);
+
+  // The menu closes on a press outside it, on Escape, and once a choice is made.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!running) return setStarted(null);
@@ -59,14 +77,18 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   ].filter(Boolean).join("\n");
   const shown = percent !== null ? `${percent}%` : used !== null ? shortTokens(used) : "";
   const label = percent !== null ? `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}` : used !== null ? `${used.toLocaleString()} tokens of context used, window not known yet` : "";
-  const showActions = !!actions && !running && (level !== null || long || open);
+  const showMenu = !!actions && !running && open;
+  const choose = (act: () => void) => () => {
+    setOpen(false);
+    act();
+  };
 
   return (
-    <span className={`context-meter${level ? ` ${level}` : ""}`} title={details || undefined}>
+    <span className={`context-meter${level ? ` ${level}` : ""}`} title={details || undefined} ref={root}>
       {running && started !== null && <span className="elapsed">{formatDuration(Math.max(0, now - started))}</span>}
       {shown !== "" &&
         (actions && !running ? (
-          <button type="button" className="context-used" aria-expanded={open} aria-label={label} onClick={() => setOpen(!open)}>
+          <button type="button" className="context-used" aria-haspopup="menu" aria-expanded={open} aria-label={label} onClick={() => setOpen(!open)}>
             <span>{shown}</span>
             {note && <span className="context-note">{note}</span>}
           </button>
@@ -76,20 +98,29 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
             {note && <span className="context-note">{note}</span>}
           </span>
         ))}
-      {showActions && (
-        <span className="context-actions">
-          <button type="button" className="ghost context-compact" title="Summarises the conversation so far to free up context (sends /compact)" onClick={actions.onCompact}>
-            Compact
+      {showMenu && actions && (
+        <div className="menu context-menu" ref={menu} style={menuStyle} role="menu" aria-label="Context" onKeyDown={keys.onKeyDown}>
+          <button type="button" role="menuitem" className="menu-row" onClick={choose(actions.onCompact)}>
+            <span className="mode-text">
+              <span className="menu-row-title">Compact</span>
+              <span className="mode-hint">Summarises the conversation so far to free up context (sends /compact)</span>
+            </span>
           </button>
-          <button type="button" className="ghost context-clear" title="Starts a new conversation in this folder (sends /clear). The files stay as they are." onClick={actions.onClear}>
-            Clear
+          <button type="button" role="menuitem" className="menu-row" onClick={choose(actions.onClear)}>
+            <span className="mode-text">
+              <span className="menu-row-title">Clear</span>
+              <span className="mode-hint">Starts a new conversation in this folder (sends /clear). The files stay as they are.</span>
+            </span>
           </button>
           {actions.onFresh && (
-            <button type="button" className="ghost context-fresh" title="Goes on in a fresh session with only the words of this conversation carried over (no tool output), so each message sends far less. The messages stay on screen." onClick={actions.onFresh}>
-              Continue fresh
+            <button type="button" role="menuitem" className="menu-row" onClick={choose(actions.onFresh)}>
+              <span className="mode-text">
+                <span className="menu-row-title">Continue fresh</span>
+                <span className="mode-hint">Goes on in a fresh session with only the words of this conversation carried over (no tool output), so each message sends far less. The messages stay on screen.</span>
+              </span>
             </button>
           )}
-        </span>
+        </div>
       )}
     </span>
   );

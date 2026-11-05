@@ -115,11 +115,16 @@ describe("the chat box, per provider", () => {
 
   it("has no Compact and Clear (they are slash commands) for a provider without skills", () => {
     const usage = { used: 190_000, window: 200_000, lastTurnMs: null, actions: { onCompact: () => {}, onClear: () => {} } };
+    // Without skills the meter is plain text: nothing to press, so no menu to open.
     const { container } = render(<MessageInput status="idle" provider={PLAIN} onSend={() => {}} onStop={() => {}} usage={usage} />);
-    expect(container.querySelector(".context-compact")).toBeNull();
+    expect(container.querySelector("button.context-used")).toBeNull();
     cleanup();
     const claude = render(<MessageInput status="idle" provider={CLAUDE_INFO} onSend={() => {}} onStop={() => {}} usage={usage} />);
-    expect(claude.container.querySelector(".context-compact")).not.toBeNull();
+    // With them, Compact and Clear are in the menu the meter opens, not on the screen unasked.
+    expect(screen.queryByRole("menuitem", { name: /Compact/ })).toBeNull();
+    fireEvent.click(claude.container.querySelector("button.context-used")!);
+    expect(screen.getByRole("menuitem", { name: /Compact/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Clear/ })).toBeInTheDocument();
   });
 
   it("names the provider where the box talks about the agent, and says Claude for Claude and for none", () => {
