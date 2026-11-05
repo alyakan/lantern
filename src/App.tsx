@@ -113,6 +113,7 @@ import { useTeamGuards } from "./lib/teamGuards";
 import { PlanPaused } from "./components/PlanPaused";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
+import { RecapLine, useRecap } from "./components/RecapLine";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { DiffComment } from "./lib/diffComments";
@@ -517,6 +518,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, []);
   const capsOf = (slot: string) => capabilitiesOf(chats.slots[slot]?.provider);
   const caps = capabilitiesOf(state.provider);
+  const recap = useRecap(active, { canRecap: caps.supports_recap !== false, idle: state.status === "idle", sessionId: state.sessionId ?? null, items: state.items.length }, state.folder, state.claudePath ?? null);
   const activeProvider = providerIdOf(state.provider);
 
   // The harness (which models do what) is Claude Code's: a provider with no advisor runs Standard, its own model and effort.
@@ -3398,6 +3400,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
+                  {recap && <RecapLine text={recap} />}
                   {chatExtras}
                   {composer}
                 </>

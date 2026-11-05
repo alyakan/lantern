@@ -27,7 +27,7 @@ impl Provider for CodexProvider {
     /// commands of Claude's, and reports tokens but not dollars. Its effort and model are
     /// given with each turn.
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: true, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true, supports_images: true, supports_compact: true, supports_clear: true, publishes_artifacts: false }
+        Capabilities { supports_auto_mode: true, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true, supports_images: true, supports_compact: true, supports_clear: true, publishes_artifacts: false, supports_recap: false }
     }
 
     fn models(&self) -> &'static [&'static str] {
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn codex_has_auto_review_but_no_advisor_skills_or_dollar_cost_and_takes_effort_and_a_model_per_turn() {
         let c = CodexProvider.capabilities();
-        assert!(c.supports_auto_mode && !c.supports_advisor && !c.supports_skills && !c.reports_cost_usd && c.supports_lantern_tools && !c.publishes_artifacts);
+        assert!(c.supports_auto_mode && !c.supports_advisor && !c.supports_skills && !c.reports_cost_usd && c.supports_lantern_tools && !c.publishes_artifacts && !c.supports_recap);
         assert!(c.supports_effort && c.model_switchable && c.phone_approvals);
     }
 
