@@ -57,6 +57,8 @@ export interface Capabilities {
   supports_clear?: boolean;
   /** It can publish an artifact to a link the user can open and share (Claude Code's Artifact tool). */
   publishes_artifacts?: boolean;
+  /** It can say what happened in a chat and what's next when the user comes back to it (Claude Code's /recap). */
+  supports_recap?: boolean;
 }
 
 export interface ProviderInfo {

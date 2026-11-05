@@ -44,6 +44,7 @@ pub mod roles;
 pub mod storage;
 pub mod stream_parser;
 pub mod test_runs;
+pub mod recap;
 pub mod titles;
 pub mod desk;
 pub mod desk_agent;
@@ -3727,6 +3728,19 @@ async fn title_session(state: State<'_, AppState>, claude_path: String, folder: 
     Ok(title)
 }
 
+/// What happened in a session and what's next, as Claude Code's own recap says it (see recap.rs). None when none could be made.
+#[tauri::command]
+async fn recap_session(state: State<'_, AppState>, claude_path: String, folder: String, session_id: String) -> Result<Option<String>, String> {
+    if !history::valid_id(&session_id) {
+        return Err("Not a session id.".into());
+    }
+    if !std::path::Path::new(&folder).is_dir() {
+        return Err(format!("{folder} no longer exists."));
+    }
+    let path_env = login_path(&state).await;
+    Ok(recap::generate(std::path::Path::new(&claude_path), std::path::Path::new(&folder), path_env.as_deref(), &session_id).await)
+}
+
 /// Where a message typed on the Desk goes (see desk.rs): one of `chats`, a new chat in one of `projects`, a question back to
 /// the user, or a search. The window sends the user's own words wherever that is.
 #[tauri::command]
@@ -4379,6 +4393,7 @@ pub fn run() {
             rename_session,
             session_events,
             title_session,
+            recap_session,
             desk_route,
             desk_answer,
             desk_talk,

@@ -2376,6 +2376,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
               r(`Mostly done: retries work, one test is still red.\n\n**Done**\n- Retry on 5xx with backoff ${cite(0)}\n- Cap the delay at 8 seconds ${cite(1)}\n\n**Open**\n- Log each retry once ${cite(0)}\n\n**Blocked**\n- The timeout test is flaky on CI ${cite(2)}`);
             }, 900),
           );
+        case "recap_session":
+          return new Promise((r) => setTimeout(() => r("You're adding retries to fetchJson, and the backoff is in with its tests. Next: decide whether a 429 should wait for Retry-After."), 800));
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

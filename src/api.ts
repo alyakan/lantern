@@ -262,6 +262,8 @@ export const api = {
   sessionEvents: (folder: string, sessionId: string) => invoke<UiEvent[]>("session_events", { folder, sessionId }),
   /** A short title for the session (Claude Code's, one made before, or a new one from its first prompt); null if none. */
   titleSession: (claudePath: string, folder: string, sessionId: string, prompt: string) => invoke<string | null>("title_session", { claudePath, folder, sessionId, prompt }),
+  /** What happened in a session and what's next, from Claude Code's /recap; null when none could be made. */
+  recapSession: (claudePath: string, folder: string, sessionId: string) => invoke<string | null>("recap_session", { claudePath, folder, sessionId }),
   recentFolders: () => invoke<RecentFolder[]>("recent_folders"),
   /** Replays a past session into the chat and resumes it. A session only in a folder's old place is copied into the folder first. */
   openSession: (slot: string, claudePath: string, folder: string, settings: Settings, sessionId: string) =>
