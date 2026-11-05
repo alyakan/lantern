@@ -206,10 +206,51 @@ describe("Your work with Linear", () => {
     const items = withLinear([], work([issue("ENG-5", review), issue("ENG-6", ready)]), { "/p/lantern": "ENG" }, [r], NOW);
     expect(items.map((i) => [i.title, i.stage, i.tone, i.word, i.next])).toEqual([
       ["ENG-5 Issue ENG-5", "review", "wait", "In Review", null],
-      ["ENG-6 Issue ENG-6", "release", "wait", "Ready", null],
+      ["ENG-6 Issue ENG-6", "release", "ready", "Ready", null],
     ]);
     expect(items[1].meta).toBe("Testo integration · merged, waiting for a release");
     expect(projectsOf(items, "/p/lantern").map((p) => p.todo)).toEqual([0]);
+  });
+
+  it("says a ticket needs moving when its pull request merged and Linear still has it In Progress or In Review, and offers to update the feature", () => {
+    const merged = (number: number, branch: string, title = `PR ${number}`) => ({ number, title, author: "aly", branch, merged_at: "2026-11-02T10:00:00Z" });
+    // No release in this repository (as on a team that ships elsewhere): nothing merged is listed for one, only matched to its issue.
+    const m = repo({ merged: [merged(20, "aly/eng-20-x"), merged(21, "b21"), merged(22, "aly/eng-22-y"), merged(23, "b23")] });
+    const issues = [
+      issue("ENG-20", review),
+      issue("ENG-21", { state: "In Progress", state_type: "started", project: "Testo integration", links: ["https://github.com/aly/lantern/pull/21"] }),
+      // Testing can rightly come after a merge, and Ready is where a merged one goes: neither is behind.
+      issue("ENG-22", { state: "Testing", state_type: "completed", project: "Testo integration" }),
+      issue("ENG-23", { ...ready, links: ["https://github.com/aly/lantern/pull/23"] }),
+      // No pull request of it merged: on its way, as before.
+      issue("ENG-24", review),
+    ];
+    const items = withLinear(yourWork([m], NOW), work(issues), { "/p/lantern": "ENG" }, [m], NOW);
+    expect(items.filter((i) => !i.stepOnly).map((i) => [i.issue?.identifier, i.tone, i.word, i.number])).toEqual([
+      ["ENG-20", "move", "Merged · move the ticket", 20],
+      ["ENG-21", "move", "Merged · move the ticket", 21],
+      ["ENG-22", "wait", "Testing", null],
+      ["ENG-23", "ready", "Ready", null],
+      ["ENG-24", "wait", "In Review", null],
+    ]);
+    expect(items[1].meta).toBe("Testo integration · still In Progress in Linear · merged 6h ago");
+    // One step for the feature: a chat moves them in Linear, after asking; it is told identifiers, links and numbers, never titles.
+    const step = nextSteps(items).find((i) => i.next?.kind === "move")!;
+    expect([step.key, step.title, step.word, step.tone, step.stepOnly, step.next!.yours]).toEqual(["linear-move:Testo integration", "Testo integration", "2 tickets behind their pull requests", "move", true, true]);
+    expect(step.next!.text).toContain("ENG-20 (https://linear.app/acme/issue/ENG-20), pull request #20 in aly/lantern; ENG-21 (https://linear.app/acme/issue/ENG-21), pull request #21 in aly/lantern");
+    expect(step.next!.text).toMatch(/never to Done\. .*request_approval before you change anything in Linear\.$/);
+    expect(step.next!.text).not.toContain("Issue ENG-20");
+    expect(targetFor(step, [], [m])).toEqual({ kind: "new", folder: "/p/lantern" });
+    expect(step.sig.length).toBeLessThanOrEqual(80);
+  });
+
+  it("says a merged pull request waiting for a release needs its ticket moved while Linear has the issue In Review", () => {
+    const m = repo({ release: { tag: "v1", published_at: "2026-11-01T00:00:00Z" }, merged: [{ number: 30, title: "PR 30", author: "aly", branch: "aly/eng-30-z", merged_at: "2026-11-02T10:00:00Z" }, { number: 31, title: "PR 31", author: "aly", branch: "aly/eng-31-z", merged_at: "2026-11-02T11:00:00Z" }] });
+    const items = withLinear(yourWork([m], NOW), work([issue("ENG-30", review), issue("ENG-31", ready)]), { "/p/lantern": "ENG" }, [m], NOW);
+    expect(items.filter((i) => i.key.includes(":merged:")).map((i) => [i.number, i.tone, i.word, i.fold ?? null])).toEqual([
+      [30, "move", "Merged · move the ticket", null],
+      [31, "ready", "Merged · not released", "ready"],
+    ]);
   });
 
   it("marks the Ready issues to fold, and not the ones In Review, and hides none of them", () => {

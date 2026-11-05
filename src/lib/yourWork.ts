@@ -23,11 +23,12 @@ export const STAGES: { stage: Stage; label: string }[] = [
 ];
 
 /** bad: blocked (checks failing, conflicts, changes asked); wait: on its way (checks running, a review pending); you: your call;
- * local: on the Mac only; todo: an issue in Linear not started (no branch or pull request); done: merged and released. */
-export type Tone = "bad" | "wait" | "you" | "local" | "todo" | "done";
-export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", wait: "waiting", local: "local only", todo: "not started", done: "done" };
+ * move: its pull request merged but its Linear issue still says it is being worked on (the ticket needs moving); local: on the Mac
+ * only; todo: an issue in Linear not started (no branch or pull request); ready: merged, waiting for a release; done: released. */
+export type Tone = "bad" | "wait" | "you" | "move" | "local" | "todo" | "ready" | "done";
+export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", move: "needs moving", wait: "waiting", local: "local only", todo: "not started", ready: "ready", done: "done" };
 
-export type StepKind = "push" | "conflicts" | "checks" | "changes" | "update" | "merge" | "review" | "release" | "publish" | "start";
+export type StepKind = "push" | "conflicts" | "checks" | "changes" | "update" | "merge" | "review" | "release" | "publish" | "start" | "move";
 
 export interface Step {
   kind: StepKind;
@@ -179,7 +180,7 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
     const released = time(r.release?.published_at);
     const waiting = released === null ? [] : r.merged.filter((m) => mine(m.author) && (time(m.merged_at) ?? 0) > released);
     for (const m of waiting) {
-      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "you", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged", fold: "ready" });
+      out.push({ ...base, key: `${r.repo}:merged:${m.number}`, number: m.number, branch: m.branch, title: m.title, stage: "release", tone: "ready", word: "Merged · not released", meta: `${name} · merged ${ago(now, time(m.merged_at))}`, at: time(m.merged_at), next: null, sig: "merged", fold: "ready" });
     }
     for (const tag of r.drafts) {
       const ok = safeRef(tag);
@@ -261,21 +262,21 @@ function ago(now: number, at: number | null): string {
   return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
 }
 
-const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, todo: 3, wait: 4, done: 5 };
+const ORDER: Record<Tone, number> = { you: 0, bad: 1, move: 2, local: 3, todo: 4, wait: 5, ready: 6, done: 7 };
 
 /** The repositories GitHub answered for without saying who you are: their pull requests can't be told apart, so none are shown. */
 export function unknownViewer(repos: RepoStatus[] | null): string[] {
   return (repos ?? []).filter((r) => r.gh === "ready" && !r.viewer).map(short);
 }
 
-/** What to do next, yours to decide first, then what is blocked, then branches to push, then issues to start. */
+/** What to do next, yours to decide first, then what is blocked, then tickets to move, then branches to push, then issues to start. */
 export function nextSteps(items: WorkItem[]): WorkItem[] {
   return items.filter((i) => i.next).sort((a, b) => ORDER[a.tone] - ORDER[b.tone]);
 }
 
-/** Every item, blocked first, then yours, on its way, local and done: what's done and branches with nothing to do come last. */
+/** Every item, blocked first, then yours, tickets to move, on its way, local, Ready and done: what's done and branches with nothing to do come last. */
 export function whereThingsStand(items: WorkItem[]): WorkItem[] {
-  const rank = (i: WorkItem) => ({ bad: 0, you: 1, wait: 2, local: 3, todo: 5, done: 6 })[i.tone] + (i.tone === "local" && !i.next ? 1 : 0);
+  const rank = (i: WorkItem) => ({ bad: 0, you: 1, move: 2, wait: 3, local: 4, todo: 6, ready: 7, done: 8 })[i.tone] + (i.tone === "local" && !i.next ? 1 : 0);
   return items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0));
 }
 
@@ -345,7 +346,7 @@ const SOON_MS = 3 * 86_400_000;
 
 /** Whether `issue` is the issue of `item`: a pull request Linear has linked, the branch Linear suggests, or its identifier in the
  * branch or the title. */
-function isIssueOf(issue: LinearIssue, item: WorkItem): boolean {
+function isIssueOf(issue: LinearIssue, item: Pick<WorkItem, "number" | "github" | "branch" | "title">): boolean {
   if (item.number !== null && item.github && issue.links.includes(`https://github.com/${item.github}/pull/${item.number}`)) return true;
   if (item.branch && issue.branch && item.branch.toLowerCase() === issue.branch.toLowerCase()) return true;
   const named = (t: string | null) => !!t && [...t.matchAll(ISSUE_ID)].some((m) => `${m[1]}-${m[2]}`.toUpperCase() === issue.identifier);
@@ -360,6 +361,20 @@ export const isReady = (issue: LinearIssue) => issue.state.trim().toLowerCase() 
 
 /** Done or Closed: finished. Linear says an issue is done only by its state's name here (Ready and In Review are "completed" too). */
 export const isFinished = (issue: LinearIssue) => issue.state_type === "completed" && ["done", "closed"].includes(issue.state.trim().toLowerCase());
+
+/** Linear still says it is being worked on (In Progress, In Review, or not even started): once its pull request has merged, the
+ * ticket needs moving. Testing can rightly come after a merge; Ready, Done and Closed are where a merged one goes. */
+export const lagsMerge = (issue: LinearIssue) => !isReady(issue) && !isFinished(issue) && issue.state_type !== "canceled" && issue.state.trim().toLowerCase() !== "testing";
+
+/** The pull request of `issue` that merged in this repository (one of the latest GitHub listed), when there is one. */
+function mergedPull(issue: LinearIssue, r: RepoStatus): RepoStatus["merged"][number] | null {
+  return r.merged.find((m) => isIssueOf(issue, { number: m.number, github: r.github, branch: m.branch, title: m.title })) ?? null;
+}
+
+const MOVED = "Merged · move the ticket";
+
+/** A short fingerprint of `text` (not for secrets: only to tell one list from another). */
+const hash = (text: string) => [...text].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0, 7).toString(36);
 
 /** The pull request Linear has linked to `issue` in this repository, when it has one. */
 function linkedPull(issue: LinearIssue, github: string | null): number | null {
@@ -384,7 +399,13 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     // The issue by name, so a row says what it is the work of (and why it sits under its feature), not only its identifier.
     const named = issue.title.trim() ? `${issue.identifier} ${issue.title.trim()}` : issue.identifier;
     const tag = issue.project ? `${named} · ${issue.project}` : named;
-    return [{ ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` }];
+    const marked: WorkItem = { ...item, issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title }, bare: item.meta, meta: `${tag} · ${item.meta}` };
+    // Merged, and Linear still says it is being worked on: the ticket is behind, which is louder than waiting for a release.
+    if (item.key.includes(":merged:") && lagsMerge(issue)) {
+      const { fold: _quiet, ...moved } = marked;
+      return [{ ...moved, tone: "move", word: MOVED, sig: `move:${issue.state}` }];
+    }
+    return [marked];
   });
   const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
   // A feature (Linear project) is going while any issue of yours in it isn't finished: only then its finished issues are listed.
@@ -417,6 +438,28 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
       });
       continue;
     }
+    // Its pull request merged and Linear wasn't told: it isn't on its way, or work to start, but a ticket to move.
+    const pull = r && lagsMerge(issue) ? mergedPull(issue, r) : null;
+    if (r && pull) {
+      out.push({
+        key: `linear:${issue.identifier}`,
+        repo: r.repo,
+        name: short(r),
+        github: r.github,
+        number: pull.number,
+        branch: pull.branch || null,
+        title: `${issue.identifier} ${issue.title}`,
+        stage: "release",
+        tone: "move",
+        word: MOVED,
+        meta: [issue.project, `still ${issue.state || "open"} in Linear`, `merged ${ago(now, time(pull.merged_at))}`].filter(Boolean).join(" · "),
+        at: time(pull.merged_at),
+        next: null,
+        sig: `move:${issue.state}`,
+        issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
+      });
+      continue;
+    }
     const due = issue.due ? Date.parse(`${issue.due}T23:59:59`) : NaN;
     const soon = (issue.priority === 1 || issue.priority === 2) || (Number.isFinite(due) && due - now < SOON_MS);
     const ok = !!r && safeIssueId(issue.identifier) && safeIssueUrl(issue.url);
@@ -433,7 +476,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
         branch: null,
         title: `${issue.identifier} ${issue.title}`,
         stage: ready ? "release" : "review",
-        tone: "wait",
+        tone: ready ? "ready" : "wait",
         word: issue.state,
         meta: [issue.project, ready && "merged, waiting for a release", !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
         at: null,
@@ -466,7 +509,54 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
       issue: { identifier: issue.identifier, url: issue.url, project: issue.project, title: issue.title },
     });
   }
-  return out;
+  return [...out, ...moveSteps(out, repos)];
+}
+
+/**
+ * A step for each feature whose tickets are behind their merged pull requests: a chat moves them all in Linear, after asking. It
+ * names each issue by its identifier and link, and its pull request by repository and number, never by what Linear or GitHub
+ * call them.
+ */
+function moveSteps(items: WorkItem[], repos: RepoStatus[] | null): WorkItem[] {
+  const by = new Map<string, WorkItem[]>();
+  for (const i of items) {
+    if (i.tone !== "move" || !i.issue || !i.repo || !safeIssueId(i.issue.identifier) || !safeIssueUrl(i.issue.url)) continue;
+    const k = i.issue.project ?? "";
+    by.set(k, [...(by.get(k) ?? []), i]);
+  }
+  return [...by.entries()].flatMap(([feature, moving]): WorkItem[] => {
+    const r = repos?.find((x) => x.repo === moving[0].repo);
+    if (!r) return [];
+    const ids = moving.map((i) => i.issue!.identifier).sort();
+    const listed = moving.map((i) => `${i.issue!.identifier} (${i.issue!.url})${i.number !== null && i.github ? `, ${prRef({ ...r, github: i.github }, i.number)}` : ""}`).join("; ");
+    return [
+      {
+        key: `linear-move:${feature}`,
+        repo: r.repo,
+        name: short(r),
+        github: r.github,
+        number: null,
+        branch: null,
+        title: feature || "issues in no feature",
+        stage: "release",
+        tone: "move",
+        word: `${plural(moving.length, "ticket")} behind ${moving.length === 1 ? "its pull request" : "their pull requests"}`,
+        meta: `${short(r)} · ${ids.join(", ")}`,
+        at: null,
+        next: {
+          kind: "move",
+          what: "Update Linear for",
+          yours: true,
+          button: "Update Linear…",
+          onBranch: false,
+          text: `${plural(moving.length, "Linear issue")} of mine still ${moving.length === 1 ? "says it is" : "say they are"} being worked on, but ${moving.length === 1 ? "its pull request has" : "their pull requests have"} merged: ${listed}. Read each with your Linear tools and check its pull request merged with gh. Move each to the state that follows a merge in its team's workflow (Ready, if the team has it), never to Done. List them with the state you'll set and ask me with request_approval before you change anything in Linear.`,
+        },
+        // Short (a phone is sent at most 80 characters of it) and changing whenever the tickets behind do.
+        sig: `move:${ids.length}:${hash(ids.join(","))}`,
+        stepOnly: true,
+      },
+    ];
+  });
 }
 
 /** How your Linear issues stand in each project (feature) a repository's work is in: how many are being worked on, and how many
@@ -476,7 +566,7 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
   for (const i of items) {
     if (i.repo !== repo || !i.issue?.project) continue;
     const p = by.get(i.issue.project) ?? { doing: new Set<string>(), todo: 0 };
-    if (i.tone === "done") continue;
+    if (i.tone === "done" || i.tone === "ready") continue;
     if (i.tone === "todo") p.todo++;
     else p.doing.add(i.issue.identifier);
     by.set(i.issue.project, p);
@@ -536,7 +626,7 @@ export function groupWork(items: WorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.tone !== "done" && i.issue).map((i) => i.issue!.identifier)).size,
+      doing: new Set(g.items.filter((i) => i.tone !== "todo" && i.tone !== "done" && i.tone !== "ready" && i.issue).map((i) => i.issue!.identifier)).size,
       todo: g.items.filter((i) => i.tone === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || ordered.indexOf(a.items[0]) - ordered.indexOf(b.items[0]) || a.label.localeCompare(b.label));
@@ -548,7 +638,7 @@ export function byFeature(items: WorkItem[]): FeatureGroup[] {
 }
 
 /** The states a filter offers, in the order shown, with how many items are in each (done included: it is listed, only quieter). */
-export const FILTER_TONES: Tone[] = ["bad", "you", "wait", "local", "todo", "done"];
+export const FILTER_TONES: Tone[] = ["bad", "you", "move", "wait", "local", "todo", "ready", "done"];
 
 export function stateCounts(items: WorkItem[]): Partial<Record<Tone, number>> {
   const n: Partial<Record<Tone, number>> = {};

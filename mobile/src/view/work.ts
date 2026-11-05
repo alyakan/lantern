@@ -5,12 +5,12 @@
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { ago } from "./home";
 
-export type Tone = "bad" | "wait" | "you" | "local" | "todo" | "done";
+export type Tone = "bad" | "wait" | "you" | "move" | "local" | "todo" | "ready" | "done";
 export type GroupBy = "feature" | "project" | "none";
 
-export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", wait: "waiting", local: "local only", todo: "not started", done: "done" };
+export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", move: "needs moving", wait: "waiting", local: "local only", todo: "not started", ready: "ready", done: "done" };
 /** The states a filter offers, in the order shown. */
-export const FILTER_TONES: Tone[] = ["bad", "you", "wait", "local", "todo", "done"];
+export const FILTER_TONES: Tone[] = ["bad", "you", "move", "wait", "local", "todo", "ready", "done"];
 
 const STAGES: { stage: string; label: string }[] = [
   { stage: "issue", label: "Issue" },
@@ -54,8 +54,8 @@ export function metaUnder(item: RemoteWorkItem, now: number, heading: string | n
   return heading === null ? meta : meta.split(" · ").filter((part) => part !== heading).join(" · ");
 }
 
-/** What to do next: yours to decide first, then what is blocked, then branches to push, then issues to start. */
-const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, todo: 3, wait: 4, done: 5 };
+/** What to do next: yours to decide first, then what is blocked, then tickets to move, then branches to push, then issues to start. */
+const ORDER: Record<Tone, number> = { you: 0, bad: 1, move: 2, local: 3, todo: 4, wait: 5, ready: 6, done: 7 };
 export function nextSteps(items: RemoteWorkItem[]): RemoteWorkItem[] {
   return items.filter((i) => i.next).sort((a, b) => ORDER[toneOf(a)] - ORDER[toneOf(b)]);
 }
@@ -88,7 +88,7 @@ export function groupItems(items: RemoteWorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => toneOf(i) !== "todo" && toneOf(i) !== "done" && i.issue).map((i) => i.issue)).size,
+      doing: new Set(g.items.filter((i) => !["todo", "ready", "done"].includes(toneOf(i)) && i.issue).map((i) => i.issue)).size,
       todo: g.items.filter((i) => toneOf(i) === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || items.indexOf(a.items[0]) - items.indexOf(b.items[0]) || a.label.localeCompare(b.label));

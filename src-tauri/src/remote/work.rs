@@ -15,7 +15,7 @@ const KEY_MAX: usize = 240;
 const BLIND_MAX: usize = 5;
 
 const STAGES: &[&str] = &["issue", "local", "pr", "checks", "review", "merge", "release"];
-const TONES: &[&str] = &["bad", "wait", "you", "local", "todo", "done"];
+const TONES: &[&str] = &["bad", "wait", "you", "move", "local", "todo", "ready", "done"];
 const FOLDS: &[&str] = &["ready", "done"];
 
 /// What the window says of the user's work: the shape the phone is sent, checked and cut here.

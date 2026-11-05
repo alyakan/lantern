@@ -25,15 +25,20 @@ const GROUP_SHOWN = 4;
 const LIST_SHOWN = 8;
 const COLUMN_MAX = 640;
 
-/** A state's colour: the Mac's (red blocked, blue your call, amber on its way, purple local only, grey not started, green done). */
+/** A state's colour, the Mac's: only what needs you is loud (red blocked, blue your call, amber a ticket to move); slate on its way,
+ * purple local only, grey not started, teal Ready, green done. */
 function toneColor(tone: Tone, c: Palette): string {
   switch (tone) {
     case "bad":
       return c.stop;
     case "you":
       return c.cobalt;
-    case "wait":
+    case "move":
       return c.isDark ? "#e0a43a" : "#a86b00";
+    case "wait":
+      return c.isDark ? "#8b9bb4" : "#5b6b82";
+    case "ready":
+      return c.isDark ? "#3fc1c6" : "#0f8a8f";
     case "local":
       return c.isDark ? "#b794f4" : "#7c4fd0";
     case "todo":
@@ -44,7 +49,7 @@ function toneColor(tone: Tone, c: Palette): string {
 }
 
 /** An item's colour: its state's, or the warning amber when its step goes around a rule (merging a pull request nobody approved). */
-const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "wait" : toneOf(item), c);
+const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "move" : toneOf(item), c);
 
 /** What happened to a step asked for: where it went, or why it didn't. Kept while the item stays in the state it was asked in. */
 interface Outcome {

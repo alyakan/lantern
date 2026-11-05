@@ -163,7 +163,7 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
 function FoldRow({ fold, items, issues, feature }: { fold: Fold; items: WorkItem[]; issues: boolean; feature: string | null }) {
   const [open, setOpen] = useState(false);
   return (
-    <li className={`dp-row yw-row yw-foldrow yw-tone-${fold === "done" ? "done" : "wait"}`}>
+    <li className={`dp-row yw-row yw-foldrow yw-tone-${fold}`}>
       <button className="yw-fold" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? "Fold them away" : "Show them"}>
         <span className="chev" aria-hidden />
         <span className="yw-name">{foldWord(fold, items.length)}</span>
@@ -421,7 +421,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
 
 /** A project's work in a line on its tile: a coloured dot and a count for each state, blocked first. */
 export function WorkDots({ counts }: { counts: Partial<Record<WorkItem["tone"], number>> }) {
-  const order: WorkItem["tone"][] = ["bad", "you", "wait", "local", "todo"];
+  const order: WorkItem["tone"][] = ["bad", "you", "move", "wait", "local", "todo"];
   const shown = order.filter((t) => counts[t]);
   if (!shown.length) return <span className="muted">nothing open</span>;
   return (

@@ -3929,11 +3929,14 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-repo-num { color: var(--muted-text); font-variant-numeric: tabular-nums; }
 
 /* Your work: next steps, then where each piece stands as a row of nodes (Local › PR › Checks › Review › Merge › Release). A state
-   has one colour, in its dot, its word and its node: blocked red, your call blue, on its way amber, local only purple, done green. */
+   has one colour, in its dot, its word and its node. Only what needs you is loud: blocked red, your call blue, a ticket to move
+   amber; on its way slate, local only purple, Ready teal, done green. */
 .yw-tone-bad { --yw: var(--del); }
 .yw-tone-you { --yw: var(--yw-you); }
+.yw-tone-move { --yw: var(--attn-text); }
 .yw-tone-wait { --yw: var(--yw-wait); }
 .yw-tone-local { --yw: var(--yw-local); }
+.yw-tone-ready { --yw: var(--storage-5); }
 .yw-tone-done { --yw: var(--add); }
 .yw-tone-todo { --yw: var(--muted-text); }
 /* Several quiet pieces of work (Ready, or done) in one line that opens to them. */
@@ -3944,7 +3947,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
 .yw-row.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */
-.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: var(--attn-text); --yw-local: var(--storage-4); }
+.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
