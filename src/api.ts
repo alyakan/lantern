@@ -108,6 +108,8 @@ export const api = {
   hostedProviderConnect: (id: string, key: string) => invoke<HostedProvider[]>("hosted_provider_connect", { id, key }),
   hostedProviderDisconnect: (id: string) => invoke<HostedProvider[]>("hosted_provider_disconnect", { id }),
   conversationMetadata: (sessionId: string) => invoke<string | null>("conversation_metadata", { sessionId }),
+  /** Continues a long chat in a fresh session with only its words carried over (see continue_fresh in lib.rs). */
+  continueFresh: (slot: string) => invoke<void>("continue_fresh", { slot }),
   conversationSettings: (slot: string, change?: { provider?: string; model?: string | null; effort?: string | null }) => invoke<import("../mobile/src/protocol/generated/ConversationConfiguration").ConversationConfiguration>("conversation_settings", { slot, change: change ?? null }),
   conversationAction: (slot: string, action: "compact" | "clear") => invoke<void>("conversation_action", { slot, action }),
   onConversationConfigured: (f: (r: { slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }) => void) => listen<{ slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }>("conversation-configured", (e) => f(e.payload)),

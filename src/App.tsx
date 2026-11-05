@@ -1603,6 +1603,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * Switches a chat to a preset (and makes it its folder's): its claude restarts on the same session with the
    * preset's models, as for a new mode.
    */
+  /** A long chat goes on in a fresh session with only its words carried over: each message then sends far less. */
+  const continueFresh = (slot: string) => {
+    to(slot)({ type: "restarting", fresh: true });
+    api.continueFresh(slot).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+  };
   const switchHarness = (h: Harness, slot = active) => changeOrAsk(slot, { preset: h.id }, () => unlessBackground(slot, () => applyHarness(h, slot)));
   // `remember`: it also becomes the folder's preset, for the project's next chats; a phone's switch doesn't (nobody chose it at the Mac).
   const applyHarness = (h: Harness, slot: string, remember = true) => {
@@ -3231,7 +3236,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
-      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active) } : undefined }}
+      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active), ...(state.orchestrator ? {} : { onFresh: () => continueFresh(active) }) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       pendingSwitch={
         switches[active] && switches[active].phase === "waiting"

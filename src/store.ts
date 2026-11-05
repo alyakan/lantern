@@ -447,7 +447,7 @@ export type Action =
   | { type: "flavour_picked"; flavour: Flavour | null; explain?: boolean }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
-  | { type: "restarting" }
+  | { type: "restarting"; fresh?: boolean }
   | { type: "select_file"; path: string }
   | { type: "follow_latest" }
   | { type: "failed"; text: string }
@@ -979,6 +979,9 @@ export function reducer(state: State, action: Action): State {
         tokenBase: state.tokenBase + state.sessionTokens,
         sessionTokens: 0,
         items: denyPending(state.items),
+        // Continue fresh: a new session, whose context is its own (none until it reports it). Its first call isn't known: the
+        // messages before it stay on screen, so it doesn't look like a new conversation (see startsAfresh).
+        ...(action.fresh ? { contextUsed: null, firstCall: null } : {}),
       };
     case "select_file":
       return { ...state, selectedFile: action.path, follow: false };

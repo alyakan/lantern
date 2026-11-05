@@ -13,6 +13,23 @@ describe("formatDuration", () => {
 });
 
 describe("ContextMeter", () => {
+  it("offers Continue fresh on its own once a chat is long, even with room left in a big window", () => {
+    const onFresh = vi.fn();
+    render(<ContextMeter used={160_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn(), onFresh }} />);
+    expect(screen.getByText("Long chat")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue fresh" }));
+    expect(onFresh).toHaveBeenCalledOnce();
+  });
+
+  it("says nothing of a long chat below the mark, or where it can't be continued fresh", () => {
+    const { unmount } = render(<ContextMeter used={140_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn(), onFresh: vi.fn() }} />);
+    expect(screen.queryByText("Long chat")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue fresh" })).toBeNull();
+    unmount();
+    render(<ContextMeter used={160_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn() }} />);
+    expect(screen.queryByText("Long chat")).toBeNull();
+  });
+
   it("shows only the percentage, with token counts and timing on hover", () => {
     render(<ContextMeter used={61_480} window={200_000} running={false} lastTurnMs={8_200} />);
     const meter = screen.getByLabelText("31% of context used");

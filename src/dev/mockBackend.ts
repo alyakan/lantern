@@ -1779,6 +1779,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return null;
         }
         case "apply_harness":
+        case "continue_fresh":
           return null;
         case "close_session":
           delete slotMode[String(a.slot)];
