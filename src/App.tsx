@@ -116,6 +116,7 @@ import { PlanPaused } from "./components/PlanPaused";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { RecapLine, useRecap } from "./components/RecapLine";
+import type { PastedImage } from "./lib/images";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { DiffComment } from "./lib/diffComments";
@@ -1328,7 +1329,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // `auto`: sent by Lantern from agents' notes, not typed by the user.
   // `switchTo`: a flavour this message switches to itself (a page's button, the badge mid-chat), over any pick.
   const mapNoted = useRef<Record<string, string>>({});
-  const sendIn = (slot: string, text: string, draft?: string, auto = false, switchTo?: { flavour: Flavour; explain: boolean }) => {
+  const sendIn = (slot: string, text: string, draft?: string, auto = false, switchTo?: { flavour: Flavour; explain: boolean }, images?: PastedImage[]) => {
     const pick = switchTo?.flavour ?? chats.slots[slot]?.flavourPick ?? null;
     const explain = pick !== null && canExplain(pick) && (switchTo ? switchTo.explain : !!chats.slots[slot]?.explainPick);
     const chat = chats.slots[slot];
@@ -1338,7 +1339,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const map = chat && chat.mode === "steps" ? architectureMap(pagesOf(chat.items)) : null;
     const broken = map?.kind === "broken" && mapNoted.current[slot] !== map.page ? mapNote(map) : null;
     if (map?.kind === "broken" && broken) mapNoted.current[slot] = map.page;
-    to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick, ...(explain ? { explained: true } : {}) } : {}), ...(draft ? { draft } : {}) });
+    to(slot)({ type: "user_sent", text, ...(images?.length ? { images: images.length } : {}), ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick, ...(explain ? { explained: true } : {}) } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
@@ -1347,7 +1348,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const reverted = withRevertNote(withPageNote([unread, broken].filter(Boolean).join("\n\n") || null, pick ? withFlavourNote(pick, noted, { guide: guides[pick]?.text, explain, explainGuide: guides.explain?.text }) : noted), chats.slots[slot]?.revertNotes ?? []);
     // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
     const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
-    api.sendMessage(slot, withShellContext(items, moved), auto).then(
+    api.sendMessage(slot, withShellContext(items, moved), auto, images).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );
@@ -3250,11 +3251,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
-      onSend={(text, draft) => {
-        if (addTodoFromBox(text)) return;
+      onSend={(text, draft, images) => {
+        if (!images && addTodoFromBox(text)) return;
         // Starting something new instead: the chats from last time aren't offered any more.
         if (hero) setOffer([]);
-        sendIn(active, text, draft);
+        sendIn(active, text, draft, false, undefined, images);
       }}
       onStop={stop}
       onCancelStart={() => cancelStart(active)}

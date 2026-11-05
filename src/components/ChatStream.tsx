@@ -198,10 +198,10 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
           <div className="msg user">
             <CollapsibleText>{row.text}</CollapsibleText>
           </div>
-          {/* The pictures went to Claude and not here: only that they were sent is known. */}
+          {/* The pictures (pasted into the box, or from a phone) went to Claude and not here: only that they were sent is known. */}
           {!!row.images && (
             <div className="msg-note" role="note">
-              {row.images === 1 ? "1 photo from your phone" : `${row.images} photos from your phone`}
+              {row.images === 1 ? "1 picture sent with it" : `${row.images} pictures sent with it`}
             </div>
           )}
           <MessageActions text={row.text} align="end" actions={actions} />

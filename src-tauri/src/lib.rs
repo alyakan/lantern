@@ -2474,8 +2474,11 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 /// `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it.
-async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String, auto: Option<bool>) -> Result<usize, String> {
-    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &[], auto != Some(true)).await
+/// `images`: pictures pasted into the box, checked as a phone's are (see remote::protocol::check_images).
+async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String, auto: Option<bool>, images: Option<Vec<remote::protocol::RemoteImage>>) -> Result<usize, String> {
+    let images = images.unwrap_or_default();
+    remote::protocol::check_images(&images)?;
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &images, auto != Some(true)).await
 }
 
 /// Sends what the user typed (in the window, or on a paired phone: `sent_by`, with the `images` it attached) to chat `slot`.

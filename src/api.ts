@@ -10,6 +10,7 @@ import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, Re
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
+import type { PastedImage } from "./lib/images";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
@@ -126,7 +127,8 @@ export const api = {
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
   /** `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it. */
-  sendMessage: (slot: string, text: string, auto?: boolean) => invoke<number>("send_message", { slot, text, ...(auto ? { auto } : {}) }),
+  /** `images`: pictures pasted into the box (see lib/images.ts), sent to Claude with the text. */
+  sendMessage: (slot: string, text: string, auto?: boolean, images?: PastedImage[]) => invoke<number>("send_message", { slot, text, ...(auto ? { auto } : {}), ...(images?.length ? { images } : {}) }),
   /**
    * Asks a side question about the chat (`aside` names the popover's side chat, started by its first question): a read-only copy
    * of the chat's conversation answers it, as aside events. `model` null is the chat's own. Resolves to whether it has the
