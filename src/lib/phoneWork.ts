@@ -4,7 +4,9 @@
  * goes to a chat only when a step is asked for, on the Mac, from an item the phone saw as it is now (its `sig`).
  */
 import { safeIssueUrl } from "./linear";
-import { nextSteps, whereThingsStand, type WorkItem } from "./yourWork";
+import type { InboxRow } from "./deskBoard";
+import type { RepoStatus } from "../types";
+import { chatsOn, nextSteps, whereThingsStand, type WorkItem } from "./yourWork";
 
 export interface WindowWorkItem {
   key: string;
@@ -24,6 +26,12 @@ export interface WindowWorkItem {
   /** ready or done: quiet enough to fold with its kind in a list. */
   fold: string | null;
   next: { what: string; yours: boolean; button: string; warn: boolean } | null;
+  /** Its Linear issue's page, when `url` is the pull request's (or both are the issue's). */
+  issue_url: string | null;
+  branch: string | null;
+  stack: { id: number; pos: number; of: number; on: number | null } | null;
+  /** The chat open in a folder on its branch, which the phone can open. */
+  chat: { slot: string; title: string } | null;
 }
 
 export interface WindowWork {
@@ -48,8 +56,11 @@ function linkOf(item: WorkItem): string | null {
   return item.number !== null && item.github && SLUG.test(item.github) ? `https://github.com/${item.github}/pull/${item.number}` : null;
 }
 
+/** An item's quiet line: its issue by identifier only (its title and feature are on the item's details and its heading). */
+const quiet = (i: WorkItem): string => (i.bare !== undefined ? [i.issue?.identifier, i.bare].filter(Boolean).join(" · ") : i.meta);
+
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
-export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
+export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[], chats: InboxRow[] = [], repos: RepoStatus[] | null = null): WindowWork {
   const standing = whereThingsStand(items);
   // The phone is told only so many items: what is done (a feature's finished issues can be many) goes last, after the steps with no row of their own.
   const listed = standing.filter((i) => i.tone !== "done");
@@ -66,7 +77,7 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       stage: i.stage,
       tone: i.tone,
       word: i.word,
-      meta: i.at !== null ? i.meta.replace(RELATIVE, "{ago}") : i.meta,
+      meta: i.at !== null ? quiet(i).replace(RELATIVE, "{ago}") : quiet(i),
       at: i.at,
       number: i.number,
       feature: i.issue?.project ?? null,
@@ -76,6 +87,10 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       step_only: !!i.stepOnly,
       fold: i.fold ?? null,
       next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button, warn: !!i.next.warn } : null,
+      issue_url: i.issue && safeIssueUrl(i.issue.url) ? i.issue.url : null,
+      branch: i.branch,
+      stack: i.stack ?? null,
+      chat: (([c]) => (c ? { slot: c.slot, title: c.title } : null))(chatsOn(i, chats, repos)),
     })),
   };
 }

@@ -14,6 +14,8 @@ export function formatDuration(ms: number): string {
 /** The share of the context used from which the meter warns (amber), and from which it's nearly full (red). */
 export const WARN_AT = 75;
 export const FULL_AT = 90;
+/** From this many tokens a chat is long whatever its window: every message sends all of it, so Continue fresh is offered. */
+export const LONG_AT = 150_000;
 
 interface Props {
   /** Tokens in the conversation so far; null before the first reply. */
@@ -22,8 +24,8 @@ interface Props {
   window: number | null;
   running: boolean;
   lastTurnMs: number | null;
-  /** Compact and Clear, shown when the meter warns or is clicked, and only while Claude isn't working. */
-  actions?: { onCompact: () => void; onClear: () => void };
+  /** Compact, Clear and Continue fresh, shown when the meter warns, the chat is long, or the meter is clicked; only while Claude isn't working. */
+  actions?: { onCompact: () => void; onClear: () => void; onFresh?: () => void };
   /** What the session has cost and used so far, for the tooltip (each known or not, see lib/cost.ts). */
   session?: { cost: number | null; tokens: number };
 }
@@ -47,7 +49,9 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   const percent = used !== null && window !== null ? Math.round(Math.min(used / window, 1) * 100) : null;
   // The warning is said in words as well as colour: the label is what a screen reader and a colour-blind reader get.
   const level = percent === null ? null : percent >= FULL_AT ? "full" : percent >= WARN_AT ? "warn" : null;
-  const note = level === "full" ? "Nearly full" : level === "warn" ? "Getting full" : null;
+  // Said only where it can be acted on: a chat that can Continue fresh.
+  const long = !!actions?.onFresh && used !== null && used >= LONG_AT;
+  const note = level === "full" ? "Nearly full" : level === "warn" ? "Getting full" : long ? "Long chat" : null;
   const details = [
     used !== null && (window !== null ? `${used.toLocaleString()} of ${window.toLocaleString()} tokens of context used` : `${used.toLocaleString()} tokens of context used (the window isn't known until a turn ends)`),
     lastTurnMs !== null && `Last turn took ${formatDuration(lastTurnMs)}`,
@@ -55,7 +59,7 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   ].filter(Boolean).join("\n");
   const shown = percent !== null ? `${percent}%` : used !== null ? shortTokens(used) : "";
   const label = percent !== null ? `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}` : used !== null ? `${used.toLocaleString()} tokens of context used, window not known yet` : "";
-  const showActions = !!actions && !running && (level !== null || open);
+  const showActions = !!actions && !running && (level !== null || long || open);
 
   return (
     <span className={`context-meter${level ? ` ${level}` : ""}`} title={details || undefined}>
@@ -80,6 +84,11 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
           <button type="button" className="ghost context-clear" title="Starts a new conversation in this folder (sends /clear). The files stay as they are." onClick={actions.onClear}>
             Clear
           </button>
+          {actions.onFresh && (
+            <button type="button" className="ghost context-fresh" title="Goes on in a fresh session with only the words of this conversation carried over (no tool output), so each message sends far less. The messages stay on screen." onClick={actions.onFresh}>
+              Continue fresh
+            </button>
+          )}
         </span>
       )}
     </span>

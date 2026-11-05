@@ -54,6 +54,8 @@ impl Totals {
                         cost_usd: u["costUSD"].as_f64().unwrap_or(0.0),
                         input_tokens: u["inputTokens"].as_u64().unwrap_or(0) + u["cacheReadInputTokens"].as_u64().unwrap_or(0) + u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
                         output_tokens: u["outputTokens"].as_u64().unwrap_or(0),
+                        cache_read_tokens: u["cacheReadInputTokens"].as_u64().unwrap_or(0),
+                        cache_write_tokens: u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
                     })
                     .collect()
             })
@@ -78,12 +80,15 @@ impl Totals {
         };
         let mut models = Vec::with_capacity(self.models.len());
         for m in &self.models {
-            let (was_cost, was_in, was_out) = before.models.iter().find(|p| p.model == m.model).map_or((0.0, 0, 0), |p| (p.cost_usd, p.input_tokens, p.output_tokens));
+            let was = before.models.iter().find(|p| p.model == m.model);
+            let (was_cost, was_in, was_out) = was.map_or((0.0, 0, 0), |p| (p.cost_usd, p.input_tokens, p.output_tokens));
+            let (was_read, was_write) = was.map_or((0, 0), |p| (p.cache_read_tokens, p.cache_write_tokens));
             let (input_tokens, output_tokens) = (m.input_tokens.checked_sub(was_in)?, m.output_tokens.checked_sub(was_out)?);
+            let (cache_read_tokens, cache_write_tokens) = (m.cache_read_tokens.checked_sub(was_read)?, m.cache_write_tokens.checked_sub(was_write)?);
             if m.cost_usd < was_cost {
                 return None;
             }
-            models.push(ModelCost { model: m.model.clone(), cost_usd: m.cost_usd - was_cost, input_tokens, output_tokens });
+            models.push(ModelCost { model: m.model.clone(), cost_usd: m.cost_usd - was_cost, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens });
         }
         Some(Turn { cost, tokens: Totals::tokens(&models), models })
     }
@@ -848,6 +853,8 @@ mod tests {
         assert!(session_cost_usd.is_some_and(|c| (c - 0.25).abs() < 1e-9));
         let UiEvent::ModelUsage { models } = &second[0] else { panic!("{second:?}") };
         assert_eq!(models.iter().map(|m| (m.model.as_str(), m.input_tokens, m.output_tokens)).collect::<Vec<_>>(), vec![("haiku", 10, 5), ("opus", 700, 70)]);
+        // And of the input, what the turn read from the cache and wrote to it.
+        assert_eq!(models.iter().map(|m| (m.cache_read_tokens, m.cache_write_tokens)).collect::<Vec<_>>(), vec![(0, 0), (600, 0)]);
         assert!(models.iter().map(|m| m.cost_usd).zip([0.03, 0.12]).all(|(c, want)| (c - want).abs() < 1e-9));
         // A total that went down (a count this doesn't follow) gives no share, rather than a wrong one.
         let reset = p.parse_line(r#"{"type":"result","total_cost_usd":0.05,"modelUsage":{}}"#);

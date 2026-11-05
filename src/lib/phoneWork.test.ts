@@ -5,7 +5,7 @@ import { withLinear, yourWork } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
-const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks: "pass", review: null, mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
+const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, base: "main", draft: false, checks: "pass", review: null, mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
 const issue = (identifier: string, over: Partial<LinearIssue> = {}): LinearIssue => ({ identifier, title: `Issue ${identifier}`, url: `https://linear.app/a/issue/${identifier}`, priority: 1, due: null, state: "Todo", state_type: "unstarted", team: "ENG", project: "Sync", project_id: "p", branch: null, links: [], ...over });
 const linearWork = (issues: LinearIssue[]): LinearWork => ({ connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues, error: null });
 
@@ -63,8 +63,8 @@ describe("Your work for a phone", () => {
     const items = withLinear(yourWork([r], NOW), linearWork([issue("ENG-1", { state: "In Progress", state_type: "started" }), issue("ENG-2", done)]), { "/p/lantern": "ENG" }, [r], NOW);
     const told = phoneWork(items, true, true, []).items;
     expect(told.map((i) => [i.key.split(":").slice(1).join(":"), i.step_only, i.tone])).toEqual([
-      ["merged:9", false, "you"],
       ["ENG-1", false, "todo"],
+      ["merged:9", false, "ready"],
       ["release", true, "you"],
       ["ENG-2", false, "done"],
     ]);
@@ -76,9 +76,9 @@ describe("Your work for a phone", () => {
     const told = phoneWork(yourWork([r], NOW), false, true, []).items;
     expect(told.map((i) => [i.key.split(":").slice(1).join(":"), i.step_only])).toEqual([
       ["pr:2", false],
-      // Both are yours to do something about: the one that moved last comes first.
-      ["merged:9", false],
+      // Yours to merge comes before what is merged and only waits for a release.
       ["pr:1", false],
+      ["merged:9", false],
       ["release", true],
     ]);
   });

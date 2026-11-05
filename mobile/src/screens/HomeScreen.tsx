@@ -468,6 +468,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     return (
       <>
         <WorkScreen
+          onOpenChat={onOpenChat}
           top={
             <>
               {top}

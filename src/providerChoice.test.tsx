@@ -62,7 +62,7 @@ describe("with one provider", () => {
     const [start] = started();
     expect(start.claudePath).toBe("/Users/you/.local/bin/claude");
     // Nothing about providers goes with the start, as for a window that has never heard of them.
-    expect(Object.keys(start.settings).sort()).toEqual(["advisor", "auto_approve", "effort", "mode", "model", "subagent_model"]);
+    expect(Object.keys(start.settings).sort()).toEqual(["advisor", "auto_approve", "effort", "mode", "model", "plugins_off", "subagent_model"]);
     openMode();
     expect(pickable()).toEqual(["Ask", "Auto"]);
   });

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
-import { filterWork, FILTER_TONES, foldRows, foldWord, groupWork, nextSteps, STAGES, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
-import type { RepoStatus } from "../types";
+import { PROJECT_COLORS } from "../lib/projectColors";
+import { chatsOn, searchTerms, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
+import type { ChatHit, ChatSearchResults, RepoStatus } from "../types";
 import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
@@ -23,7 +24,64 @@ export interface YourWorkProps {
   standFirst?: boolean;
   /** Only Next: the Desk's cross-project actions, while each project's page carries the board (see #desk-v2). */
   nextOnly?: boolean;
+  /** Opens a chat on the Desk (an item's details offer the one on its branch). */
+  onOpen?: (slot: string) => void;
 }
+
+/** History's search over every past chat, and opening one of them: an item's details find the last chat about it with them. */
+export const PastChats = createContext<{ find?: (query: string) => Promise<ChatSearchResults>; open?: (id: string, folder: string) => void }>({});
+
+/** The newest past chat about `item`, by its branch, then its issue, then its pull request (undefined while it looks; null: none). */
+function useLastChat(item: WorkItem): ChatHit | null | undefined {
+  const { find } = useContext(PastChats);
+  const [last, setLast] = useState<ChatHit | null | undefined>(find ? undefined : null);
+  const terms = searchTerms(item).join("\n");
+  useEffect(() => {
+    if (!find) return;
+    let live = true;
+    void (async () => {
+      for (const term of terms.split("\n").filter(Boolean)) {
+        const found = await find(term).catch(() => null);
+        if (!live) return;
+        const hit = found && !found.cancelled ? found.chats[0] : undefined;
+        if (hit) return setLast(hit);
+      }
+      setLast(null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [find, terms]);
+  return last;
+}
+
+const ago = (ms: number) => {
+  const m = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`;
+};
+
+/** Each project's colour in the sidebar (folder → index into PROJECT_COLORS): an item's tag says its project in it. */
+export const ProjectColors = createContext<Record<string, number>>({});
+
+/** Which project an item is in, as a tag in the project's sidebar colour: only where items of several projects are listed. */
+const Tagged = createContext<{ on: boolean; repos: RepoStatus[] | null }>({ on: false, repos: null });
+
+function ProjectTag({ item }: { item: WorkItem }) {
+  const colors = useContext(ProjectColors);
+  const { on, repos } = useContext(Tagged);
+  if (!on) return null;
+  const r = repos?.find((x) => x.repo === item.repo);
+  const index = [item.repo, ...(r?.folders.map((f) => f.folder) ?? [])].map((f) => colors[f]).find((i) => i !== undefined);
+  const color = index !== undefined ? PROJECT_COLORS[index] : undefined;
+  return (
+    <span className="yw-project-tag" style={color ? ({ "--tag": color } as CSSProperties) : undefined} title={`In ${item.name}`}>
+      {item.name}
+    </span>
+  );
+}
+
+/** Opens an item's details: every row and step can. */
+const Pick = createContext<(item: WorkItem) => void>(() => {});
 
 /** The rows of "Where things stand" shown before "Show N more": all of it in one list, or each group's; and Next's. */
 const SHOWN = 8;
@@ -61,35 +119,6 @@ function Nodes({ item, issues }: { item: WorkItem; issues: boolean }) {
         </li>
       ))}
     </ol>
-  );
-}
-
-function Num({ item }: { item: WorkItem }) {
-  if (item.number === null) return null;
-  const n = <span className="yw-num">#{item.number}</span>;
-  return item.github ? (
-    <ExternalLink className="desk-pr-link" href={`https://github.com/${item.github}/pull/${item.number}`}>
-      {n}
-    </ExternalLink>
-  ) : (
-    n
-  );
-}
-
-/** Its number (a link to GitHub) and its title, or only its title; an issue not started links to Linear. */
-function Named({ item }: { item: WorkItem }) {
-  if (item.tone === "todo" && item.issue)
-    return (
-      <ExternalLink className="desk-pr-link" href={item.issue.url}>
-        {item.title}
-      </ExternalLink>
-    );
-  return item.number === null ? (
-    <>{item.title}</>
-  ) : (
-    <>
-      <Num item={item} /> {item.title}
-    </>
   );
 }
 
@@ -138,24 +167,118 @@ function IssueChip({ item, feature }: { item: WorkItem; feature: string | null }
   );
 }
 
-/** One item where it stands: a bar in its state's colour, its name and state, the issue it is the work of, a quiet line, and its
- * path as nodes. */
-function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: boolean; feature?: string | null }) {
-  // An issue not started is named by its title already. Under its feature's heading, the feature isn't said again.
-  const chip = !!item.issue && item.tone !== "todo";
-  const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature).join(" · ");
+/** The class a stacked pull request's row adds: a rail joins it to the ones above and under it. */
+const stackClass = (item: WorkItem) => (item.stack ? ` yw-stacked${item.stack.pos === 1 ? " yw-stack-first" : ""}${item.stack.pos === item.stack.of ? " yw-stack-last" : ""}` : "");
+
+/** One item where it stands, on two lines: a bar in its state's colour, its name and state, then a quiet line (its issue, where it
+ * is, its place in a stack). The rest (its path, links, the chat on it, its step) is in its details, which a click opens. */
+function StandRow({ item, feature = null }: { item: WorkItem; issues: boolean; feature?: string | null }) {
+  const pick = useContext(Pick);
+  const tagged = useContext(Tagged).on;
+  const line = lineOf(item, feature, tagged);
   return (
-    <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}`}>
-      <span className="dp-row-top">
+    <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}${stackClass(item)}`}>
+      <button className="yw-open" onClick={() => pick(item)} aria-haspopup="dialog" title="Details, links and the chat on it">
         <span className="dp-title yw-name">
-          <Named item={item} />
+          {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
         </span>
-        <span className="dp-aside yw-word">{item.word}</span>
-      </span>
-      {chip && <IssueChip item={item} feature={feature} />}
-      {meta && <span className="dp-meta">{meta}</span>}
-      <Nodes item={item} issues={issues} />
+        {/* Its tags, on a line of their own: the project (where several are listed), then where it stands. */}
+        <span className="yw-tags">
+          <ProjectTag item={item} />
+          <span className="yw-word">{item.word}</span>
+        </span>
+        {line && <span className="dp-meta">{line}</span>}
+      </button>
     </li>
+  );
+}
+
+/**
+ * An item's details: where it stands and its path, its issue, branch and place in a stack, and what can be done with it: its step,
+ * the chat on its branch, and its pages on GitHub and Linear.
+ */
+function WorkDetail({ item, issues, chats, repos, onStep, onOpen, onClose }: { item: WorkItem; issues: boolean; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"]; onOpen?: (slot: string) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || el.open) return;
+    // jsdom has no showModal: there, the attribute alone opens it.
+    if (el.showModal) el.showModal();
+    else el.setAttribute("open", "");
+  }, []);
+  const on = chatsOn(item, chats, repos);
+  const past = useContext(PastChats);
+  const last = useLastChat(item);
+  const lastTitle = last ? last.title.map((p) => p.text).join("") || "Untitled chat" : "";
+  const pr = item.number !== null && item.github ? `https://github.com/${item.github}/pull/${item.number}` : null;
+  const linear = item.issue && safeIssueUrl(item.issue.url) ? item.issue.url : null;
+  const facts = [item.name, item.branch, item.stack ? stackWord(item.stack) : null].filter(Boolean).join(" · ");
+  return (
+    <dialog
+      ref={ref}
+      className={`revert-dialog yw-detail yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}`}
+      aria-labelledby={titleId}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="revert-body">
+        <div className="revert-title" id={titleId}>
+          {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
+        </div>
+        <p className="yw-detail-state">
+          <ProjectTag item={item} />
+          <span className="yw-word">{item.word}</span>
+          <span className="dp-meta">{facts}</span>
+        </p>
+        <Nodes item={item} issues={issues} />
+        {item.issue && !item.key.startsWith("linear:") && <IssueChip item={item} feature={null} />}
+        {item.key.startsWith("linear:") && item.issue?.project && <p className="dp-meta">In {item.issue.project}</p>}
+        {item.next && (
+          <div className="yw-detail-step dp-aside">
+            <span className="yw-detail-what">{item.next.what}…</span>
+            <StepButton item={item} chats={chats} repos={repos} onStep={onStep} />
+          </div>
+        )}
+        <div className="revert-actions yw-detail-actions">
+          {onOpen && on[0] && (
+            <button
+              title={`Open "${on[0].title}", the chat on its branch`}
+              onClick={() => {
+                onClose();
+                onOpen(on[0].slot);
+              }}
+            >
+              Open chat
+            </button>
+          )}
+          {past.open && last === undefined && (
+            <button disabled title="Searching your past chats for its branch, issue and pull request">
+              Finding its last chat…
+            </button>
+          )}
+          {past.open && last && (
+            <button
+              title={`"${lastTitle}", ${ago(last.updated_ms)}: the newest chat that mentions it`}
+              onClick={() => {
+                onClose();
+                past.open!(last.id, last.folder);
+              }}
+            >
+              Last chat · {lastTitle.length > 32 ? `${lastTitle.slice(0, 31)}…` : lastTitle}
+            </button>
+          )}
+          {pr && <ExternalLink className="yw-detail-link" href={pr}>GitHub</ExternalLink>}
+          {linear && <ExternalLink className="yw-detail-link" href={linear}>Linear</ExternalLink>}
+          <button className="primary" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 
@@ -163,7 +286,7 @@ function StandRow({ item, issues, feature = null }: { item: WorkItem; issues: bo
 function FoldRow({ fold, items, issues, feature }: { fold: Fold; items: WorkItem[]; issues: boolean; feature: string | null }) {
   const [open, setOpen] = useState(false);
   return (
-    <li className={`dp-row yw-row yw-foldrow yw-tone-${fold === "done" ? "done" : "wait"}`}>
+    <li className={`dp-row yw-row yw-foldrow yw-tone-${fold}`}>
       <button className="yw-fold" aria-expanded={open} onClick={() => setOpen(!open)} title={open ? "Fold them away" : "Show them"}>
         <span className="chev" aria-hidden />
         <span className="yw-name">{foldWord(fold, items.length)}</span>
@@ -295,8 +418,12 @@ function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen }: YourWorkProps) {
   const [all, setAll] = useState(false);
+  // Items of several projects in one list (the Desk's own Next, or grouped by feature or none): each says its project in a tag.
+  const tagged = (repos?.length ?? 0) > 1;
+  // The item whose details are open, by key: it stays open as the item moves on, and closes if it goes.
+  const [picked, setPicked] = useState<string | null>(null);
   const [allNext, setAllNext] = useState(false);
   const [chosen, setChosen] = usePersistentState<GroupBy | "auto">("desk.work.groupBy", "auto");
   const [only, setOnly] = useState<Tone[]>([]);
@@ -369,17 +496,20 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
               {nextShown.map((i) => (
                 <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}${i.next!.warn ? " yw-warn" : ""}`}>
                   <span className="dp-row-top">
-                    <span className="dp-title yw-name">
-                      {i.next!.what} <Named item={i} />
-                    </span>
+                    <button className="dp-title yw-name yw-open" onClick={() => setPicked(i.key)} aria-haspopup="dialog" title="Details, links and the chat on it">
+                      {i.next!.what} {i.number !== null && <><span className="yw-num">#{i.number}</span> </>}{i.title}
+                    </button>
                     <span className="dp-aside">
-                      {/* Yours to decide is said outright (a step that goes around a rule says so); otherwise the pill is where it stands, in its state's colour. */}
-                      <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
                       <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
                     </span>
                   </span>
-                  {i.issue && i.tone !== "todo" && <IssueChip item={i} feature={null} />}
-                  <span className="dp-meta">{i.next!.yours ? `${i.word} · ${i.bare ?? i.meta}` : (i.bare ?? i.meta)}</span>
+                  {/* Its tags, on a line of their own: the project (where several are listed), then yours to decide said outright (a step that
+                      goes around a rule says so), or where it stands, in its state's colour. */}
+                  <span className="yw-tags">
+                    <ProjectTag item={i} />
+                    <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
+                  </span>
+                  <span className="dp-meta">{i.next!.yours ? `${i.word} · ${lineOf(i, null, tagged)}` : lineOf(i, null, tagged)}</span>
                 </li>
               ))}
             </ul>
@@ -415,13 +545,21 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
           )}
         </Card>
   ) : null;
-  if (nextOnly) return nextCard;
-  return <>{standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}</>;
+  const shownItem = picked ? items.find((i) => i.key === picked) : undefined;
+  const detail = shownItem && <WorkDetail item={shownItem} issues={issues} chats={chats} repos={repos} onStep={onStep} onOpen={onOpen} onClose={() => setPicked(null)} />;
+  return (
+    <Tagged.Provider value={{ on: tagged, repos }}>
+    <Pick.Provider value={(i) => setPicked(i.key)}>
+      {nextOnly ? nextCard : standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}
+      {detail}
+    </Pick.Provider>
+    </Tagged.Provider>
+  );
 }
 
 /** A project's work in a line on its tile: a coloured dot and a count for each state, blocked first. */
 export function WorkDots({ counts }: { counts: Partial<Record<WorkItem["tone"], number>> }) {
-  const order: WorkItem["tone"][] = ["bad", "you", "wait", "local", "todo"];
+  const order: WorkItem["tone"][] = ["bad", "you", "move", "wait", "local", "todo"];
   const shown = order.filter((t) => counts[t]);
   if (!shown.length) return <span className="muted">nothing open</span>;
   return (

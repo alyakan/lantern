@@ -219,6 +219,14 @@ export interface State {
   mcpTools: string[];
   /** What the last turn cost per model (main, subagents', advisor's). */
   modelUsage: ModelCost[];
+  /**
+   * Input tokens since the chat started, and how many of them were read from the prompt cache (cheap): from each turn's
+   * share, so not a process's first turn, whose share isn't known (see stream_parser.rs).
+   */
+  inputSeen: number;
+  cacheReadSeen: number;
+  /** How big the conversation's first call was: what every message starts from (the prompt, tools, skills, CLAUDE.md…). */
+  firstCall: number | null;
   /** The claude process's running totals (what the session has cost and used so far), null until a turn reports. */
   sessionCost: number | null;
   sessionTokens: number;
@@ -308,6 +316,12 @@ export interface BackgroundTask {
 }
 
 /** What the chat has cost so far, across restarts of its claude. */
+/**
+ * Whether the conversation's next call is its first: no earlier turns behind it (a reopened chat's first call carries its
+ * whole history, which isn't what each message starts from) and at most the one message that starts it.
+ */
+const startsAfresh = (s: State) => s.earlierTurns === 0 && s.items.filter((i) => i.type === "user").length <= 1;
+
 export const totalCost = (s: Pick<State, "costBase" | "costSeen">) => s.costBase + s.costSeen;
 /** Every token this chat's claude processes have read and written, its advisor's calls included. */
 export const totalTokens = (s: Pick<State, "tokenBase" | "sessionTokens">) => s.tokenBase + s.sessionTokens;
@@ -342,6 +356,9 @@ export const initialState: State = {
   models: [],
   mcpTools: [],
   modelUsage: [],
+  inputSeen: 0,
+  cacheReadSeen: 0,
+  firstCall: null,
   sessionCost: null,
   sessionTokens: 0,
   cleared: false,
@@ -430,7 +447,7 @@ export type Action =
   | { type: "flavour_picked"; flavour: Flavour | null; explain?: boolean }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
-  | { type: "restarting" }
+  | { type: "restarting"; fresh?: boolean }
   | { type: "select_file"; path: string }
   | { type: "follow_latest" }
   | { type: "failed"; text: string }
@@ -540,7 +557,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], inputSeen: 0, cacheReadSeen: 0, firstCall: null, sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -665,8 +682,10 @@ function applyEvent(state: State, ev: UiEvent): State {
       const summary = ev.outcome === "unavailable" ? `unavailable${ev.error_code ? ` (${ev.error_code})` : ""}` : ev.outcome;
       return { ...state, items: mapTools(state.items, ev.id, (t) => ({ ...t, summary, status: ev.outcome === "unavailable" ? "error" : "done", endedAt: Date.now() })) };
     }
-    case "model_usage":
-      return { ...state, modelUsage: ev.models };
+    case "model_usage": {
+      const sum = (f: (m: ModelCost) => number) => ev.models.reduce((n, m) => n + f(m), 0);
+      return { ...state, modelUsage: ev.models, inputSeen: state.inputSeen + sum((m) => m.input_tokens), cacheReadSeen: state.cacheReadSeen + sum((m) => m.cache_read_tokens ?? 0) };
+    }
     case "test_run": {
       const run: TestRunItem = { id: ev.tool_use_id, command: ev.command, run: ev.run };
       const others = state.testRuns.filter((r) => r.id !== run.id);
@@ -675,7 +694,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "retrying":
       return { ...state, banner: { kind: "info", text: `Retrying (${ev.attempt}/${ev.max_retries}): ${ev.error}`, action: null } };
     case "context_used":
-      return { ...state, contextUsed: ev.tokens };
+      return { ...state, contextUsed: ev.tokens, firstCall: state.firstCall ?? (startsAfresh(state) ? ev.tokens : null) };
     case "task_started":
       return ev.tool_use_id ? { ...state, backgroundRuns: { ...state.backgroundRuns, [ev.tool_use_id]: { status: "running" } } } : state;
     case "task_ended":
@@ -694,7 +713,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
     // Lantern runs /clear by starting the agent afresh, so no turn ends it: the chat is free again here.
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
+      return { ...state, items: [], sessionId: null, contextUsed: null, firstCall: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: signInText(state.provider), action: null }
@@ -960,6 +979,9 @@ export function reducer(state: State, action: Action): State {
         tokenBase: state.tokenBase + state.sessionTokens,
         sessionTokens: 0,
         items: denyPending(state.items),
+        // Continue fresh: a new session, whose context is its own (none until it reports it). Its first call isn't known: the
+        // messages before it stay on screen, so it doesn't look like a new conversation (see startsAfresh).
+        ...(action.fresh ? { contextUsed: null, firstCall: null } : {}),
       };
     case "select_file":
       return { ...state, selectedFile: action.path, follow: false };

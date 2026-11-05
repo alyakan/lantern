@@ -4,9 +4,10 @@ import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
 import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, workOfRepo, yourWork, type WorkItem } from "./yourWork";
 
-const NOW = new Date(2026, 10, 2, 18, 0).getTime();
+// A fixed moment in UTC, not local time: the fixtures' times are UTC strings, so "merged 6h ago" must not depend on the machine's zone.
+const NOW = Date.UTC(2026, 10, 2, 16, 0);
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
-const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
+const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, base: "main", draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
 const one = (p: RepoStatus["prs"][number]) => yourWork([repo({ prs: [p] })], NOW)[0];
 const chat = (slot: string, folder: string, state: InboxRow["state"] = "done"): InboxRow => ({ slot, title: `Chat ${slot}`, folder, where: "lantern", workflow: "Chat", state, unread: false, at: null, line: "" });
 
@@ -43,6 +44,37 @@ describe("Your work", () => {
     // Conflicts, failing checks and requested changes still come first.
     expect(one(pr(1, { checks: "fail" })).next?.warn).toBeUndefined();
     expect(one(pr(1, { review: "CHANGES_REQUESTED" })).next?.warn).toBeUndefined();
+  });
+
+  it("finds stacks by base branch, keeps each together bottom first, and merges one up to a pull request only when all under it can", () => {
+    const ready = { review: "APPROVED", merge_state: "CLEAN" };
+    const r = repo({ prs: [pr(3, { ...ready, branch: "s3", base: "s2" }), pr(9, { checks: "fail" }), pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1", base: "main" })] });
+    const items = yourWork([r], NOW);
+    const by = (n: number) => items.find((i) => i.number === n)!;
+    expect([1, 2, 3].map((n) => by(n).stack)).toEqual([
+      { id: 1, pos: 1, of: 3, on: null },
+      { id: 1, pos: 2, of: 3, on: 1 },
+      { id: 1, pos: 3, of: 3, on: 2 },
+    ]);
+    expect(by(9).stack).toBeUndefined();
+    // The bottom one merges on its own; one above it merges the stack up to it, into the bottom's base, after one approval card.
+    expect([by(1).next!.button, by(2).next!.button, by(3).next!.button]).toEqual(["Merge…", "Merge stack to here…", "Merge stack to here…"]);
+    expect(by(3).word).toBe("Ready to merge · 3 in the stack");
+    expect(by(3).next!.text).toContain("#1, #2, #3 in aly/lantern, into the bottom one's base branch (main)");
+    expect(by(3).next!.text).toContain("request_approval once, naming every pull request");
+    expect(whereThingsStand(items).map((i) => i.number)).toEqual([9, 1, 2, 3]);
+    // One under it that can't be merged holds it.
+    const held = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { checks: "pending", branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect([held.tone, held.word, held.next]).toEqual(["wait", "Waiting on #1", null]);
+    // Its own trouble comes first: failing checks are fixed whatever is under it.
+    const own = yourWork([repo({ prs: [pr(2, { checks: "fail", branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect(own.next!.kind).toBe("checks");
+    // One under it is someone else's: it is never merged from here.
+    const theirs = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1", author: "sara" })] })], NOW).find((i) => i.number === 2)!;
+    expect([theirs.tone, theirs.word, theirs.next]).toEqual(["wait", "Stacked on #1 by @sara", null]);
+    // Nobody approved one of them: the stack's merge goes around the rule, and says so.
+    const bypass = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect([bypass.next!.warn, bypass.next!.text.includes("bypasses a required review")]).toEqual([true, true]);
   });
 
   it("follows your pull requests and the ones that ask you to review, not everyone's", () => {
@@ -206,10 +238,51 @@ describe("Your work with Linear", () => {
     const items = withLinear([], work([issue("ENG-5", review), issue("ENG-6", ready)]), { "/p/lantern": "ENG" }, [r], NOW);
     expect(items.map((i) => [i.title, i.stage, i.tone, i.word, i.next])).toEqual([
       ["ENG-5 Issue ENG-5", "review", "wait", "In Review", null],
-      ["ENG-6 Issue ENG-6", "release", "wait", "Ready", null],
+      ["ENG-6 Issue ENG-6", "release", "ready", "Ready", null],
     ]);
     expect(items[1].meta).toBe("Testo integration · merged, waiting for a release");
     expect(projectsOf(items, "/p/lantern").map((p) => p.todo)).toEqual([0]);
+  });
+
+  it("says a ticket needs moving when its pull request merged and Linear still has it In Progress or In Review, and offers to update the feature", () => {
+    const merged = (number: number, branch: string, title = `PR ${number}`) => ({ number, title, author: "aly", branch, merged_at: "2026-11-02T10:00:00Z" });
+    // No release in this repository (as on a team that ships elsewhere): nothing merged is listed for one, only matched to its issue.
+    const m = repo({ merged: [merged(20, "aly/eng-20-x"), merged(21, "b21"), merged(22, "aly/eng-22-y"), merged(23, "b23"), { ...merged(25, "sara/eng-24-follow-up"), author: "sara" }] });
+    const issues = [
+      issue("ENG-20", review),
+      issue("ENG-21", { state: "In Progress", state_type: "started", project: "Testo integration", links: ["https://github.com/aly/lantern/pull/21"] }),
+      // Testing can rightly come after a merge, and Ready is where a merged one goes: neither is behind.
+      issue("ENG-22", { state: "Testing", state_type: "completed", project: "Testo integration" }),
+      issue("ENG-23", { ...ready, links: ["https://github.com/aly/lantern/pull/23"] }),
+      // No pull request of it merged (only someone else's follow-up that names it): on its way, as before.
+      issue("ENG-24", review),
+    ];
+    const items = withLinear(yourWork([m], NOW), work(issues), { "/p/lantern": "ENG" }, [m], NOW);
+    expect(items.filter((i) => !i.stepOnly).map((i) => [i.issue?.identifier, i.tone, i.word, i.number])).toEqual([
+      ["ENG-20", "move", "Merged · move the ticket", 20],
+      ["ENG-21", "move", "Merged · move the ticket", 21],
+      ["ENG-22", "wait", "Testing", null],
+      ["ENG-23", "ready", "Ready", null],
+      ["ENG-24", "wait", "In Review", null],
+    ]);
+    expect(items[1].meta).toBe("Testo integration · still In Progress in Linear · merged 6h ago");
+    // One step for the feature: a chat moves them in Linear, after asking; it is told identifiers, links and numbers, never titles.
+    const step = nextSteps(items).find((i) => i.next?.kind === "move")!;
+    expect([step.key, step.title, step.word, step.tone, step.stepOnly, step.next!.yours]).toEqual(["linear-move:Testo integration", "Testo integration", "2 tickets behind their pull requests", "move", true, true]);
+    expect(step.next!.text).toContain("ENG-20 (https://linear.app/acme/issue/ENG-20), pull request #20 in aly/lantern; ENG-21 (https://linear.app/acme/issue/ENG-21), pull request #21 in aly/lantern");
+    expect(step.next!.text).toMatch(/never to Done\. .*request_approval before you change anything in Linear\.$/);
+    expect(step.next!.text).not.toContain("Issue ENG-20");
+    expect(targetFor(step, [], [m])).toEqual({ kind: "new", folder: "/p/lantern" });
+    expect(step.sig.length).toBeLessThanOrEqual(80);
+  });
+
+  it("says a merged pull request waiting for a release needs its ticket moved while Linear has the issue In Review", () => {
+    const m = repo({ release: { tag: "v1", published_at: "2026-11-01T00:00:00Z" }, merged: [{ number: 30, title: "PR 30", author: "aly", branch: "aly/eng-30-z", merged_at: "2026-11-02T10:00:00Z" }, { number: 31, title: "PR 31", author: "aly", branch: "aly/eng-31-z", merged_at: "2026-11-02T11:00:00Z" }] });
+    const items = withLinear(yourWork([m], NOW), work([issue("ENG-30", review), issue("ENG-31", ready)]), { "/p/lantern": "ENG" }, [m], NOW);
+    expect(items.filter((i) => i.key.includes(":merged:")).map((i) => [i.number, i.tone, i.word, i.fold ?? null])).toEqual([
+      [30, "move", "Merged · move the ticket", null],
+      [31, "ready", "Merged · not released", "ready"],
+    ]);
   });
 
   it("marks the Ready issues to fold, and not the ones In Review, and hides none of them", () => {

@@ -3,14 +3,15 @@
  * drawn here. The same rules as the Mac's Desk (src/lib/yourWork.ts); nothing here decides what a step is or sends.
  */
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
+import type { RemoteWorkStack } from "../protocol/generated/RemoteWorkStack";
 import { ago } from "./home";
 
-export type Tone = "bad" | "wait" | "you" | "local" | "todo" | "done";
+export type Tone = "bad" | "wait" | "you" | "move" | "local" | "todo" | "ready" | "done";
 export type GroupBy = "feature" | "project" | "none";
 
-export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", wait: "waiting", local: "local only", todo: "not started", done: "done" };
+export const TONE_WORD: Record<Tone, string> = { bad: "blocked", you: "your call", move: "needs moving", wait: "waiting", local: "local only", todo: "not started", ready: "ready", done: "done" };
 /** The states a filter offers, in the order shown. */
-export const FILTER_TONES: Tone[] = ["bad", "you", "wait", "local", "todo", "done"];
+export const FILTER_TONES: Tone[] = ["bad", "you", "move", "wait", "local", "todo", "ready", "done"];
 
 const STAGES: { stage: string; label: string }[] = [
   { stage: "issue", label: "Issue" },
@@ -54,8 +55,22 @@ export function metaUnder(item: RemoteWorkItem, now: number, heading: string | n
   return heading === null ? meta : meta.split(" · ").filter((part) => part !== heading).join(" · ");
 }
 
-/** What to do next: yours to decide first, then what is blocked, then branches to push, then issues to start. */
-const ORDER: Record<Tone, number> = { you: 0, bad: 1, local: 2, todo: 3, wait: 4, done: 5 };
+/** A stack's place in words: "stack 2 of 3 · on #410". */
+export const stackWord = (s: RemoteWorkStack): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
+
+/** A row's quiet line: what `metaUnder` says, and its place in a stack. */
+export const lineUnder = (item: RemoteWorkItem, now: number, heading: string | null): string => [metaUnder(item, now, heading), item.stack ? stackWord(item.stack) : ""].filter(Boolean).join(" · ");
+
+/** An item's pages: its pull request on GitHub and its issue on Linear, each only when it is one this phone opens. */
+export function linksOf(item: RemoteWorkItem): { github: string | null; linear: string | null } {
+  const url = safeLink(item.url) ? item.url : null;
+  const github = url?.startsWith("https://github.com/") ? url : null;
+  const linear = safeLink(item.issue_url) ? item.issue_url : url?.startsWith("https://linear.app/") ? url : null;
+  return { github, linear };
+}
+
+/** What to do next: yours to decide first, then what is blocked, then tickets to move, then branches to push, then issues to start. */
+const ORDER: Record<Tone, number> = { you: 0, bad: 1, move: 2, local: 3, todo: 4, wait: 5, ready: 6, done: 7 };
 export function nextSteps(items: RemoteWorkItem[]): RemoteWorkItem[] {
   return items.filter((i) => i.next).sort((a, b) => ORDER[toneOf(a)] - ORDER[toneOf(b)]);
 }
@@ -88,7 +103,7 @@ export function groupItems(items: RemoteWorkItem[], by: GroupBy): WorkGroup[] {
     .map(([key, g]) => ({
       key,
       ...g,
-      doing: new Set(g.items.filter((i) => toneOf(i) !== "todo" && toneOf(i) !== "done" && i.issue).map((i) => i.issue)).size,
+      doing: new Set(g.items.filter((i) => !["todo", "ready", "done"].includes(toneOf(i)) && i.issue).map((i) => i.issue)).size,
       todo: g.items.filter((i) => toneOf(i) === "todo").length,
     }))
     .sort((a, b) => Number(a.plain) - Number(b.plain) || items.indexOf(a.items[0]) - items.indexOf(b.items[0]) || a.label.localeCompare(b.label));

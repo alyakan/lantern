@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import type { Chats } from "../sessions";
-import { modelLine, modelShares, teamWarning, usageRows, workingTeams } from "./usage";
+import { modelLine, modelShares, promptLine, teamWarning, usageRows, workingTeams } from "./usage";
 
 const chat = (over: Partial<State> = {}): State => ({ ...initialState, folder: "/p/acme-api", status: "idle", ...over });
 const used = (cost: number, tokens: number, over: Partial<State> = {}) => chat({ costSeen: cost, sessionCost: cost, sessionTokens: tokens, ...over });
@@ -25,6 +25,16 @@ describe("what each model took", () => {
 
   it("says <1% for a sliver", () => {
     expect(modelLine([{ name: "Haiku", share: 0.004 }])).toBe("Haiku <1%");
+  });
+});
+
+describe("what each message starts from", () => {
+  it("says how big a chat's first call was and how much of its input came from the cache", () => {
+    const rows = usageRows({ active: "s1", slots: { s1: used(0.5, 90_000, { firstCall: 42_300, inputSeen: 200_000, cacheReadSeen: 182_000 }) }, agents: {} } as unknown as Chats);
+    expect(rows[0]).toMatchObject({ start: 42_300, cached: 0.91 });
+    expect(promptLine(rows[0])).toBe("starts at 42k · 91% from cache");
+    expect(promptLine({ start: null, cached: null })).toBeNull();
+    expect(promptLine({ start: 3_400, cached: null })).toBe("starts at 3.4k");
   });
 });
 

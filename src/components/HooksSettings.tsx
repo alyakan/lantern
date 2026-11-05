@@ -11,7 +11,7 @@ export interface HooksSettingsProps {
 
 const KINDS: { kind: HookKind; title: string; when: string; example: string }[] = [
   { kind: "pre", title: "Before", when: "Goes in front of your first message in a chat, and of the first one after the chat is compacted. Claude does it before answering you.", example: "Check the brain's summary about this project." },
-  { kind: "post", title: "After", when: "Sent as a turn of its own each time Claude has answered a message. It isn't sent after a turn that failed or was stopped, after a slash command, or in Step by step.", example: "Update the brain if needed." },
+  { kind: "post", title: "After", when: "Sent as a turn of its own after Claude has answered a message and did some work since it last ran (used a tool: read, edited, ran a command). Each run sends the whole chat again, so it isn't sent after an answer that only talked, a turn that failed or was stopped, or a slash command. In Step by step it follows only the Done page.", example: "Update the brain if needed." },
 ];
 
 const CHOICES: { choice: HookChoice; label: string }[] = [

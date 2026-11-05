@@ -1,3 +1,4 @@
+import { formatTokens } from "./cost";
 import { basename } from "./diff";
 import { modelName } from "./harness";
 import { nodeStatus } from "./orchestraView";
@@ -24,6 +25,10 @@ export interface UsageRow {
   cost: number;
   tokens: number;
   models: ModelShare[];
+  /** How big the first call was (what every message starts from); null until it is known, or for a team. */
+  start: number | null;
+  /** The share (0 to 1) of input read from the prompt cache since the first message; null before any is known. */
+  cached: number | null;
   /** A team's Lead and its agents, in canvas order: this row is the team and its figures are the total. */
   members?: UsageRow[];
 }
@@ -62,12 +67,35 @@ export function modelShares(states: State[]): ModelShare[] {
   return running.map((name) => ({ name, share: null }));
 }
 
+/** "starts at 42k · 91% from cache": what each message starts from, and how much of what it sends is cheap. Null if neither is known. */
+export function promptLine(r: Pick<UsageRow, "start" | "cached">): string | null {
+  const start = formatTokens(r.start)?.replace(/ tokens$/, "");
+  const parts = [start ? `starts at ${start}` : null, r.cached === null ? null : `${Math.round(r.cached * 100)}% from cache`].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** "Sonnet 62%, Opus 38%"; "<1%" for a sliver, no figure when none is known. */
 export function modelLine(models: ModelShare[]): string {
   return models.map((m) => (m.share === null ? m.name : `${m.name} ${m.share < 0.01 ? "<1" : Math.round(m.share * 100)}%`)).join(", ");
 }
 
-const rowOf = (slot: string, name: string, s: State): UsageRow => ({ slot, name, project: s.folder ? basename(s.folder) : "", state: stateOf(s), cost: totalCost(s), tokens: totalTokens(s), models: modelShares([s]) });
+/** The share of `states`' input read from the cache; null when none is known yet. */
+const cachedOf = (states: State[]): number | null => {
+  const input = states.reduce((n, s) => n + s.inputSeen, 0);
+  return input > 0 ? states.reduce((n, s) => n + s.cacheReadSeen, 0) / input : null;
+};
+
+const rowOf = (slot: string, name: string, s: State): UsageRow => ({
+  slot,
+  name,
+  project: s.folder ? basename(s.folder) : "",
+  state: stateOf(s),
+  cost: totalCost(s),
+  tokens: totalTokens(s),
+  models: modelShares([s]),
+  start: s.firstCall,
+  cached: cachedOf([s]),
+});
 const used = (r: Pick<UsageRow, "cost" | "tokens" | "state">) => r.cost > 0 || r.tokens > 0 || r.state === "working";
 
 /** Biggest spender first: by cost, then by tokens (all that is known when there are no costs). */
@@ -97,6 +125,8 @@ export function usageRows(chats: Chats, titles: Record<string, string> = {}): Us
       cost: members.reduce((sum, m) => sum + m.cost, 0),
       tokens: members.reduce((sum, m) => sum + m.tokens, 0),
       models: modelShares([s, ...agentsOf(slot).map(([id]) => chats.slots[id])]),
+      start: null,
+      cached: cachedOf([s, ...agentsOf(slot).map(([id]) => chats.slots[id])]),
       members: members.sort((a, b) => (a.slot === slot ? -1 : b.slot === slot ? 1 : biggest(a, b))),
     };
     if (members.some(used)) rows.push(team);

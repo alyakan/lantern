@@ -6,7 +6,7 @@ import { setWeekUsage } from "../lib/weekUsage";
 import { DAY_SECS, HOUR_SECS, SESSION_SECS, windowMarks } from "../lib/usageMarks";
 import { PlanMeter } from "./PlanMeter";
 
-const row = (over: Partial<UsageRow>): UsageRow => ({ slot: "s1", name: "Fix the login", project: "acme-api", state: "idle", cost: 0, tokens: 0, models: [], ...over });
+const row = (over: Partial<UsageRow>): UsageRow => ({ slot: "s1", name: "Fix the login", project: "acme-api", state: "idle", cost: 0, tokens: 0, models: [], start: null, cached: null, ...over });
 
 describe("the plan meter", () => {
   it("says how full the five-hour window is and when it resets, and warns from 80% and stops at 95%", () => {
