@@ -433,9 +433,10 @@ export function searchTerms(item: WorkItem): string[] {
 /** A stack's place in words: "stack 2 of 3 · on #410". */
 export const stackWord = (s: StackPlace): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
 
-/** What the item's own line says, quietly: its issue, where it is (without a feature the heading says), and its place in a stack. */
-export function lineOf(item: WorkItem, feature: string | null): string {
-  const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature);
+/** What the item's own line says, quietly: its issue, where it is (without a feature the heading says, or its project when a tag
+ * says that), and its place in a stack. */
+export function lineOf(item: WorkItem, feature: string | null, tagged = false): string {
+  const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature && !(tagged && part === item.name));
   return [item.issue && !item.key.startsWith("linear:") ? item.issue.identifier : null, ...meta, item.stack ? stackWord(item.stack) : null].filter(Boolean).join(" · ");
 }
 

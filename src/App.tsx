@@ -104,7 +104,7 @@ import { useDeskStatus } from "./lib/deskStatus";
 import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
 import { phoneWork } from "./lib/phoneWork";
 import { stepMessage, targetFor, unknownViewer, withLinear, yourWork } from "./lib/yourWork";
-import { markStepSent, PastChats, stepSentTo } from "./components/YourWork";
+import { markStepSent, PastChats, ProjectColors, stepSentTo } from "./components/YourWork";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -3319,6 +3319,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             deskShown ? (
               <ErrorBoundary name="desk">
                 <PastChats.Provider value={pastChats}>
+                <ProjectColors.Provider value={projectColors}>
                 <DeskView
                   chats={deskRows}
                   projects={projectRows(
@@ -3358,6 +3359,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onAsk={() => setAskSheet(true)}
                   linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
+                </ProjectColors.Provider>
                 </PastChats.Provider>
               </ErrorBoundary>
             ) : showCanvas ? (

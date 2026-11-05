@@ -4,7 +4,7 @@ import type { InboxItem } from "../lib/inbox";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import type { RepoStatus } from "../types";
 import { DeskView, type DeskViewProps } from "./DeskView";
-import { forgetSent, PastChats } from "./YourWork";
+import { forgetSent, PastChats, ProjectColors } from "./YourWork";
 
 const item = (slot: string, over: Partial<InboxItem> = {}): InboxItem => ({ key: slot, slot, kind: "permission", role: "chat", team: null, title: `Chat ${slot}`, where: "lantern", need: `Wants to use Bash in ${slot}`, since: Date.now() - 60_000, requestId: `r-${slot}`, canAllow: true, detail: `npm test ${slot}`, needsYou: true, ...over });
 const row = (n: number, over: Partial<InboxRow> = {}): InboxRow => ({ slot: `s${n}`, title: `Chat ${n}`, folder: "/p/lantern", where: "lantern", workflow: "Chat", state: "done", unread: false, at: Date.now() - n * 60_000, line: `Did thing ${n}.`, ...over });
@@ -272,6 +272,22 @@ describe("the Desk", () => {
     expect(find.mock.calls.map((c) => c[0])).toEqual(["aly/eng-1-sync", "ENG-1"]);
     fireEvent.click(last);
     expect(open).toHaveBeenCalledWith("sess-1", "/p/wt");
+  });
+
+  it("tags each of Next's steps with its project, in the project's sidebar colour, when the Desk has several", () => {
+    const props = { chats: [], projects: [project("/p/lantern"), project("/p/web")], needs: [], page: null, onPage: vi.fn(), onNewChat: vi.fn(), onOpen: vi.fn(), onGo: vi.fn(), onDecide: vi.fn(), onStep: vi.fn(() => true), onRefreshRepos: vi.fn(), onAsk: vi.fn() };
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail")] }), repo("/p/web", { github: "aly/web", prs: [pr(3, "fail")] })];
+    render(
+      <ProjectColors.Provider value={{ "/p/web": 2 }}>
+        <DeskView {...props} repos={repos} />
+      </ProjectColors.Provider>,
+    );
+    const next = screen.getByRole("region", { name: "Next" });
+    const tags = [...next.querySelectorAll(".yw-project-tag")] as HTMLElement[];
+    expect(tags.map((t) => t.textContent).sort()).toEqual(["lantern", "web"]);
+    expect(tags.find((t) => t.textContent === "web")!.style.getPropertyValue("--tag")).toBe("#c2255c");
+    // The quiet line no longer says the project the tag says.
+    expect(within(next).getByText("b3")).toBeInTheDocument();
   });
 
   it("doesn't send to a chat on the branch that is busy", () => {

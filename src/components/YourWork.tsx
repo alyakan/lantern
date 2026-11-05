@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { InboxRow } from "../lib/deskBoard";
 import { usePersistentState } from "../lib/layout";
+import { PROJECT_COLORS } from "../lib/projectColors";
 import { chatsOn, searchTerms, filterWork, FILTER_TONES, foldRows, foldWord, groupWork, lineOf, nextSteps, STAGES, stackWord, stateCounts, targetFor, toneCounts, TONE_WORD, unknownViewer, type Fold, type GroupBy, type Target, type Tone, type WorkGroup, type WorkItem, type WorkRow } from "../lib/yourWork";
 import type { ChatHit, ChatSearchResults, RepoStatus } from "../types";
 import { Card } from "./DeskCard";
@@ -58,6 +59,26 @@ const ago = (ms: number) => {
   const m = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
   return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`;
 };
+
+/** Each project's colour in the sidebar (folder → index into PROJECT_COLORS): an item's tag says its project in it. */
+export const ProjectColors = createContext<Record<string, number>>({});
+
+/** Which project an item is in, as a tag in the project's sidebar colour: only where items of several projects are listed. */
+const Tagged = createContext<{ on: boolean; repos: RepoStatus[] | null }>({ on: false, repos: null });
+
+function ProjectTag({ item }: { item: WorkItem }) {
+  const colors = useContext(ProjectColors);
+  const { on, repos } = useContext(Tagged);
+  if (!on) return null;
+  const r = repos?.find((x) => x.repo === item.repo);
+  const index = [item.repo, ...(r?.folders.map((f) => f.folder) ?? [])].map((f) => colors[f]).find((i) => i !== undefined);
+  const color = index !== undefined ? PROJECT_COLORS[index] : undefined;
+  return (
+    <span className="yw-project-tag" style={color ? ({ "--tag": color } as CSSProperties) : undefined} title={`In ${item.name}`}>
+      {item.name}
+    </span>
+  );
+}
 
 /** Opens an item's details: every row and step can. */
 const Pick = createContext<(item: WorkItem) => void>(() => {});
@@ -153,11 +174,13 @@ const stackClass = (item: WorkItem) => (item.stack ? ` yw-stacked${item.stack.po
  * is, its place in a stack). The rest (its path, links, the chat on it, its step) is in its details, which a click opens. */
 function StandRow({ item, feature = null }: { item: WorkItem; issues: boolean; feature?: string | null }) {
   const pick = useContext(Pick);
-  const line = lineOf(item, feature);
+  const tagged = useContext(Tagged).on;
+  const line = lineOf(item, feature, tagged);
   return (
     <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}${stackClass(item)}`}>
       <button className="yw-open" onClick={() => pick(item)} aria-haspopup="dialog" title="Details, links and the chat on it">
         <span className="dp-row-top">
+          <ProjectTag item={item} />
           <span className="dp-title yw-name">
             {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
           </span>
@@ -203,6 +226,7 @@ function WorkDetail({ item, issues, chats, repos, onStep, onOpen, onClose }: { i
     >
       <div className="revert-body">
         <div className="revert-title" id={titleId}>
+          <ProjectTag item={item} />{" "}
           {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
         </div>
         <p className="yw-detail-state">
@@ -395,6 +419,8 @@ function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }
  */
 export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen }: YourWorkProps) {
   const [all, setAll] = useState(false);
+  // Items of several projects in one list (the Desk's own Next, or grouped by feature or none): each says its project in a tag.
+  const tagged = (repos?.length ?? 0) > 1;
   // The item whose details are open, by key: it stays open as the item moves on, and closes if it goes.
   const [picked, setPicked] = useState<string | null>(null);
   const [allNext, setAllNext] = useState(false);
@@ -469,6 +495,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
               {nextShown.map((i) => (
                 <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}${i.next!.warn ? " yw-warn" : ""}`}>
                   <span className="dp-row-top">
+                    <ProjectTag item={i} />
                     <button className="dp-title yw-name yw-open" onClick={() => setPicked(i.key)} aria-haspopup="dialog" title="Details, links and the chat on it">
                       {i.next!.what} {i.number !== null && <><span className="yw-num">#{i.number}</span> </>}{i.title}
                     </button>
@@ -478,7 +505,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
                       <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
                     </span>
                   </span>
-                  <span className="dp-meta">{i.next!.yours ? `${i.word} · ${lineOf(i, null)}` : lineOf(i, null)}</span>
+                  <span className="dp-meta">{i.next!.yours ? `${i.word} · ${lineOf(i, null, tagged)}` : lineOf(i, null, tagged)}</span>
                 </li>
               ))}
             </ul>
@@ -517,10 +544,12 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const shownItem = picked ? items.find((i) => i.key === picked) : undefined;
   const detail = shownItem && <WorkDetail item={shownItem} issues={issues} chats={chats} repos={repos} onStep={onStep} onOpen={onOpen} onClose={() => setPicked(null)} />;
   return (
+    <Tagged.Provider value={{ on: tagged, repos }}>
     <Pick.Provider value={(i) => setPicked(i.key)}>
       {nextOnly ? nextCard : standFirst ? <>{standCard}{nextCard}</> : <>{nextCard}{standCard}</>}
       {detail}
     </Pick.Provider>
+    </Tagged.Provider>
   );
 }
 
