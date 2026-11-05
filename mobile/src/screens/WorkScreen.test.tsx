@@ -34,7 +34,7 @@ beforeEach(() => {
   mockSaveGrouping.mockClear();
 });
 
-const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, ...over });
+const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
 const step = (what = "Fix failing checks on", over: Partial<NonNullable<RemoteWorkItem["next"]>> = {}) => ({ what, yours: false, button: "Do it", warn: false, ...over });
 
 const work: RemoteWork = {
@@ -49,10 +49,10 @@ const work: RemoteWork = {
   ],
 };
 
-async function open(answers: Record<string, unknown> = {}, features = ["desk", "work"]) {
+async function open(answers: Record<string, unknown> = {}, features = ["desk", "work"], onOpenChat = jest.fn()) {
   const { controller } = makeController();
   const session = attachSession(controller, { work, ...answers }, features);
-  await renderWith(<HomeScreen onOpenChat={jest.fn()} onReview={jest.fn()} onOpenMac={jest.fn()} onCompose={jest.fn()} onNewChat={jest.fn()} onSupport={jest.fn()} />, { connection: connectedWith(features), chats: [chat({ slot: "a" })] }, controller);
+  await renderWith(<HomeScreen onOpenChat={onOpenChat} onReview={jest.fn()} onOpenMac={jest.fn()} onCompose={jest.fn()} onNewChat={jest.fn()} onSupport={jest.fn()} />, { connection: connectedWith(features), chats: [chat({ slot: "a" })] }, controller);
   await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
   return { session, controller };
 }
@@ -195,7 +195,7 @@ describe("Your work on the phone", () => {
     await fireEvent.press(card("Next").getByRole("button", { name: "Show 3 more" }));
     const all = within(screen.getByLabelText("All next steps"));
     expect(all.getByText(/More c/)).toBeTruthy();
-    expect(all.getAllByRole("button", { name: /^(Fix failing checks on|Merge|Start)/ })).toHaveLength(6);
+    expect(all.getAllByRole("button", { name: /^(Fix failing checks on|Merge|Start) (#\d+|.+)$/ }).filter((b) => b.props.accessibilityHint !== "Opens its details")).toHaveLength(6);
     await fireEvent.press(all.getByRole("button", { name: "Fix failing checks on #22" }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(session.lastOf("work_step")).toEqual({ op: "work_step", key: "more-c", sig: "m2" });
@@ -208,15 +208,33 @@ describe("Your work on the phone", () => {
     expect(session.lastOf("work_refresh")).toEqual({ op: "work_refresh" });
   });
 
-  it("opens a pull request or issue page, and never a link that isn't on GitHub or Linear", async () => {
+  it("opens an item's details from its name, with its pages on GitHub and Linear, and never a link that isn't one of them", async () => {
     const open_ = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
-    const evil = { ...work, items: [...work.items, item("x", { title: "Sneaky", tone: "bad", url: "https://evil.example/https://github.com/", next: step() })] };
+    const evil = { ...work, items: [...work.items, item("x", { title: "Sneaky", tone: "bad", url: "https://evil.example/https://github.com/", issue_url: "https://evil.example/", next: step() })] };
     await open({ work: evil });
-    await fireEvent.press(card("Next").getByRole("link", { name: /Retry fetchJson/ }));
+    await fireEvent.press(card("Next").getByRole("button", { name: /Retry fetchJson/ }));
+    const details = within(screen.getByLabelText("Details"));
+    await fireEvent.press(details.getByRole("button", { name: "GitHub" }));
     expect(open_).toHaveBeenCalledWith("https://github.com/aly/lantern/pull/7");
-    expect(card("Next").queryByRole("link", { name: /Sneaky/ })).toBeNull();
-    expect(card("Next").getByText(/Sneaky/)).toBeTruthy();
+    await fireEvent.press(details.getByRole("button", { name: "Done" }));
+    await fireEvent.press(card("Next").getAllByRole("button", { name: /Sneaky/ })[0]);
+    const sneaky = within(screen.getByLabelText("Details"));
+    expect(sneaky.queryByRole("button", { name: "GitHub" })).toBeNull();
+    expect(sneaky.queryByRole("button", { name: "Linear" })).toBeNull();
     open_.mockRestore();
+  });
+
+  it("shows a stack's rows with their place, and opens the chat on an item's branch from its details", async () => {
+    const onOpenChat = jest.fn();
+    const stacked = { ...work, items: [item("s1", { number: 1, title: "Base", tone: "you", stack: { id: 1, pos: 1, of: 2, on: null } }), item("s2", { number: 2, title: "Top", stack: { id: 1, pos: 2, of: 2, on: 1 }, branch: "aly/top", chat: { slot: "a", title: "Top work" } })] };
+    await open({ work: stacked }, ["desk", "work"], onOpenChat);
+    const stand = card("Where things stand");
+    expect(stand.getByRole("button", { name: /^#2 Top, Checks running, lantern · b · stack 2 of 2 · on #1$/ })).toBeTruthy();
+    await fireEvent.press(stand.getByRole("button", { name: /^#2 Top/ }));
+    const details = within(screen.getByLabelText("Details"));
+    expect(details.getByText(/aly\/top · stack 2 of 2 · on #1/)).toBeTruthy();
+    await fireEvent.press(details.getByRole("button", { name: "Open chat" }));
+    expect(onOpenChat).toHaveBeenCalledWith("a");
   });
 
   it("says when nothing is open", async () => {

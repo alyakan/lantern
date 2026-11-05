@@ -4,7 +4,7 @@
 //! The window is trusted for what it says, but what it says is kept small and plain: so many items, each word cut short, only the
 //! stages and states the phone draws, and a link only when it is an https page on GitHub or Linear.
 
-use super::protocol::{RemoteWork, RemoteWorkItem, RemoteWorkNext};
+use super::protocol::{RemoteWork, RemoteWorkChat, RemoteWorkItem, RemoteWorkNext, RemoteWorkStack};
 use serde::Deserialize;
 use std::sync::Mutex;
 
@@ -15,7 +15,7 @@ const KEY_MAX: usize = 240;
 const BLIND_MAX: usize = 5;
 
 const STAGES: &[&str] = &["issue", "local", "pr", "checks", "review", "merge", "release"];
-const TONES: &[&str] = &["bad", "wait", "you", "local", "todo", "done"];
+const TONES: &[&str] = &["bad", "wait", "you", "move", "local", "todo", "ready", "done"];
 const FOLDS: &[&str] = &["ready", "done"];
 
 /// What the window says of the user's work: the shape the phone is sent, checked and cut here.
@@ -87,6 +87,10 @@ fn tidy(item: RemoteWorkItem) -> Option<RemoteWorkItem> {
         step_only: item.step_only,
         fold: item.fold.filter(|f| FOLDS.contains(&f.as_str())),
         next: item.next.map(|n| RemoteWorkNext { what: cut(&n.what, 80), yours: n.yours, button: cut(&n.button, 20), warn: n.warn }),
+        issue_url: item.issue_url.filter(|u| link_ok(u)),
+        branch: cut_opt(item.branch, 120),
+        stack: item.stack.filter(|s| s.pos >= 1 && s.pos <= s.of && s.of <= 50).map(|s| RemoteWorkStack { id: s.id, pos: s.pos, of: s.of, on: s.on }),
+        chat: item.chat.filter(|c| key_ok(&c.slot) && c.slot.len() <= 80).map(|c| RemoteWorkChat { slot: c.slot, title: cut(&c.title, 80) }),
     })
 }
 
@@ -142,7 +146,27 @@ mod tests {
             step_only: false,
             fold: None,
             next: Some(RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into(), warn: false }),
+            issue_url: Some("https://linear.app/a/issue/ENG-1".into()),
+            branch: Some("aly/eng-1".into()),
+            stack: None,
+            chat: Some(RemoteWorkChat { slot: "s1".into(), title: "Fix\nit".into() }),
         }
+    }
+
+    #[test]
+    fn keeps_a_stack_place_that_makes_sense_and_only_a_linear_or_github_issue_link() {
+        let b = WorkBoard::default();
+        let mut on = item("k-on");
+        on.stack = Some(RemoteWorkStack { id: 4, pos: 2, of: 3, on: Some(4) });
+        let mut odd = item("k-odd");
+        odd.stack = Some(RemoteWorkStack { id: 4, pos: 5, of: 3, on: None });
+        odd.issue_url = Some("javascript:alert(1)".into());
+        b.set(WindowWork { issues: true, looked: true, blind: vec![], items: vec![on, odd] });
+        let items = b.phone().0.items;
+        assert_eq!(items[0].stack, Some(RemoteWorkStack { id: 4, pos: 2, of: 3, on: Some(4) }));
+        assert_eq!((items[0].issue_url.as_deref(), items[0].branch.as_deref()), (Some("https://linear.app/a/issue/ENG-1"), Some("aly/eng-1")));
+        assert_eq!((items[1].stack.as_ref(), items[1].issue_url.as_ref()), (None, None));
+        assert_eq!(items[0].chat, Some(RemoteWorkChat { slot: "s1".into(), title: "Fix it".into() }));
     }
 
     #[test]

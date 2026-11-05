@@ -10,13 +10,15 @@ import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, space, useColors, type Palette } from "../ui/theme";
-import { FILTER_TONES, filterItems, foldRows, foldWord, groupingFor, groupItems, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup, type WorkRow } from "../view/work";
+import { FILTER_TONES, filterItems, foldRows, foldWord, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, pathOf, stackWord, standing, stateCounts, toneOf, TONE_WORD, type GroupBy, type Tone, type WorkGroup, type WorkRow } from "../view/work";
 
 export interface WorkProps {
   /** Above the page: Home's top on a phone (the Mac's name, the Desk, Work and Chats switch), the page's own header on a tablet. */
   top: ReactNode;
   /** A tablet's main area: the page is held to a column that reads well. */
   wide?: boolean;
+  /** Opens a chat on the Mac (an item's details offer the one on its branch). */
+  onOpenChat?: (slot: string) => void;
 }
 
 /** How many of Next's steps show before "Show N more" (which opens them all in a sheet), and how many rows of a group (all of it when there is one list). */
@@ -25,15 +27,20 @@ const GROUP_SHOWN = 4;
 const LIST_SHOWN = 8;
 const COLUMN_MAX = 640;
 
-/** A state's colour: the Mac's (red blocked, blue your call, amber on its way, purple local only, grey not started, green done). */
+/** A state's colour, the Mac's: only what needs you is loud (red blocked, blue your call, amber a ticket to move); slate on its way,
+ * purple local only, grey not started, teal Ready, green done. */
 function toneColor(tone: Tone, c: Palette): string {
   switch (tone) {
     case "bad":
       return c.stop;
     case "you":
       return c.cobalt;
-    case "wait":
+    case "move":
       return c.isDark ? "#e0a43a" : "#a86b00";
+    case "wait":
+      return c.isDark ? "#8b9bb4" : "#5b6b82";
+    case "ready":
+      return c.isDark ? "#3fc1c6" : "#0f8a8f";
     case "local":
       return c.isDark ? "#b794f4" : "#7c4fd0";
     case "todo":
@@ -44,7 +51,7 @@ function toneColor(tone: Tone, c: Palette): string {
 }
 
 /** An item's colour: its state's, or the warning amber when its step goes around a rule (merging a pull request nobody approved). */
-const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "wait" : toneOf(item), c);
+const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "move" : toneOf(item), c);
 
 /** What happened to a step asked for: where it went, or why it didn't. Kept while the item stays in the state it was asked in. */
 interface Outcome {
@@ -77,11 +84,10 @@ function Path({ item, issues }: { item: RemoteWorkItem; issues: boolean }) {
   );
 }
 
-/** One item: its dot and name (a link to its page when it has one), a quiet line, and under it what the caller adds. */
-function Item({ item, meta, lead, children }: { item: RemoteWorkItem; meta: string; lead?: string; children?: ReactNode }) {
+/** One item: its dot and name (which opens its details), a quiet line, and under it what the caller adds. */
+function Item({ item, meta, lead, onOpen, children }: { item: RemoteWorkItem; meta: string; lead?: string; onOpen: () => void; children?: ReactNode }) {
   const colors = useColors();
   const tone = hueOf(item, colors);
-  const link = safeLink(item.url) ? item.url : null;
   const name = (
     <Txt variant="body" style={{ fontWeight: "600", flexShrink: 1 }}>
       {lead ? `${lead} ` : ""}
@@ -97,13 +103,9 @@ function Item({ item, meta, lead, children }: { item: RemoteWorkItem; meta: stri
     <View style={{ paddingHorizontal: 14, paddingVertical: 11, gap: 2 }}>
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone, marginTop: 7 }} />
-        {link ? (
-          <PressScale accessibilityRole="link" accessibilityHint="Opens the page" onPress={() => void Linking.openURL(link).catch(() => {})} scaleTo={0.99} style={{ flex: 1 }}>
-            {name}
-          </PressScale>
-        ) : (
-          <View style={{ flex: 1 }}>{name}</View>
-        )}
+        <PressScale accessibilityRole="button" accessibilityHint="Opens its details" onPress={onOpen} scaleTo={0.99} style={{ flex: 1 }}>
+          {name}
+        </PressScale>
       </View>
       <Txt variant="small" tone="ink3" style={{ paddingLeft: 16 }}>
         {meta}
@@ -112,6 +114,29 @@ function Item({ item, meta, lead, children }: { item: RemoteWorkItem; meta: stri
     </View>
   );
 }
+
+/** The rail down the left of a stack's rows: it joins each to the one under it, and stops at the top and the bottom. */
+function StackRail({ pos, of, color }: { pos: number; of: number; color: string }) {
+  const colors = useColors();
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={{ position: "absolute", left: 13, top: 0, bottom: 0, width: 10, alignItems: "center" }}>
+      <View style={{ position: "absolute", top: pos === 1 ? "50%" : 0, bottom: pos === of ? "50%" : 0, width: 2, backgroundColor: colors.rule }} />
+      <View style={{ position: "absolute", top: "50%", marginTop: -5, width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: color, backgroundColor: colors.card }} />
+    </View>
+  );
+}
+
+/** A button on an item's details: a page to open, or a chat. */
+const Action = ({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) => {
+  const colors = useColors();
+  return (
+    <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.95} style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.rule, alignItems: "center", justifyContent: "center" }}>
+      <Txt variant="small" style={{ fontWeight: "600" }}>
+        {label}
+      </Txt>
+    </PressScale>
+  );
+};
 
 /** A card with a heading and a count, and what goes in it. */
 function Card({ title, count, edge, action, children }: { title: string; count: number; edge?: string; action?: ReactNode; children: ReactNode }) {
@@ -158,7 +183,7 @@ function Dotted({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false }: WorkProps) {
+export function WorkScreen({ top, wide = false, onOpenChat }: WorkProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -170,6 +195,8 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   // The folded lines (Ready, or done) that were opened.
   const [openFolds, setOpenFolds] = useState<string[]>([]);
   const [nextOpen, setNextOpen] = useState(false);
+  // The item whose details are open, by key: they follow it as it moves on, and close if it goes.
+  const [detail, setDetail] = useState<string | null>(null);
   // How tall the bar over the list is (with the status bar's room above it): the list starts below it.
   const [barHeight, setBarHeight] = useState(0);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
@@ -269,7 +296,11 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
   /** One of Next's steps, in the card and in the sheet that lists them all (its outcome and busy state are this screen's, so they carry across). */
   const nextRow = (i: RemoteWorkItem, n: number) => (
     <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
-      <Item item={i} lead={i.next?.what} meta={`${i.word} · ${metaUnder(i, now, null)}`}>
+      <Item item={i} lead={i.next?.what} meta={`${i.word} · ${lineUnder(i, now, null)}`} onOpen={() => {
+        // One sheet at a time: the details take the place of the list of next steps.
+        setNextOpen(false);
+        setDetail(i.key);
+      }}>
         {step(i)}
       </Item>
     </View>
@@ -338,20 +369,47 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     </View>
   );
 
-  const row = (i: RemoteWorkItem, heading: string | null, n: number) => (
-    <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
-      <Item item={i} meta={metaUnder(i, now, heading)}>
-        <View style={{ flexDirection: "row", alignItems: "center", paddingLeft: 16 }}>
-          <Txt variant="tiny" style={{ color: hueOf(i, colors), fontWeight: "700" }}>
-            {i.word}
-          </Txt>
-        </View>
-        <View style={{ paddingLeft: 16 }}>
-          <Path item={i} issues={issues} />
-        </View>
-      </Item>
-    </View>
-  );
+  /** One piece of work where it stands, in two quiet lines (its name and state, then its issue, where it is and its place in a
+   * stack). Its path, pages and step are in its details, which a tap opens. */
+  const row = (i: RemoteWorkItem, heading: string | null, n: number) => {
+    const hue = hueOf(i, colors);
+    const line = lineUnder(i, now, heading);
+    return (
+      <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
+        <PressScale
+          accessibilityRole="button"
+          accessibilityLabel={`${i.number !== null ? `#${i.number} ` : ""}${i.title}, ${i.word}${line ? `, ${line}` : ""}`}
+          accessibilityHint="Opens its details"
+          onPress={() => setDetail(i.key)}
+          scaleTo={0.99}
+          style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingVertical: 10, paddingRight: 14, paddingLeft: i.stack ? 32 : 14 }}
+        >
+          {i.stack && <StackRail pos={i.stack.pos} of={i.stack.of} color={hue} />}
+          {!i.stack && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: hue, marginTop: 7 }} />}
+          <View style={{ flex: 1, gap: 2 }}>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+              <Txt variant="body" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+                {i.number !== null && (
+                  <Txt variant="small" tone="ink3">
+                    #{i.number}{" "}
+                  </Txt>
+                )}
+                {i.title}
+              </Txt>
+              <Txt variant="tiny" numberOfLines={1} style={{ color: hue, fontWeight: "700", maxWidth: "45%" }}>
+                {i.word}
+              </Txt>
+            </View>
+            {!!line && (
+              <Txt variant="small" tone="ink3" numberOfLines={1}>
+                {line}
+              </Txt>
+            )}
+          </View>
+        </PressScale>
+      </View>
+    );
+  };
 
   /** Several quiet pieces of work (Ready, or done) in one line that opens to a row for each. */
   const foldRow = (r: Extract<WorkRow, { kind: "fold" }>, scope: string, heading: string | null, n: number) => {
@@ -411,6 +469,8 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
     );
   };
 
+  const shown = detail ? items.find((i) => i.key === detail) : undefined;
+  const metaOfShown = shown ? metaUnder(shown, now, null) : "";
   const flatRows = flat ? rowsOf(groups[0]?.items ?? []) : [];
   const flatShown = open.includes("all") ? flatRows : flatRows.slice(0, LIST_SHOWN);
   const standCard = (
@@ -459,6 +519,72 @@ export function WorkScreen({ top, wide = false }: WorkProps) {
       <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
         {top}
       </View>
+      {shown && (
+        <Sheet onClose={() => setDetail(null)}>
+          {(close, scroll) => {
+            const { github, linear } = linksOf(shown);
+            const facts = [shown.repo, shown.branch, shown.stack ? stackWord(shown.stack) : null].filter(Boolean).join(" · ");
+            const open = (url: string) => void Linking.openURL(url).catch(() => {});
+            return (
+              <ScrollView ref={scroll} accessibilityLabel="Details" contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }}>
+                <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+                  <Txt variant="heading" style={{ flex: 1 }}>
+                    {shown.number !== null ? `#${shown.number} ` : ""}
+                    {shown.title}
+                  </Txt>
+                  <Link label="Done" onPress={close} />
+                </View>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: `${hueOf(shown, colors)}22` }}>
+                    <Txt variant="small" style={{ color: hueOf(shown, colors), fontWeight: "700" }}>
+                      {shown.word}
+                    </Txt>
+                  </View>
+                  {!!facts && (
+                    <Txt variant="small" tone="ink3" style={{ flexShrink: 1 }}>
+                      {facts}
+                    </Txt>
+                  )}
+                </View>
+                <Path item={shown} issues={issues} />
+                {(shown.issue || shown.feature) && (
+                  <Txt variant="small" tone="ink2">
+                    {[shown.issue, shown.feature && `in ${shown.feature}`].filter(Boolean).join(" ")}
+                  </Txt>
+                )}
+                {!!metaOfShown && (
+                  <Txt variant="small" tone="ink3">
+                    {metaOfShown}
+                  </Txt>
+                )}
+                {shown.next && (
+                  <View style={{ borderWidth: 1, borderColor: colors.rule, borderRadius: radius.card, paddingVertical: 10, paddingRight: 14 }}>
+                    <Txt variant="small" style={{ fontWeight: "600", paddingLeft: 16 }}>
+                      {shown.next.what}…
+                    </Txt>
+                    {step(shown)}
+                  </View>
+                )}
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {onOpenChat && shown.chat && (
+                    <Action
+                      label="Open chat"
+                      hint={`Opens “${shown.chat.title}”, the chat on its branch`}
+                      onPress={() => {
+                        const slot = shown.chat!.slot;
+                        close();
+                        onOpenChat(slot);
+                      }}
+                    />
+                  )}
+                  {github && <Action label="GitHub" hint="Opens the pull request" onPress={() => open(github)} />}
+                  {linear && <Action label="Linear" hint="Opens the issue" onPress={() => open(linear)} />}
+                </View>
+              </ScrollView>
+            );
+          }}
+        </Sheet>
+      )}
       {/* All of Next's steps, which can be many, in a sheet of their own. A step is asked from it as from the card. */}
       {nextOpen && (
         <Sheet size="large" onClose={() => setNextOpen(false)}>

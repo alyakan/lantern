@@ -3906,7 +3906,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
    one row are as tall as the tallest, their Chats button at the bottom; nothing opens inside a tile (its chats drop down over
    the Desk), so a row never grows for one tile. */
 .desk-main { container-type: inline-size; }
-.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; gap: 10px; }
+/* Two columns at most: a column is never narrower than half the pane (less half the gap), nor than 240px, where it is one. */
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(240px, calc((100% - 10px) / 2)), 1fr)); align-items: stretch; gap: 10px; }
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
@@ -3938,11 +3939,14 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-repo-num { color: var(--muted-text); font-variant-numeric: tabular-nums; }
 
 /* Your work: next steps, then where each piece stands as a row of nodes (Local › PR › Checks › Review › Merge › Release). A state
-   has one colour, in its dot, its word and its node: blocked red, your call blue, on its way amber, local only purple, done green. */
+   has one colour, in its dot, its word and its node. Only what needs you is loud: blocked red, your call blue, a ticket to move
+   amber; on its way slate, local only purple, Ready teal, done green. */
 .yw-tone-bad { --yw: var(--del); }
 .yw-tone-you { --yw: var(--yw-you); }
+.yw-tone-move { --yw: var(--attn-text); }
 .yw-tone-wait { --yw: var(--yw-wait); }
 .yw-tone-local { --yw: var(--yw-local); }
+.yw-tone-ready { --yw: var(--storage-5); }
 .yw-tone-done { --yw: var(--add); }
 .yw-tone-todo { --yw: var(--muted-text); }
 /* Several quiet pieces of work (Ready, or done) in one line that opens to them. */
@@ -3951,9 +3955,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-foldrow > .yw-fold:hover { color: var(--text); }
 .yw-folded { margin: 8px -12px 0; border-top: 0.5px solid var(--line); }
 /* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
-.yw-row.yw-warn { --yw: var(--warn); }
+.yw-row.yw-warn, .yw-detail.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */
-.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: var(--attn-text); --yw-local: var(--storage-4); }
+.yw-card, .desk-tile, .yw-detail { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
@@ -3968,6 +3972,33 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-feature-head + .dp-list { border-top: none; }
 .yw-feature > .desk-more { margin: 0; }
 .yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+/* A row is one button that opens its details: two quiet lines, nothing else to aim at. */
+.yw-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.yw-row > .yw-open { width: 100%; }
+.yw-open:hover .yw-name { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
+.dp-row-top > .yw-open { display: block; flex: 1 1 auto; }
+/* A stack's pull requests, together: a rail on the left joins each to the one under it. */
+.yw-row.yw-stacked { position: relative; padding-left: 26px; }
+.yw-row.yw-stacked::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--yw-you) 45%, var(--line)); }
+.yw-row.yw-stack-first::before { top: 50%; }
+.yw-row.yw-stack-last::before { bottom: 50%; }
+.yw-row.yw-stacked::after { content: ""; position: absolute; left: 10px; top: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--pane); border: 2px solid var(--yw); box-sizing: border-box; }
+/* A row's tags, under its name: its project, then where it stands. */
+.yw-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+/* Which project an item is in, where several are listed: its name on a tint of the project's sidebar colour. */
+.yw-project-tag { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 7px; border-radius: var(--radius-chip); border: 0.5px solid color-mix(in srgb, var(--tag, var(--muted-text)) 45%, transparent); background: color-mix(in srgb, var(--tag, var(--muted-text)) 16%, var(--pane)); color: color-mix(in srgb, var(--tag, var(--muted-text)) 70%, var(--text)); font: 600 calc(11px * var(--font-scale)) var(--ui); vertical-align: 1px; }
+/* An item's details. */
+.yw-detail { width: min(520px, calc(100vw - 32px)); }
+.yw-detail .revert-title { overflow-wrap: anywhere; }
+.yw-detail-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
+.yw-detail-state .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
+.yw-detail .yw-nodes { margin: 6px 0; }
+.yw-detail .yw-node.yw-node { font-size: calc(10.5px * var(--font-scale)); gap: 3px; }
+.yw-detail-step { justify-content: space-between; padding: 8px 10px; border: 0.5px solid var(--line); border-radius: var(--radius-md); }
+.yw-detail-what { font-weight: 600; }
+.yw-detail-actions { flex-wrap: wrap; }
+.yw-detail-link { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-md); color: var(--text); text-decoration: none; }
+.yw-detail-link:hover { background: var(--bg-hover); }
 .yw-row .dp-title { white-space: normal; font-weight: 600; font-size: calc(13.5px * var(--font-scale)); }
 .yw-row .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
 .yw-issue { display: inline-flex; align-items: baseline; align-self: flex-start; gap: 7px; max-width: 100%; padding: 2px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--text) 7%, var(--pane)); font-size: calc(12px * var(--font-scale)); color: var(--text-2); text-decoration: none; }

@@ -104,7 +104,7 @@ import { useDeskStatus } from "./lib/deskStatus";
 import { loadTeams, saveTeams, teamOfRepo, useLinearWork, type TeamChoice } from "./lib/linear";
 import { phoneWork } from "./lib/phoneWork";
 import { stepMessage, targetFor, unknownViewer, withLinear, yourWork } from "./lib/yourWork";
-import { markStepSent, stepSentTo } from "./components/YourWork";
+import { markStepSent, PastChats, ProjectColors, stepSentTo } from "./components/YourWork";
 import { anythingWorking } from "./lib/awake";
 import { useRoutines } from "./lib/useRoutines";
 import { type Routine, routineTitle } from "./lib/routines";
@@ -2847,7 +2847,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // names and states, never the message a step sends.
   const workNow = Date.now();
   const workItems = withLinear(yourWork(deskRepos, workNow), linear.work, teamOfRepo(deskRepos, linear.work, linearTeams), deskRepos, workNow);
-  const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected, !!deskRepos && deskRepos.length > 0, unknownViewer(deskRepos));
+  const phoneWorkNow = phoneWork(workItems, !!linear.work?.connected, !!deskRepos && deskRepos.length > 0, unknownViewer(deskRepos), deskInbox(chats, deskOpen), deskRepos);
   const phoneWorkKey = JSON.stringify(phoneWorkNow);
   useEffect(() => {
     void api.remoteWindowWork(phoneWorkNow).catch(() => {});
@@ -3101,6 +3101,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     setDesk(false);
     run(...args);
   };
+  // The Desk's work finds the last chat about a piece of work in History's search, and opens it (leaving the Desk). Held steady
+  // across renders, so an item's details search once when they open.
+  const pastRef = useRef({ searchPast, openPast: leaveDesk((id: string, folder: string) => openSession(id, folder)) });
+  pastRef.current = { searchPast, openPast: leaveDesk((id: string, folder: string) => openSession(id, folder)) };
+  const pastChats = useMemo(() => ({ find: (query: string) => pastRef.current.searchPast(query), open: (id: string, folder: string) => pastRef.current.openPast(id, folder) }), []);
   const sidebarHandlers = {
     ...sidebarBase,
     onNewChatIn: leaveDesk(sidebarBase.onNewChatIn),
@@ -3345,6 +3350,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
+                <PastChats.Provider value={pastChats}>
+                <ProjectColors.Provider value={projectColors}>
                 <DeskView
                   chats={deskRows}
                   projects={projectRows(
@@ -3384,6 +3391,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   onAsk={() => setAskSheet(true)}
                   linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
+                </ProjectColors.Provider>
+                </PastChats.Provider>
               </ErrorBoundary>
             ) : showCanvas ? (
               <ChatStoreContext.Provider value={chatStore}>

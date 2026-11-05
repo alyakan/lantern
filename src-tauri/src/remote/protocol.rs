@@ -793,7 +793,7 @@ pub struct RemoteWorkItem {
     pub title: String,
     /// issue, local, pr, checks, review, merge or release: where its path is.
     pub stage: String,
-    /// bad, wait, you, local, todo or done: its colour.
+    /// bad, wait, you, move, local, todo, ready or done: its colour.
     pub tone: String,
     /// Where it is, in a few words ("Checks failing").
     pub word: String,
@@ -816,6 +816,42 @@ pub struct RemoteWorkItem {
     #[serde(default)]
     pub fold: Option<String>,
     pub next: Option<RemoteWorkNext>,
+    /// Its Linear issue's page, beside `url` (which is the pull request's when it has one): both are offered on its details.
+    #[serde(default)]
+    pub issue_url: Option<String>,
+    /// Its branch, as git or GitHub has it.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Where it sits in a stack of pull requests.
+    #[serde(default)]
+    pub stack: Option<RemoteWorkStack>,
+    /// The chat open on the Mac in a folder on its branch: the one working on it, which the phone can open.
+    #[serde(default)]
+    pub chat: Option<RemoteWorkChat>,
+}
+
+/// A chat open on the Mac, by its slot and title.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkChat {
+    pub slot: String,
+    pub title: String,
+}
+
+/// A pull request's place in a stack: each is based on the branch of the one below.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkStack {
+    /// The bottom one's number: what the stack is known by.
+    #[ts(type = "number")]
+    pub id: u64,
+    /// 1 at the bottom.
+    pub pos: u32,
+    /// How tall the stack is.
+    pub of: u32,
+    /// The number of the one it is based on (none at the bottom).
+    #[ts(type = "number | null")]
+    pub on: Option<u64>,
 }
 
 /// What an item waits on. The words of the message a chat is sent stay on the Mac.
