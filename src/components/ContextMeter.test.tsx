@@ -13,21 +13,29 @@ describe("formatDuration", () => {
 });
 
 describe("ContextMeter", () => {
-  it("offers Continue fresh on its own once a chat is long, even with room left in a big window", () => {
+  it("says a chat is long once it is, even with room left in a big window, and offers Continue fresh from its menu", () => {
     const onFresh = vi.fn();
     render(<ContextMeter used={160_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn(), onFresh }} />);
     expect(screen.getByText("Long chat")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Continue fresh" }));
+    // Nothing to press until the meter is: the actions aren't shown unasked.
+    expect(screen.queryByRole("menuitem", { name: /Continue fresh/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /context used, long chat/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Continue fresh/ }));
     expect(onFresh).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("says nothing of a long chat below the mark, or where it can't be continued fresh", () => {
     const { unmount } = render(<ContextMeter used={140_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn(), onFresh: vi.fn() }} />);
     expect(screen.queryByText("Long chat")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Continue fresh" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Continue fresh/ })).toBeNull();
     unmount();
     render(<ContextMeter used={160_000} window={1_000_000} running={false} lastTurnMs={null} actions={{ onCompact: vi.fn(), onClear: vi.fn() }} />);
     expect(screen.queryByText("Long chat")).toBeNull();
+    // Where a chat can't continue fresh the menu has no such row.
+    fireEvent.click(screen.getByRole("button", { name: /context used/ }));
+    expect(screen.getByRole("menuitem", { name: /Compact/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Continue fresh/ })).toBeNull();
   });
 
   it("shows only the percentage, with token counts and timing on hover", () => {
@@ -89,29 +97,48 @@ describe("ContextMeter's warning", () => {
     expect(screen.getByText("Nearly full")).toBeInTheDocument();
   });
 
-  it("offers Compact and Clear once it warns, and sends each", () => {
+  it("shows no buttons unasked, even when it warns: Compact and Clear are in a menu the meter opens", () => {
+    render(meter(at(95)));
+    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("opens a menu from the meter with Compact and Clear, sends each, and closes on a choice", () => {
     actions.onCompact.mockReset();
     actions.onClear.mockReset();
     render(meter(at(80)));
-    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+    fireEvent.click(screen.getByRole("button", { name: /80% of context used/ }));
+    expect(screen.getByRole("button", { name: /80% of context used/ })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("menuitem", { name: /Compact/ }));
     expect(actions.onCompact).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /80% of context used/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Clear/ }));
     expect(actions.onClear).toHaveBeenCalledTimes(1);
   });
 
-  it("offers them on a click of the meter below the warning, and folds them back", () => {
+  it("opens it below the warning too, and closes it on the meter, Escape or a press outside", () => {
     render(meter(at(31)));
-    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "31% of context used" }));
-    expect(screen.getByRole("button", { name: "31% of context used" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Compact" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "31% of context used" }));
-    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+    const button = () => screen.getByRole("button", { name: "31% of context used" });
+    fireEvent.click(button());
+    expect(button()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: /Compact/ })).toBeInTheDocument();
+    fireEvent.click(button());
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(button());
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(button());
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("doesn't offer them while Claude works", () => {
     render(meter(at(95), true));
-    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /context used/ })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("is plain text, with nothing to press, when no actions are given", () => {

@@ -322,6 +322,7 @@ This chat so far: $0.90 · 400k tokens"
         >
           <button
             aria-expanded="false"
+            aria-haspopup="menu"
             aria-label="31% of context used"
             class="context-used"
             type="button"
