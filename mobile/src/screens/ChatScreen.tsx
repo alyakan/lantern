@@ -22,9 +22,8 @@ import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
-import type { Suggestion } from "../protocol/generated/Suggestion";
-import { draftAt, shouldAsk } from "../view/cruise";
 import { CruiseBar } from "./Cruise";
+import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
 import { StepNav, StepPager, type PagePlaces } from "./StepPager";
 import { keepOffset, keepPage, placeOf } from "../view/stepPlace";
@@ -152,16 +151,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
-  // Cruise: per chat and off by default. On, when the chat goes idle it drafts the next step (from its last few turns) and
-  // shows it over the box; "Do it" sends that draft, and it asks again when the next turn ends. It never sends by itself.
   const canCruise = useMacCan("cruise");
-  const [cruiseOn, setCruiseOn] = useState(false);
-  const [cruiseAsking, setCruiseAsking] = useState(false);
-  const [cruiseItems, setCruiseItems] = useState<Suggestion[]>([]);
-  const [cruiseAt, setCruiseAt] = useState(0);
-  const [cruiseError, setCruiseError] = useState<string | null>(null);
-  // The turn Cruise last asked for, so a re-render doesn't ask again for the same end of a turn.
-  const cruiseAsked = useRef<string | null>(null);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
   // A Review page's file whose change is open, and the verdicts picked on each page not yet sent (by the page's message id).
@@ -428,61 +418,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
   };
-  // Cruise asks each time a turn ends: on, idle, and not already asked for this turn. Step by step has its own pages to
-  // approve, so it is left alone there.
-  useEffect(() => {
-    if (!canCruise || !cruiseOn || cruiseAsking || stepsChat) return;
-    if (!shouldAsk({ on: true, status: chat?.status, asked: cruiseAsked.current, turnKey })) return;
-    cruiseAsked.current = turnKey;
-    setCruiseAsking(true);
-    setCruiseError(null);
-    sync.cruise(slot).then(
-      (r) => {
-        setCruiseItems(r.items);
-        setCruiseAt(0);
-        setCruiseAsking(false);
-      },
-      (e: Error) => {
-        setCruiseAsking(false);
-        setCruiseError(e.message);
-      },
-    );
-  }, [canCruise, cruiseOn, cruiseAsking, chat?.status, turnKey, slot, sync, stepsChat]);
-  const cruiseStop = () => {
-    setCruiseOn(false);
-    setCruiseItems([]);
-    setCruiseError(null);
-  };
-  const cruiseDo = () => {
-    const d = draftAt(cruiseItems, cruiseAt);
-    if (!d) return;
-    // A quick reply does the same: the send is marked, and Cruise asks again when the next turn ends.
-    send(d.message);
-    setCruiseItems([]);
-    setCruiseError(null);
-  };
-  const cruiseAnother = () => {
-    // One ask at a time: the button says it is asking and can't be pressed again.
-    if (cruiseAsking) return;
-    // "Another" goes round the drafts already made before it asks for more (each ask costs usage).
-    if (cruiseAt + 1 < cruiseItems.length) {
-      setCruiseAt(cruiseAt + 1);
-      return;
-    }
-    setCruiseAsking(true);
-    setCruiseError(null);
-    sync.cruise(slot, true).then(
-      (r) => {
-        setCruiseItems(r.items);
-        setCruiseAt(0);
-        setCruiseAsking(false);
-      },
-      (e: Error) => {
-        setCruiseAsking(false);
-        setCruiseError(e.message);
-      },
-    );
-  };
+  // Cruise: drafts the next step when the chat goes idle, shown over the box (see useCruise); it never sends by itself.
+  const cruise = useCruise({ slot, available: canCruise, status: chat?.status, turnKey, disabled: stepsChat, sync, send });
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
   // Step by step, whose pages they would cut across, not during a turn, which the Mac waits for too, and not while the chat sleeps);
   // Clear asks first, as the Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
@@ -728,21 +665,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       )}
       {canCruise && !asleep && !stepsChat && (
         <CruiseBar
-          on={cruiseOn}
+          on={cruise.on}
           resting={!working && !open}
-          asking={cruiseAsking}
-          draft={draftAt(cruiseItems, cruiseAt)}
-          error={cruiseError}
-          onToggle={() => {
-            if (cruiseOn) cruiseStop();
-            else {
-              setCruiseError(null);
-              setCruiseOn(true);
-            }
-          }}
-          onDo={cruiseDo}
-          onAnother={cruiseAnother}
-          onStop={cruiseStop}
+          asking={cruise.asking}
+          draft={cruise.draft}
+          error={cruise.error}
+          onToggle={cruise.toggle}
+          onAsk={cruise.nextStep}
+          onDo={cruise.doIt}
+          onAnother={cruise.another}
+          onStop={cruise.stop}
         />
       )}
       {asleep ? (

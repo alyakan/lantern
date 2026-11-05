@@ -11,7 +11,7 @@ import { radius, shadow, space, useColors } from "../ui/theme";
  * different one; the ✕ stops it. It never sends anything by itself, and a real prompt (a permission, a question) always
  * breaks the loop: the chat's own card takes the box back.
  */
-export function CruiseBar({ on, resting, asking, draft, error, onToggle, onDo, onAnother, onStop }: {
+export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, onDo, onAnother, onStop }: {
   on: boolean;
   /** The chat is idle: no turn running and nothing waiting on you. While it isn't, Cruise waits instead of offering a step. */
   resting: boolean;
@@ -19,6 +19,8 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onDo, o
   draft: Suggestion | null;
   error: string | null;
   onToggle: () => void;
+  /** Asks for a next step now, when none is offered. */
+  onAsk: () => void;
   onDo: () => void;
   onAnother: () => void;
   onStop: () => void;
@@ -53,7 +55,7 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onDo, o
           </Txt>
           <View style={{ flex: 1 }} />
           {resting && !draft && !asking && (
-            <PressScale accessibilityRole="button" accessibilityLabel="Suggest a next step" onPress={onAnother} hitSlop={10} haptic="select" scaleTo={0.94}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Suggest a next step" onPress={onAsk} hitSlop={10} haptic="select" scaleTo={0.94}>
               <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
                 Next step
               </Txt>

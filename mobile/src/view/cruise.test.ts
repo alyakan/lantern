@@ -3,12 +3,11 @@ import { draftAt, shouldAsk } from "./cruise";
 const s = (id: string) => ({ id, title: `T${id}`, why: "w", message: `m${id}`, target: { kind: "continue" as const, slot: "a" } });
 
 describe("cruise", () => {
-  it("asks only when it is on, the chat is idle, and this turn hasn't been asked for", () => {
-    const on = { on: true, status: "idle" as const, asked: null, turnKey: "t1" };
+  it("asks only when the chat is idle and this turn hasn't been asked for", () => {
+    const on = { status: "idle" as const, asked: null, turnKey: "t1" };
     expect(shouldAsk(on)).toBe(true);
-    // Off, working, waiting on you, asleep or stopped: never.
+    // Working, waiting on you, asleep or stopped: never.
     for (const status of ["working", "needs_you", "asleep", "ended"] as const) expect(shouldAsk({ ...on, status })).toBe(false);
-    expect(shouldAsk({ ...on, on: false })).toBe(false);
     // Nothing said yet: nothing to go on.
     expect(shouldAsk({ ...on, turnKey: "" })).toBe(false);
     // Already asked for this turn: wait for the next one.

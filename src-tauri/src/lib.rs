@@ -645,7 +645,7 @@ impl remote::gateway::Host for RemoteHost {
             let state = app.state::<AppState>();
             let claude = state.remote.claude_path().unwrap_or_default();
             let path_env = login_path(&state).await;
-            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), &prompt).await
+            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), remote::suggest::args(&prompt)).await
         })
     }
 
@@ -655,7 +655,7 @@ impl remote::gateway::Host for RemoteHost {
             let state = app.state::<AppState>();
             let claude = state.remote.claude_path().unwrap_or_default();
             let path_env = login_path(&state).await;
-            remote::suggest::ask_claude_cruise(std::path::Path::new(&claude), path_env.as_deref(), &prompt).await
+            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), remote::suggest::cruise_args(&prompt)).await
         })
     }
 

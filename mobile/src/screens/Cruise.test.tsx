@@ -4,7 +4,7 @@ import { CruiseBar } from "./Cruise";
 
 const nextStep: Suggestion = { id: "c1", title: "Re-run the tests", why: "One is red.", message: "Re-run the tests.", target: { kind: "continue", slot: "a" } };
 
-const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Suggestion | null; error?: string | null; onToggle?: () => void; onDo?: () => void; onAnother?: () => void; onStop?: () => void } = {}) => (
+const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Suggestion | null; error?: string | null; onToggle?: () => void; onAsk?: () => void; onDo?: () => void; onAnother?: () => void; onStop?: () => void } = {}) => (
   <CruiseBar
     on={p.on ?? true}
     resting={p.resting ?? true}
@@ -12,6 +12,7 @@ const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Sug
     draft={p.draft ?? null}
     error={p.error ?? null}
     onToggle={p.onToggle ?? (() => {})}
+    onAsk={p.onAsk ?? (() => {})}
     onDo={p.onDo ?? (() => {})}
     onAnother={p.onAnother ?? (() => {})}
     onStop={p.onStop ?? (() => {})}
@@ -49,6 +50,15 @@ describe("Cruise, over the message box", () => {
     await fireEvent.press(button);
     expect(onAnother).not.toHaveBeenCalled();
     expect(screen.getByText("Another…")).toBeTruthy();
+  });
+
+  it("offers Next step when nothing is drafted, and that asks (it isn't Another)", async () => {
+    const onAsk = jest.fn();
+    const onAnother = jest.fn();
+    await render(bar({ onAsk, onAnother }));
+    await fireEvent.press(screen.getByRole("button", { name: "Suggest a next step" }));
+    expect(onAsk).toHaveBeenCalledTimes(1);
+    expect(onAnother).not.toHaveBeenCalled();
   });
 
   it("waits while the chat isn't at rest, and never sends by itself", async () => {

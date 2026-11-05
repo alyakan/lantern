@@ -50,13 +50,8 @@ export const DESK_WAIT = 170_000;
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
 
-/** How long the phone keeps a cruise draft for one chat before it asks the Mac again. */
-export const CRUISE_KEPT_MS = 2 * 60 * 1000;
-
 export class Sync {
   private suggested: { at: number; value: Suggestions } | null = null;
-  /** Cruise's last draft per chat, and when it came: coming back to a chat doesn't ask the Mac again. */
-  private cruised = new Map<string, { at: number; value: Suggestions }>();
   private state: State = initialState;
   private listeners = new Set<() => void>();
   private queue: Action[] = [];
@@ -335,18 +330,16 @@ export class Sync {
   }
 
   /**
-   * What Claude would do next in one chat (Cruise): drafts made on the Mac from the chat's last few turns. Kept on this
-   * phone for a couple of minutes, so a screen that comes back doesn't ask (each ask costs usage); `refresh` asks for more
-   * ("Another"). Never sent by itself: the caller shows them as a card and sends the one the user taps.
+   * What Claude would do next in one chat (Cruise): drafts made on the Mac from the chat's last few turns. Nothing is kept
+   * here: the Mac keeps them per chat and knows whether the chat has moved on since (a draft kept on this side would be
+   * the last turn's); `refresh` asks for more ("Another"). Never sent by itself: the caller shows them as a card and sends
+   * the one the user taps.
    */
   async cruise(slot: string, refresh = false): Promise<Suggestions> {
     if (!this.has("cruise")) throw new Error("This Mac can't suggest a next step yet. Update Lantern on it.");
-    const kept = this.cruised.get(slot);
-    if (kept && !refresh && this.now() - kept.at < CRUISE_KEPT_MS) return kept.value;
     const value = await this.ask<Suggestions>({ op: "cruise", slot, refresh });
-    // Whatever the Mac sends is checked before it is kept or shown.
+    // Whatever the Mac sends is checked before it is shown.
     if (!value || !Array.isArray(value.items)) throw new Error("Claude's next step didn't come through.");
-    this.cruised.set(slot, { at: this.now(), value });
     return value;
   }
 

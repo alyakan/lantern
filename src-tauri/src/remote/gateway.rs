@@ -191,11 +191,9 @@ pub trait Host: Send + Sync + 'static {
     /// Asks a small model, with no tools and no saved session, and gives its reply (see suggest.rs, which asks for this
     /// rarely and checks what comes back).
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
-    /// Asks a model for the next step in one chat (Cruise): Sonnet, no tools, no saved session. A Mac that doesn't know
-    /// Cruise falls back to the Home suggestion call.
-    fn cruise_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
-        self.suggest_reply(prompt)
-    }
+    /// Asks a model for the next step in one chat (Cruise): Sonnet, no tools, no saved session, with Cruise's own system
+    /// prompt (see suggest.rs; not the Home call's, so there is no default to fall back on).
+    fn cruise_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
     /// A file's diff in one of the Changes pane's other views (Uncommitted: against the last commit; Branch: against where the
@@ -1578,6 +1576,9 @@ pub(crate) mod tests {
         pub prompts: Mutex<Vec<String>>,
         /// How long the model takes to answer, and a chat started from a phone takes to open.
         pub suggest_delay: Mutex<Duration>,
+        /// What Cruise asked and what it is told (the last in the list first), apart from Home's suggestions above.
+        pub cruise_prompts: Mutex<Vec<String>>,
+        pub cruise_replies: Mutex<Vec<Result<String, String>>>,
         pub new_chat_delay: Mutex<Duration>,
         /// The steps of the user's work it was asked to do (key, sig), what it answers to them, and how often it was asked to look again.
         pub work_steps: Mutex<Vec<(String, String)>>,
@@ -1736,6 +1737,11 @@ pub(crate) mod tests {
                 tokio::time::sleep(delay).await;
                 reply
             })
+        }
+        fn cruise_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
+            self.cruise_prompts.lock().unwrap().push(prompt);
+            let reply = self.cruise_replies.lock().unwrap().pop().unwrap_or_else(|| Ok("[]".to_string()));
+            Box::pin(async move { reply })
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
@@ -3051,6 +3057,38 @@ pub(crate) mod tests {
         // A refresh straight after is not a new call either.
         assert_eq!(one.ask(Request::Suggest { refresh: true }).await.0, first);
         assert_eq!(r.host.prompts.lock().unwrap().len(), 1);
+    }
+
+    const NEXT_STEP: &str = r#"[{"kind":"continue","slot":"a","title":"Write the notes","why":"The release is cut.","message":"Write the release notes."}]"#;
+
+    #[tokio::test]
+    async fn cruise_gives_one_chats_next_step_from_its_own_call_and_asks_again_when_the_chat_moves_on() {
+        let r = rig();
+        talked(&r);
+        let (_, mut p) = paired(&r).await;
+        // Another chat, or none, isn't Cruise's to answer.
+        let (ok, err, _) = p.ask(Request::Cruise { slot: "nobody".into(), refresh: false }).await;
+        assert!(ok.is_none() && err.as_deref() == Some("That chat isn't open on your Mac."));
+        *r.host.cruise_replies.lock().unwrap() = vec![Ok(NEXT_STEP.into())];
+        let first = p.ask(Request::Cruise { slot: "a".into(), refresh: false }).await.0.unwrap();
+        assert_eq!(first["items"][0], json!({"id": "c1", "title": "Write the notes", "why": "The release is cut.", "message": "Write the release notes.", "target": {"kind": "continue", "slot": "a"}}));
+        {
+            let asked = r.host.cruise_prompts.lock().unwrap();
+            assert_eq!(asked.len(), 1);
+            for must in ["[chat id=a", "Cut the release", "Done: tests pass."] {
+                assert!(asked[0].contains(must), "{must}: {}", asked[0]);
+            }
+            assert!(!asked[0].contains("/Users/me"), "no folder paths go to the model");
+        }
+        assert!(r.host.prompts.lock().unwrap().is_empty(), "Home's call isn't the one asked");
+        // Asking again with the chat as it was costs nothing; a refresh and a new turn each ask.
+        assert_eq!(p.ask(Request::Cruise { slot: "a".into(), refresh: false }).await.0.unwrap(), first);
+        assert_eq!(r.host.cruise_prompts.lock().unwrap().len(), 1);
+        p.ask(Request::Cruise { slot: "a".into(), refresh: true }).await;
+        assert_eq!(r.host.cruise_prompts.lock().unwrap().len(), 2);
+        r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "c".into(), text: "Notes written.".into() });
+        p.ask(Request::Cruise { slot: "a".into(), refresh: false }).await;
+        assert_eq!(r.host.cruise_prompts.lock().unwrap().len(), 3, "a turn ended, so the kept step is for what was done");
     }
 
     #[tokio::test]
