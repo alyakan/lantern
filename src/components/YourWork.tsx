@@ -179,12 +179,13 @@ function StandRow({ item, feature = null }: { item: WorkItem; issues: boolean; f
   return (
     <li className={`dp-row yw-row yw-tone-${item.tone}${item.next?.warn ? " yw-warn" : ""}${stackClass(item)}`}>
       <button className="yw-open" onClick={() => pick(item)} aria-haspopup="dialog" title="Details, links and the chat on it">
-        <span className="dp-row-top">
+        <span className="dp-title yw-name">
+          {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
+        </span>
+        {/* Its tags, on a line of their own: the project (where several are listed), then where it stands. */}
+        <span className="yw-tags">
           <ProjectTag item={item} />
-          <span className="dp-title yw-name">
-            {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
-          </span>
-          <span className="dp-aside yw-word">{item.word}</span>
+          <span className="yw-word">{item.word}</span>
         </span>
         {line && <span className="dp-meta">{line}</span>}
       </button>
@@ -226,10 +227,10 @@ function WorkDetail({ item, issues, chats, repos, onStep, onOpen, onClose }: { i
     >
       <div className="revert-body">
         <div className="revert-title" id={titleId}>
-          <ProjectTag item={item} />{" "}
           {item.number !== null && <><span className="yw-num">#{item.number}</span> </>}{item.title}
         </div>
         <p className="yw-detail-state">
+          <ProjectTag item={item} />
           <span className="yw-word">{item.word}</span>
           <span className="dp-meta">{facts}</span>
         </p>
@@ -495,15 +496,18 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
               {nextShown.map((i) => (
                 <li key={i.key} className={`dp-row yw-row yw-tone-${i.tone}${i.next!.warn ? " yw-warn" : ""}`}>
                   <span className="dp-row-top">
-                    <ProjectTag item={i} />
                     <button className="dp-title yw-name yw-open" onClick={() => setPicked(i.key)} aria-haspopup="dialog" title="Details, links and the chat on it">
                       {i.next!.what} {i.number !== null && <><span className="yw-num">#{i.number}</span> </>}{i.title}
                     </button>
                     <span className="dp-aside">
-                      {/* Yours to decide is said outright (a step that goes around a rule says so); otherwise the pill is where it stands, in its state's colour. */}
-                      <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
                       <StepButton item={i} chats={chats} repos={repos} onStep={onStep} />
                     </span>
+                  </span>
+                  {/* Its tags, on a line of their own: the project (where several are listed), then yours to decide said outright (a step that
+                      goes around a rule says so), or where it stands, in its state's colour. */}
+                  <span className="yw-tags">
+                    <ProjectTag item={i} />
+                    <span className="yw-word">{i.next!.warn ? "Bypasses review" : i.next!.yours ? "Your call" : i.word}</span>
                   </span>
                   <span className="dp-meta">{i.next!.yours ? `${i.word} · ${lineOf(i, null, tagged)}` : lineOf(i, null, tagged)}</span>
                 </li>

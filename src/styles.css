@@ -3974,6 +3974,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-row.yw-stack-first::before { top: 50%; }
 .yw-row.yw-stack-last::before { bottom: 50%; }
 .yw-row.yw-stacked::after { content: ""; position: absolute; left: 10px; top: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--pane); border: 2px solid var(--yw); box-sizing: border-box; }
+/* A row's tags, under its name: its project, then where it stands. */
+.yw-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 /* Which project an item is in, where several are listed: its name on a tint of the project's sidebar colour. */
 .yw-project-tag { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 7px; border-radius: var(--radius-chip); border: 0.5px solid color-mix(in srgb, var(--tag, var(--muted-text)) 45%, transparent); background: color-mix(in srgb, var(--tag, var(--muted-text)) 16%, var(--pane)); color: color-mix(in srgb, var(--tag, var(--muted-text)) 70%, var(--text)); font: 600 calc(11px * var(--font-scale)) var(--ui); vertical-align: 1px; }
 /* An item's details. */

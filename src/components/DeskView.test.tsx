@@ -205,11 +205,11 @@ describe("the Desk", () => {
     });
     const next = within(screen.getByRole("region", { name: "Next" })).getAllByRole("listitem").map((l) => l.textContent);
     expect(next).toEqual([
-      expect.stringMatching(/^Merge #8 PR 8Your callMerge…Ready to merge/),
+      expect.stringMatching(/^Merge #8 PR 8Merge…Your callReady to merge/),
       // Yours to decide says so on its pill; the others say where they stand there.
-      expect.stringMatching(/^Review #10 PR 10Your review is askedDo itlantern · by @sara$/),
-      expect.stringMatching(/^Release 1 pull request since v0\.1\.93Your callRelease…/),
-      expect.stringMatching(/^Fix failing checks on #7 PR 7Checks failingDo it/),
+      expect.stringMatching(/^Review #10 PR 10Do itYour review is askedlantern · by @sara$/),
+      expect.stringMatching(/^Release 1 pull request since v0\.1\.93Release…Your call/),
+      expect.stringMatching(/^Fix failing checks on #7 PR 7Do itChecks failing/),
     ]);
     const stand = within(screen.getByRole("region", { name: "Where things stand" }));
     // Someone else's pull request that doesn't ask for you isn't your work; one merged before the release is done.
