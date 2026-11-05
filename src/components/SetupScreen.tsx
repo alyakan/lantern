@@ -24,7 +24,7 @@ export function SetupScreen({ error, onCheck }: { error: string | null; onCheck:
         </li>
       </ol>
       <div className="setup-row">
-        <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/you/.local/bin/claude" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+        <input value={path} onChange={(e) => setPath(e.target.value)} aria-label="Path to Claude Code (optional)" placeholder="/Users/you/.local/bin/claude" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
         <button className="primary" onClick={() => onCheck(path.trim() || null)}>
           Check again
         </button>

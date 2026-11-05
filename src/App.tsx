@@ -27,7 +27,7 @@ import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
 import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
-import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
+import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend, type Chats } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
@@ -113,6 +113,7 @@ import { useTeamGuards } from "./lib/teamGuards";
 import { PlanPaused } from "./components/PlanPaused";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
+import { RecapLine, useRecap } from "./components/RecapLine";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { DiffComment } from "./lib/diffComments";
@@ -517,6 +518,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, []);
   const capsOf = (slot: string) => capabilitiesOf(chats.slots[slot]?.provider);
   const caps = capabilitiesOf(state.provider);
+  const recap = useRecap(active, { canRecap: caps.supports_recap !== false, idle: state.status === "idle", sessionId: state.sessionId ?? null, items: state.items.length }, state.folder, state.claudePath ?? null);
   const activeProvider = providerIdOf(state.provider);
 
   // The harness (which models do what) is Claude Code's: a provider with no advisor runs Standard, its own model and effort.
@@ -2748,11 +2750,36 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
   const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
   const [prDialog, setPrDialog] = useState<string | null>(null);
+  // Where each chat works (a worktree it is in, else its folder): a pull request's failure goes to a chat on its branch.
+  const [workBySlot, setWorkBySlot] = useState<Record<string, string>>({});
+  const liveSlot = (s: Chats["slots"][string]) => s.status === "idle" || s.status === "running";
+  const workKey = Object.entries(chats.slots).map(([slot, s]) => `${slot}:${s.folder}:${s.status}:${s.changedFiles.length}:${worktreeCalls(s.items)}`).join(",");
+  useEffect(() => {
+    let live = true;
+    for (const [slot, s] of Object.entries(chats.slots)) {
+      if (!s.folder || !liveSlot(s)) continue;
+      api.workFolder(slot).then(
+        (view) => live && setWorkBySlot((all) => (all[slot] === (view?.path ?? s.folder!) ? all : { ...all, [slot]: view?.path ?? s.folder! })),
+        () => {},
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [workKey]);
   const prChecks = usePrChecks({
-    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, live: s.status === "idle" || s.status === "running", busy: isBusy(s) }] : [])),
+    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, work: workBySlot[slot] ?? s.folder, live: liveSlot(s), busy: isBusy(s) }] : [])),
     active,
     settings: prSettings,
     send: (slot, text) => sendIn(slot, text),
+    start: (folder, text) => {
+      if (!agentReady) return null;
+      const slot = `s${++slotSeq.current}`;
+      dispatchChats({ type: "add", slot });
+      // Its first message is CI's output, which is untrusted: it runs on Ask, like a chat a phone step starts.
+      startIn(slot, folder, false, false, text, undefined, undefined, { permissions: "ask", preset: null, workflow: "chat" });
+      return slot;
+    },
     onFailed: (folder, slot, snap) => {
       const body = `${basename(folder)}: pull request #${snap.pr.number}`;
       const wanted = shouldNotify(notifyPrefs, "failed");
@@ -2768,13 +2795,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const list = (recent: RecentFolder[]) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => p.folder);
     loadRecentFolders().then((recent) => setPrFolders(list(recent)), () => setPrFolders(list([])));
   }, [settingsAt]);
+  // One row per pull request: the folder and a worktree may both have found it. Its chat: one working where it was found.
   const prRows = checkItems(
-    Object.values(prChecks.views).flatMap((v) => {
-      const slot = Object.entries(chats.slots).filter(([, s]) => s.folder === v.folder && (s.status === "idle" || s.status === "running")).map(([id]) => id);
-      const target = slot.includes(active) ? active : slot[slot.length - 1];
-      return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
-    }),
+    Object.values(prChecks.views)
+      .filter((v, i, all) => !v.snap || all.findIndex((w) => w.folder === v.folder && w.snap?.pr.number === v.snap!.pr.number) === i)
+      .flatMap((v) => {
+        const slot = Object.entries(chats.slots).filter(([id, s]) => s.folder === v.folder && liveSlot(s) && (workBySlot[id] ?? s.folder) === v.place).map(([id]) => id);
+        const target = slot.includes(active) ? active : slot[slot.length - 1];
+        return v.needsYou && v.snap && target ? [{ folder: v.place, slot: target, where: basename(v.place), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
+      }),
   );
+  // The pull request the chat on screen is on: the one found where it works.
+  const activeWork = state.folder ? (workBySlot[active] ?? state.folder) : null;
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
   const deskShown = desk && Object.keys(openByProject).length > 0;
@@ -3005,6 +3037,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
   useAction("session-history", toggleHistory, true);
+  useAction("show-desk", () => { setDeskPage(null); setDesk(true); }, Object.keys(openByProject).length > 0);
   // The Desk's Ask, from anywhere on it; deskShown is settled by here.
   useAction("ask-desk", () => setAskSheet((open) => !open), deskShown);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
@@ -3397,6 +3430,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
+                  {recap && <RecapLine text={recap} />}
                   {chatExtras}
                   {composer}
                 </>
@@ -3417,7 +3451,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
-                prChecks={state.folder ? { view: prChecks.views[state.folder], busy: isBusy(state), onSend: () => prChecks.sendFailure(state.folder!, active), onStop: () => prChecks.stop(state.folder!) } : undefined}
+                prChecks={state.folder ? { view: prChecks.views[activeWork!], busy: isBusy(state), onSend: () => prChecks.sendFailure(activeWork!, active), onStop: () => prChecks.stop(activeWork!) } : undefined}
                 onShip={state.folder ? () => setShipping(true) : undefined}
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}

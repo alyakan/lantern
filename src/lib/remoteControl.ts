@@ -16,6 +16,8 @@ export interface RemoteView {
   /** The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home. */
   tailnet: string[];
   allow_phone_auto: boolean;
+  /** Paired phones may run `!` commands on the Mac (off until the user turns it on). */
+  allow_phone_shell: boolean;
   devices: RemoteDevice[];
   /** The ids of the phones connected now. */
   connected: string[];

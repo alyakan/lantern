@@ -104,6 +104,9 @@ pub struct Capabilities {
     /// its own: Claude Code's Artifact tool, which Lantern turns on for its chats (`claude -p` leaves it off).
     #[serde(default)]
     pub publishes_artifacts: bool,
+    /// It can say what happened in a chat and what's next when the user comes back to it: Claude Code's /recap.
+    #[serde(default)]
+    pub supports_recap: bool,
 }
 
 /// A provider and what it can do, as the window is told.
@@ -146,7 +149,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false, supports_images: false, supports_compact: false, supports_clear: true, publishes_artifacts: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false, supports_images: false, supports_compact: false, supports_clear: true, publishes_artifacts: false, supports_recap: false }
     }
 
     fn models(&self) -> &'static [&'static str] {

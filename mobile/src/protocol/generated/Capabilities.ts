@@ -47,4 +47,8 @@ phone_approvals: boolean, supports_images: boolean, supports_compact: boolean, s
  * It can publish an artifact (a presentation, a diagram, a page) to a link the user can open and share, with a tool of
  * its own: Claude Code's Artifact tool, which Lantern turns on for its chats (`claude -p` leaves it off).
  */
-publishes_artifacts: boolean, };
+publishes_artifacts: boolean, 
+/**
+ * It can say what happened in a chat and what's next when the user comes back to it: Claude Code's /recap.
+ */
+supports_recap: boolean, };

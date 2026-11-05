@@ -77,6 +77,7 @@ In the box:
 - Type `/` for skills, commands and MCP prompts, and `@` to point Claude at a file.
 - Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message (the hint under the box says so, and that backspace leaves the terminal). Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
+- Dropping files anywhere on the window puts their paths in the box, at the cursor, as dropping them into a terminal does (a path with spaces in quotes). Claude reads them, images and PDFs included.
 - Send while Claude is working and the message is queued until its turn ends.
 
 ### Side chat
@@ -339,6 +340,8 @@ The notes are kept by Lantern, on this Mac, one set per project folder. They are
 People start work and walk away, so two things help while you are gone.
 
 **What needs you.** The tray button at the top right of the title bar (always there, whether the sidebar is expanded, collapsed or hidden; also **What Needs You…** in the command palette) opens a list of everything waiting on you across every open project and team: permission requests and questions, plans to approve, merges to approve, a team held back until you say go on, and chats that finished while you were elsewhere. Each row shows the chat or agent, its project (and team), what it needs in plain words and how long it has waited. **Go** takes you there; a plain permission request also has **Allow** and **Deny** right in the list. What needs an answer comes first, longest waiting first, then what only finished. The button's badge counts what needs an answer; a small blue dot means only unread finishes. Arrow keys move between rows (Left and Right between a row's buttons) and Esc closes it. macOS notifications are separate (see Settings).
+
+**Recap.** Come back to a chat after five minutes or more away (another chat, another app) and a line above the box says what happened and what's next, as Claude Code does in a terminal ("recap: You're adding retries to fetchJson… Next: …"). Lantern asks Claude Code's `/recap` for it on a copy of the session that isn't saved, so the chat itself is untouched. It goes once you send or a turn starts, and isn't asked for again until the chat has changed. Only for a provider that can recap: Claude Code can, Codex and gateway chats can't.
 
 **Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
 

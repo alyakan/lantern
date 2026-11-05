@@ -11,7 +11,7 @@ import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
-import type { AsideEvent, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -91,7 +91,22 @@ export const api = {
   /** Saves the whole list; rejects, in words, with what to fix. Resolves to what was kept (ids made for new ones). */
   saveEndpoints: (endpoints: Endpoint[]) => invoke<Endpoint[]>("save_endpoints", { endpoints }),
   /** Asks an endpoint what models it serves; rejects, in words, when it can't say (then they are typed). */
-  fetchEndpointModels: (url: string, keyEnv: string | null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv }),
+  fetchEndpointModels: (url: string, keyEnv: string | null, endpointId: string | null = null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv, endpointId }),
+  /** Which providers run on an API key and which keys are saved. Never a key. */
+  providerAuthState: () => invoke<AuthState>("provider_auth_state"),
+  /** Saves Claude Code's API key in the Keychain; the key is not sent back. Rejects, in words, for a key that isn't one. */
+  providerClaudeKeySet: (key: string) => invoke<AuthState>("provider_claude_key_set", { key }),
+  providerClaudeKeyClear: () => invoke<AuthState>("provider_claude_key_clear"),
+  /** Claude Code on its API key (true) or its own sign-in. New chats follow it; a running chat keeps what it started with. */
+  providerClaudeUseKey: (on: boolean) => invoke<AuthState>("provider_claude_use_key", { on }),
+  /** Saves an endpoint's key in the Keychain (for an endpoint that is saved); it wins over the variable the endpoint names. */
+  endpointKeySet: (id: string, key: string) => invoke<AuthState>("endpoint_key_set", { id, key }),
+  endpointKeyClear: (id: string) => invoke<AuthState>("endpoint_key_clear", { id }),
+  /** The hosted providers (DeepSeek and the like), and whether each is connected. */
+  hostedProviders: () => invoke<HostedProvider[]>("hosted_provider_list"),
+  /** Makes the provider's endpoint if there is none and saves its key in the Keychain; the key is not sent back. */
+  hostedProviderConnect: (id: string, key: string) => invoke<HostedProvider[]>("hosted_provider_connect", { id, key }),
+  hostedProviderDisconnect: (id: string) => invoke<HostedProvider[]>("hosted_provider_disconnect", { id }),
   conversationMetadata: (sessionId: string) => invoke<string | null>("conversation_metadata", { sessionId }),
   conversationSettings: (slot: string, change?: { provider?: string; model?: string | null; effort?: string | null }) => invoke<import("../mobile/src/protocol/generated/ConversationConfiguration").ConversationConfiguration>("conversation_settings", { slot, change: change ?? null }),
   conversationAction: (slot: string, action: "compact" | "clear") => invoke<void>("conversation_action", { slot, action }),
@@ -247,6 +262,8 @@ export const api = {
   sessionEvents: (folder: string, sessionId: string) => invoke<UiEvent[]>("session_events", { folder, sessionId }),
   /** A short title for the session (Claude Code's, one made before, or a new one from its first prompt); null if none. */
   titleSession: (claudePath: string, folder: string, sessionId: string, prompt: string) => invoke<string | null>("title_session", { claudePath, folder, sessionId, prompt }),
+  /** What happened in a session and what's next, from Claude Code's /recap; null when none could be made. */
+  recapSession: (claudePath: string, folder: string, sessionId: string) => invoke<string | null>("recap_session", { claudePath, folder, sessionId }),
   recentFolders: () => invoke<RecentFolder[]>("recent_folders"),
   /** Replays a past session into the chat and resumes it. A session only in a folder's old place is copied into the folder first. */
   openSession: (slot: string, claudePath: string, folder: string, settings: Settings, sessionId: string) =>
@@ -425,6 +442,8 @@ export const api = {
   /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
   remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
   remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
+  /** Whether paired phones may run `!` commands on the Mac. Off by default. */
+  remoteSetAllowShell: (on: boolean) => invoke<RemoteView>("remote_set_allow_shell", { on }),
   /** Imports the push key (a .p8 file) for the phones' lock-screen cards: checked, then kept in the Keychain. Rejects, in words, when it isn't one. */
   remoteSetLiveKey: (path: string, keyId: string, teamId: string) => invoke<RemoteView>("remote_set_live_key", { path, keyId, teamId }),
   /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */

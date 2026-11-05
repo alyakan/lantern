@@ -14,7 +14,7 @@ impl Provider for ClaudeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true, phone_approvals: true, supports_images: true, supports_compact: true, supports_clear: true, publishes_artifacts: true }
+        Capabilities { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true, phone_approvals: true, supports_images: true, supports_compact: true, supports_clear: true, publishes_artifacts: true, supports_recap: true }
     }
 
     fn models(&self) -> &'static [&'static str] {
@@ -42,7 +42,7 @@ mod tests {
     #[test]
     fn claude_can_do_everything_and_offers_its_three_aliases() {
         let c = ClaudeProvider.capabilities();
-        assert!(c.supports_auto_mode && c.supports_advisor && c.reports_cost_usd && c.supports_skills && c.supports_effort && c.model_switchable && c.supports_lantern_tools && c.can_lead_team && c.phone_approvals && c.publishes_artifacts);
+        assert!(c.supports_auto_mode && c.supports_advisor && c.reports_cost_usd && c.supports_skills && c.supports_effort && c.model_switchable && c.supports_lantern_tools && c.can_lead_team && c.phone_approvals && c.publishes_artifacts && c.supports_recap);
         assert_eq!(ClaudeProvider.models(), ["opus", "sonnet", "haiku"]);
         assert!(ClaudeProvider.models().iter().all(|m| crate::args::valid_model(m)));
     }

@@ -21,6 +21,7 @@ export const CLAUDE_CAPABILITIES: Capabilities = {
   supports_compact: true,
   supports_clear: true,
   publishes_artifacts: true,
+  supports_recap: true,
 };
 
 /** What a provider can do; Claude's all of it when unknown. A flag a (newer or older) backend leaves out counts as Claude's too. */

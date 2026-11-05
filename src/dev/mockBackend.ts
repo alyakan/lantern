@@ -32,6 +32,13 @@ const slotProvider: Record<string, string> = {};
 /** The endpoints saved (with `endpoints`: one to begin with, as Settings → Endpoints lists them). */
 type MockEndpoint = { id: string; name: string; url: string; key_env: string | null; models: string[] };
 let mockEndpoints: MockEndpoint[] = [];
+const MOCK_DEEPSEEK = { url: "https://api.deepseek.com/anthropic", models: ["deepseek-v4-pro", "deepseek-flash"] };
+const mockHosted = () => {
+  const endpoint = mockEndpoints.find((e) => e.url === MOCK_DEEPSEEK.url);
+  return [{ id: "deepseek", name: "DeepSeek", ...MOCK_DEEPSEEK, key_hint: "sk-…", key_page: "https://platform.deepseek.com/api_keys", endpoint_id: endpoint?.id ?? null, connected: !!endpoint && mockAuth.endpoint_keys.includes(endpoint.id) }];
+};
+/** The API keys (never a key: only that one is saved) and the switch, as Settings → API keys shows them. */
+let mockAuth = { claude: { use_key: false, has_key: false }, endpoint_keys: [] as string[], not_yet: "Codex's own sign-in is used for now: how its app-server takes an API key without replacing your saved sign-in couldn't be checked yet." };
 const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : slotProvider[slot] === "gateway" ? (mockEndpoints[0]?.models[0] ?? "qwen3:8b") : "claude-opus-5-5");
 /** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex and an endpoint only tokens. */
 const usedBy = (slot: string, tokens: number) =>
@@ -1081,17 +1088,38 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
       await sleep(50);
     }
   };
+  // The app may already have the folder open (it restores the last one and starts on the Desk): then there is no welcome
+  // button to press, and the screen it is on has no message box until a chat is opened.
+  const untilOr = async <T,>(find: () => T | null | undefined, ms: number): Promise<T | null> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const found = find();
+      if (found) return found;
+      if (Date.now() > end) return null;
+      await sleep(50);
+    }
+  };
+  const openChat = () => document.querySelector<HTMLButtonElement>(".sb-row")?.click();
   void (async () => {
     if (new URLSearchParams(location.search).has("folders")) return;
-    (await until(() => document.querySelector<HTMLButtonElement>(".welcome-open"))).click();
+    (await untilOr(() => document.querySelector<HTMLButtonElement>(".welcome-open"), 1500))?.click();
     if (history) {
       const pill = new URLSearchParams(location.search).has("pill");
-      const selector = pill ? '.composer-pills .pill[title="Continue a past session"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
-      (await until(() => document.querySelector<HTMLButtonElement>(selector))).click();
+      const selector = pill ? '.composer-pills .pill[title="Continue a past chat"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
+      let trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      if (!trigger) {
+        openChat();
+        trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      }
+      trigger?.click();
       return;
     }
     if (openOnly) return;
-    const box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    let box = await untilOr(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"), 2500);
+    if (!box) {
+      openChat();
+      box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    }
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
     setValue.call(box, "Add retries with backoff to fetchJson for transient errors, then run the retry tests.");
     box.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1609,7 +1637,37 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             ...mockEndpoints.map((e) => ({ ...GATEWAY_INFO, models: e.models, binary: null, endpoint: { id: e.id, name: e.name } })),
           ];
         case "list_endpoints":
-          return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null }));
+          return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null, saved_key: mockAuth.endpoint_keys.includes(e.id) }));
+        case "provider_auth_state":
+          return mockAuth;
+        case "provider_claude_key_set":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          mockAuth = { ...mockAuth, claude: { ...mockAuth.claude, has_key: true } };
+          return mockAuth;
+        case "provider_claude_key_clear":
+          mockAuth = { ...mockAuth, claude: { use_key: false, has_key: false } };
+          return mockAuth;
+        case "provider_claude_use_key":
+          if (a.on && !mockAuth.claude.has_key) return Promise.reject("Save an API key first.");
+          mockAuth = { ...mockAuth, claude: { ...mockAuth.claude, use_key: !!a.on } };
+          return mockAuth;
+        case "endpoint_key_set":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          mockAuth = { ...mockAuth, endpoint_keys: [...new Set([...mockAuth.endpoint_keys, String(a.id)])] };
+          return mockAuth;
+        case "endpoint_key_clear":
+          mockAuth = { ...mockAuth, endpoint_keys: mockAuth.endpoint_keys.filter((x) => x !== a.id) };
+          return mockAuth;
+        case "hosted_provider_list":
+          return mockHosted();
+        case "hosted_provider_connect":
+          if (String(a.key).trim().length < 8) return Promise.reject("That's too short to be an API key.");
+          if (!mockEndpoints.some((e) => e.url === MOCK_DEEPSEEK.url)) mockEndpoints = [...mockEndpoints, { id: "deepseek", name: "DeepSeek", url: MOCK_DEEPSEEK.url, key_env: null, models: MOCK_DEEPSEEK.models }];
+          mockAuth = { ...mockAuth, endpoint_keys: [...new Set([...mockAuth.endpoint_keys, "deepseek"])] };
+          return mockHosted();
+        case "hosted_provider_disconnect":
+          mockAuth = { ...mockAuth, endpoint_keys: mockAuth.endpoint_keys.filter((x) => x !== "deepseek") };
+          return mockHosted();
         // Like the backend: ids made once from the first name; a name given twice is refused, in words.
         case "save_endpoints": {
           const wanted = a.endpoints as MockEndpoint[];
@@ -2120,9 +2178,10 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "remote_set_rich_notifications":
         case "remote_set_keep_awake":
         case "remote_set_allow_auto":
+        case "remote_set_allow_shell":
         case "remote_remove_device":
         case "remote_set_live_key":
-          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, allow_phone_shell: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";
         case "remote_pair_cancel":
@@ -2317,6 +2376,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
               r(`Mostly done: retries work, one test is still red.\n\n**Done**\n- Retry on 5xx with backoff ${cite(0)}\n- Cap the delay at 8 seconds ${cite(1)}\n\n**Open**\n- Log each retry once ${cite(0)}\n\n**Blocked**\n- The timeout test is flaky on CI ${cite(2)}`);
             }, 900),
           );
+        case "recap_session":
+          return new Promise((r) => setTimeout(() => r("You're adding retries to fetchJson, and the backoff is in with its tests. Next: decide whether a 429 should wait for Retry-After."), 800));
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

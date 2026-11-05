@@ -168,6 +168,10 @@ pub async fn route(claude: &Path, path_env: Option<&str>, text: &str, chats: &[C
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    // On an API key it runs on that key or not at all: never on the sign-in the user chose not to use.
+    if crate::provider_keys::apply_claude_tokio(&mut cmd).is_err() {
+        return unsure(chats);
+    }
     match tokio::time::timeout(TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => read(&String::from_utf8_lossy(&out.stdout), chats, projects),
         _ => unsure(chats),
@@ -256,6 +260,7 @@ pub async fn answer(claude: &Path, path_env: Option<&str>, question: &str, sourc
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    crate::provider_keys::apply_claude_tokio(&mut cmd)?;
     match tokio::time::timeout(ANSWER_TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => {
             let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -416,6 +421,7 @@ pub async fn summary(claude: &Path, path_env: Option<&str>, question: &str, repl
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    crate::provider_keys::apply_claude_tokio(&mut cmd)?;
     match tokio::time::timeout(SUMMARY_TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => {
             let text = cut(String::from_utf8_lossy(&out.stdout).trim(), SUMMARY_MAX);

@@ -88,13 +88,6 @@ export const ArrowUpIcon = () => (
   </svg>
 );
 
-// Plan first: a short checklist.
-export const PlanIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
-    <path d="M1.5 2.5l1 1 1.6-1.8M6 3h4.5M1.5 7l1 1 1.6-1.8M6 7.5h4.5M6 10.5h4.5" />
-  </svg>
-);
-
 // Debug: a small bug.
 export const BugIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" {...base}>

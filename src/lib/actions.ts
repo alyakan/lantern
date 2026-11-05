@@ -21,6 +21,8 @@ const CATALOGUE = [
   // The title bar's inbox of what waits on you, across every project and team.
   { id: "show-inbox", title: "What Needs You…", group: "View" },
   { id: "toggle-compact", title: "Collapse Sidebar", group: "View", menu: true },
+  // The board of every open chat, a destination like a chat: the sidebar's Desk button, the palette and ⇧⌘D all go there.
+  { id: "show-desk", title: "Desk", group: "View", key: "d", shift: true, menu: true, native: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   // Only while the canvas has focus (see Canvas.tsx).

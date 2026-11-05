@@ -232,8 +232,8 @@ interface SingleChoice {
 }
 
 /**
- * The One project button: off, it opens a list of the projects to pick one from; on, it shows every project again. While it
- * is on the sidebar lists only that project, under a banner in its colour.
+ * The Projects button: every project in the sidebar, or only one of them. It opens the list whichever is showing, with
+ * "All projects" first, so the filter can always be cleared from the same place it was set.
  */
 function SingleButton({ single, choices, full, closing, onPick }: { single: string | null; choices: SingleChoice[]; full: boolean; closing: boolean; onPick: (folder: string | null) => void }) {
   const [open, setOpen] = useState(false);
@@ -244,36 +244,47 @@ function SingleButton({ single, choices, full, closing, onPick }: { single: stri
   useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("button"));
   const { ref: menuRef, style: menuStyle } = useMenuInside(open);
   useEffect(() => {
-    if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    if (open) root.current?.querySelector<HTMLElement>('[role="menuitemradio"]')?.focus();
   }, [open]);
   const on = single !== null;
-  const label = on ? "Show all projects" : "One project";
   return (
     <div className="sb-new" ref={root}>
       <button
         className={`icon sb-button single-button${full ? " labelled" : ""}${on ? " on" : ""}`}
-        aria-label={label}
-        aria-pressed={on}
-        aria-haspopup={on ? undefined : "menu"}
-        aria-expanded={on ? undefined : open}
-        title={on ? "Show every project again" : "Show only one project in the sidebar"}
-        disabled={!on && choices.length === 0}
-        onClick={() => (on ? onPick(null) : setOpen(!open))}
+        aria-label="Projects"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Show every project, or only one"
+        disabled={choices.length === 0}
+        onClick={() => setOpen(!open)}
       >
         <FocusIcon />
         {full && (
           <Away across>
-            <span aria-hidden>One project</span>
+            <span aria-hidden>Projects</span>
           </Away>
         )}
       </button>
       {open && !closing && (
-        <div className="menu sb-menu" role="menu" aria-label="Show only" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+        <div className="menu sb-menu" role="menu" aria-label="Projects" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+          <button
+            role="menuitemradio"
+            aria-checked={!on}
+            className={`menu-row${on ? "" : " current"}`}
+            onClick={() => {
+              setOpen(false);
+              onPick(null);
+            }}
+          >
+            <span className="menu-row-title">All projects</span>
+          </button>
+          <div className="menu-sep" role="separator" />
           {choices.map((c) => (
             <button
               key={c.folder}
-              role="menuitem"
-              className="menu-row"
+              role="menuitemradio"
+              aria-checked={single === c.folder}
+              className={`menu-row${single === c.folder ? " current" : ""}`}
               title={c.folder}
               onClick={() => {
                 setOpen(false);
