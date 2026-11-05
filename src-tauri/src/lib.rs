@@ -12,6 +12,7 @@ pub mod git;
 pub mod history;
 pub mod history_search;
 pub mod hooks;
+pub mod hosted_providers;
 pub mod mcp_config;
 pub mod menu;
 pub mod menu_bar;
@@ -1968,6 +1969,37 @@ async fn endpoint_key_clear(state: State<'_, AppState>, id: String) -> Result<pr
     let keys = state.provider_keys.clone();
     tauri::async_runtime::spawn_blocking(move || keys.clear_endpoint_key(&id)).await.map_err(|e| e.to_string())??;
     Ok(state.provider_keys.state())
+}
+
+/// The hosted providers (DeepSeek and the like) and whether each is connected. Never a key.
+#[tauri::command]
+fn hosted_provider_list(state: State<'_, AppState>) -> Vec<hosted_providers::HostedStatus> {
+    hosted_providers::statuses(&state.endpoints, &state.provider_keys.state().endpoint_keys)
+}
+
+/// Connects a hosted provider: makes its endpoint if the user has none at its address (the others are left alone), and saves the
+/// key for it in the Keychain. The key is checked first, so a bad paste leaves nothing behind.
+#[tauri::command]
+async fn hosted_provider_connect(state: State<'_, AppState>, id: String, key: String) -> Result<Vec<hosted_providers::HostedStatus>, String> {
+    let provider = hosted_providers::find(&id).ok_or("That provider isn't one Lantern knows.")?;
+    let key = provider_keys::clean_key(&key)?;
+    let endpoint = provider.ensure_endpoint(&state.endpoints)?;
+    endpoints::key_allowed_for(&endpoint.url)?;
+    let keys = state.provider_keys.clone();
+    let endpoint_id = endpoint.id;
+    tauri::async_runtime::spawn_blocking(move || keys.set_endpoint_key(&endpoint_id, &key)).await.map_err(|e| e.to_string())??;
+    Ok(hosted_provider_list(state))
+}
+
+/// Forgets a hosted provider's key. Its endpoint stays, with no key, until the user removes it in Endpoints.
+#[tauri::command]
+async fn hosted_provider_disconnect(state: State<'_, AppState>, id: String) -> Result<Vec<hosted_providers::HostedStatus>, String> {
+    let provider = hosted_providers::find(&id).ok_or("That provider isn't one Lantern knows.")?;
+    if let Some(endpoint) = provider.existing(&state.endpoints) {
+        let keys = state.provider_keys.clone();
+        tauri::async_runtime::spawn_blocking(move || keys.clear_endpoint_key(&endpoint.id)).await.map_err(|e| e.to_string())??;
+    }
+    Ok(hosted_provider_list(state))
 }
 
 /// Asks an endpoint what models it serves, for the Fetch button: with its key if it names one that is set.
@@ -4230,6 +4262,9 @@ pub fn run() {
             provider_claude_use_key,
             endpoint_key_set,
             endpoint_key_clear,
+            hosted_provider_list,
+            hosted_provider_connect,
+            hosted_provider_disconnect,
             user_name,
             start_session,
             conversation_settings,

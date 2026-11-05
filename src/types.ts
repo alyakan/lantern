@@ -92,6 +92,21 @@ export interface EndpointStatus extends Endpoint {
   saved_key: boolean;
 }
 
+/** A hosted provider (the backend's `HostedStatus`): a company whose Anthropic-compatible API a chat can run on, such as DeepSeek. */
+export interface HostedProvider {
+  id: string;
+  name: string;
+  url: string;
+  models: string[];
+  key_hint: string;
+  /** Where the user makes a key. */
+  key_page: string;
+  /** The endpoint made for it, once connected. */
+  endpoint_id: string | null;
+  /** A key is saved for it. */
+  connected: boolean;
+}
+
 /** What Settings → API keys shows (the backend's `AuthState`): which providers run on a key and which keys exist. Never a key. */
 export interface AuthState {
   claude: { use_key: boolean; has_key: boolean };

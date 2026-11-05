@@ -119,7 +119,7 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
             ) : tab === "endpoints" && endpoints ? (
               <EndpointsSettings {...endpoints} />
             ) : tab === "apikeys" ? (
-              <ApiKeysSettings />
+              <ApiKeysSettings onProvidersChanged={endpoints?.onSaved} />
             ) : tab === "routines" && routines ? (
               <RoutinesSettings {...routines} />
             ) : tab === "hooks" && hooks ? (

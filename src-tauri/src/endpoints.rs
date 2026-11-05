@@ -213,6 +213,24 @@ impl EndpointStore {
             return Err(format!("Up to {MAX_ENDPOINTS} endpoints."));
         }
         let mut items = self.items.lock().unwrap();
+        self.replace_locked(&mut items, wanted)
+    }
+
+    /// The endpoint at `wanted`'s address, or `wanted` added when there is none (the others are left as they are). Name taken by
+    /// an endpoint at another address: an error, since two endpoints can't share one.
+    pub fn ensure(&self, wanted: Endpoint) -> Result<Endpoint, String> {
+        let mut items = self.items.lock().unwrap();
+        let url = clean(wanted.clone())?.url;
+        if let Some(found) = items.iter().find(|e| e.url.eq_ignore_ascii_case(&url)) {
+            return Ok(found.clone());
+        }
+        let mut all = items.clone();
+        all.push(Endpoint { id: String::new(), ..wanted });
+        let saved = self.replace_locked(&mut items, all)?;
+        saved.into_iter().find(|e| e.url.eq_ignore_ascii_case(&url)).ok_or_else(|| "Couldn't add the endpoint.".to_string())
+    }
+
+    fn replace_locked(&self, items: &mut std::sync::MutexGuard<'_, Vec<Endpoint>>, wanted: Vec<Endpoint>) -> Result<Vec<Endpoint>, String> {
         let mut next: Vec<Endpoint> = Vec::new();
         for e in wanted {
             let known = !e.id.is_empty() && items.iter().any(|x| x.id == e.id) && !next.iter().any(|x| x.id == e.id);
@@ -228,7 +246,7 @@ impl EndpointStore {
         if let Some(path) = &self.path {
             write_atomic(path, &serde_json::to_vec_pretty(&next).map_err(|e| e.to_string())?)?;
         }
-        *items = next.clone();
+        **items = next.clone();
         Ok(next)
     }
 }

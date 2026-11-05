@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { AuthState } from "../types";
+import { HostedProviders } from "./HostedProviders";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -9,7 +10,7 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
  * Code today (a key for an endpoint is set on the endpoint, in Endpoints); Codex says why it can't yet. The key goes to the Mac's
  * Keychain and is never shown again: the page only knows that one is saved.
  */
-export function ApiKeysSettings() {
+export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: () => void }) {
   const [state, setState] = useState<AuthState | null>(null);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +91,9 @@ export function ApiKeysSettings() {
         <h3 className="settings-subhead">Codex</h3>
         <p className="settings-muted">{state.not_yet}</p>
       </section>
+      <HostedProviders onChanged={onProvidersChanged} />
       <section className="settings-section">
-        <h3 className="settings-subhead">Endpoints</h3>
+        <h3 className="settings-subhead">Other endpoints</h3>
         <p className="settings-muted">An endpoint's key (OpenRouter, LiteLLM and the like) is set on the endpoint itself, in Endpoints.</p>
       </section>
     </>
