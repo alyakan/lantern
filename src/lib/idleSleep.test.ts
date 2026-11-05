@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { initialState, reducer, type State } from "../store";
 import { chatTitle } from "../sessions";
+import type { UiEvent } from "../types";
 import { chatsToSave, sessionModesToSave } from "./restore";
-import { canSleep, SLEEP_MINUTES_DEFAULT, setSleepMinutes, sleepMinutes, sweep } from "./idleSleep";
+import { canSleep, SLEEP_MINUTES_DEFAULT, setSleepMinutes, sleepMinutes, sleepNote, sweep } from "./idleSleep";
 
 const resting: State = {
   ...initialState,
@@ -56,6 +57,78 @@ describe("which chats may go to sleep", () => {
   it("has nothing to put to sleep in a chat with no conversation to come back to", () => {
     expect(canSleep({ ...resting, items: [] }, own)).toBe(false);
     expect(canSleep({ ...resting, sessionId: null }, own)).toBe(false);
+  });
+});
+
+describe("a step still running", () => {
+  const NOW = 10_000_000_000;
+  const HOUR = 60 * 60_000;
+  const step = { type: "tool" as const, id: "t1", name: "Bash", summary: "cargo build", status: "running" as const, output: null, edit: null, children: [], startedAt: NOW - 20 * 60_000 };
+  const withItem = (item: State["items"][number]): State => ({ ...resting, items: [...resting.items, item] });
+
+  it("keeps a chat awake even when its status says idle, so a build or an upload is not stopped under Claude", () => {
+    expect(canSleep(withItem(step), own, NOW)).toBe(false);
+    expect(canSleep(withItem({ ...step, status: "done" }), own, NOW)).toBe(true);
+  });
+
+  it("counts a subagent's running step too", () => {
+    const agent = { ...step, name: "Agent", status: "done" as const, children: [step] };
+    expect(canSleep(withItem(agent), own, NOW)).toBe(false);
+  });
+
+  it("does not keep a chat awake once a whole turn has run: every step it started, the advisor's and a subagent's included, is over", () => {
+    const ui = (s: State, event: UiEvent): State => reducer(s, { type: "ui_event", event });
+    const done = { kind: "turn_done" as const, is_error: false, result: null, cost_usd: null, duration_ms: 1, auth_hint: false, denied: 0, context_window: null };
+    let s: State = { ...initialState, status: "starting", folder: "/p", claudePath: "/c" };
+    const events: UiEvent[] = [
+      { kind: "session_started", session_id: "sess-1", model: "m", cwd: "/p", permission_mode: "auto", claude_version: "1" },
+      { kind: "user_text", text: "build it", sent_by: "phone" },
+      { kind: "thinking", parent: null },
+      { kind: "tool_started", parent: null, tool_use_id: "t1", name: "Bash", summary: "cargo build" },
+      { kind: "tool_finished", parent: null, tool_use_id: "t1", is_error: false, output: "ok" },
+      { kind: "advisor_started", parent: null, id: "a1" },
+      { kind: "advisor_done", parent: null, id: "a1", outcome: "reviewed", error_code: null },
+      { kind: "tool_started", parent: null, tool_use_id: "t2", name: "Agent", summary: "look around" },
+      { kind: "tool_started", parent: "t2", tool_use_id: "t3", name: "Read", summary: "a.ts" },
+      { kind: "tool_finished", parent: "t2", tool_use_id: "t3", is_error: false, output: "" },
+      { kind: "tool_finished", parent: null, tool_use_id: "t2", is_error: false, output: "found it" },
+      { kind: "assistant_text", parent: null, block_id: "b1", text: "Done." },
+      done,
+    ];
+    for (const ev of events) {
+      s = ui(s, ev);
+      // Mid-turn the chat is running (or at least not allowed to sleep for another reason), never resting.
+      if (ev.kind !== "turn_done") expect(canSleep(s, own)).toBe(false);
+    }
+    expect(s.status).toBe("idle");
+    expect(canSleep(s, own)).toBe(true);
+  });
+
+  it("lets go of a step Claude never finished, and of one with no start time (replayed from History)", () => {
+    expect(canSleep(withItem({ ...step, startedAt: NOW - 3 * HOUR }), own, NOW)).toBe(true);
+    expect(canSleep(withItem({ ...step, startedAt: undefined }), own, NOW)).toBe(true);
+  });
+});
+
+describe("what sleep.log says of a chat put to sleep", () => {
+  const NOW = 10_000_000;
+  const step = { type: "tool" as const, id: "t1", name: "Bash", summary: "a secret command", status: "done" as const, output: null, edit: null, children: [], startedAt: NOW - 90_000, endedAt: NOW - 30_000 };
+
+  it("names the slot, the status, how long it was idle and its last step, and never a word said in the chat", () => {
+    const s: State = { ...resting, items: [...resting.items, step], queued: ["x"] };
+    const line = sleepNote("s7", s, "idle", 601_400, NOW);
+    expect(line).toBe("slot=s7 why=idle status=idle thinking=false idle_for=601s items=2 last_item=tool last_tool=Bash:done@30s ago running_tools=0 queued=1 background=0 wakes=0");
+    expect(line).not.toContain("secret");
+    expect(line).not.toContain("login");
+  });
+
+  it("counts a running step even one too old to keep the chat awake, so a stuck one shows", () => {
+    const s: State = { ...resting, items: [{ ...step, status: "running", endedAt: undefined, startedAt: NOW - 5 * 60 * 60_000 }] };
+    expect(sleepNote("s7", s, "idle", 0, NOW + 5 * 60 * 60_000)).toContain("running_tools=1");
+  });
+
+  it("copes with a chat that has no step at all", () => {
+    expect(sleepNote("s1", resting, "idle", 0, NOW)).toContain("last_tool=none");
   });
 });
 

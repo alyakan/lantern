@@ -6,6 +6,11 @@ import { Sheet, SHEET_INSET } from "./Sheet";
 const native = () => screen.getByTestId("true-sheet").props as Record<string, unknown>;
 
 describe("Sheet", () => {
+  it("gives a large sheet's flex content the full detent height", async () => {
+    await render(<Sheet size="large" onClose={jest.fn()}>{() => <Text>Settings</Text>}</Sheet>);
+    expect(native()).toMatchObject({ detents: [0.88], style: { flex: 1 } });
+  });
+
   it("is iOS's own sheet, shown at once, sized to what is in it up to most of the screen, with its grabber", async () => {
     await render(<Sheet onClose={jest.fn()}>{() => <Text>Inside</Text>}</Sheet>);
     expect(screen.getByText("Inside")).toBeTruthy();

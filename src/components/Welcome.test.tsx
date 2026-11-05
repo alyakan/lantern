@@ -70,10 +70,11 @@ describe("the claude check", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("stays quiet about signing in when claude can't say", async () => {
+  it("offers to check again, without alarming, when claude can't say", async () => {
     claudeLogin.mockRejectedValueOnce("too old");
     welcome();
-    expect(await screen.findByText("Claude Code is installed")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't check Claude Code's sign-in")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 

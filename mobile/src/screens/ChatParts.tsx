@@ -1143,7 +1143,7 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
     };
   }, [path, load]);
   return (
-    <Sheet onClose={onClose}>
+    <Sheet onClose={onClose} wide>
       {(close, scroll) => (
         <View style={{ flexShrink: 1, paddingBottom: insets.bottom + 8 }}>
           <View style={{ padding: space.lg, gap: 8 }}>

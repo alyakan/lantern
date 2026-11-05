@@ -194,5 +194,15 @@ export function DiffView({ path, text }: { path: string; text: string }) {
       )}
     </View>
   );
-  return markdown ? body : <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView>;
+  const scroller = markdown ? body : <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView>;
+  // A file with no change in it (the Mac shows a named file whole when git has nothing for it) says so before its lines.
+  if (rows.some((r) => r.kind === "add" || r.kind === "del") || !rows.some((r) => r.kind === "ctx")) return scroller;
+  return (
+    <>
+      <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.lg, paddingBottom: 8 }}>
+        No changes in this file here: it is shown as it is.
+      </Txt>
+      {scroller}
+    </>
+  );
 }

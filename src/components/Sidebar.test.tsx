@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
+import { AFTER_COLLAPSE_MS, OPEN_AFTER_MS, Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import { PROJECT_COLORS } from "../lib/projectColors";
 import { usePersistentState } from "../lib/layout";
 import type { CloseCheck } from "../types";
@@ -52,6 +52,7 @@ function setup(over: Partial<Props> = {}) {
     onNewTeamIn: vi.fn(),
     onBringOld: vi.fn(),
     onProjectNotes: vi.fn(),
+    onOpenInDesk: vi.fn(),
     onSetup: vi.fn(),
     onReveal: vi.fn(),
     onPrChecks: vi.fn(),
@@ -315,15 +316,24 @@ describe("clicking in the open sidebar", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Open in Desk", "New team", "Only this project", "Close finished chats", "Project notes…", "Project setup…", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
-    for (const [label, handler] of [["Project notes…", h.onProjectNotes], ["Project setup…", h.onSetup], ["Bring old chats here…", h.onBringOld], ["Pull request checks…", h.onPrChecks], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
+    for (const [label, handler] of [["Open in Desk", h.onOpenInDesk], ["Project notes…", h.onProjectNotes], ["Project setup…", h.onSetup], ["Bring old chats here…", h.onBringOld], ["Pull request checks…", h.onPrChecks], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
       fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
       fireEvent.click(screen.getByRole("menuitem", { name: label }));
       expect(handler).toHaveBeenCalledWith(MONITOR);
     }
+  });
+
+  it("opens the project menu on a right-click, with Open in Desk", () => {
+    const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
+    const header = project("network-monitor").querySelector(".sb-header")!;
+    fireEvent.contextMenu(header);
+    const menu = screen.getByRole("menu", { name: "network-monitor actions" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open in Desk" }));
+    expect(h.onOpenInDesk).toHaveBeenCalledWith(MONITOR);
   });
 
   it("marks a project that has notes on its header, and only that one", () => {
@@ -611,14 +621,14 @@ describe("one project", () => {
   it("picks a project from the button, lists only it under a banner in its colour, and shows every project again", async () => {
     setup({ open: ALL_OPEN, colors: { [LANTERN]: 2, [MONITOR]: 1, [IOS]: 0 } });
     await waitFor(() => expect(regions()).toHaveLength(3));
-    fireEvent.click(screen.getByRole("button", { name: "One project" }));
-    const menu = screen.getByRole("menu", { name: "Show only" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(3);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "network-monitor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    const menu = screen.getByRole("menu", { name: "Projects" });
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(4);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "network-monitor" }));
     expect(regions()).toEqual(["network-monitor"]);
     const banner = screen.getByRole("status", { name: "Only network-monitor" });
     expect(banner.style.getPropertyValue("--pc")).toBe(PROJECT_COLORS[1]);
-    expect(screen.getByRole("button", { name: "Show all projects", pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show all projects" })).toBeInTheDocument();
     fireEvent.click(within(banner).getByRole("button", { name: "Show all projects" }));
     expect(regions()).toHaveLength(3);
     expect(screen.queryByRole("status", { name: /^Only/ })).toBeNull();
@@ -644,10 +654,10 @@ describe("one project", () => {
   it("offers recent projects with nothing open, and picking one leaves only its banner", async () => {
     setup({ open: { [LANTERN]: lanternOpen } });
     await waitFor(() => expect(regions()).toEqual(["lantern"]));
-    fireEvent.click(screen.getByRole("button", { name: "One project" }));
-    const menu = screen.getByRole("menu", { name: "Show only" });
-    await waitFor(() => expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["lantern", "network-monitor", "lumiform-ios"]));
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "lumiform-ios" }));
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    const menu = screen.getByRole("menu", { name: "Projects" });
+    await waitFor(() => expect(within(menu).getAllByRole("menuitemradio").map((i) => i.textContent)).toEqual(["All projects", "lantern", "network-monitor", "lumiform-ios"]));
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "lumiform-ios" }));
     expect(screen.getByRole("status", { name: "Only lumiform-ios" })).toBeInTheDocument();
     expect(screen.queryAllByRole("region")).toHaveLength(0);
   });
@@ -872,6 +882,68 @@ describe("the collapsed sidebar", () => {
     first.unmount();
     bar({ canNew: false });
     expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
+  });
+
+  it("shrinks to the bar when it is collapsed, as the open bar does when it closes, instead of being swapped for it at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, props } = setup({ mode: "pinned" });
+      await act(async () => {});
+      expect(panel()).not.toHaveClass("closing");
+      rerender(<Kept {...props} mode="collapsed" />);
+      // Drawn as the open pane that lets go of its look (the Chats | Timeline switch and the labels fold away with it), then the bar.
+      expect(panel()).toHaveClass("closing");
+      expect(panel()).not.toHaveClass("expanded");
+      expect(screen.getByRole("button", { name: "Keep sidebar open" })).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(500));
+      expect(panel()).not.toHaveClass("closing");
+      expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't fade its labels in again when the open bar is pinned: the pinned pane is the same on screen", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender, props } = setup({ mode: "collapsed" });
+      await act(async () => {});
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS + 20));
+      expect(panel()).toHaveClass("expanded");
+      rerender(<Kept {...props} mode="pinned" />);
+      expect(panel()).toHaveClass("carried");
+      act(() => vi.advanceTimersByTime(800));
+      expect(panel()).not.toHaveClass("carried");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't open again over the chat when it was collapsed with the pointer on it, only when the pointer comes back to it", async () => {
+    vi.useFakeTimers();
+    const matches = Element.prototype.matches;
+    const hover = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) {
+      return selector === ":hover" ? true : matches.call(this, selector);
+    });
+    try {
+      const { rerender, props } = setup({ mode: "pinned" });
+      await act(async () => {});
+      // Collapsed from the button in it: the pointer is still on the bar it became.
+      rerender(<Kept {...props} mode="collapsed" />);
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS * 3));
+      expect(panel()).not.toHaveClass("expanded");
+      // Leaving it and coming back later is asking for it.
+      fireEvent.pointerLeave(panel());
+      act(() => vi.advanceTimersByTime(AFTER_COLLAPSE_MS));
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS));
+      expect(panel()).toHaveClass("expanded");
+    } finally {
+      hover.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("opens over the chat once the pointer rests on it, not as it passes, and closes when it leaves or a chat is picked", async () => {

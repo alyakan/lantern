@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { usePersistentState } from "./layout";
-import { BUILTIN_ROLES, BUILTIN_TEMPLATES, type Role, type TeamTemplate } from "./roles";
+import { BUILTIN_TEMPLATES, type Role, type TeamTemplate } from "./roles";
 
 /** The project's own roles and team templates (kept per project folder), and what the user does to them. */
 export interface RoleStore {
@@ -63,6 +63,3 @@ export function useRoleStoreState(): RoleStore {
 export function RoleStoreProvider({ store, children }: { store: RoleStore; children: ReactNode }) {
   return <RoleStoreContext.Provider value={store}>{children}</RoleStoreContext.Provider>;
 }
-
-/** The ids a custom role must not take: every built-in one. */
-export const BUILTIN_IDS = BUILTIN_ROLES.map((r) => r.id);

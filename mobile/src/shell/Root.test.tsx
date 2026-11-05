@@ -139,31 +139,6 @@ describe("starting a chat from Home", () => {
     expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
   });
 
-  it("carries on a chat from a suggestion: the draft is read first, then sent to that chat, and the chat opens", async () => {
-    const suggest = { generated_at: 1, items: [{ id: "s1", title: "Write the notes", why: "The release is cut.", message: "Write the release notes.", target: { kind: "continue", slot: "a" } }] };
-    const { lastOf } = await open({ chats: [chat()] }, {}, { suggest });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Write the notes. The release is cut." })).toBeTruthy());
-    await press("Write the notes. The release is cut.");
-    // The sheet shows the draft, for reading and changing; nothing has been sent yet.
-    expect(screen.getByLabelText("What to start with").props.value).toBe("Write the release notes.");
-    expect(lastOf("send")).toBeUndefined();
-    await press("Send");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeTruthy());
-    expect(lastOf("send")).toMatchObject({ slot: "a", text: "Write the release notes." });
-    expect(lastOf("subscribe")).toMatchObject({ slot: "a" });
-  });
-
-  it("starts a new chat from a suggestion in the project it names", async () => {
-    const suggest = { generated_at: 1, items: [{ id: "s1", title: "Check the footer", why: "Quick tidy.", message: "Fix the footer links.", target: { kind: "new_chat", project: "/Users/me/site", project_name: "site" } }] };
-    const projects = [{ id: "/Users/me/lantern", name: "lantern" }, { id: "/Users/me/site", name: "site" }];
-    const { lastOf } = await open({ chats: [chat()] }, {}, { suggest, projects, new_chat: { slot: "s9" } });
-    await waitFor(() => screen.getByRole("button", { name: "Check the footer. Quick tidy." }));
-    await press("Check the footer. Quick tidy.");
-    await waitFor(() => expect(screen.getByRole("radio", { name: "site" }).props.accessibilityState).toMatchObject({ selected: true }));
-    await press("Start the chat");
-    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/site", text: "Fix the footer links.", permissions: null, preset: null, workflow: null }));
-  });
-
   it("closes the sheet with the system's back button before it leaves anything else", async () => {
     await open({ chats: [chat()] }, {}, answers);
     await press("New chat");
@@ -258,6 +233,29 @@ describe("the Mac's sheet", () => {
     expect(unpair).toHaveBeenCalled();
     expect(screen.getByText("Pair with your Mac")).toBeTruthy();
     expect(connected.kind).toBe("connected");
+  });
+
+  it("shows each provider's usage, which opens it in full once the sheet is away, and the back button closes that", async () => {
+    const { controller } = await open({ chats: [chat()] });
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "plan", used: 0.4, resets_at: null, status: "allowed" } }));
+    await press(/^Aly's MacBook Pro, connected/);
+    await press(/^Claude usage, 40 percent used/);
+    await settle();
+    expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
+    expect(screen.getByText("Usage by provider")).toBeTruthy();
+    await act(async () => void backHandlers[backHandlers.length - 1]({ nativeEvent: {} } as never));
+    expect(screen.queryByText("Usage by provider")).toBeNull();
+  });
+
+  it("opens this phone's voice typing once the sheet is away, saying which is in use", async () => {
+    await open({ chats: [chat()] });
+    await press(/^Aly's MacBook Pro, connected/);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Voice typing, / })).toBeTruthy());
+    await press(/^Voice typing, /);
+    await settle();
+    expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
+    expect(screen.getByRole("header", { name: "Voice typing" })).toBeTruthy();
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
   });
 
   it("has no What's new when this build carries no notes (a development run)", async () => {

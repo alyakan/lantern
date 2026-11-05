@@ -55,6 +55,8 @@ export interface Capabilities {
   supports_images?: boolean;
   supports_compact?: boolean;
   supports_clear?: boolean;
+  /** It can publish an artifact to a link the user can open and share (Claude Code's Artifact tool). */
+  publishes_artifacts?: boolean;
 }
 
 export interface ProviderInfo {
@@ -673,7 +675,7 @@ export interface DashboardPreview {
   confirm: string | null;
 }
 
-export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
+export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "archive" | "temp" | "download" | "trash";
 /** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
 export type StorageRisk = "safe" | "review" | "blocked";
 
@@ -698,6 +700,8 @@ export interface StorageItem {
   within: string | null;
   /** Claude's reason for suggesting it. */
   suggestion: string | null;
+  /** Its size may be shared with something that stays (an APFS copy of an app): deleting it frees up to `bytes`. */
+  shared: boolean;
 }
 
 /** What the Storage tab shows. */
@@ -708,6 +712,10 @@ export interface StorageView {
   /** When the last scan finished (ms since the epoch); null before the first. */
   scanned_at: number | null;
   free_bytes: number | null;
+  /** The size of the disk. */
+  total_bytes: number | null;
+  /** What macOS can free by itself when it needs the room, measured at the end of a scan; null before one. */
+  purgeable_bytes: number | null;
   /** Local Time Machine snapshots, which can keep deleted space from showing as free. */
   snapshots: number;
   notes: string[];
@@ -804,6 +812,34 @@ export interface OpenPr {
   draft: boolean;
 }
 
+/** One of your issues in Linear that isn't Done, Closed or Canceled (linear.rs). `state_type`: triage, backlog, unstarted, started,
+ * or completed for a state of that kind that isn't Done or Closed (Ready, In Review, Testing); `priority`:
+ * 0 none, 1 urgent, 2 high, 3 medium, 4 low; `branch`: the name Linear suggests; `links`: what is attached (linked PRs). */
+export interface LinearIssue {
+  identifier: string;
+  title: string;
+  url: string;
+  priority: number;
+  due: string | null;
+  state: string;
+  state_type: string;
+  team: string;
+  project: string | null;
+  project_id: string | null;
+  branch: string | null;
+  links: string[];
+}
+
+/** What Linear says of your work (read-only); `connected`: a key is kept; `error`: why it couldn't be asked this time. */
+export interface LinearWork {
+  connected: boolean;
+  viewer: string | null;
+  org: string | null;
+  teams: { key: string; name: string }[];
+  issues: LinearIssue[];
+  error: string | null;
+}
+
 /** How a repository with a chat open stands, for the Desk's board (status.rs). */
 export interface RepoStatus {
   /** Its main checkout. */
@@ -814,12 +850,18 @@ export interface RepoStatus {
   /** Linked worktrees, besides the main checkout, from git's list (`agent`: a worker's or a subagent's, the team's to clean up). */
   worktrees: { path: string; branch: string | null; locked: boolean; agent: boolean }[];
   gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
-  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null }[];
+  /** `mergeable`: MERGEABLE, CONFLICTING or UNKNOWN; `merge_state`: GitHub's mergeStateStatus (CLEAN, BEHIND, BLOCKED, DIRTY…);
+   * `review_requests`: the logins asked to review it. */
+  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null; mergeable: string | null; merge_state: string | null; review_requests: string[] }[];
   /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
-  merged: { number: number; title: string; merged_at: string }[];
+  merged: { number: number; title: string; author: string; branch: string; merged_at: string }[];
   release: { tag: string; published_at: string | null } | null;
   /** Releases waiting as drafts, by tag. */
   drafts: string[];
+  /** Who gh is logged in as. */
+  viewer: string | null;
+  /** Local branches never pushed, newest commit first; `committed` in seconds. */
+  branches: { name: string; ahead: number; committed: number }[];
   error: string | null;
 }
 

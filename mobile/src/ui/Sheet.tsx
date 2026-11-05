@@ -8,6 +8,9 @@ import { SHEET_MAX } from "../view/layout";
 
 /** How much of the screen's height a sheet may take. */
 const MOST = 0.88;
+/** How wide a `wide` sheet may be on a screen `width` wide: as a floated pane is (layout.ts floatFrame), never narrower than any sheet. */
+export const wideSheet = (width: number) => Math.max(SHEET_MAX, Math.round(Math.min(width * 0.8, 1100)));
+
 /** The room what is in a sheet keeps at its bottom: the sheet itself stays clear of the home indicator. */
 export const SHEET_INSET = 8;
 
@@ -21,7 +24,7 @@ export type SheetScroll = RefObject<any>;
 /**
  * A bottom sheet: iOS's own (UISheetPresentationController, through True Sheet), sized to what is in it up to most of the
  * screen, with its grabber; a swipe down or a tap on the dimmed screen around it puts it away. On a tablet it is no wider than
- * SHEET_MAX. `children` is given `close`, which slides it away and then calls `onClose` (as a swipe does: once, however it
+ * SHEET_MAX, or (`wide`, for what reads across, like a diff) most of the screen's width. `children` is given `close`, which slides it away and then calls `onClose` (as a swipe does: once, however it
  * goes), and `scroll`, the ref for the list in it that scrolls.
  *
  * A sheet sized to its content can't hide the screen around it, so when the app lock covers the app (it locked, or the app is
@@ -29,11 +32,11 @@ export type SheetScroll = RefObject<any>;
  * app switcher's picture as the app leaves: no animation is left running for it to catch). One asked for while the app is
  * covered (a handoff as it locks, a sheet at launch) is never shown: it says it closed.
  */
-export function Sheet({ onClose, children, size = "content" }: { onClose: () => void; children: (close: () => void, scroll: SheetScroll) => ReactNode; size?: "content" | "large" }) {
+export function Sheet({ onClose, children, size = "content", wide = false }: { onClose: () => void; children: (close: () => void, scroll: SheetScroll) => ReactNode; size?: "content" | "large"; wide?: boolean }) {
   const sheet = useRef<TrueSheet>(null);
   const scroll: SheetScroll = useRef(null);
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const gone = useRef(false);
   const done = () => {
     if (gone.current) return;
@@ -53,7 +56,7 @@ export function Sheet({ onClose, children, size = "content" }: { onClose: () => 
   }, [covered]);
   if (blocked) return null;
   return (
-    <TrueSheet ref={sheet} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
+    <TrueSheet ref={sheet} style={size === "large" ? { flex: 1 } : undefined} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={wide ? wideSheet(width) : SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
       <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
       {covered && (

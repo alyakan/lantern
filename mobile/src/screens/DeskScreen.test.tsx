@@ -19,8 +19,6 @@ jest.mock("../prefs", () => ({
   saveFolded: jest.fn(async () => {}),
   loadSeen: jest.fn(async () => ({})),
   saveSeen: jest.fn(async () => {}),
-  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: true, dismissed: [] as string[] })),
-  saveSuggestionPrefs: jest.fn(async () => {}),
 }));
 // The Desk's messages are kept in memory here, not in the Keychain.
 let mockLog: DeskEntry[] = [];

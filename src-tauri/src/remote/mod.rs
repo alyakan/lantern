@@ -6,6 +6,7 @@ pub mod answers;
 pub mod bus;
 pub mod desk;
 pub mod single;
+pub mod work;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
@@ -85,6 +86,16 @@ pub struct NewChatRequest {
     pub workflow: &'static str,
     /// The id of one of the providers the window listed, or None for the project's own.
     pub provider: Option<String>,
+}
+
+/// What the window is asked when a phone asks for a step of the user's work (a button of Your work). The gateway has checked the item
+/// is listed and was shown as it is; the window finds it again, and refuses it if it moved on or was sent already.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WorkStepRequest {
+    /// Single-use: the window answers with it (`Remote::work_step_done`).
+    pub id: String,
+    pub key: String,
+    pub sig: String,
 }
 
 /// What the window is asked when a phone puts a chat on Chat or Step by step. The gateway has checked the chat; the window checks again.
@@ -243,6 +254,8 @@ pub struct RemoteView {
     /// The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home.
     pub tailnet: Vec<String>,
     pub allow_phone_auto: bool,
+    /// Paired phones may run `!` commands on the Mac (off until the user turns it on).
+    pub allow_phone_shell: bool,
     pub devices: Vec<DeviceView>,
     /// The ids of the devices connected now.
     pub connected: Vec<String>,
@@ -359,7 +372,7 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, rich_notifications: saved.rich_notifications, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, rich_notifications: saved.rich_notifications, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, allow_phone_shell: saved.allow_phone_shell, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.
@@ -422,6 +435,37 @@ pub struct WindowChat {
     /// window, which knows it for a chat not started yet; None for a chat on Claude.
     #[serde(default)]
     pub provider: Option<String>,
+    /// A change to the chat's settings that waits for it (made while it worked), for a phone to show.
+    #[serde(default)]
+    pub pending: Option<WindowPending>,
+}
+
+/// A change waiting for a chat, as the window says it: "now" or "finished", the change in words, and what it puts the chat on.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct WindowPending {
+    pub when: String,
+    pub text: String,
+    #[serde(default)]
+    pub permissions: Option<String>,
+    #[serde(default)]
+    pub workflow: Option<String>,
+    #[serde(default)]
+    pub preset: Option<String>,
+}
+
+impl WindowPending {
+    /// What a phone is told: only a `when` and values it knows, its words one short line.
+    fn remote(&self) -> Option<protocol::RemotePending> {
+        let when = match self.when.as_str() {
+            "now" => protocol::RemoteWhen::Now,
+            "finished" => protocol::RemoteWhen::Finished,
+            _ => return None,
+        };
+        let text = self.text.chars().filter(|c| !c.is_control()).take(120).collect();
+        let workflow = self.workflow.as_deref().and_then(protocol::RemoteWorkflow::parse).filter(|w| *w != protocol::RemoteWorkflow::Team);
+        let preset = self.preset.clone().filter(|p| !p.is_empty() && p.len() <= 64);
+        Some(protocol::RemotePending { when, text, permissions: self.permissions.as_deref().and_then(protocol::RemotePermissions::parse), workflow, preset })
+    }
 }
 
 impl Remote {
@@ -438,20 +482,35 @@ impl Remote {
         self.claude.lock().unwrap().clone()
     }
 
-    /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
-    pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+    /// An id for the window to answer with, and what that answer will be. Used once. A chat's ids start with "n-" and a step's with
+    /// "w-", so the window's answer to one can't be taken for the other's (they share a table).
+    fn expect(&self, prefix: &str) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
         let mut raw = [0u8; 12];
         let _ = getrandom::fill(&mut raw);
-        let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let id: String = format!("{prefix}{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>());
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.new_chats.lock().unwrap().insert(id.clone(), tx);
         (id, rx)
     }
 
-    /// The window's answer to a started chat: the slot it made, or why not. False for an id nobody waits for (unknown,
-    /// already answered, or given up on), which does nothing.
-    pub fn new_chat_done(&self, id: &str, result: Result<String, String>) -> bool {
+    /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
+    pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+        self.expect("n-")
+    }
+
+    /// A phone asked for a step of the user's work: an id for the window to answer with, and what that answer will be. Used once.
+    pub fn expect_work_step(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+        self.expect("w-")
+    }
+
+    fn answer(&self, id: &str, result: Result<String, String>) -> bool {
         self.new_chats.lock().unwrap().remove(id).is_some_and(|tx| tx.send(result).is_ok())
+    }
+
+    /// The window's answer to a started chat: the slot it made, or why not. False for an id nobody waits for (unknown,
+    /// already answered, given up on, or a step's), which does nothing.
+    pub fn new_chat_done(&self, id: &str, result: Result<String, String>) -> bool {
+        id.starts_with("n-") && self.answer(id, result)
     }
 
     /// Stops waiting for the window's answer (it took too long).
@@ -462,6 +521,17 @@ impl Remote {
     /// Takes in what the window says its Desks hold (see desk.rs).
     pub fn window_desk(&self, desk: desk::WindowDesk) {
         self.hub.desk.set(desk);
+    }
+
+    /// Takes in what the window says the user's work is (see work.rs).
+    pub fn window_work(&self, work: work::WindowWork) {
+        self.hub.work.set(work);
+    }
+
+    /// The window's answer to a step a phone asked for: what it did ("sent" to a chat, or "started" one, and where), or why not. False
+    /// for an id nobody waits for, or a chat's.
+    pub fn work_step_done(&self, id: &str, result: Result<(String, String), String>) -> bool {
+        id.starts_with("w-") && self.answer(id, result.map(|(kind, to)| format!("{kind}\u{1f}{to}")))
     }
 
     /// Takes in the window's One project (see single.rs): None when it shows every project.
@@ -476,6 +546,7 @@ impl Remote {
                 self.hub.controls(&c.slot, p, c.preset.as_deref());
             }
             self.hub.colored(&c.slot, c.color.as_deref());
+            self.hub.set_pending(&c.slot, c.pending.as_ref().and_then(WindowPending::remote));
             if let Some(w) = c.workflow.as_deref() {
                 self.hub.flow(&c.slot, w);
             }
@@ -606,10 +677,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_windows_answer_to_a_chat_cannot_be_taken_for_a_steps_or_the_other_way_round() {
+        let remote = Remote::default();
+        let (chat, _chat_rx) = remote.expect_new_chat();
+        let (step, step_rx) = remote.expect_work_step();
+        assert!(chat.starts_with("n-") && step.starts_with("w-"));
+        assert!(!remote.work_step_done(&chat, Ok(("sent".into(), "x".into()))), "a chat's id isn't a step's");
+        assert!(!remote.new_chat_done(&step, Ok("s7".into())), "a step's id isn't a chat's");
+        assert!(remote.work_step_done(&step, Ok(("sent".into(), "Chat one".into()))));
+        assert_eq!(step_rx.await.unwrap(), Ok("sent\u{1f}Chat one".to_string()));
+    }
+
+    #[tokio::test]
     async fn the_windows_answer_to_a_started_chat_reaches_the_one_waiting_once() {
         let remote = Remote::default();
         let (id, rx) = remote.expect_new_chat();
-        assert_eq!(id.len(), 24);
+        assert_eq!(id.len(), 26, "n- and 24 hex digits");
         assert!(remote.new_chat_done(&id, Ok("s7".into())));
         assert_eq!(rx.await.unwrap(), Ok("s7".to_string()));
         assert!(!remote.new_chat_done(&id, Ok("s8".into())), "an id is used once");
@@ -731,7 +814,7 @@ mod tests {
     fn the_window_titles_its_chats_and_lists_the_asleep_ones_which_can_then_be_woken() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: None };
+        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: None, pending: None };
         remote.window_chats(&[chat("a", false), chat("b", true)]);
         assert_eq!(remote.hub.chat("a").unwrap().title.as_deref(), Some("Chat a"));
         let b = remote.hub.chat("b").unwrap();
@@ -765,7 +848,7 @@ mod tests {
     fn the_window_says_which_workflow_each_chat_is_on() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |workflow: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: None, preset: None, color: None, workflow: workflow.map(String::from), provider: None };
+        let chat = |workflow: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: None, preset: None, color: None, workflow: workflow.map(String::from), provider: None, pending: None };
         remote.window_chats(&[chat(Some("steps"))]);
         assert_eq!(remote.hub.chat("a").unwrap().workflow.as_deref(), Some("steps"));
         remote.window_chats(&[chat(None)]);
@@ -777,7 +860,7 @@ mod tests {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
         remote.hub.asleep("b", "/p", None, None);
-        let chat = |slot: &str, asleep: bool, color: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep, session_id: None, permissions: None, preset: None, color: color.map(String::from), workflow: None, provider: None };
+        let chat = |slot: &str, asleep: bool, color: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep, session_id: None, permissions: None, preset: None, color: color.map(String::from), workflow: None, provider: None, pending: None };
         remote.window_chats(&[chat("a", false, Some("#c2255c")), chat("b", true, Some("#0f8a7e"))]);
         assert_eq!(remote.hub.chat("a").unwrap().color.as_deref(), Some("#c2255c"));
         assert_eq!(remote.hub.chat("b").unwrap().color.as_deref(), Some("#0f8a7e"), "an asleep chat's too");
@@ -788,7 +871,7 @@ mod tests {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
         remote.hub.opened("b", "/p");
-        let chat = |slot: &str, permissions: Option<&str>, preset: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: permissions.map(String::from), preset: preset.map(String::from), color: None, workflow: None, provider: None };
+        let chat = |slot: &str, permissions: Option<&str>, preset: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: permissions.map(String::from), preset: preset.map(String::from), color: None, workflow: None, provider: None, pending: None };
         remote.window_chats(&[chat("a", Some("auto"), Some("max")), chat("b", None, None)]);
         let (a, b) = (remote.hub.chat("a").unwrap(), remote.hub.chat("b").unwrap());
         assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), Some("max")));
@@ -801,7 +884,7 @@ mod tests {
         // The chat is listed (its claude starts) but hasn't said anything: claude names its session only with its first message.
         remote.hub.opened("a", "/p");
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
-        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from), permissions: None, preset: None, color: None, workflow: None, provider: None };
+        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from), permissions: None, preset: None, color: None, workflow: None, provider: None, pending: None };
         remote.window_chats(&[chat(Some("0a1b2c3d-1111-2222-3333-444455556666"))]);
         let a = remote.hub.chat("a").unwrap();
         assert_eq!((a.status, a.session_id.as_deref()), (hub::ChatStatus::Idle, Some("0a1b2c3d-1111-2222-3333-444455556666")), "it is still awake, and now has its session");
@@ -814,7 +897,7 @@ mod tests {
     fn the_window_only_fills_a_gap_in_the_session_and_never_with_a_name_that_is_not_one() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()), permissions: None, preset: None, color: None, workflow: None, provider: None };
+        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()), permissions: None, preset: None, color: None, workflow: None, provider: None, pending: None };
         // Not a session id (a path, or something with slashes in it): ignored.
         remote.window_chats(&[chat("../../etc/passwd")]);
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);

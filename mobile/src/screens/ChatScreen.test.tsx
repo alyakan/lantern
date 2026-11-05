@@ -1063,11 +1063,13 @@ describe("Step by step's pages", () => {
       await renderWith(<ChatScreen {...handlers()} />, { chats: [c], events: { a: run }, connection: connectedWithControls }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
       expect(screen.queryByRole("button", { name: /Show as/ })).toBeNull();
+      // The sheet stays up after a choice: it is opened once, and the choice is made in place.
       const show = async (label: string) => {
-        await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
-        await waitFor(() => expect(screen.getByText("Show")).toBeTruthy());
-        await fireEvent.press(screen.getByRole("button", { name: /^Show,/ }));
-        await fireEvent.press(screen.getByRole("radio", { name: label }));
+        if (!screen.queryByText("Show")) {
+          await fireEvent.press(screen.getByRole("button", { name: "Chat settings" }));
+          await waitFor(() => expect(screen.getByText("Show")).toBeTruthy());
+        }
+        await fireEvent.press(screen.getByRole("menuitem", { name: label }));
       };
       await show("One list");
       await waitFor(() => expect(screen.getByTestId("chat-list")).toBeTruthy());

@@ -42,4 +42,9 @@ can_lead_team: boolean,
  * A paired phone can see and answer the provider's approval cards, through the permission bridge or its session protocol.
  * Providers without this are left out when a phone starts a chat.
  */
-phone_approvals: boolean, supports_images: boolean, supports_compact: boolean, supports_clear: boolean, };
+phone_approvals: boolean, supports_images: boolean, supports_compact: boolean, supports_clear: boolean, 
+/**
+ * It can publish an artifact (a presentation, a diagram, a page) to a link the user can open and share, with a tool of
+ * its own: Claude Code's Artifact tool, which Lantern turns on for its chats (`claude -p` leaves it off).
+ */
+publishes_artifacts: boolean, };

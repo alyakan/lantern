@@ -36,9 +36,6 @@ jest.mock("../prefs", () => ({
   saveSeen: jest.fn(async (m: Record<string, number>) => {
     mockSeen = { ...m };
   }),
-  // The suggestions' own memory: nothing folded away or dismissed.
-  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: false, dismissed: [] as string[] })),
-  saveSuggestionPrefs: jest.fn(async () => {}),
 }));
 
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
@@ -143,24 +140,14 @@ describe("Home", () => {
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
   });
 
-  it("suggests what to do next when nothing waits on you, with one way to start a chat of your own: New chat", async () => {
+  it("suggests nothing when nothing waits on you, nor asks Claude to (the Desk is where things start), with one way to start a chat: New chat", async () => {
     const { controller } = makeController();
     const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
-    const h = handlers();
-    await renderWith(<HomeScreen {...h} />, { chats: [chat()], waiting: [] }, controller);
-    await waitFor(() => expect(screen.getByText("Claude suggests")).toBeTruthy());
-    expect(asked.some((r) => r.op === "suggest")).toBe(true);
-    expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
-  });
-
-  it("doesn't suggest anything, or ask Claude, while something waits on you: that leads", async () => {
-    const { controller } = makeController();
-    const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
-    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting()] }, controller);
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [] }, controller);
+    expect(screen.getByText("Nothing")).toBeTruthy();
     expect(screen.queryByText("Claude suggests")).toBeNull();
-    expect(screen.getByRole("button", { name: "New chat" })).toBeTruthy();
     expect(asked.filter((r) => r.op === "suggest")).toEqual([]);
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
   });
 
   it("says nothing waits, and shows no stack", async () => {
@@ -579,10 +566,27 @@ describe("a file change waiting on you", () => {
   });
 });
 
-describe("the plan usage on Home", () => {
-  it("opens the usage in full when pressed", async () => {
-    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], plan: { used: 0.4, resetsAt: null, status: "allowed" } });
-    await fireEvent.press(screen.getByRole("button", { name: /^Claude usage/ }));
-    expect(await screen.findByText("Usage by provider")).toBeTruthy();
+describe("the usage on Home", () => {
+  const soon = () => Date.now() / 1000 + 3600;
+
+  it("is no line of its own: comfortably under, the Mac's dot is all there is, and it says the usage to a screen reader", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], plan: { used: 0.4, resetsAt: soon(), status: "allowed" } });
+    expect(screen.queryByRole("button", { name: /^Claude usage/ })).toBeNull();
+    expect(screen.queryByTestId("usage-ring")).toBeNull();
+    expect(screen.getByRole("button", { name: /, connected\. Claude session 40% used, resets in/ })).toBeTruthy();
+  });
+
+  it("rings the Mac's dot once a limit runs low", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], plan: { used: 0.86, resetsAt: soon(), status: "allowed" } });
+    expect(screen.getByTestId("usage-ring")).toBeTruthy();
+  });
+});
+
+describe("Home's bar", () => {
+  it("stays put over the list instead of scrolling with it", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()] });
+    const bar = screen.getByTestId("home-bar");
+    expect(bar).toHaveStyle({ position: "absolute" });
+    expect(within(bar).getByRole("button", { name: /connected/ })).toBeTruthy();
   });
 });

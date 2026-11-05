@@ -202,9 +202,6 @@ function boxOf(n: ArchNode): { w: number; h: number; lines: string[] } {
   return { w, h, lines };
 }
 
-/** How many characters of a label fit in a box this wide (for a box drawn without its own lines). */
-export const labelFits = (w: number) => Math.floor((w - PAD_X + 6) / CHAR_W);
-
 // ---- The labels on the arrows ("pills"): small, placed where they hide nothing else ----
 
 export const PILL_H = 16;

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
 import { statusFor, type ProjectStatus } from "../lib/deskStatus";
+import { projectsOf, toneCounts, type WorkItem } from "../lib/yourWork";
 import { elapsed } from "../lib/time";
 import type { RepoStatus } from "../types";
 import { useMenuInside } from "../lib/useMenuInside";
 import { Row } from "./DeskCard";
+import { WorkDots } from "./YourWork";
 import { useMenuKeys } from "./useMenuKeys";
 
 export interface DeskProjectsProps {
@@ -13,6 +15,8 @@ export interface DeskProjectsProps {
   chats: InboxRow[];
   /** How the projects' repositories stand; null until the Mac has said. */
   repos: RepoStatus[] | null;
+  /** Your work in them (see YourWork). */
+  items: WorkItem[];
   now: number;
   onOpen: (slot: string) => void;
   /** Opens a project's own page. */
@@ -51,17 +55,16 @@ function Branch({ s }: { s: ProjectStatus | null | undefined }) {
   );
 }
 
-/** Its repository's open pull requests, and how many have checks failing or still running. */
-function Prs({ s }: { s: ProjectStatus | null | undefined }) {
+/** Your work in its repository (see YourWork): a coloured dot and a count for each state. */
+function Work({ s, repo, items }: { s: ProjectStatus | null | undefined; repo: string | null; items: WorkItem[] }) {
   if (s === undefined) return <dd className="muted">…</dd>;
-  if (s === null) return <dd className="muted">—</dd>;
+  if (s === null || repo === null) return <dd className="muted">—</dd>;
+  const counts = toneCounts(items, repo);
   const why = NO_GH[s.gh];
-  if (why) return <dd className="muted" title={s.error ?? why}>{why}</dd>;
-  if (!s.open) return <dd className="muted">none open</dd>;
+  if (why && !Object.keys(counts).length) return <dd className="muted" title={s.error ?? why}>{why}</dd>;
   return (
-    <dd title={s.running > 0 ? `${s.running} with checks still running` : undefined}>
-      {s.open} open
-      {s.failing > 0 && <span className="desk-bad"> · {s.failing} failing</span>}
+    <dd>
+      <WorkDots counts={counts} />
     </dd>
   );
 }
@@ -98,7 +101,13 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
   return (
     <div className="desk-tile-chats" ref={root}>
       <button className="desk-more" aria-haspopup="menu" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the chats of ${label}`} disabled={!chats.length} onClick={() => setOpen(!open)}>
-        {chats.length ? `Chats (${chats.length}) ▾` : "No chats"}
+        {chats.length ? (
+          <>
+            Chats ({chats.length}) <span className="chev down" aria-hidden />
+          </>
+        ) : (
+          "No chats"
+        )}
       </button>
       {open && (
         <div className="menu desk-chats-menu" ref={inside.ref} style={inside.style} role="menu" aria-label={`Chats of ${label}`} onKeyDown={keys.onKeyDown}>
@@ -138,15 +147,16 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
 
 /**
  * Every project on the Desk, a tile each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
- * you among them), its branch, pull requests and release (from git and gh), its to-dos, and when something last happened, one
+ * you among them), its branch, your work in it and its release (from git and gh), its to-dos, and when something last happened, one
  * under the other. A tile's Chats button drops its chats down over the Desk, each with its last message; its name opens its own page.
  */
-export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskProjectsProps) {
+export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }: DeskProjectsProps) {
   if (!rows.length) return null;
   return (
     <section className="desk-projects" aria-label="Projects">
         {rows.map((r) => {
           const s = statusFor(r.folder, repos);
+          const repo = repos?.find((x) => x.folders.some((f) => f.folder === r.folder))?.repo ?? null;
           return (
             <article key={r.folder} className="desk-tile" aria-label={r.label}>
               <header className="desk-tile-head">
@@ -160,14 +170,36 @@ export function DeskProjects({ rows, chats, repos, now, onOpen, onPage }: DeskPr
               <dl className="desk-facts">
                 <dt>Chats</dt>
                 <dd>{chatsLine(r)}</dd>
-                <dt>Pull requests</dt>
-                <Prs s={s} />
+                <dt>Your work</dt>
+                <Work s={s} repo={repo} items={items} />
+                {repo !== null && projectsOf(items, repo).length > 0 && (
+                  <>
+                    <dt>Linear</dt>
+                    <dd className="yw-projects">
+                      {projectsOf(items, repo).map((p) => (
+                        <span key={p.project} className="yw-project">
+                          {p.project}
+                          <span className="muted">
+                            {p.doing > 0 && ` · ${p.doing} doing`}
+                            {p.todo > 0 && ` · ${p.todo} to start`}
+                          </span>
+                        </span>
+                      ))}
+                    </dd>
+                  </>
+                )}
                 <dt>Release</dt>
                 <Release s={s} now={now} />
                 <dt>To-dos</dt>
                 <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
               </dl>
-              <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+              <footer className="desk-tile-foot">
+                <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
+                {/* Its page is where the full work board lives: where each pull request, branch and issue of this project stands. */}
+                <button className="desk-more" onClick={() => onPage(r.folder)} aria-label={`Open ${r.label}'s page: work, pull requests, worktrees and to-dos`}>
+                  Open page →
+                </button>
+              </footer>
             </article>
           );
         })}

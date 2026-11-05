@@ -109,7 +109,8 @@ export interface ProjectRow {
 
 /**
  * One row for each project on the Desk: the ones open on it (`open`), counted from the inbox's rows, and the ones only given to
- * it (`folders`), with nothing open. The ones that need you first, then the last active.
+ * it (`folders`), with nothing open. In order of name, so the tiles stay where they are as chats work, finish and ask: what needs
+ * you is said on a project's own tile (and by the summary), not by moving it.
  */
 export function deskProjects(rows: InboxRow[], open: Record<string, ProjectOpen>, folders: string[], todos: Record<string, TodoCount>, needs: Record<string, number> = {}): ProjectRow[] {
   const all = [...new Set([...Object.keys(open), ...folders])];
@@ -121,5 +122,5 @@ export function deskProjects(rows: InboxRow[], open: Record<string, ProjectOpen>
       const at = mine.reduce<number | null>((max, r) => (r.at !== null && (max === null || r.at > max) ? r.at : max), null);
       return { folder, label: labels[i], chats: mine.length, working: count("working"), waiting: count("waiting"), asleep: count("asleep"), unread: mine.filter((r) => r.unread).length, needs: needs[folder] ?? 0, at, todos: todos[folder] ?? null };
     })
-    .sort((a, b) => b.needs - a.needs || (b.at ?? -1) - (a.at ?? -1));
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }) || a.folder.localeCompare(b.folder));
 }

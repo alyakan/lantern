@@ -131,6 +131,8 @@ export interface ChangedFile {
   removed: number;
   /** Gone from disk since Claude changed it. */
   deleted?: boolean;
+  /** Where a branch or pull request moved it from (absolute). */
+  moved_from?: string;
 }
 
 /**
@@ -404,7 +406,7 @@ export type Action =
   | { type: "agent_available" }
   | { type: "claude_found"; path: string }
   | { type: "claude_missing"; error: string }
-  | { type: "folder_opened"; folder: string }
+  | { type: "folder_opened"; folder: string; /** What a chat brought back from the last launch was called, until its history says. */ title?: string }
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null; earlier?: number }
   /** The turns before the ones loaded: `expected` is how many were not loaded when they were asked for, `hidden` how many still aren't. */
@@ -542,9 +544,10 @@ function freshSession(state: State, folder: string | null): State {
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
-// opened by a note in place of a prompt.
-function wake(state: State): State {
-  if (state.status !== "idle") return state;
+// opened by a note in place of a prompt. A helper's own steps (`parent`) aren't: one still at work after the turn ended
+// would leave the chat running with no turn to end, which nothing could stop or clear.
+function wake(state: State, parent: string | null): State {
+  if (state.status !== "idle" || parent !== null) return state;
   const seq = state.seq + 1;
   const text = state.lastEndedTask ? `After ${state.lastEndedTask} ended` : `${agentName(state.provider)} followed up on its own`;
   return { ...state, status: "running", seq, lastEndedTask: null, items: [...state.items, { type: "user", id: `u${seq}`, text, at: Date.now(), auto: true }] };
@@ -611,17 +614,17 @@ function applyEvent(state: State, ev: UiEvent): State {
       if (ev.id.startsWith(RUN_PREFIX)) return state;
       return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, secret: ev.secret })) };
     case "thinking":
-      return { ...wake(state), thinking: true };
+      return { ...wake(state, ev.parent), thinking: true };
     case "text_delta": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: upsertText(s.items, ev.parent, ev.block_id, (t) => t + ev.text) };
     }
     case "assistant_text": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: upsertText(s.items, ev.parent, ev.block_id, () => ev.text) };
     }
     case "tool_started": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return {
         ...s,
         thinking: false,
@@ -655,7 +658,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     // The advisor is a step like any other in the turn's work: running while it's consulted, then what it said.
     case "advisor_started": {
-      const s = wake(state);
+      const s = wake(state, ev.parent);
       return { ...s, thinking: false, items: insert(s.items, ev.parent, { type: "tool", id: ev.id, name: "advisor", summary: "", status: "running", output: null, edit: null, children: [], startedAt: Date.now() }) };
     }
     case "advisor_done": {
@@ -689,8 +692,9 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "mcp_tools":
       return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
+    // Lantern runs /clear by starting the agent afresh, so no turn ends it: the chat is free again here.
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0 };
+      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: signInText(state.provider), action: null }
@@ -855,7 +859,8 @@ export function reducer(state: State, action: Action): State {
       const fresh = freshSession(state, action.folder);
       // A chat waking from sleep is still that conversation until its history arrives: it stays saved for the next launch, found
       // by its session, and called what it was called (not "New chat" for the moment it takes to load).
-      return state.status === "asleep" ? { ...fresh, sessionId: state.sessionId, asleepTitle: state.asleepTitle, asleepSaved: state.asleepSaved } : fresh;
+      if (state.status === "asleep") return { ...fresh, sessionId: state.sessionId, asleepTitle: state.asleepTitle, asleepSaved: state.asleepSaved };
+      return action.title ? { ...fresh, asleepTitle: action.title } : fresh;
     }
     case "sleep":
       return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title, asleepSaved: action.saved ?? null };
@@ -866,7 +871,13 @@ export function reducer(state: State, action: Action): State {
       // The backend keeps the replayed session's last turn as turn 0; earlier turns' changes aren't known.
       const last = replayed.items.map((it) => it.type).lastIndexOf("user");
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0 };
+      // Its name stays until the history has the chat's own first prompt: a chat with no title of its own (another provider's)
+      // is called what it was called, not "New chat" because the history has no prompt (or begins after it, on a later page).
+      // An open chat that starts again on the same session was called by its first message: that is its name, too.
+      const was = state.sessionId === action.sessionId ? state.items.find((it) => it.type === "user" && !it.auto) : undefined;
+      const name = state.asleepTitle ?? (was?.type === "user" ? was.text.split("\n")[0] || null : null);
+      const first = !action.earlier && items.some((it) => it.type === "user" && !it.auto);
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0, asleepTitle: first ? null : name };
     }
     case "earlier_loaded": {
       // A page for a chat that has moved on (another session, or loaded further since) is let go.
@@ -908,7 +919,8 @@ export function reducer(state: State, action: Action): State {
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
       // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
       const autoStreak = action.auto ? state.autoStreak + 1 : 0;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
+      // A new message is a new turn: a /clear before it (which no turn ended) no longer hides its end.
+      return { ...state, status: "running", thinking: true, stopRequested: false, cleared: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
     }
     case "wakes_taken":
       return { ...state, wakes: [] };

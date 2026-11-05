@@ -51,6 +51,8 @@ pub struct ChatInfo {
     pub provider: Option<String>,
     /// One short line of what the chat is doing (the tool it is in) or last said, for a list row (None until it has done either).
     pub preview: Option<String>,
+    /// A change to its settings that waits for it, as the window holds it (None when there is none).
+    pub pending: Option<super::protocol::RemotePending>,
 }
 
 /// What came after a number a client had.
@@ -114,6 +116,8 @@ struct Log {
     /// The chat runs on another provider than Claude Code (a gateway's model, Codex): what is said in it is never put to Claude
     /// for the phone's suggestions, which are made on the user's own Claude login.
     off_claude: bool,
+    /// The change to its settings that waits for it (made while it worked), as the window last said.
+    switch_pending: Option<super::protocol::RemotePending>,
 }
 
 impl Log {
@@ -146,6 +150,7 @@ impl Log {
             workflow: self.workflow.clone(),
             provider: self.provider.clone(),
             preview: self.doing.clone().or_else(|| self.said.clone()),
+            pending: self.switch_pending.clone(),
         }
     }
 
@@ -182,7 +187,9 @@ impl Log {
                     self.first_prompt = title_from(text);
                 }
             }
-            UiEvent::Thinking { .. } | UiEvent::TextDelta { .. } | UiEvent::ToolStarted { .. } => self.working = true,
+            // The agent itself (following up on its own too). A helper still at work after the turn ended isn't: no turn would
+            // end to say it stopped, and the chat would look busy for good, with nothing for Stop to stop and Clear refused.
+            UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. } => self.working = true,
             UiEvent::TurnDone { context_window, .. } => {
                 self.working = false;
                 self.window = context_window.or(self.window);
@@ -346,6 +353,8 @@ pub struct SessionHub {
     plan: Mutex<PlanSeen>,
     /// The Desk as the window last said it (see desk.rs).
     pub desk: super::desk::Board,
+    /// Your work, as the window last said it (see work.rs).
+    pub work: super::work::WorkBoard,
     /// The window's One project, for the phones that follow it.
     pub single: super::single::Board,
     cap: usize,
@@ -356,6 +365,20 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+/// The agent itself at work (not a helper's steps): what makes a chat "working" in `Log::note`.
+fn is_agent_work(event: &UiEvent) -> bool {
+    matches!(event, UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. })
+}
+
+fn event_name(event: &UiEvent) -> &'static str {
+    match event {
+        UiEvent::Thinking { .. } => "thinking",
+        UiEvent::TextDelta { .. } => "text",
+        UiEvent::ToolStarted { .. } => "tool",
+        _ => "other",
+    }
+}
+
 impl Default for SessionHub {
     fn default() -> Self {
         Self::with_cap(CHAT_CAP)
@@ -364,7 +387,7 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
@@ -377,6 +400,10 @@ impl SessionHub {
         }
         let mut chats = self.chats.lock().unwrap();
         let log = chats.entry(ev.slot.clone()).or_default();
+        // Claude working in a chat the hub lists as asleep: a phone shows "Asleep" over its work (asleep outranks working). One line a turn.
+        if log.asleep && !log.working && is_agent_work(&ev.event) {
+            super::push_log::SLEEP.note(&format!("hub slot={} agent works while the hub has the chat asleep (first event: {})", ev.slot, event_name(&ev.event)));
+        }
         log.note(&ev.event);
         log.keep(ev, self.cap);
         log.last_seq = ev.seq;
@@ -414,6 +441,10 @@ impl SessionHub {
     pub fn asleep(&self, slot: &str, folder: &str, title: Option<String>, session_id: Option<String>) {
         let mut chats = self.chats.lock().unwrap();
         let log = chats.entry(slot.to_string()).or_default();
+        // The window put it to sleep while the hub still had it at work or waiting on the user: the case a phone can't tell from idle.
+        if !log.asleep && (log.working || !log.pending.is_empty()) {
+            super::push_log::SLEEP.note(&format!("hub slot={slot} asleep while working={} pending={} last_seq={}", log.working, log.pending.len(), log.last_seq));
+        }
         (log.asleep, log.working) = (true, false);
         log.pending.clear();
         log.folder = Some(folder.to_string());
@@ -464,6 +495,13 @@ impl SessionHub {
             if matches!(workflow, "chat" | "steps" | "team") {
                 log.workflow = Some(workflow.to_string());
             }
+        }
+    }
+
+    /// The change waiting for a chat, as the window says (None: none waits). Only for a chat the hub lists.
+    pub fn set_pending(&self, slot: &str, pending: Option<super::protocol::RemotePending>) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.switch_pending = pending;
         }
     }
 
@@ -607,7 +645,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -647,6 +685,22 @@ mod tests {
     }
 
     #[test]
+    fn a_helper_still_at_work_after_the_turn_ended_leaves_the_chat_idle_so_it_can_be_cleared() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("run the tests in the background"), done()]);
+        let helper = Some("agent-1".to_string());
+        feed(&hub, "a", vec![
+            UiEvent::Thinking { parent: helper.clone() },
+            UiEvent::ToolStarted { parent: helper.clone(), tool_use_id: "t9".into(), name: "Bash".into(), summary: "npm test".into() },
+            UiEvent::TextDelta { parent: helper, block_id: "b9".into(), text: "still going".into() },
+        ]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Idle);
+        // The agent following up on its own is working.
+        feed(&hub, "a", vec![UiEvent::Thinking { parent: None }]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Working);
+    }
+
+    #[test]
     fn a_chat_remembers_what_it_reviews_until_its_conversation_starts_again() {
         let hub = hub();
         assert_eq!(hub.review_target("a"), None);
@@ -674,7 +728,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -687,14 +741,14 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
 
     #[test]
     fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
         assert_eq!(hub.steps("a"), None, "no plan yet");
@@ -721,7 +775,7 @@ mod tests {
 
     #[test]
     fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
         feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
@@ -751,7 +805,7 @@ mod tests {
 
     #[test]
     fn what_runs_in_the_background_is_told_until_it_ends_or_the_chat_sleeps() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let task = |d: &str| crate::ui_event::BackgroundTask { id: d.into(), task_type: "local_bash".into(), description: d.into() };
         use super::super::protocol::RemoteEvent as R;
         let background = |hub: &SessionHub| hub.extras("a").into_iter().find(|e| matches!(e, R::Background { .. }));
@@ -988,7 +1042,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

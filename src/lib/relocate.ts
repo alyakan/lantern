@@ -47,12 +47,11 @@ export const OPEN_CHATS = "session.openChats";
 
 /** Every key the app saves that isn't about one folder (a session, a model, a setting). Listed so a new key is a decision. */
 export const NOT_FOLDER_KEYED = [
-  // The Desks, each a list of its projects' folders. Not moved with a folder: a moved project goes back to the first
-  // Desk, and is put on its Desk again in Edit Desks.
-  "desk.desks",
-  // The Desk's Ask pane: shown or not, and how wide. The sidebar's list: Chats or Timeline.
-  "desk.askCollapsed",
-  "desk.askRatio",
+  // The sidebar's list: Chats or Timeline.
+  // How Your work is grouped (by feature, by project or not at all), which features are open, and whether Next is folded.
+  "desk.work.groupBy",
+  "desk.work.open",
+  "desk.work.nextClosed",
   "sidebar.view",
   "settings.modeBySession",
   "settings.harnessBySession",

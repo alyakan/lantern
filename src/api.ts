@@ -10,17 +10,24 @@ import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
-import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { WindowWork } from "./lib/phoneWork";
+import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
 
-/** The worktree a chat works in when Claude entered one itself; `main`: the user chose to read the chat's own folder instead. */
-export interface WorkView {
+/** A linked worktree of the chat's project. */
+export interface Worktree {
   path: string;
   name: string;
   branch: string | null;
+}
+
+/** The worktree a chat works in (Claude entered one itself, or was put in one); `main`: the user chose to read the chat's own folder instead. */
+export interface WorkView extends Worktree {
   main: boolean;
+  /** The chat was put in it (enter_worktree, or the picker), rather than found from where it edited. */
+  pinned: boolean;
 }
 
 /** A local branch under review: its commits (newest first) since it left `base`. */
@@ -203,6 +210,10 @@ export const api = {
   workFolder: (slot: string) => invoke<WorkView | null>("work_folder", { slot }),
   /** `main`: read Git and Branch from the chat's own folder even while it works in a worktree. */
   setViewMain: (slot: string, main: boolean) => invoke<void>("set_view_main", { slot, main }),
+  /** The project's linked worktrees, for the Changes pane's picker. */
+  listWorktrees: (slot: string) => invoke<Worktree[]>("list_worktrees", { slot }),
+  /** Put the chat in one of them (`path` from listWorktrees), so Git and Branch read from it; null lets its latest edit decide again. */
+  pinWorktree: (slot: string, path: string | null) => invoke<void>("pin_worktree", { slot, path }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce or approval request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
@@ -265,7 +276,13 @@ export const api = {
   /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
   openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
   /** How the repositories with a chat open stand (branches, pull requests and checks, merges, releases), for the Desk. */
-  deskStatus: () => invoke<RepoStatus[]>("desk_status"),
+  /** `fresh`: ask GitHub again rather than use what it said in the last 90 s (the Mac allows it every 15 s). */
+  deskStatus: (fresh = false) => invoke<RepoStatus[]>("desk_status", { fresh }),
+  /** Checks a Linear API key and keeps it in the Keychain; it never comes back. */
+  linearConnect: (key: string) => invoke<LinearWork>("linear_connect", { key }),
+  linearDisconnect: () => invoke<void>("linear_disconnect"),
+  /** Your issues in Linear (read-only); `fresh`: the Desk's Refresh. */
+  linearWork: (fresh = false) => invoke<LinearWork>("linear_work", { fresh }),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */
@@ -326,6 +343,8 @@ export const api = {
   sidebarMenu: (hidden: boolean, compact: boolean) => invoke<void>("sidebar_menu", { hidden, compact }),
   /** Anything is working (and the user allows it): the Mac is kept from idle sleep until it isn't. */
   keepAwake: (working: boolean, allowed: boolean) => invoke<void>("keep_awake", { working, allowed }),
+  /** One line in sleep.log about a chat the window put to sleep (see lib/idleSleep.ts `sleepNote`). */
+  sleepLog: (line: string) => invoke<void>("sleep_log", { line }),
   /** A menu bar item backed by an action was chosen: the action's id (see src/lib/actions.ts). */
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */
@@ -416,6 +435,8 @@ export const api = {
   /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
   remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
   remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
+  /** Whether paired phones may run `!` commands on the Mac. Off by default. */
+  remoteSetAllowShell: (on: boolean) => invoke<RemoteView>("remote_set_allow_shell", { on }),
   /** Imports the push key (a .p8 file) for the phones' lock-screen cards: checked, then kept in the Keychain. Rejects, in words, when it isn't one. */
   remoteSetLiveKey: (path: string, keyId: string, teamId: string) => invoke<RemoteView>("remote_set_live_key", { path, keyId, teamId }),
   /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
@@ -427,6 +448,14 @@ export const api = {
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
   /** Tells the backend what the Desks hold, for a phone's Desk (see lib/desk.ts windowDesk). */
   remoteWindowDesk: (desk: WindowDesk) => invoke<void>("remote_window_desk", { desk }),
+  /** Tells the backend where the user's work stands, for a phone's Work tab (see lib/phoneWork.ts). */
+  remoteWindowWork: (work: WindowWork) => invoke<void>("remote_window_work", { work }),
+  /** A paired phone asked for a step of the user's work (the backend checked the item is listed and as the phone saw it): answered with remoteWorkStepDone. */
+  onRemoteWorkStep: (cb: (r: { id: string; key: string; sig: string }) => void): Promise<UnlistenFn> => listen<{ id: string; key: string; sig: string }>("remote-work-step", (e) => cb(e.payload)),
+  /** A paired phone asked the Mac to look at git, GitHub and Linear again. */
+  onRemoteWorkRefresh: (cb: () => void): Promise<UnlistenFn> => listen("remote-work-refresh", () => cb()),
+  /** The window's answer to a phone's step: "sent" to a chat or "started" one (and where), or why it didn't. */
+  remoteWorkStepDone: (id: string, kind: "sent" | "started" | null, to: string | null, error: string | null) => invoke<void>("remote_work_step_done", { id, kind, to, error }),
   /** The sidebar's One project (null: every project), for the phones that follow it. */
   remoteWindowSingle: (single: WindowSingle | null) => invoke<void>("remote_window_single", { single }),
   /** A phone connected or went: ask remoteSettings who is connected now. */
@@ -449,6 +478,8 @@ export const api = {
   onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */
   onRemoteSetPreset: (cb: (r: RemoteSetPreset) => void): Promise<UnlistenFn> => listen<RemoteSetPreset>("remote-set-preset", (e) => cb(e.payload)),
+  /** A phone changed a working chat's settings (the backend checked it as it checks a change to an idle one): the window holds it. */
+  onRemoteQueueSwitch: (cb: (r: { slot: string; change: unknown; when: string }) => void): Promise<UnlistenFn> => listen<{ slot: string; change: unknown; when: string }>("remote-queue-switch", (e) => cb(e.payload)),
   /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
   remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
   /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */

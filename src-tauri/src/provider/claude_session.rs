@@ -87,11 +87,18 @@ fn command(cfg: &SessionConfig) -> Command {
         }
         None => {}
     }
+    // `claude -p` leaves its Artifact tool off unless asked; a chat in Lantern gets it, as the same chat in a terminal does.
+    if cfg.helper.publish_artifacts {
+        cmd.env(PUBLISH_ARTIFACTS_ENV, "1");
+    }
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
     }
     cmd
 }
+
+/// What turns on Claude Code's Artifact tool in a `-p` session.
+const PUBLISH_ARTIFACTS_ENV: &str = "CLAUDE_CODE_ARTIFACT";
 
 impl ClaudeSession {
     pub fn spawn(cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<ClaudeSession, String> {
@@ -409,7 +416,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         }
@@ -489,6 +496,26 @@ mod tests {
         let bare = command(&config("/bin/claude".into(), dir.path(), None));
         assert_eq!(bare.as_std().get_envs().count(), 0);
         assert!(!bare.as_std().get_args().any(|a| a == "--advisor" || a == "--resume"));
+    }
+
+    /// A provider that publishes artifacts gets Claude Code's Artifact tool turned on and is told when to use it; one that
+    /// doesn't (a gateway chat, say) gets neither.
+    #[test]
+    fn a_chat_that_publishes_artifacts_turns_the_artifact_tool_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt = |cfg: &SessionConfig| {
+            let args: Vec<String> = command(cfg).as_std().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+            args.iter().position(|a| a == "--append-system-prompt").map(|i| args[i + 1].clone()).unwrap()
+        };
+        let mut cfg = config("/bin/claude".into(), dir.path(), None);
+        cfg.helper.publish_artifacts = true;
+        let env: Vec<_> = command(&cfg).as_std().get_envs().map(|(k, v)| (k.to_os_string(), v.map(|v| v.to_os_string()))).collect();
+        assert_eq!(env, vec![(PUBLISH_ARTIFACTS_ENV.into(), Some("1".into()))]);
+        assert!(prompt(&cfg).contains("publish it with your Artifact tool"));
+
+        cfg.helper.publish_artifacts = false;
+        assert_eq!(command(&cfg).as_std().get_envs().count(), 0);
+        assert!(!prompt(&cfg).contains("Artifact tool"));
     }
 
     /// A gateway chat: the token is in the environment and never on the command line (any process of the user reads that),

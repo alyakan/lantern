@@ -1,9 +1,9 @@
-import { claudeUsage, currentUsageWindows } from "../view/providerUsage";
+import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadFolded, loadGrouping, loadHomeMode, saveFolded, saveGrouping, saveHomeMode } from "../prefs";
+import { loadFolded, loadGrouping, loadHomeMode, saveFolded, saveGrouping, saveHomeMode, type HomeMode } from "../prefs";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
 import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
@@ -27,10 +27,13 @@ import { HomeSearch } from "./HomeSearch";
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
 import { DeskScreen } from "./DeskScreen";
+import { ModeSwitch } from "./ModeSwitch";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT, TopBar } from "../ui/TopBar";
+import { UsageRing } from "../ui/UsageRing";
+import { WorkScreen } from "./WorkScreen";
+import { nextSteps } from "../view/work";
 import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
-import { Suggestions } from "./Suggestions";
-import { UsageSheet } from "./UsageSheet";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -61,22 +64,6 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 24, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: pinned ? colors.ink : colors.ink3, flexDirection: "row", overflow: "hidden" }}>
       <View style={{ width: 8, backgroundColor: pinned ? colors.ink : "transparent", borderRightWidth: 1.5, borderRightColor: pinned ? colors.ink : colors.ink3 }} />
-    </View>
-  );
-}
-
-/** Home as the Desk (every chat at once, and a box that finds the chat) or as the list of chats. */
-function ModeSwitch({ value, onChange }: { value: "desk" | "chats"; onChange: (m: "desk" | "chats") => void }) {
-  const colors = useColors();
-  return (
-    <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: colors.card, borderRadius: radius.pill, padding: 3, borderWidth: 1, borderColor: colors.rule }}>
-      {(["desk", "chats"] as const).map((m) => (
-        <PressScale key={m} accessibilityRole="tab" accessibilityState={{ selected: value === m }} onPress={() => onChange(m)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: value === m ? colors.ink : "transparent" }}>
-          <Txt variant="small" tone={value === m ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
-            {m === "desk" ? "Desk" : "Chats"}
-          </Txt>
-        </PressScale>
-      ))}
     </View>
   );
 }
@@ -332,7 +319,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, work } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
@@ -352,7 +339,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // Holding a chat down also offers to pin it, and to mark it read or unread (on this phone only).
   const [acting, setActing] = useState<Row | null>(null);
   const pins = usePins();
-  const [usageOpen, setUsageOpen] = useState(false);
+  // How tall the bar floating over the list is, once it is measured.
+  const [barHeight, setBarHeight] = useState(0);
   // The chat whose swipe buttons are out (one at a time), and the search of the list (what is typed narrows it).
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -361,8 +349,12 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const scrollY = useRef(new Animated.Value(0)).current;
   // The Desk, for a Mac that has one (remembered on this phone; the Desk unless the list was chosen).
   const canDesk = useMacCan("desk");
-  const [mode, setMode] = useState<"desk" | "chats">("desk");
-  const pickMode = (m: "desk" | "chats") => {
+  // Your work, for a Mac that has it: a third switch beside the Desk and the chats, with how many steps wait on you.
+  const canWork = useMacCan("work");
+  const [chosenMode, setMode] = useState<HomeMode>("desk");
+  const mode: HomeMode = chosenMode === "work" && !canWork ? "desk" : chosenMode;
+  const modes: { id: HomeMode; label: string; badge?: number }[] = [{ id: "desk", label: "Desk" }, ...(canWork ? [{ id: "work" as const, label: "Work", badge: work ? nextSteps(work.items).length : 0 }] : []), { id: "chats", label: "Chats" }];
+  const pickMode = (m: HomeMode) => {
     setMode(m);
     void saveHomeMode(m);
   };
@@ -399,6 +391,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const head = headline(stack.length);
   const list = rows(chats, now, seen, workingSince, pins);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
+  // The limit nearest its end, across the providers, as a ring round the Mac's dot: drawn only once it runs low or will run out.
+  const usage = macName ? tightest(plan, providerUsage, now) : null;
+  const ringed = usage && usage.view.tone !== "ok" ? usage : null;
   // What is searched for narrows the list; while it is, the rest of Home (what waits on you) steps aside.
   const asked = searching ? query.trim() : "";
   const shown = asked ? list.filter((r) => matches(r, asked)) : list;
@@ -433,37 +428,56 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   };
 
   const top = (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, gap: 10 }}>
-      <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, flexShrink: 1 }}>
-        {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
-        <Txt variant="small" tone="ink2" numberOfLines={1}>
-          {macName ?? "Your Mac"}
-        </Txt>
-      </PressScale>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-        {refreshing && (
-          <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
-            <Dots />
-          </View>
-        )}
-        {canDesk && !onOpenDesk && <ModeSwitch value={mode} onChange={pickMode} />}
-        {canSingle && !single && (
-          <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-            <FocusGlyph color={colors.ink2} />
-          </PressScale>
-        )}
-        {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
-        {onTogglePin && (
-          <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
-            <PinGlyph pinned={pinned} />
-          </PressScale>
-        )}
+    <TopBar>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected${usage ? `. ${tightestText(usage)}` : ""}` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, flexShrink: 1 }}>
+          {/* The ring says enough while it is there: the dot stops pulsing inside it. */}
+          <UsageRing fill={ringed ? ringed.window.used : null} tone={ringed?.view.tone ?? "ok"}>
+            {!macName ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} /> : ringed ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} /> : <PulseDot color={colors.go} size={8} ms={2600} />}
+          </UsageRing>
+          <Txt variant="small" tone="ink2" numberOfLines={1}>
+            {macName ?? "Your Mac"}
+          </Txt>
+        </PressScale>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          {refreshing && (
+            <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+              <Dots />
+            </View>
+          )}
+          {canDesk && !onOpenDesk && <ModeSwitch value={mode} modes={modes} onChange={pickMode} />}
+          {canSingle && !single && (
+            <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+              <FocusGlyph color={colors.ink2} />
+            </PressScale>
+          )}
+          {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
+          {onTogglePin && (
+            <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+              <PinGlyph pinned={pinned} />
+            </PressScale>
+          )}
+        </View>
       </View>
-    </View>
+    </TopBar>
   );
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
   const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
+  if (canDesk && canWork && mode === "work" && !onOpenDesk)
+    return (
+      <>
+        <WorkScreen
+          top={
+            <>
+              {top}
+              {banner}
+            </>
+          }
+        />
+        {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
+      </>
+    );
   if (canDesk && mode === "desk" && !onOpenDesk)
     return (
       <>
@@ -490,11 +504,10 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         // Buttons a swipe laid out go back in when the list moves.
         onScrollBeginDrag={() => setOpenSlot(null)}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }}
+        // The list starts under the bar floating over it, and scrolls under it.
+        contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {top}
-        {banner}
         {canDesk && onOpenDesk && (
           <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
@@ -509,13 +522,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: space.xl, paddingTop: 10 }}>
-          {["claude", "codex"].map(id => {
-            const windows = currentUsageWindows(id === "claude" ? claudeUsage(plan) : providerUsage?.[id], now);
-            const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
-            return <PressScale key={id} accessibilityRole="button" accessibilityLabel={`${id === "claude" ? "Claude" : "Codex"} usage, ${used === null ? "usage unavailable" : `${Math.round(used * 100)} percent used`}`} onPress={() => setUsageOpen(true)}><Txt variant="small" tone={used !== null && used >= .95 ? "stop" : "ink2"}>{id === "claude" ? "Claude" : "Codex"} · {used === null ? "Usage unavailable" : `${Math.round(used * 100)}% used`}</Txt></PressScale>;
-          })}
-        </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -532,9 +538,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </Animated.View>
 
             {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
-            {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
-            {/* Not with One project: a suggestion can be about any project. */}
-            {stack.length === 0 && macName && !single && <Suggestions onPick={onNewChat} />}
             {stack.length > 1 && (
               <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
                 {stack.length - 1} more after this one
@@ -596,10 +599,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </>
         )}
       </Animated.ScrollView>
+      {/* The bar stays put, floating over the list, which scrolls under its glass. The status bar's own strip is paper, so rows don't run under the clock. */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
+      <View testID="home-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
+        {top}
+        {banner}
+      </View>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
       {!loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
-      {usageOpen && <UsageSheet plan={plan} providers={providerUsage} onClose={() => setUsageOpen(false)} />}
       {acting && (
         <ChatActionsSheet
           title={acting.title}

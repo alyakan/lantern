@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
-import { contextOf, progressOf, shortTokens, usageOf, weekOf } from "../view/plan";
+import type { UsageWindow } from "../protocol/generated/UsageWindow";
+import { contextOf, progressOf, shortTokens, usageOf, weekOf, windowOf } from "../view/plan";
+import { tightestOf } from "../view/providerUsage";
 import { ScrollView, Share, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -288,6 +290,34 @@ export function WeekRow({ week }: { week: { used: number; resetsAt: number | nul
   );
 }
 
+/** One of a provider's limits (its session, its week, or another it reports), as a bar with when it resets. */
+export function WindowRow({ window, provider }: { window: UsageWindow; /** Said before the title when the row isn't in its provider's own section. */ provider?: string }) {
+  const colors = useColors();
+  const w = windowOf(window);
+  const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
+  const title = provider ? `${provider} · ${w.title}` : w.title;
+  return (
+    <View accessibilityLabel={`${title}: ${w.percent} percent used. ${w.note}`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          {title}
+        </Txt>
+        <Txt variant="small" tone={w.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {w.tone === "stop" ? "Limit reached" : `${w.percent}% used`}
+        </Txt>
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 6, backgroundColor: fill }} />
+      </View>
+      {w.note !== "" && (
+        <Txt variant="tiny" tone="ink2">
+          {w.note}
+        </Txt>
+      )}
+    </View>
+  );
+}
+
 /** How full the chat's context is, as a bar with the tokens it holds. */
 export function ContextRow({ context }: { context: { tokens: number; window: number | null } }) {
   const colors = useColors();
@@ -337,6 +367,35 @@ export function UsageStrip({ plan, onPress }: { plan: PlanUsage; /** Opens the u
         <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
       </View>
       {plan.week && <WeekStrip week={plan.week} />}
+    </PressScale>
+  );
+}
+
+/** One provider's usage in a line with a thin bar under it, for the window nearest its limit (at it, then running out before it resets). */
+export function ProviderStrip({ name, windows, onPress }: { name: string; windows: UsageWindow[]; onPress?: () => void }) {
+  const colors = useColors();
+  const top = tightestOf(windows);
+  const w = top ? windowOf(top) : null;
+  const fill = w?.tone === "stop" ? colors.stop : w?.tone === "warn" ? colors.hi : colors.go;
+  const said = w === null ? "Usage unavailable" : w.tone === "stop" ? `${w.title}${/limit$/i.test(w.title) ? "" : " limit"} reached` : `${w.title} · ${w.percent}% used`;
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={`${name} usage, ${w === null ? "usage unavailable" : `${w.percent} percent used`}${w?.short ? `. ${w.short}` : ""}`} onPress={onPress} haptic="select" scaleTo={0.98} style={{ gap: 5 }}>
+      {/* The words give way (cut with "…") before the reset does: side by side they ran over each other. */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+        <Txt variant="tiny" tone={w?.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+          {name} · {said}
+        </Txt>
+        {!!w?.short && (
+          <Txt variant="tiny" tone="ink3" style={{ flexShrink: 0 }} numberOfLines={1}>
+            {w.short}
+          </Txt>
+        )}
+      </View>
+      {w && (
+        <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
+          <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 4, backgroundColor: fill }} />
+        </View>
+      )}
     </PressScale>
   );
 }

@@ -27,6 +27,9 @@ const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Ma
 export const OPEN_AFTER_MS = 220;
 /** How long the bar may take to close again: its pane stays drawn until the width transition ends (the stylesheet's 0.22s), or until this if that never reports. */
 const CLOSE_MS = 300;
+/** After the sidebar is collapsed with the pointer on it (the button that collapses it is in it), the pointer resting on the bar it
+ * became isn't asking for it to open again: for this long its resting doesn't open it. */
+export const AFTER_COLLAPSE_MS = 1200;
 /** How long "Closed 3 finished chats" stays under a project's header. */
 const NOTICE_MS = 4000;
 
@@ -39,10 +42,10 @@ const reducedMotion = () => typeof window.matchMedia === "function" && window.ma
  * Part of the open pane the collapsed bar doesn't have. As the pane opens it unfolds and fades in, and as it closes it fades and folds away (its height, or its width
  * with `across`) while the bar narrows, so what stays moves to its place in the bar instead of jumping when the bar takes over.
  */
-function Away({ across, children }: { across?: boolean; children: ReactNode }) {
+function Away({ across, className, children }: { across?: boolean; className?: string; children: ReactNode }) {
   const Tag = across ? "span" : "div";
   return (
-    <Tag className={across ? "sb-away-x" : "sb-away-y"}>
+    <Tag className={`${across ? "sb-away-x" : "sb-away-y"}${className ? ` ${className}` : ""}`}>
       <Tag className="sb-away-in">{children}</Tag>
     </Tag>
   );
@@ -69,6 +72,8 @@ export interface SidebarHandlers {
   onHistory: () => void;
   onNewChatIn: (folder: string) => void;
   onNewTeamIn: (folder: string) => void;
+  /** Opens the project's page on the Desk: its work, pull requests, worktrees and to-dos. */
+  onOpenInDesk: (folder: string) => void;
   onBringOld: (folder: string) => void;
   /** Opens the project's notes: the text every new chat in it starts with. */
   onProjectNotes: (folder: string) => void;
@@ -227,8 +232,8 @@ interface SingleChoice {
 }
 
 /**
- * The One project button: off, it opens a list of the projects to pick one from; on, it shows every project again. While it
- * is on the sidebar lists only that project, under a banner in its colour.
+ * The Projects button: every project in the sidebar, or only one of them. It opens the list whichever is showing, with
+ * "All projects" first, so the filter can always be cleared from the same place it was set.
  */
 function SingleButton({ single, choices, full, closing, onPick }: { single: string | null; choices: SingleChoice[]; full: boolean; closing: boolean; onPick: (folder: string | null) => void }) {
   const [open, setOpen] = useState(false);
@@ -239,36 +244,47 @@ function SingleButton({ single, choices, full, closing, onPick }: { single: stri
   useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("button"));
   const { ref: menuRef, style: menuStyle } = useMenuInside(open);
   useEffect(() => {
-    if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    if (open) root.current?.querySelector<HTMLElement>('[role="menuitemradio"]')?.focus();
   }, [open]);
   const on = single !== null;
-  const label = on ? "Show all projects" : "One project";
   return (
     <div className="sb-new" ref={root}>
       <button
         className={`icon sb-button single-button${full ? " labelled" : ""}${on ? " on" : ""}`}
-        aria-label={label}
-        aria-pressed={on}
-        aria-haspopup={on ? undefined : "menu"}
-        aria-expanded={on ? undefined : open}
-        title={on ? "Show every project again" : "Show only one project in the sidebar"}
-        disabled={!on && choices.length === 0}
-        onClick={() => (on ? onPick(null) : setOpen(!open))}
+        aria-label="Projects"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Show every project, or only one"
+        disabled={choices.length === 0}
+        onClick={() => setOpen(!open)}
       >
         <FocusIcon />
         {full && (
           <Away across>
-            <span aria-hidden>One project</span>
+            <span aria-hidden>Projects</span>
           </Away>
         )}
       </button>
       {open && !closing && (
-        <div className="menu sb-menu" role="menu" aria-label="Show only" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+        <div className="menu sb-menu" role="menu" aria-label="Projects" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
+          <button
+            role="menuitemradio"
+            aria-checked={!on}
+            className={`menu-row${on ? "" : " current"}`}
+            onClick={() => {
+              setOpen(false);
+              onPick(null);
+            }}
+          >
+            <span className="menu-row-title">All projects</span>
+          </button>
+          <div className="menu-sep" role="separator" />
           {choices.map((c) => (
             <button
               key={c.folder}
-              role="menuitem"
-              className="menu-row"
+              role="menuitemradio"
+              aria-checked={single === c.folder}
+              className={`menu-row${single === c.folder ? " current" : ""}`}
               title={c.folder}
               onClick={() => {
                 setOpen(false);
@@ -549,6 +565,9 @@ function ProjectMenu({ group, h, moves, finished, onOnly, onClose, onClosed }: {
   };
   return (
     <div className="menu sb-menu project-menu" role="menu" aria-label={`${group.label} actions`} ref={root} style={style} onKeyDown={menuKeys}>
+      <button role="menuitem" className="menu-row" title="Its page on the Desk: where its work, pull requests, worktrees and to-dos are" onClick={pick(() => h.onOpenInDesk(group.folder))}>
+        <span className="menu-row-title">Open in Desk</span>
+      </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onNewTeamIn(group.folder))}>
         <span className="menu-row-title">New team</span>
       </button>
@@ -670,7 +689,14 @@ function Project({ group, color, noted, todos, expanded, phase, onToggle, curren
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
   return (
     <section className={`sb-section${current ? " current" : ""}${reorder.lifted ? " lifted" : ""}`} aria-label={group.label} data-reorder-id={group.folder} style={{ ...reorder.style, "--pc": color } as CSSProperties}>
-      <div className="sb-header" {...reorder.handle}>
+      <div
+        className="sb-header"
+        {...reorder.handle}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu(true);
+        }}
+      >
         <button className="sb-header-toggle" aria-expanded={expanded} title={group.folder} onClick={onToggle} onKeyDown={(e) => moveByKey(e, reorder.moves)}>
           <span className="sb-project-initials" aria-hidden>
             {group.initials}
@@ -780,7 +806,11 @@ export function Sidebar(props: Props) {
   const rest = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const floating = mode === "collapsed" && (hovered || focused);
-  const expanded = mode !== "collapsed" || floating;
+  // Collapsing the pinned sidebar: its new pane is drawn open for one frame (stage 1) and then closes like the open bar does.
+  const [collapsing, setCollapsing] = useState(false);
+  // And until the bar has taken its place: the pane keeps the pinned sidebar's edge, not the open bar's.
+  const [fromPinned, setFromPinned] = useState(false);
+  const expanded = mode !== "collapsed" || floating || collapsing;
   // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
   const full = expanded || closingBar;
   const closingNow = closingBar && !expanded;
@@ -793,6 +823,45 @@ export function Sidebar(props: Props) {
   const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasFloating = useRef(false);
   wasFloating.current = floating;
+  // Collapsing it from the button in it leaves the pointer on the bar it becomes: that rest isn't asking for it to open again,
+  // over the chat, with the border it has there (the pinned sidebar's is another, so it would go and flash back).
+  const aside = useRef<HTMLElement>(null);
+  const lastMode = useRef(mode);
+  const collapsedUnderPointer = useRef(0);
+  // Pinning the open bar swaps its pane for the pinned one, which is the same on screen: the labels' fade-in on a new pane isn't
+  // replayed (they would go and come back), for as long as the sidebar's width takes to grow.
+  const wasFull = useRef(false);
+  const carriedUntil = useRef(0);
+  const [, settleCarried] = useState(0);
+  if (mode === "pinned" && lastMode.current === "collapsed" && wasFull.current) carriedUntil.current = Date.now() + CLOSE_MS + 120;
+  const carried = Date.now() < carriedUntil.current;
+  useEffect(() => {
+    if (!carried) return;
+    const timer = setTimeout(() => settleCarried((n) => n + 1), CLOSE_MS + 140);
+    return () => clearTimeout(timer);
+  }, [carried]);
+  useLayoutEffect(() => {
+    wasFull.current = full;
+  });
+  useLayoutEffect(() => {
+    if (mode === "collapsed" && lastMode.current === "pinned") {
+      if (aside.current?.matches(":hover")) collapsedUnderPointer.current = Date.now();
+      if (!reducedMotion()) {
+        setCollapsing(true);
+        setFromPinned(true);
+      }
+    }
+    lastMode.current = mode;
+  }, [mode]);
+  useLayoutEffect(() => {
+    if (!collapsing) return;
+    // Reading the layout makes the browser compute the open look first, so closing is a change it animates.
+    panel.current?.getBoundingClientRect();
+    setCollapsing(false);
+    setClosingBar(true);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(stopClosing, CLOSE_MS);
+  }, [collapsing]);
 
   useLayoutEffect(() => {
     if (settle.current) clearTimeout(settle.current);
@@ -938,11 +1007,12 @@ export function Sidebar(props: Props) {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = null;
     setClosingBar(false);
+    setFromPinned(false);
   };
   const enter = (e: { buttons: number }) => {
     inside.current = true;
-    // Not while dragging something across it.
-    if (e.buttons || rest.current) return;
+    // Not while dragging something across it, nor as the pointer is still where the sidebar was collapsed from.
+    if (e.buttons || rest.current || Date.now() - collapsedUnderPointer.current < AFTER_COLLAPSE_MS) return;
     rest.current = setTimeout(() => {
       rest.current = null;
       stopClosing();
@@ -1012,6 +1082,7 @@ export function Sidebar(props: Props) {
           onNewTeamIn: then(handlers.onNewTeamIn),
           onBringOld: then(handlers.onBringOld),
           onProjectNotes: then(handlers.onProjectNotes),
+          onOpenInDesk: then(handlers.onOpenInDesk),
           onSetup: then(handlers.onSetup),
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),
@@ -1069,12 +1140,12 @@ export function Sidebar(props: Props) {
   );
 
   return (
-    <aside className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
+    <aside ref={aside} className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
       {/* Pinned and floating are different elements, so pinning or collapsing is at once, not a width transition. */}
       <div
         ref={panel}
         key={mode === "pinned" ? "pinned" : "floating"}
-        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}`}
+        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}${fromPinned ? " from-pinned" : ""}${carried ? " carried" : ""}`}
         style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
         onTransitionEnd={(e) => e.target === e.currentTarget && e.propertyName === "width" && stopClosing()}
         onPointerEnter={mode === "collapsed" ? enter : undefined}
@@ -1113,14 +1184,16 @@ export function Sidebar(props: Props) {
           )}
         </div>
         {full && timeline && (
-          <div className="sb-views" role="group" aria-label="Show">
-            <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
-              Chats
-            </button>
-            <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
-              Timeline
-            </button>
-          </div>
+          <Away className="sb-views-away">
+            <div className="sb-views" role="group" aria-label="Show">
+              <button aria-pressed={view === "chats"} onClick={() => setView("chats")}>
+                Chats
+              </button>
+              <button aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>
+                Timeline
+              </button>
+            </div>
+          </Away>
         )}
         <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
           {single !== null && <SingleBanner choice={choiceOf(single)} full={full} onNewChat={() => opening(h.onNewChatIn)(single)} onShowAll={() => setSingle(null)} />}

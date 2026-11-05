@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Md } from "./Md";
 import { describeStep, editsIn, failedCount, runningStep, stepLabel, stepTarget, summarize, type Entry, type Step } from "../lib/activity";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
-import type { EditInfo } from "../store";
+import type { EditInfo, TestRunItem } from "../store";
 import { countChanges } from "../lib/diff";
 import { runSummary } from "../lib/testRuns";
 import { Counts, EditLine } from "./EditLine";
@@ -28,6 +28,7 @@ export function ActivityGroup({ steps, entries = steps, live = false, verb = "Wo
   const current = runningStep(steps);
   const failed = failedCount(steps);
   const edits = editsIn(steps);
+  const runs = handlers.testRunFor ? steps.flatMap((s) => handlers.testRunFor?.(s.id) ?? []) : [];
   const notes = entries.filter((e): e is Extract<Entry, { type: "assistant" }> => e.type === "assistant");
   const narrated = entries.length > steps.length;
   const summary = summarize(steps) || (narrated ? summarize(steps, true) : "");
@@ -62,19 +63,36 @@ export function ActivityGroup({ steps, entries = steps, live = false, verb = "Wo
       )}
       {notes.length > 0 && <Messages notes={notes} />}
       {edits.length > 0 && <FileChanges edits={edits.map((e) => e.edit)} folder={folder} onOpen={handlers.onOpenFile} />}
-      {handlers.testRunFor &&
-        steps.map((s) => {
-          const t = handlers.testRunFor?.(s.id);
-          return (
-            t && (
-              <button key={`test-${s.id}`} className={`activity-line test-chip ${t.run.outcome}`} title={`${t.command}\nShow in the Tests tab`} onClick={() => handlers.onOpenTestRun?.(t.id)}>
-                {t.run.outcome === "failed" ? <FailIcon /> : t.run.outcome === "passed" ? <HudCheckIcon /> : null}
-                <span className="activity-text">{`Tests: ${runSummary(t.run)}`}</span>
-              </button>
-            )
-          );
-        })}
+      {runs.length > 0 && <TestRuns runs={runs} onOpen={(id) => handlers.onOpenTestRun?.(id)} />}
     </div>
+  );
+}
+
+// The turn's test runs as one collapsed line ("3 test runs · 1 failed") that expands to a line per run, each opening the Tests tab,
+// like the changed files above it.
+function TestRuns({ runs, onOpen }: { runs: TestRunItem[]; onOpen: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const failed = runs.filter((r) => r.run.outcome === "failed").length;
+  return (
+    <>
+      <button className={`activity-line test-chip${failed > 0 ? " failed" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="chev" aria-hidden />
+        {failed > 0 ? <FailIcon /> : runs.every((r) => r.run.outcome === "passed") ? <HudCheckIcon /> : null}
+        <span className="activity-text">{`${runs.length} test run${runs.length === 1 ? "" : "s"}`}</span>
+        {failed > 0 && <span className="failed">{failed} failed</span>}
+      </button>
+      {open && (
+        <div className="file-changes test-runs" role="list" aria-label="Test runs">
+          {runs.map((t) => (
+            <button key={t.id} role="listitem" className={`activity-line test-chip ${t.run.outcome}`} title={`${t.command}\nShow in the Tests tab`} onClick={() => onOpen(t.id)}>
+              {t.run.outcome === "failed" ? <FailIcon /> : t.run.outcome === "passed" ? <HudCheckIcon /> : null}
+              <span className="activity-text test-run-command">{t.command}</span>
+              <span className="test-run-summary">{runSummary(t.run)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

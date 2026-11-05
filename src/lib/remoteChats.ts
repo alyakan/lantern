@@ -31,18 +31,30 @@ export interface WindowChat {
    * that isn't open yet too.
    */
   provider?: string;
+  /** A change to its settings that waits for it (made while it worked), for a phone to show. Left out when none waits. */
+  pending?: WindowPending;
+}
+
+/** A change waiting for a chat, as the hub is told it: when, in words, and what it puts the chat on. */
+export interface WindowPending {
+  when: "now" | "finished";
+  text: string;
+  permissions?: "ask" | "auto";
+  workflow?: "chat" | "steps";
+  preset?: string;
 }
 
 /**
  * `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into
  * PROJECT_COLORS (see assignColors). `providerOf`: the name of what a chat runs on when that isn't Claude Code, else null.
  */
-export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}, providerOf: (slot: string) => string | null = () => null): WindowChat[] {
+export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}, providerOf: (slot: string) => string | null = () => null, pendingOf: (slot: string) => WindowPending | null = () => null): WindowChat[] {
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
       const provider = providerOf(item.slot);
-      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null, ...(provider ? { provider } : {}) };
+      const pending = pendingOf(item.slot);
+      return { ...(pending ? { pending } : {}), slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null, ...(provider ? { provider } : {}) };
     }),
   );
 }

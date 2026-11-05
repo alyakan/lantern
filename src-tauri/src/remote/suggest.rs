@@ -407,7 +407,7 @@ mod tests {
     fn a_restored_chat_that_is_not_claudes_is_not_told_to_claude_before_it_is_opened() {
         use crate::remote::WindowChat;
         let remote = crate::remote::Remote::default();
-        let chat = |slot: &str, provider: Option<&str>| WindowChat { slot: slot.into(), folder: "/Users/me/app".into(), title: format!("Words of {slot}"), asleep: true, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: provider.map(String::from) };
+        let chat = |slot: &str, provider: Option<&str>| WindowChat { slot: slot.into(), folder: "/Users/me/app".into(), title: format!("Words of {slot}"), asleep: true, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: provider.map(String::from), pending: None };
         remote.window_chats(&[chat("on-claude", None), chat("on-ollama", Some("Ollama"))]);
         let got = digests(&remote.hub);
         assert_eq!(got.iter().map(|d| d.slot.as_str()).collect::<Vec<_>>(), ["on-claude"]);

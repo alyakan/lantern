@@ -19,7 +19,8 @@ export type Row = Exclude<ChatItem, Step | HookItem> | ActivityRow | HookRow;
  * Folds each turn's work (tool calls, the narration between them, answered permissions) into one activity row at
  * the point the work started, like Warp's in-place status. What stays out: what Claude says before its first tool (often
  * the answer to a question, before it goes on to act on it), the reply (the assistant text after the last tool, or else
- * the last text), permission prompts still waiting for an answer, and the turn's closing note.
+ * the last text), a message for the user said between steps (see `important`: the work before and after it are blocks of
+ * their own), permission prompts still waiting for an answer, and the turn's closing note.
  * `live` says whether the stream is still running; only its last turn can be. What follows a post-hook, up to the turn's
  * closing note, is folded the same way inside the hook's own row.
  */
@@ -80,6 +81,18 @@ function lastIndexWhere<T>(xs: T[], pred: (x: T) => boolean): number {
   return -1;
 }
 
+/** The shortest message said between steps that stays in the conversation (see `important`). */
+export const KEPT_MESSAGE_CHARS = 280;
+
+/**
+ * Whether something the agent says between its steps is a message for the user (a finding, a status, what it needs), not
+ * a note on what it does next: a long one, or one with a list or a heading. It stays in the conversation, where it was said.
+ */
+export function important(text: string): boolean {
+  const t = text.trim();
+  return t.length >= KEPT_MESSAGE_CHARS || /^\s*([-*+]|\d+[.)]|#{1,6})\s+\S/m.test(t);
+}
+
 function foldTurn(items: ChatItem[], live: boolean): Row[] {
   const lastTool = lastIndexWhere(items, (it) => it.type === "tool");
   if (lastTool < 0) return items as Row[];
@@ -88,17 +101,30 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   // What Claude says before it first acts: often the answer to the user's question, so it stays in the conversation.
   const firstTool = items.findIndex((it) => it.type === "tool");
   const opening = new Set(items.flatMap((it, i) => (i < firstTool && it.type === "assistant" ? [i] : [])));
+  // A message for the user said between steps stays out too, and the work before and after it are blocks of their own.
+  const kept = (it: ChatItem, i: number) => it.type === "assistant" && i <= lastTool && i !== reply && !opening.has(i) && important(it.text);
   const inBlock = (it: ChatItem, i: number) =>
-    i <= lastTool && i !== reply && !opening.has(i) && (it.type === "tool" || it.type === "assistant" || (it.type === "permission" && it.decision !== null && !KEPT_CARDS.includes(it.toolName)));
-  const entries = items.filter(inBlock) as Entry[];
-  const steps = entries.filter((e): e is Step => e.type === "tool");
+    i <= lastTool && i !== reply && !opening.has(i) && !kept(it, i) && (it.type === "tool" || it.type === "assistant" || (it.type === "permission" && it.decision !== null && !KEPT_CARDS.includes(it.toolName)));
   // Live until the turn is fully done, even while the reply streams: the work line keeps moving until then.
-  const block: ActivityRow = { type: "activity", id: `a:${steps[0].id}`, steps, entries, live: live && !items.some((it) => it.type === "turn") };
-  const rest = items.filter((it, i) => !inBlock(it, i)) as Row[];
-  const at = items.findIndex(inBlock);
-  // The block goes where the work began: after anything left out that came first (e.g. a pending prompt).
-  const before = rest.filter((r) => items.indexOf(r as ChatItem) < at);
-  return [...before, block, ...rest.slice(before.length)];
+  const running = live && !items.some((it) => it.type === "turn");
+  const segments: { it: ChatItem; i: number }[][] = [[]];
+  items.forEach((it, i) => {
+    if (kept(it, i)) segments.push([{ it, i }], []);
+    else segments[segments.length - 1].push({ it, i });
+  });
+  const lastWork = lastIndexWhere(segments, (seg) => seg.some(({ it, i }) => it.type === "tool" && inBlock(it, i)));
+  return segments.flatMap((seg, n) => {
+    const entries = seg.filter(({ it, i }) => inBlock(it, i)).map(({ it }) => it as Entry);
+    const steps = entries.filter((e): e is Step => e.type === "tool");
+    // A kept message, or notes with no step between two of them, are left as they were said.
+    if (steps.length === 0) return seg.map(({ it }) => it as Row);
+    const block: ActivityRow = { type: "activity", id: `a:${steps[0].id}`, steps, entries, live: running && n === lastWork };
+    const rest = seg.filter(({ it, i }) => !inBlock(it, i));
+    const at = seg.find(({ it, i }) => inBlock(it, i))!.i;
+    // The block goes where the work began: after anything left out that came first (e.g. a pending prompt).
+    const before = rest.filter(({ i }) => i < at);
+    return [...before.map(({ it }) => it as Row), block, ...rest.slice(before.length).map(({ it }) => it as Row)];
+  });
 }
 
 export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "approval" | "network" | "storage" | "mcp" | "other";

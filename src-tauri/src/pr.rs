@@ -278,34 +278,88 @@ pub fn branch(folder: &Path, hints: &[String], asked: Option<&str>) -> Result<(P
     Ok((range, BranchReview { branch: name, base, note, commits }))
 }
 
-/// The PR's files: (absolute path, created, deleted, lines added, lines removed), by path.
+/**
+ * The branch a review is of, among the chat's folders (the one the Changes pane reads first, then the chat's own): the
+ * first whose checked-out branch is built on the base the reviewer named, so a base named for one worktree's branch isn't
+ * laid on another's when the chat edits in several. The default branch fits any of them, so naming it still reviews the
+ * first folder's whole stack. When none fits (or none was named): the first folder, as `branch` gives it.
+ */
+pub fn review_branch(folders: &[PathBuf], hints: &[String], asked: Option<&str>) -> Result<(PrRange, BranchReview), String> {
+    let first = folders.first().ok_or("There is no folder to review.")?;
+    if let Some(a) = asked.and_then(ref_name) {
+        if !built_on(first, hints, a) {
+            if let Some(other) = folders[1..].iter().find(|f| *f != first && built_on(f, hints, a)) {
+                let (range, mut review) = branch(other, hints, Some(a))?;
+                let name = other.file_name().map_or_else(|| other.display().to_string(), |n| n.to_string_lossy().into_owned());
+                review.note = Some(format!("Showing {name}, where {} is checked out: {a} is the branch it is built on.", review.branch));
+                return Ok((range, review));
+            }
+        }
+    }
+    branch(first, hints, asked)
+}
+
+/// Whether `folder`'s checked-out branch is built on `base`: the branch it is stacked on, or the default branch.
+fn built_on(folder: &Path, hints: &[String], base: &str) -> bool {
+    let Ok(repo) = repo_for(folder, hints) else { return false };
+    let f = repo.as_path();
+    let (Ok(name), Ok(head), Ok(default)) = (git(f, &["rev-parse", "--abbrev-ref", "HEAD"]), git(f, &["rev-parse", "HEAD"]), default_base(f)) else { return false };
+    let same = |r: &str| r == base || r.strip_prefix("origin/") == Some(base) || base.strip_prefix("origin/") == Some(r);
+    same(&default) || stacked_on(f, &name, &head, &default).is_some_and(|s| same(&s))
+}
+
+/// The PR's files: (absolute path, created, deleted, lines added, lines removed), by path. A file moved (and maybe
+/// changed) is one row at its new path, saying where it was, not one added and one removed.
 pub fn summary(range: &PrRange) -> Result<Vec<ChangeSummary>, String> {
     let root = &range.root;
-    let status = git(root, &["diff", "--name-status", "-z", "--no-renames", &range.base, &range.head])?;
-    let numstat = git(root, &["diff", "--numstat", "-z", "--no-renames", &range.base, &range.head])?;
+    let status = git(root, &["diff", "--name-status", "-z", "-M", &range.base, &range.head])?;
+    let numstat = git(root, &["diff", "--numstat", "-z", "-M", &range.base, &range.head])?;
     let mut counts = std::collections::HashMap::new();
-    for record in numstat.split('\0').filter(|r| !r.is_empty()) {
+    // "added\tremoved\tpath", or for a move "added\tremoved\t" then its old path and its new one, each on its own.
+    let mut records = numstat.split('\0');
+    while let Some(record) = records.next() {
         let mut f = record.splitn(3, '\t');
         if let (Some(a), Some(r), Some(p)) = (f.next(), f.next(), f.next()) {
-            counts.insert(p.to_string(), (a.parse().unwrap_or(0), r.parse().unwrap_or(0)));
+            let path = if p.is_empty() { records.nth(1).unwrap_or_default() } else { p };
+            counts.insert(path.to_string(), (a.parse().unwrap_or(0), r.parse().unwrap_or(0)));
         }
     }
     let mut fields = status.split('\0').filter(|f| !f.is_empty());
     let mut out = vec![];
-    while let (Some(code), Some(path)) = (fields.next(), fields.next()) {
+    // "M path", or for a move or a copy "R100 old new".
+    while let Some(code) = fields.next() {
+        let from = if code.starts_with('R') || code.starts_with('C') { fields.next() } else { None };
+        let Some(path) = fields.next() else { break };
         let (added, removed) = counts.get(path).copied().unwrap_or((0, 0));
-        out.push(ChangeSummary { path: root.join(path).display().to_string(), created: code == "A", deleted: code == "D", added, removed });
+        let moved_from = from.filter(|_| code.starts_with('R')).map(|f| root.join(f).display().to_string());
+        out.push(ChangeSummary { path: root.join(path).display().to_string(), created: code == "A" || code.starts_with('C'), deleted: code == "D", added, removed, moved_from });
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
 
-/// One file of the PR, as it was at the base and as the PR has it.
+/// One file of the PR, as it was at the base and as the PR has it: a file the PR moved is compared with where it was.
 pub fn file(range: &PrRange, path: &str) -> Result<FileDiff, String> {
     let rel = Path::new(path).strip_prefix(&range.root).map_err(|_| "That file isn't in this repository.")?.to_string_lossy().into_owned();
-    let show = |commit: &str| run(&range.root, "git", &["show", &format!("{commit}:{rel}")], None).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
-    let (original, current) = (show(&range.base), show(&range.head));
+    let show = |commit: &str, rel: &str| run(&range.root, "git", &["show", &format!("{commit}:{rel}")], None).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+    let current = show(&range.head, &rel);
+    let original = show(&range.base, &rel).or_else(|| moved_from(range, &rel).and_then(|old| show(&range.base, &old)));
     Ok(FileDiff { path: path.to_string(), created: original.is_none(), deleted: current.is_none(), original: original.unwrap_or_default(), current: current.unwrap_or_default() })
+}
+
+/// Where the PR moved `rel` from, relative to the repository. The whole diff is read: limited to the new path, git
+/// wouldn't see the old one, so it wouldn't see the move.
+fn moved_from(range: &PrRange, rel: &str) -> Option<String> {
+    let status = git(&range.root, &["diff", "--name-status", "-z", "-M", &range.base, &range.head]).ok()?;
+    let mut fields = status.split('\0').filter(|f| !f.is_empty());
+    while let Some(code) = fields.next() {
+        let from = if code.starts_with('R') || code.starts_with('C') { fields.next() } else { None };
+        let path = fields.next()?;
+        if path == rel && code.starts_with('R') {
+            return from.map(str::to_string);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -452,6 +506,55 @@ mod tests {
             assert_eq!(r.base, "feat/core", "{bad}");
             assert!(r.note.as_deref().unwrap().contains("Couldn't find the base"), "{bad}");
         }
+    }
+
+    /// A chat reviewing feat/ui in its own folder that also edited a worktree on a branch built on feat/ui: the review's
+    /// base (feat/core) is read where it fits, not laid on the worktree's branch.
+    #[test]
+    fn a_base_named_for_one_worktrees_branch_is_read_where_it_fits() {
+        let dir = stack();
+        let wt = tempfile::tempdir().unwrap();
+        let wt_path = wt.path().join("x");
+        sh(dir.path(), &["worktree", "add", "-q", "-b", "feat/x", wt_path.to_str().unwrap()]);
+        std::fs::write(wt_path.join("x.txt"), "x\n").unwrap();
+        sh(&wt_path, &["add", "."]);
+        sh(&wt_path, &["commit", "-qm", "x"]);
+        let folders = [wt_path.clone(), dir.path().to_path_buf()];
+        let (_, review) = review_branch(&folders, &[], Some("feat/core")).unwrap();
+        assert_eq!((review.branch.as_str(), review.base.as_str(), subjects(&review)), ("feat/ui", "feat/core", vec!["ui".to_string()]));
+        assert!(review.note.as_deref().unwrap().contains("feat/ui is checked out"));
+        // A base that fits the worktree's own branch, or the default branch (the whole stack), stays on the worktree.
+        assert_eq!(review_branch(&folders, &[], Some("feat/ui")).unwrap().1.branch, "feat/x");
+        let (_, whole) = review_branch(&folders, &[], Some("main")).unwrap();
+        assert_eq!((whole.branch.as_str(), whole.commits.len(), whole.note.as_deref()), ("feat/x", 4, None));
+        // No base named: the worktree, against the branch it is built on.
+        assert_eq!(review_branch(&folders, &[], None).unwrap().1.base, "feat/ui");
+    }
+
+    /// A moved file is one row saying where it was, and its diff is against its old place, not a new file.
+    #[test]
+    fn a_moved_file_is_one_row_compared_with_where_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        sh(d, &["init", "-qb", "main"]);
+        sh(d, &["config", "user.email", "t@t"]);
+        sh(d, &["config", "user.name", "t"]);
+        let body: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(d.join("a.swift"), &body).unwrap();
+        sh(d, &["add", "."]);
+        sh(d, &["commit", "-qm", "init"]);
+        sh(d, &["checkout", "-qb", "feat/move"]);
+        std::fs::create_dir(d.join("Kit")).unwrap();
+        sh(d, &["mv", "a.swift", "Kit/a.swift"]);
+        std::fs::write(d.join("Kit/a.swift"), format!("{body}line 21\n")).unwrap();
+        sh(d, &["commit", "-qam", "move"]);
+        let (range, _) = branch(d, &[], None).unwrap();
+        let rows = summary(&range).unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let root = &range.root;
+        assert_eq!((rows[0].path.clone(), rows[0].moved_from.clone(), rows[0].created, rows[0].added, rows[0].removed), (root.join("Kit/a.swift").display().to_string(), Some(root.join("a.swift").display().to_string()), false, 1, 0));
+        let f = file(&range, &rows[0].path).unwrap();
+        assert!(!f.created && f.original == body && f.current.ends_with("line 21\n"));
     }
 
     #[test]

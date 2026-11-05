@@ -168,6 +168,28 @@ describe("reducer", () => {
     expect(s.items.map((i) => i.type)).toEqual(["user", "turn"]);
   });
 
+  it("a /clear Lantern runs by starting the agent afresh is over at the reset: no turn follows it to end it", () => {
+    let s = reducer(running, { type: "user_sent", text: "/clear" });
+    s = ev(s, { kind: "conversation_reset" });
+    expect(s).toMatchObject({ items: [], status: "idle", thinking: false, stopRequested: false });
+    // The next turn is marked as usual, and a Stop in it reads as one.
+    s = reducer(s, { type: "user_sent", text: "hi" });
+    s = reducer(s, { type: "stop_requested" });
+    s = ev(s, { kind: "turn_done", is_error: true, result: null, cost_usd: null, duration_ms: 1, auth_hint: false, denied: 0, context_window: null });
+    expect(s.items.map((i) => i.type)).toEqual(["user", "turn"]);
+    expect(s.items[1]).toMatchObject({ stopped: true });
+  });
+
+  it("a helper still at work after the turn ended doesn't make the chat look busy: only the agent itself does", () => {
+    const idle = ev(running, { kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 1, auth_hint: false, denied: 0, context_window: null });
+    let s = ev(idle, { kind: "thinking", parent: "agent-1" });
+    s = ev(s, { kind: "tool_started", parent: "agent-1", tool_use_id: "t9", name: "Bash", summary: "npm test" });
+    s = ev(s, { kind: "text_delta", parent: "agent-1", block_id: "b9", text: "still going" });
+    expect(s.status).toBe("idle");
+    // The agent following up on its own is a turn.
+    expect(ev(idle, { kind: "thinking", parent: null }).status).toBe("running");
+  });
+
   it("syncs the changed files with the disk: true counts, reverted files gone, order kept", () => {
     const hunks = [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 1, lines: ["-a", "+b"] }];
     let s = ev(running, { kind: "edit_applied", parent: null, tool_use_id: "e1", path: "/p/a.ts", created: false, hunks });

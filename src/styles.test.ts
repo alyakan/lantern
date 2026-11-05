@@ -65,6 +65,10 @@ describe("text you can select and copy", () => {
       expect(selectable).toContain(cls);
     }
   });
+
+  it("includes what the agent said between its steps, folded with the work or in the messages line", () => {
+    expect(selectable).toContain(".step-note");
+  });
 });
 
 describe("colours", () => {
@@ -293,6 +297,25 @@ describe("themes", () => {
         for (const n of ["working", "unread", "sev-blocker"]) for (const s of ["pane", "sidebar"]) at(id, `${n} on ${s}`, t(n), t(s), 4.5);
         for (const n of ["attn", "sev-should", "accent"]) for (const s of ["pane", "sidebar"]) at(id, `${n} on ${s}`, t(n), t(s), 3);
       });
+    });
+
+    // The loop above checks the six themes with their own blocks; Light and Dark are the ones most people see, so they are
+    // checked here too. A `--x-text` twin may be an alias of `--x` (where that colour is already text-grade).
+    it("keeps Light and Dark readable too, not only the themes the loop above covers", () => {
+      const lightBlock = css.match(/:root \{([^}]*)\}/)?.[1] ?? "";
+      const darkBlock = css.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme\]\), :root\[data-theme="system"\] \{([^}]*)\}/)?.[1] ?? "";
+      const hex = (block: string, token: string) => block.match(new RegExp(`--${token}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
+      for (const [name, block] of [["light", lightBlock], ["dark", darkBlock]] as const) {
+        const t = (token: string) => hex(block, token) || hex(block, token.replace(/-text$/, ""));
+        for (const surface of ["pane", "sidebar", "bg", "field"]) {
+          at(name, `muted on ${surface}`, t("muted"), t(surface), 4.5);
+          at(name, `muted-text on ${surface}`, t("muted-text"), t(surface), 4.5);
+        }
+        for (const surface of ["pane", "sidebar"]) {
+          at(name, `working-text on ${surface}`, t("working-text"), t(surface), 4.5);
+          at(name, `unread-text on ${surface}`, t("unread-text"), t(surface), 4.5);
+        }
+      }
     });
 
     it("reads the text on a primary button, a red confirm button, a check mark, an issue badge and the inbox badge", () => {

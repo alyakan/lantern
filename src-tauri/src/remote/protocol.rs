@@ -13,7 +13,14 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", PHONE_DESK, DESK_TALK, PHONE_SINGLE];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+
+/// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
+/// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
+pub const SWITCH_BUSY: &str = "switchbusy";
+
+/// The Changes pane's three views (Request::Changes, and Diff's `scope`): the feature that says a Mac answers them.
+pub const CHANGE_SCOPES: &str = "changescopes";
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -102,6 +109,9 @@ pub const PHONE_EXTRAS: &str = "extras";
 pub const PHONE_DESK: &str = "desk";
 /// A Mac whose Desk talks back (Request::DeskTalk) and sums up what came back (Request::DeskReply).
 pub const DESK_TALK: &str = "desktalk";
+/// A phone that shows Your work (the Work tab): it is pushed ServerMessage::Work, may ask for it (Request::Work), run one of its steps
+/// (Request::WorkStep) and ask the Mac to look again (Request::WorkRefresh).
+pub const PHONE_WORK: &str = "work";
 /// A phone that follows the Mac's One project: it is pushed ServerMessage::Single, and may pick one (Request::SetSingle).
 pub const PHONE_SINGLE: &str = "single";
 
@@ -401,6 +411,47 @@ pub struct RemoteChat {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub preview: Option<String>,
+    /// A change to its settings that waits for it (made while it worked): None when there is none, and from a Mac that doesn't say.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pending: Option<RemotePending>,
+}
+
+/// When a change to a working chat's settings is made: `now` stops its turn first (and tells it to carry on), `finished` waits
+/// for the turn to end by itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteWhen {
+    Now,
+    Finished,
+}
+
+impl RemoteWhen {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Now => "now",
+            Self::Finished => "finished",
+        }
+    }
+}
+
+/// A change waiting for a chat, as the Mac's window holds it: when it is made, what it is in words ("Auto, Step by step"), and
+/// what it puts the chat on, so a phone shows the new value with the setting it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemotePending {
+    pub when: RemoteWhen,
+    pub text: String,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub permissions: Option<RemotePermissions>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub workflow: Option<RemoteWorkflow>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub preset: Option<String>,
 }
 
 /// How a chat goes about its work: a plain conversation, one page at a time in a flavour (Build, Review, Debug or Design), or a
@@ -527,6 +578,37 @@ pub struct RemoteArtifact {
     pub size: u64,
 }
 
+/// Which changes the phone's Changes pane shows, as the Mac's Changes tab names them: "This chat", "Uncommitted", "This branch".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteChangeScope {
+    Chat,
+    Uncommitted,
+    Branch,
+}
+
+/// One changed file in a Changes view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteChangedFile {
+    /// Absolute, on the Mac.
+    pub path: String,
+    pub created: bool,
+    pub deleted: bool,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// The answer to Request::Changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteChanges {
+    pub files: Vec<RemoteChangedFile>,
+    /// With the branch: what it is compared with ("main", "origin/main").
+    pub base: Option<String>,
+}
+
 /// One item of the Mac's storage a phone may clear, as it is shown: no path, only what the user needs to decide. The phone sends
 /// the ids back to clear them, and the Mac clears only those it still finds safe (see storage/phone.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -603,7 +685,7 @@ impl From<crate::storage::phone::PhoneView> for RemoteStorage {
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview, pending: c.pending }
     }
 }
 
@@ -682,6 +764,83 @@ pub struct Waiting {
     pub input: serde_json::Value,
     #[ts(type = "number")]
     pub at: u64,
+}
+
+/// Your work as the Mac's window has it (see remote/work.rs): every piece of the user's work, from an issue or branch to its release, and
+/// the step each waits on. The window works it out (git, GitHub and Linear are asked on the Mac); the phone only shows it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWork {
+    /// Linear is connected: paths start at the issue.
+    pub issues: bool,
+    /// The window has read the repositories it shows: before that (its first answer isn't in, or no project is open) "nothing open" would
+    /// only be a guess.
+    pub looked: bool,
+    /// Repositories GitHub answered for without saying whose account is the user's: their pull requests can't be told apart, so none is listed.
+    pub blind: Vec<String>,
+    /// Blocked first, then what is yours, then the rest, as the Desk lists them.
+    pub items: Vec<RemoteWorkItem>,
+}
+
+/// One piece of work. Every word is what git, GitHub or Linear said, cut short; the phone shows it and never sends it anywhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkItem {
+    /// What Request::WorkStep names.
+    pub key: String,
+    /// The repository's short name.
+    pub repo: String,
+    pub title: String,
+    /// issue, local, pr, checks, review, merge or release: where its path is.
+    pub stage: String,
+    /// bad, wait, you, local, todo or done: its colour.
+    pub tone: String,
+    /// Where it is, in a few words ("Checks failing").
+    pub word: String,
+    /// One quiet line. A time in it is `{ago}`, which the phone fills from `at` (so a line doesn't change every minute).
+    pub meta: String,
+    #[ts(type = "number | null")]
+    pub at: Option<u64>,
+    #[ts(type = "number | null")]
+    pub number: Option<u64>,
+    /// The Linear project it is the work of (the feature), and its issue's identifier.
+    pub feature: Option<String>,
+    pub issue: Option<String>,
+    /// The pull request's or issue's page: an https link on github.com or linear.app, nothing else.
+    pub url: Option<String>,
+    /// Changes when it moves on: a step is asked for with the sig it was shown with, and refused if it moved.
+    pub sig: String,
+    /// Only a next step, not listed under where things stand.
+    pub step_only: bool,
+    /// ready (merged, waiting for a release) or done: several of a kind in one list fold into one line.
+    #[serde(default)]
+    pub fold: Option<String>,
+    pub next: Option<RemoteWorkNext>,
+}
+
+/// What an item waits on. The words of the message a chat is sent stay on the Mac.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkNext {
+    /// What to do, before the item's name ("Fix failing checks on").
+    pub what: String,
+    /// Yours to decide (a merge, a publish, a release): the chat prepares it and asks on an approval card.
+    pub yours: bool,
+    /// The button's word.
+    pub button: String,
+    /// Goes around a rule (merging a pull request nobody approved): the button is drawn in a warning colour.
+    #[serde(default)]
+    pub warn: bool,
+}
+
+/// The answer to Request::WorkStep: what the Mac did with the step.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWorkStep {
+    /// "sent" (to a chat already open) or "started" (a new chat).
+    pub kind: String,
+    /// The chat's title, or the project's name for a new chat.
+    pub to: String,
 }
 
 /// The Desk as the Mac's window has it (see remote/desk.rs): its Desks, and a card for each answer that finished in their chats.
@@ -870,21 +1029,61 @@ pub enum Request {
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
     Controls,
     /// Provider-neutral settings and operations, only sent when Welcome lists "conversation".
-    ConversationSettings { slot: String, #[ts(type = "{ provider?: string; model?: string | null; effort?: string | null } | null")] change: Option<serde_json::Value> },
+    ///
+    /// `when`, for a change to a chat that is working (only to a Mac whose Welcome lists "switchbusy"): `now` stops it, changes it
+    /// and tells it to carry on; `finished` changes it once its turn ends. Left out, a busy chat's change is refused, as before.
+    /// The same goes for SetPermissions, SetPreset and SetWorkflow.
+    ConversationSettings {
+        slot: String,
+        #[ts(type = "{ provider?: string; model?: string | null; effort?: string | null } | null")]
+        change: Option<serde_json::Value>,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     ConversationAction { slot: String, action: String },
     /// Puts a chat on Ask or Auto (its claude restarts on the same session). Refused for Auto unless the Mac lets phones use
     /// it, and while the chat is working or waiting on someone: the restart would drop what it is doing.
-    SetPermissions { slot: String, permissions: RemotePermissions },
+    SetPermissions {
+        slot: String,
+        permissions: RemotePermissions,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// Puts a chat on one of Controls' presets (its claude restarts on the same session), under the same conditions.
-    SetPreset { slot: String, preset: String },
+    SetPreset {
+        slot: String,
+        preset: String,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// Puts a chat on Chat or Step by step (its claude restarts on the same session), under the same conditions. Not a team's
     /// Lead, and not onto Team: a team is started and left on the Mac. Only sent to a Mac whose Welcome lists "workflow".
-    SetWorkflow { slot: String, workflow: RemoteWorkflow },
+    SetWorkflow {
+        slot: String,
+        workflow: RemoteWorkflow,
+        #[serde(default)]
+        #[ts(optional)]
+        when: Option<RemoteWhen>,
+    },
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
-    /// One file's diff from the chat's start, as unified-diff text.
-    Diff { slot: String, path: String },
+    /// One file's diff, as unified-diff text: from the chat's start, or (`scope`, only to a Mac whose Welcome lists
+    /// "changescopes") against the last commit or where the branch left the default one. Without a scope: the chat's.
+    Diff {
+        slot: String,
+        path: String,
+        #[serde(default)]
+        #[ts(optional)]
+        scope: Option<RemoteChangeScope>,
+    },
+    /// The files changed in one of the Changes pane's views, as RemoteChanges: what the chat changed (its edits and what
+    /// changed beside them, as the Mac's Changes tab lists it), everything uncommitted, or the branch's commits. Only sent to a
+    /// Mac whose Welcome lists "changescopes".
+    Changes { slot: String, scope: RemoteChangeScope },
     /// A reviewed file's diff, as unified-diff text: in the pull request or branch the chat is reviewing (its last review_target
     /// call), or, when it isn't reviewing anything, the chat's own change to it (as Diff). `path` is as the review's page names
     /// it, relative to the repository or absolute in it. Only sent to a Mac whose Welcome lists "reviewdiff".
@@ -968,6 +1167,15 @@ pub enum Request {
     /// Shows only `project` (one of Request::Projects' ids) on the Mac's sidebar and on every phone that follows it, or every project
     /// again (None). The window does it, and says so back as ServerMessage::Single. Only sent to a Mac whose Welcome lists "single".
     SetSingle { project: Option<String> },
+    /// Your work as the Mac's window has it, as RemoteWork (also pushed as ServerMessage::Work when it changes, to a phone that said
+    /// "work"). Only sent to a Mac whose Welcome lists "work" in `features`.
+    Work,
+    /// Does the step of the item `key` as the Desk's button does (RemoteWorkStep): the Mac sends a message it wrote to the chat on the
+    /// item's branch, or starts a chat on Ask. The phone sends no words, only the `sig` it was shown the item with: a step that
+    /// moved on since, or was sent already, is refused. Counts against the phone's limit on new chats.
+    WorkStep { key: String, sig: String },
+    /// Asks the Mac to look at git, GitHub and Linear again (it won't more than every 15 seconds).
+    WorkRefresh,
 }
 
 /// The user's own to-dos for one project, kept on the Mac (see todos.rs). `project` is the key a reminder names and the phone
@@ -1137,6 +1345,8 @@ pub enum ServerMessage {
     /// The Mac's One project (None: every project), when it first connects once the window has said one, and when it changes.
     /// Only sent to a phone that said "single".
     Single { single: Option<RemoteSingle> },
+    /// Your work changed (see Request::Work). Only sent to a phone that said "work".
+    Work { work: RemoteWork },
 }
 
 #[cfg(test)]
@@ -1235,7 +1445,7 @@ mod tests {
 
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
-        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None };
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None, pending: None };
         let auto = RemoteChat::from(info(Some("auto")));
         assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
@@ -1272,6 +1482,8 @@ mod tests {
         assert!(FEATURES.contains(&"shell"));
         // The phone shows its Desk only to a Mac that lists it: without it the Desk stays hidden on every phone.
         assert!(FEATURES.contains(&PHONE_DESK));
+        // Your work: the phone shows its tab only to a Mac that lists it.
+        assert!(FEATURES.contains(&PHONE_WORK));
         // The Desk that talks: a phone only asks a Mac that lists it (its own tests mock the list, so it is checked here).
         assert!(FEATURES.contains(&DESK_TALK));
         // One project: a phone follows the Mac's only when the Mac lists it.
@@ -1384,7 +1596,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()) };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()), pending: None };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }

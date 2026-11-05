@@ -6,10 +6,13 @@
 import type { Request } from "../protocol/generated/Request";
 import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
+import type { RemoteWhen } from "../protocol/generated/RemoteWhen";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteWork } from "../protocol/generated/RemoteWork";
+import type { RemoteWorkStep } from "../protocol/generated/RemoteWorkStep";
 import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import type { RemoteDeskExchange } from "../protocol/generated/RemoteDeskExchange";
 import type { RemoteDeskReply } from "../protocol/generated/RemoteDeskReply";
@@ -22,6 +25,8 @@ import type { RemoteTodoEdit } from "../protocol/generated/RemoteTodoEdit";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
+import type { RemoteChanges } from "../protocol/generated/RemoteChanges";
+import type { RemoteChangeScope } from "../protocol/generated/RemoteChangeScope";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { artifactList, type Artifact } from "../view/artifacts";
 import { newShellId } from "../view/shell";
@@ -121,6 +126,7 @@ export class Sync {
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
     void this.refreshDesk();
+    void this.refreshWork();
     this.onConnected?.();
   };
 
@@ -180,6 +186,32 @@ export class Sync {
     } catch {
       // What was known stays: the Mac pushes the Desk again when it changes.
     }
+  }
+
+  /** Asks for Your work, from a Mac that has it (it pushes it as it changes; this is for the first time). */
+  async refreshWork() {
+    if (!this.has("work")) return;
+    try {
+      const work = await this.ask<RemoteWork>({ op: "work" });
+      if (work && Array.isArray(work.items)) this.apply({ type: "work", work });
+    } catch {
+      // What was known stays: the Mac pushes it again when it changes.
+    }
+  }
+
+  /**
+   * Asks the Mac to do the step of the item `key`, as it was shown (`sig`): the Mac sends a message it wrote to the chat on the item's
+   * branch, or starts a chat on Ask. Nothing is typed here. Says what the Mac did; rejects with why it didn't.
+   */
+  workStep(key: string, sig: string) {
+    if (!this.has("work")) return Promise.reject(new Error("Update Lantern on your Mac to do that from here."));
+    return this.ask<RemoteWorkStep>({ op: "work_step", key, sig }, DESK_WAIT);
+  }
+
+  /** Asks the Mac to look at git, GitHub and Linear again; what it finds comes as Your work changes. */
+  workRefresh() {
+    if (!this.has("work")) return Promise.resolve(null);
+    return this.ask<null>({ op: "work_refresh" });
   }
 
   /**
@@ -321,9 +353,15 @@ export class Sync {
     return this.ask<RemoteUserTodos>({ op: "todo_edit", project, edit });
   }
 
-  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null): Promise<ConversationSettings> {
+  /** `when`, for a chat that is working (a Mac that lists "switchbusy"): stop it and change it now, or once it finishes. */
+  conversationSettings(slot: string, change: { provider?: string; model?: string | null; effort?: string | null } | null = null, when?: RemoteWhen): Promise<ConversationSettings> {
     if (!this.has("conversation")) return Promise.reject(new Error("Update Lantern on your Mac to change providers."));
-    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change });
+    return this.ask<ConversationSettings>({ op: "conversation_settings", slot, change, ...this.whenOf(when) });
+  }
+
+  /** `when` as it is sent: only to a Mac that knows it (an older one would refuse the chat as busy anyway). */
+  private whenOf(when: RemoteWhen | undefined): { when?: RemoteWhen } {
+    return when && this.has("switchbusy") ? { when } : {};
   }
 
   conversationAction(slot: string, action: "compact" | "clear") {
@@ -383,23 +421,32 @@ export class Sync {
     return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers };
   }
 
-  /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
-  setPermissions(slot: string, permissions: RemotePermissions) {
-    return this.ask({ op: "set_permissions", slot, permissions });
+  /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). `when`: see conversationSettings. */
+  setPermissions(slot: string, permissions: RemotePermissions, when?: RemoteWhen) {
+    return this.ask({ op: "set_permissions", slot, permissions, ...this.whenOf(when) });
   }
 
   /** Puts a chat on Chat or Step by step (a Mac that lists "workflow"); rejects with why not (a team, busy…). */
-  setWorkflow(slot: string, workflow: Exclude<RemoteWorkflow, "team">) {
-    return this.ask({ op: "set_workflow", slot, workflow });
+  setWorkflow(slot: string, workflow: Exclude<RemoteWorkflow, "team">, when?: RemoteWhen) {
+    return this.ask({ op: "set_workflow", slot, workflow, ...this.whenOf(when) });
   }
 
   /** Puts a chat on one of controls()' presets; rejects with why not. */
-  setPreset(slot: string, preset: string) {
-    return this.ask({ op: "set_preset", slot, preset });
+  setPreset(slot: string, preset: string, when?: RemoteWhen) {
+    return this.ask({ op: "set_preset", slot, preset, ...this.whenOf(when) });
   }
 
-  diff(slot: string, path: string) {
-    return this.ask<string>({ op: "diff", slot, path });
+  /** A file's diff: the chat's change to it, or (`scope`, only for a Mac that lists "changescopes") what is uncommitted or the branch's change. */
+  diff(slot: string, path: string, scope?: RemoteChangeScope) {
+    return this.ask<string>(scope && scope !== "chat" ? { op: "diff", slot, path, scope } : { op: "diff", slot, path });
+  }
+
+  /** The files changed in one of the Changes pane's views. Only for a Mac that lists "changescopes". */
+  async changes(slot: string, scope: RemoteChangeScope): Promise<RemoteChanges> {
+    const c = await this.ask<RemoteChanges | null>({ op: "changes", slot, scope });
+    if (!c || !Array.isArray(c.files)) throw new Error("The changes didn't come through.");
+    const files = c.files.filter((f) => f && typeof f.path === "string" && f.path.length > 0).map((f) => ({ path: f.path, created: f.created === true, deleted: f.deleted === true, added: Number(f.added) || 0, removed: Number(f.removed) || 0 }));
+    return { files, base: typeof c.base === "string" ? c.base : null };
   }
 
   /** A reviewed file's diff in what the chat reviews (or its own change, when it reviews nothing). Only for a Mac that lists "reviewdiff". */

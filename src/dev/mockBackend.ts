@@ -139,6 +139,30 @@ const MODELS = [
  */
 /** How many times the mock's pull request has been looked at (?prchecks=1 moves on one step each time). */
 let prLooks = 0;
+// Linear, for the Desk's Your work: connected unless ?nolinear. Your issues in two teams, matched to the mock's pull requests
+// by a linked PR, by an identifier in a branch, and by the branch Linear suggests; three not started yet.
+let mockLinear = typeof location === "undefined" || !new URLSearchParams(location.search).has("nolinear");
+function mockLinearWork() {
+  const day = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const issue = (identifier: string, title: string, over: Record<string, unknown> = {}) => ({
+    identifier, title, url: `https://linear.app/acme/issue/${identifier}`, priority: 3, due: null, state: "Todo", state_type: "unstarted",
+    team: identifier.split("-")[0], project: null, project_id: null, branch: null, links: [] as string[], ...over,
+  });
+  return {
+    connected: true, viewer: "Ada", org: "Acme", error: null,
+    teams: [{ key: "ACME", name: "API" }, { key: "WEB", name: "Web" }],
+    issues: [
+      issue("ACME-11", "Retries for flaky upstreams", { state: "In Progress", state_type: "started", project: "Reliability", project_id: "p-rel", links: ["https://github.com/you/acme-api/pull/128"] }),
+      issue("ACME-12", "Settings load too often", { state: "In Review", state_type: "started", project: "Reliability", project_id: "p-rel" }),
+      issue("ACME-15", "Queue writes while offline", { state: "In Progress", state_type: "started", project: "Offline mode", project_id: "p-off", branch: "ada/acme-15-offline-queue" }),
+      issue("ACME-20", "Rate-limit the export endpoint", { priority: 2, due: day(1), project: "Reliability", project_id: "p-rel", branch: "ada/acme-20-rate-limit-export" }),
+      issue("ACME-21", "Audit log page", { state: "Backlog", state_type: "backlog", project: "Offline mode", project_id: "p-off" }),
+      issue("WEB-3", "Weekly digest email", { state: "In Progress", state_type: "started", project: "Dashboard polish", project_id: "p-dash" }),
+      issue("WEB-7", "Empty states for every chart", { priority: 1, project: "Dashboard polish", project_id: "p-dash" }),
+    ],
+  };
+}
+
 const showUsage = () => new URLSearchParams(location.search).has("usage");
 /** ?plan=95 (with ?usage): the plan reading the turns report, in percent, to try the pause at the plan's limit. */
 const planUsed = () => {
@@ -820,6 +844,27 @@ async function playAside(aside: string, text: string) {
   await done();
 }
 
+/** A short turn that ends by itself ("quick"), with nothing asked. */
+async function playQuickTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(800);
+  await streamText(send, "q1:0", "Done.");
+  await send({ kind: "turn_done", is_error: false, result: "Done.", cost_usd: 0, duration_ms: 800, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
+/** A turn that works until it is stopped ("keep going"), then ends as a stopped one does. */
+async function playLongTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await send({ kind: "tool_started", parent: null, tool_use_id: "long-1", name: "Bash", summary: "npm test" });
+  await new Promise<void>((resolve) => (pendingInterrupt[slot] = resolve));
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "long-1", is_error: true, output: "interrupted" });
+  await send({ kind: "turn_done", is_error: true, result: null, cost_usd: 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -1038,17 +1083,38 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
       await sleep(50);
     }
   };
+  // The app may already have the folder open (it restores the last one and starts on the Desk): then there is no welcome
+  // button to press, and the screen it is on has no message box until a chat is opened.
+  const untilOr = async <T,>(find: () => T | null | undefined, ms: number): Promise<T | null> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const found = find();
+      if (found) return found;
+      if (Date.now() > end) return null;
+      await sleep(50);
+    }
+  };
+  const openChat = () => document.querySelector<HTMLButtonElement>(".sb-row")?.click();
   void (async () => {
     if (new URLSearchParams(location.search).has("folders")) return;
-    (await until(() => document.querySelector<HTMLButtonElement>(".welcome-open"))).click();
+    (await untilOr(() => document.querySelector<HTMLButtonElement>(".welcome-open"), 1500))?.click();
     if (history) {
       const pill = new URLSearchParams(location.search).has("pill");
-      const selector = pill ? '.composer-pills .pill[title="Continue a past session"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
-      (await until(() => document.querySelector<HTMLButtonElement>(selector))).click();
+      const selector = pill ? '.composer-pills .pill[title="Continue a past chat"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
+      let trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      if (!trigger) {
+        openChat();
+        trigger = await untilOr(() => document.querySelector<HTMLButtonElement>(selector), 2500);
+      }
+      trigger?.click();
       return;
     }
     if (openOnly) return;
-    const box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    let box = await untilOr(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"), 2500);
+    if (!box) {
+      openChat();
+      box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
+    }
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
     setValue.call(box, "Add retries with backoff to fetchJson for transient errors, then run the retry tests.");
     box.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1319,7 +1385,7 @@ function mockDashboardRun(values: Record<string, unknown>, form = "org"): Dashbo
 
 // The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
-  id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
+  id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
 });
 let mockStorageItems = [
   mockStorageItem("a1", "worktree", "acme-api/wt-retry", 3.2, { ticked: true, note: "A worktree of acme-api on lantern/retry. Removing it leaves the branch and its commits in the repository." }),
@@ -1337,6 +1403,12 @@ let mockStorageItems = [
   mockStorageItem("g2", "download", "Downloads/Screen Recording.mov", 1.2, { removal: "trash", idle_days: 30, note: "Yours: it goes to the Trash." }),
   mockStorageItem("a3", "worktree", "web-dashboard/wt-charts", 0.9, { within: null, idle_days: 21 }),
   mockStorageItem("c3", "build_output", "acme-api/wt-retry/target", 2.2, { within: "a1", ticked: true, note: "Inside the worktree above: it goes with it." }),
+  mockStorageItem("c4", "build_output", "actions-runner/_work/cargo-target", 19.4, { risk: "review", warning: "Kept on purpose so CI stays quick: the next run takes longer.", idle_days: 0 }),
+  mockStorageItem("h1", "archive", "2026-10-24/Lantern 2026-10-24, 14.03.xcarchive", 1.2, { risk: "review", warning: "Its debug symbols go with it: keep it if you read crash reports for this build in Xcode.", idle_days: 11 }),
+  mockStorageItem("h2", "archive", "2026-11-04/Lantern 2026-11-04, 09.12.xcarchive", 0.4, { risk: "review", warning: "One of your 3 newest archives: you may still want to export or upload it again.", idle_days: 0 }),
+  mockStorageItem("i1", "temp", "Chrome copy ylXeHR", 1.4, { ticked: true, shared: true, idle_days: 6, note: "A copy of Chrome it made when it started and never removed." }),
+  mockStorageItem("i2", "temp", "Chrome copy UcFwKy", 1.4, { risk: "blocked", shared: true, warning: "Chrome is running and may be using this copy: quit Chrome first.", idle_days: 0 }),
+  mockStorageItem("i3", "temp", "Temporary caches/com.apple.dt.Instruments", 4.9, { ticked: true, idle_days: 147 }),
 ];
 let mockStorageScannedAt: number | null = null;
 // The Memory tab's snapshot in the browser preview: a 16 GB Mac with the usual apps, sizes drifting a little on each read so the bars move.
@@ -1594,8 +1666,17 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
-          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false } : null;
+          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false, pinned: false } : null;
         case "set_view_main":
+          return undefined;
+        case "list_worktrees":
+          return new URLSearchParams(location.search).get("worktree")
+            ? [
+                { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix" },
+                { path: `${FOLDER}/.claude/worktrees/new-sheet`, name: "new-sheet", branch: "worktree-new-sheet" },
+              ]
+            : [];
+        case "pin_worktree":
           return undefined;
         case "branch_review":
           return {
@@ -1863,7 +1944,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             turnCount[slot] = (turnCount[slot] ?? -1) + 1;
             return turnCount[slot];
           }
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : /\bkeep going\b/i.test(String(a.text)) ? playLongTurn(slot) : /\bquick\b|^\[Lantern: the user changed this chat's settings/i.test(String(a.text)) ? playQuickTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
@@ -1891,6 +1972,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "set_subagents":
         case "set_agent_limit":
         case "keep_awake":
+        case "sleep_log":
         case "sidebar_menu":
           return null;
         case "list_permission_rules":
@@ -2064,7 +2146,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           void emit("network-changed");
           return true;
         case "storage_state":
-          return { items: mockStorageScannedAt ? mockStorageItems : [], scanning: false, progress: "", scanned_at: mockStorageScannedAt, free_bytes: 8_300_000_000, snapshots: 0, notes: [], deleting: false };
+          return { items: mockStorageScannedAt ? mockStorageItems : [], scanning: false, progress: "", scanned_at: mockStorageScannedAt, free_bytes: 8_300_000_000, total_bytes: 494_000_000_000, purgeable_bytes: mockStorageScannedAt ? 2_600_000_000 : null, snapshots: 0, notes: [], deleting: false };
         case "storage_scan":
           mockStorageScannedAt = Date.now();
           void emit("storage-changed");
@@ -2081,14 +2163,17 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "remote_set_rich_notifications":
         case "remote_set_keep_awake":
         case "remote_set_allow_auto":
+        case "remote_set_allow_shell":
         case "remote_remove_device":
         case "remote_set_live_key":
-          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
+          return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, allow_phone_shell: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";
         case "remote_pair_cancel":
         case "remote_window_chats":
         case "remote_window_desk":
+        case "remote_window_work":
+        case "remote_work_step_done":
         case "remote_window_single":
         case "remote_window_controls":
         case "remote_new_chat_done":
@@ -2144,8 +2229,10 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             { old: "/Users/you/projects/web-dashboard/.claude/worktrees/agent-a1b2c3", suggested: null },
           ].filter((m) => !/\/(io\.github\.alyakan\.lantern|\.claude)\/worktrees\//.test(m.old));
         case "desk_status": {
-          // The open chats' folders, each its own repository on GitHub, as status.rs would find them.
-          const today = (h: number) => new Date(new Date().setHours(h, 0, 0, 0)).toISOString();
+          // The open chats' folders, each its own repository on GitHub, as status.rs would find them. The first has your work at
+          // every stage the Desk's "Your work" tells apart; you are "ada".
+          const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+          const pr = (number: number, title: string, branch: string, more: Record<string, unknown> = {}) => ({ number, title, author: "ada", branch, draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...more });
           const folders = [...new Set(Object.values(slotFolder))];
           return folders.map((folder, i) => ({
             repo: folder,
@@ -2164,24 +2251,38 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             prs:
               i === 0
                 ? [
-                    { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false, checks: "fail", review: "REVIEW_REQUIRED" },
-                    { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false, checks: "pending", review: null },
+                    pr(128, "Retry fetchJson with backoff", "feat/retry-fetch", { checks: "fail" }),
+                    pr(129, "Cache the user's settings for a minute", "ada/acme-12-settings-cache"),
+                    pr(130, "Show usage bars on the account page", "feat/usage-bars", { checks: "pending", mergeable: "UNKNOWN", merge_state: "UNKNOWN" }),
+                    pr(127, "Fix the crash saving a form with an empty title", "fix/empty-title", { author: "grace", checks: "pending", review: null, review_requests: ["ada"] }),
                   ]
-                : [],
+                : i === 1
+                  ? [pr(61, "Weekly digest email", "ada/web-3-weekly-digest", { review: "CHANGES_REQUESTED" })]
+                  : [],
             merged:
               i === 0
-                ? [{ number: 126, title: "Log every retry with its delay", merged_at: today(0) }]
+                ? [{ number: 126, title: "Log every retry with its delay", author: "ada", branch: "feat/retry-log", merged_at: ago(3) }]
                 : i === 1
                   ? [
-                      { number: 58, title: "Chart tooltips flip at the right edge", merged_at: today(0) },
-                      { number: 56, title: "Dark mode for the settings page", merged_at: today(0) },
+                      { number: 58, title: "Chart tooltips flip at the right edge", author: "ada", branch: "fix/tooltips", merged_at: ago(5) },
+                      { number: 56, title: "Dark mode for the settings page", author: "ada", branch: "feat/dark-settings", merged_at: ago(30) },
                     ]
                   : [],
-            release: i === 0 ? { tag: "v2.4.0", published_at: today(0) } : null,
+            release: i === 0 ? { tag: "v2.4.0", published_at: ago(20) } : i === 1 ? { tag: "v0.9.0", published_at: ago(48) } : null,
             drafts: i === 0 ? ["v2.4.1"] : [],
+            viewer: "ada",
+            branches: i === 0 ? [{ name: "ada/acme-15-offline-queue", ahead: 3, committed: Math.floor(Date.now() / 1000) - 7200 }] : [],
             error: null,
           }));
         }
+        case "linear_connect":
+          mockLinear = true;
+          return mockLinearWork();
+        case "linear_disconnect":
+          mockLinear = false;
+          return null;
+        case "linear_work":
+          return mockLinear ? mockLinearWork() : { connected: false, viewer: null, org: null, teams: [], issues: [], error: null };
         case "list_open_prs":
           // ?prs=missing shows what the picker says when gh isn't installed.
           if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");

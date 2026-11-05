@@ -20,7 +20,9 @@ export const GROUPS: { kind: StorageKind; title: string; hint: string }[] = [
   { kind: "repo", title: "Stale projects", hint: "Nothing changed in 60 days and everything is pushed; they go to the Trash" },
   { kind: "build_output", title: "Build output", hint: "node_modules, target and the like: they come back with a build or install" },
   { kind: "simulator", title: "Simulators", hint: "Runtimes and devices Xcode can download or make again" },
+  { kind: "archive", title: "Xcode archives", hint: "One per upload to App Store Connect; each keeps that build's debug symbols" },
   { kind: "cache", title: "Caches and logs", hint: "Apps and package managers make them again" },
+  { kind: "temp", title: "Temporary folder", hint: "Chrome's leftover copies of itself and app caches, outside your home folder" },
   { kind: "download", title: "Downloads", hint: "Yours: they go to the Trash" },
   { kind: "trash", title: "Trash", hint: "Deleting these gives the space back" },
 ];
@@ -37,6 +39,8 @@ export interface Selection {
   bytes: number;
   /** What of that goes to the Trash instead, which frees nothing until the Trash is emptied. */
   toTrashBytes: number;
+  /** What of that may be shared with something that stays (an APFS copy of an app), so it may free less. */
+  sharedBytes: number;
   permanent: number;
   toTrash: number;
 }
@@ -44,7 +48,7 @@ export interface Selection {
 export function selection(items: StorageItem[], touched: ReadonlyMap<string, boolean>): Selection {
   const ticked = items.filter((i) => isTicked(i, touched));
   const holders = new Set(ticked.map((i) => i.id));
-  const sel: Selection = { ids: ticked.map((i) => i.id), bytes: 0, toTrashBytes: 0, permanent: 0, toTrash: 0 };
+  const sel: Selection = { ids: ticked.map((i) => i.id), bytes: 0, toTrashBytes: 0, sharedBytes: 0, permanent: 0, toTrash: 0 };
   for (const i of ticked) {
     if (i.removal === "trash") {
       sel.toTrash++;
@@ -52,6 +56,7 @@ export function selection(items: StorageItem[], touched: ReadonlyMap<string, boo
     } else sel.permanent++;
     if (i.within && holders.has(i.within)) continue;
     sel.bytes += i.bytes;
+    if (i.shared) sel.sharedBytes += i.bytes;
   }
   return sel;
 }
@@ -84,8 +89,20 @@ export function outcomeText(outcomes: StorageOutcome[], items: StorageItem[]): {
   return { text: parts.join(" "), failures: outcomes.filter((o) => !o.ok).map((o) => ({ name: o.name, error: o.error ?? "It couldn't be deleted." })) };
 }
 
-/** The theme colour of a kind (--storage-1 … --storage-7, in GROUPS' order): the same everywhere that kind is drawn. */
-export const kindColour = (kind: StorageKind): string => `var(--storage-${GROUPS.findIndex((g) => g.kind === kind) + 1})`;
+/** The theme colour of a kind: the same everywhere that kind is drawn. The first seven have a theme token each
+ * (--storage-1 … 7); the two added later mix two of them, so every theme has them without a new token. */
+const COLOURS: Record<StorageKind, string> = {
+  worktree: "var(--storage-1)",
+  repo: "var(--storage-2)",
+  build_output: "var(--storage-3)",
+  simulator: "var(--storage-4)",
+  cache: "var(--storage-5)",
+  download: "var(--storage-6)",
+  trash: "var(--storage-7)",
+  archive: "color-mix(in srgb, var(--storage-4) 45%, var(--storage-2))",
+  temp: "color-mix(in srgb, var(--storage-5) 45%, var(--storage-6))",
+};
+export const kindColour = (kind: StorageKind): string => COLOURS[kind];
 
 /** The narrowest a kind's piece of the stacked bar is drawn, in percent of its width, so a tiny kind can still be seen and pointed at. */
 export const MIN_SEGMENT = 2;
@@ -140,9 +157,44 @@ export function rowWidth(bytes: number, biggest: number): number {
 export function summaryText(totalBytes: number, sel: Selection): string {
   const scanned = `Total scanned ${sizeText(totalBytes)}`;
   if (sel.ids.length === 0) return `${scanned}, nothing selected to delete`;
-  const frees = `frees ${sizeText(sel.bytes - sel.toTrashBytes)}`;
+  const frees = `frees ${sel.sharedBytes > 0 ? "up to " : ""}${sizeText(sel.bytes - sel.toTrashBytes)}`;
   return `${scanned}, selected to delete ${sizeText(sel.bytes)} (${sel.toTrashBytes > 0 ? `${frees}; ${sizeText(sel.toTrashBytes)} goes to Trash first` : frees})`;
 }
 
 /** A share as the legend writes it: a kind with something in it never reads "0%". */
 export const shareText = (share: number) => (share === 0 ? "<1%" : `${share}%`);
+
+/** The disk at a glance, for the numbers at the top of the tab: what is used, free, purgeable, and what the selection frees. */
+export interface DiskFigures {
+  total: number;
+  /** Used by everything, purgeable included (as Finder counts it before macOS purges). */
+  used: number;
+  free: number;
+  /** What macOS frees by itself when it needs the room; 0 when unknown. */
+  purgeable: number;
+  /** What deleting the selection frees now (what goes to the Trash doesn't), never more than is used. */
+  frees: number;
+  /** Free space once the selection is deleted. */
+  freeAfter: number;
+  /** Whether `frees` is an upper bound (some of it may be shared with what stays). */
+  upTo: boolean;
+}
+
+/** The disk's figures, or null when the disk's size or free space is unknown. */
+export function diskFigures(view: { total_bytes: number | null; free_bytes: number | null; purgeable_bytes: number | null }, sel: Selection): DiskFigures | null {
+  if (view.total_bytes === null || view.free_bytes === null || view.total_bytes <= 0) return null;
+  const total = view.total_bytes;
+  const free = Math.min(view.free_bytes, total);
+  const used = total - free;
+  const purgeable = Math.min(view.purgeable_bytes ?? 0, used);
+  const frees = Math.min(Math.max(0, sel.bytes - sel.toTrashBytes), used);
+  return { total, used, free, purgeable, frees, freeAfter: free + frees, upTo: sel.sharedBytes > 0 };
+}
+
+/** The disk bar's pieces, in percent of the disk, left to right: used (what stays), selected to delete, purgeable, free. */
+export function diskBar(f: DiskFigures): { stays: number; selected: number; purgeable: number; free: number } {
+  const pct = (n: number) => (n / f.total) * 100;
+  // What is selected and what is purgeable are both inside "used"; when they would overlap, the selection wins.
+  const purgeable = Math.min(f.purgeable, f.used - f.frees);
+  return { stays: pct(f.used - f.frees - purgeable), selected: pct(f.frees), purgeable: pct(purgeable), free: pct(f.free) };
+}

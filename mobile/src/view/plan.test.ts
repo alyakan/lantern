@@ -1,5 +1,5 @@
 import { matchCommands, slashQuery } from "./slash";
-import { contextOf, progressOf, shortTokens, untilText, usageOf, weekForecast, weekOf } from "./plan";
+import { contextOf, progressOf, shortTokens, untilText, usageOf, weekForecast, weekOf, windowOf } from "./plan";
 
 const todo = (content: string, status: string, active_form = `${content}…`) => ({ content, status, active_form });
 
@@ -115,5 +115,33 @@ describe("the weekly limit's pace", () => {
     expect(weekOf({ used: 1, resetsAt: RESET }, at(4))).toMatchObject({ percent: 100, tone: "stop" });
     expect(weekOf({ used: 0.4, resetsAt: null }, at(4))).toMatchObject({ percent: 40, short: "", sentence: "40% of the weekly limit used." });
     expect(weekOf({ used: 0.85, resetsAt: RESET }, at(6.9)).tone).toBe("warn");
+  });
+});
+
+describe("a provider's usage window", () => {
+  const NOW = Date.UTC(2026, 9, 22, 12, 0, 0);
+  const at = (minutes: number) => NOW / 1000 + minutes * 60;
+
+  it("is a session with how long until it resets, never a full date", () => {
+    const w = windowOf({ label: "Session", used: 0.42, resets_at: at(130), minutes: 300 }, NOW);
+    expect(w).toEqual({ title: "Session", percent: 42, note: "Five-hour window · resets in 2 h 10 min", short: "Resets in 2 h 10 min", tone: "ok" });
+  });
+
+  it("is a weekly limit with where the pace leads, as the Mac's week row says it", () => {
+    const w = windowOf({ label: "Week", used: 0.3, resets_at: at(3 * 24 * 60), minutes: 10080 }, NOW);
+    expect(w.title).toBe("Weekly limit");
+    expect(w.note).not.toMatch(/\d{4}|, \d/);
+    expect(w.note).toMatch(/pace|resets/);
+  });
+
+  it("names another window by its own label and says the day it resets when that is more than a day away", () => {
+    const w = windowOf({ label: "2 hours", used: 0.85, resets_at: at(30 * 60), minutes: 120 }, NOW);
+    expect(w.title).toBe("2 hours");
+    expect(w.tone).toBe("warn");
+    expect(w.note).toMatch(/^Resets (tomorrow|\w{3}) \d\d:\d\d$/);
+  });
+
+  it("is red at the limit, and says nothing of a reset it wasn't told", () => {
+    expect(windowOf({ label: "Session", used: 1, resets_at: null, minutes: 300 }, NOW)).toEqual({ title: "Session", percent: 100, note: "", short: "", tone: "stop" });
   });
 });

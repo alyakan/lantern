@@ -10,6 +10,7 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
+import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
@@ -92,6 +93,8 @@ export interface State {
   epoch: number | null;
   /** The Desk as the Mac's window has it, once a Mac that has one has said (null: not yet, or a Mac without). */
   desk: RemoteDesk | null;
+  /** Your work as the Mac's window has it, once a Mac that has it has said (null: not yet, or a Mac without). */
+  work: RemoteWork | null;
   /** The Mac's One project: Home lists only its chats (null: every project, or a Mac that doesn't say). */
   single: RemoteSingle | null;
 }
@@ -104,7 +107,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, single: null };
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, single: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -114,6 +117,8 @@ export type Action =
   | { type: "waiting"; list: Waiting[]; /** Prompts visible before this pending-list request began; newer prompts are untouched. */ observedPrompts?: Record<string, string[]> }
   /** The Desk, as the Mac answered when asked (it pushes it too, as it changes). */
   | { type: "desk"; desk: RemoteDesk }
+  /** Your work, as the Mac answered when asked (it pushes it too, as it changes). */
+  | { type: "work"; work: RemoteWork }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
   /** The chat's history was asked for (again), or the asking failed. */
@@ -270,6 +275,8 @@ export function reducer(state: State, action: Action): State {
     }
     case "desk":
       return { ...state, desk: action.desk };
+    case "work":
+      return { ...state, work: action.work };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
@@ -310,6 +317,8 @@ export function reducer(state: State, action: Action): State {
           return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
         case "desk":
           return { ...state, desk: msg.desk };
+        case "work":
+          return { ...state, work: msg.work };
         case "single":
           return { ...state, single: msg.single };
         case "provider_usage":

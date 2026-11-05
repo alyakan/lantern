@@ -38,6 +38,16 @@ export function ClaudeCheck({ path }: { path: string }) {
         <button onClick={() => setAttempt((n) => n + 1)}>Check again</button>
       </div>
     );
+  if (check.kind === "unknown")
+    return (
+      <div className="claude-check" role="status">
+        <span className="claude-check-mark" aria-hidden>
+          ?
+        </span>
+        <span>Couldn't check Claude Code's sign-in</span>
+        <button onClick={() => setAttempt((n) => n + 1)}>Check again</button>
+      </div>
+    );
   return (
     <div className="claude-check" role="status">
       <span className="claude-check-mark" aria-hidden>
@@ -45,7 +55,6 @@ export function ClaudeCheck({ path }: { path: string }) {
       </span>
       {check.kind === "checking" && "Checking Claude Code…"}
       {check.kind === "signed_in" && (check.account ? `Claude Code is installed and signed in as ${check.account}` : "Claude Code is installed and signed in")}
-      {check.kind === "unknown" && "Claude Code is installed"}
     </div>
   );
 }

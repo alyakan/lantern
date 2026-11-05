@@ -23,14 +23,16 @@
   --line-strong: #d4d4d9;
   --text: #1d1d1f;
   --text-2: #48484a;
-  --muted: #86868b;
+  --muted: #6e6e73;        /* icons, rings and the focus outline: 4.7:1 on the sidebar, so a word set in it reads too */
   --faint: #aeaeb2;
-  --muted-text: #6e6e73;   /* small text in the muted grey: 4.7:1 on the sidebar, where --muted is 3.3:1 */
+  --muted-text: #5f5f64;   /* small secondary text: 5.8:1 on the sidebar, a step darker than --muted */
   --accent: #1d1d1f;       /* neutral: buttons are black/white, never blue */
   --accent-soft: #ececee;
   --accent-text: #ffffff;
   --working: #d4693f;      /* Claude's orange, only while it works */
+  --working-text: #b5542c; /* the same orange as text: 4.5:1 on the sidebar, where --working is 3.3:1 */
   --unread: #0a84ff;       /* a chat finished in the background, not opened yet */
+  --unread-text: #0a6fd0;  /* the same blue as text: 4.6:1 on the sidebar, where --unread is 3.4:1 */
   --attn: #c47f00;         /* an agent on the canvas that is waiting for you: rings, tethers, dots */
   --attn-text: #8a5d00;    /* the same, as small text: 5.2:1 on the sidebar, where --attn is 2.9:1 */
   --add: #1a7f37;
@@ -48,6 +50,7 @@
   --lift-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--line-strong);   /* a project row while it's dragged */
   --hud-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
   --panel-shadow: 0 0 0 0.5px var(--line-strong), 8px 0 28px rgba(0, 0, 0, 0.14);   /* the collapsed sidebar opened over the chat, and the peek */
+  --panel-shadow-gone: 0 0 0 0.5px transparent, 8px 0 28px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --overlay: rgba(0, 0, 0, 0.28);   /* behind a dialog */
   --overlay-strong: rgba(0, 0, 0, 0.35);
   --on-color: #ffffff;     /* text on a project's own colour, or a severity's */
@@ -137,14 +140,16 @@
     --line-strong: #3c3c43;
     --text: #dfdfe0;
     --text-2: #b9b9bd;
-    --muted: #8e8e93;
+    --muted: #919196;
     --faint: #5d5d63;
-    --muted-text: #98989d;   /* 5.0:1 on the sidebar, where --muted is 4.4:1 */
+    --muted-text: #98989d;   /* 5.0:1 on the sidebar, where --muted is 4.6:1 */
     --accent: #e6e6e7;
     --accent-soft: #2a2a2a;
     --accent-text: #1a1a1d;
     --working: #ef8a5c;
+    --working-text: var(--working);
     --unread: #0a84ff;
+    --unread-text: #4a9eff;   /* 5.3:1 on the sidebar, where --unread is 4.0:1 */
     --attn: #f0b44c;
     --attn-text: #f0b44c;
     --add: #6bd488;
@@ -181,14 +186,16 @@
   --line-strong: #3c3c43;
   --text: #dfdfe0;
   --text-2: #b9b9bd;
-  --muted: #8e8e93;
+  --muted: #919196;
   --faint: #5d5d63;
   --muted-text: #98989d;
   --accent: #e6e6e7;
   --accent-soft: #2a2a2a;
   --accent-text: #1a1a1d;
   --working: #ef8a5c;
+  --working-text: var(--working);
   --unread: #0a84ff;
+  --unread-text: #4a9eff;
   --attn: #f0b44c;
   --attn-text: #f0b44c;
   --add: #6bd488;
@@ -239,7 +246,9 @@
   --accent-text: #0d1117;
   --on-status: #0d1117;
   --working: #e3b341;
+  --working-text: var(--working);
   --unread: #79c0ff;
+  --unread-text: var(--unread);
   --attn: #e3b341;
   --attn-text: #e3b341;
   --add: #7ee787;
@@ -305,6 +314,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(1, 4, 9, 0.6);
   --overlay-strong: rgba(1, 4, 9, 0.7);
@@ -341,7 +351,9 @@
   --accent-text: #021207;
   --on-status: #020a04;
   --working: #ffb000;
+  --working-text: var(--working);
   --unread: #6bffe0;
+  --unread-text: var(--unread);
   --attn: #ffc933;
   --attn-text: #ffc933;
   --add: #8dffb0;
@@ -413,6 +425,7 @@
   --lift-shadow: 0 0 0 1px var(--text-2);
   --hud-shadow: 0 0 0 1px var(--line-strong);
   --panel-shadow: 0 0 0 1px var(--line-strong);
+  --panel-shadow-gone: 0 0 0 1px transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
   --pane-edge: inset 0 0 0 1px var(--line-strong);
   --overlay: rgba(0, 4, 1, 0.65);
   --overlay-strong: rgba(0, 4, 1, 0.75);
@@ -448,7 +461,9 @@
   --md-quote-bar: #2aa198;
   --md-pre-head-text: #8a9c9e;
   --working: #e2814e;
+  --working-text: var(--working);
   --unread: #4aa3e8;
+  --unread-text: var(--unread);
   --attn: #b58900;
   --attn-text: #d9a520;
   --add: #6dc870;
@@ -495,7 +510,9 @@
   --on-status: #2e3440;
   --md-quote-bar: #88c0d0;
   --working: #dea491;
+  --working-text: var(--working);
   --unread: #9ab4cd;
+  --unread-text: var(--unread);
   --attn: #ebcb8b;
   --attn-text: #ebcb8b;
   --add: #a3be8c;
@@ -543,7 +560,9 @@
   --md-quote-bar: #6b3f1d;
   --md-pre-head-text: #675b4c;
   --working: #ac4813;
+  --working-text: var(--working);
   --unread: #1d69ba;
+  --unread-text: var(--unread);
   --attn: #a86300;
   --attn-text: #7c4a00;
   --add: #236d37;
@@ -593,7 +612,9 @@
   --accent-hover: #f9bd2b;
   --on-attn: #151515;
   --working: #bd3e00;
+  --working-text: var(--working);
   --unread: #1d4aff;
+  --unread-text: var(--unread);
   --attn: #b87800;
   --attn-text: #805600;
   --add: #17722f;
@@ -631,6 +652,8 @@
   --lift-shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
   --hud-shadow: 0 0 0 0 transparent;
   --panel-shadow: inset -2px 0 0 var(--ph-ink), 4px 0 0 var(--ph-ink);
+  --panel-shadow-gone: inset -2px 0 0 transparent, 4px 0 0 transparent;   /* the same with nothing showing: what a closing pane's edge fades to */
+  --panel-shadow-pinned: inset -2px 0 0 var(--ph-ink);   /* the pinned sidebar's edge, which a pane closing from pinned keeps */
   --md-link: #1d4aff;
   --md-link-line: #1d4aff;
   --md-quote-bar: #f54e00;
@@ -803,6 +826,16 @@
 
 /* Base */
 * { box-sizing: border-box; }
+/* Scrollbars are thin and quiet everywhere: no track, and a faint thumb that firms up while the pointer is over what scrolls
+   (posthog draws its own chunky ones). The standard properties are Chrome's and Firefox's; WebKit, the app's own webview,
+   reads the pseudo-elements. */
+:where(:root:not([data-theme="posthog"])) * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+:where(:root:not([data-theme="posthog"])) *:hover { scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-track, :where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-corner { background: transparent; }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: transparent; background-clip: padding-box; }
+:where(:root:not([data-theme="posthog"])) :hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--muted) 45%, transparent); }
+:where(:root:not([data-theme="posthog"])) ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 70%, transparent); }
 /* Monaco sizes its completion list in content-box terms; under the reset above the last row is cut off. */
 .monaco-editor .suggest-widget, .monaco-editor .suggest-widget *, .monaco-editor .suggest-details, .monaco-editor .suggest-details * { box-sizing: content-box; }
 /* The app fills the window and scrolls inside its panes; the page around it never scrolls. */
@@ -821,7 +854,7 @@ button.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--te
 button.icon { border: none; background: none; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-inner); font-size: calc(15px * var(--font-scale)); }
 button.icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 code, pre { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); }
-textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-preface, .review-changed, .review-notes, .review-table { user-select: text; cursor: auto; }
+textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-text, .review-preface, .review-changed, .review-notes, .review-table { user-select: text; cursor: auto; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; align-self: stretch; }
 .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
@@ -871,7 +904,7 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .viewer-crumb { flex: none; width: 5px; height: 5px; margin: 0 2px 0 0; border-right: 1.3px solid var(--faint); border-bottom: 1.3px solid var(--faint); transform: rotate(-45deg); }
 .viewer-status { flex: 0 0 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .viewer-detail { color: var(--muted); }
-.viewer.working .viewer-status { color: var(--working); }
+.viewer.working .viewer-status { color: var(--working-text); }
 /* While Claude works, an orange glint runs along the viewer's bottom edge. It moves by transform, which WebKit animates off
    the main thread: moved by `left`, it laid the page out every frame for as long as Claude worked. */
 .viewer-progress { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--working) 18%, transparent); }
@@ -1549,7 +1582,7 @@ button.hud-sound:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .viewer-issue:disabled { opacity: 1; }
 .viewer-issue.failed { color: var(--del); }
 /* Still running in the background: a count with a spinner, and the list under the viewer. */
-.viewer-issue.background { color: var(--working); }
+.viewer-issue.background { color: var(--working-text); }
 .viewer-issue.background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
 .viewer-issue.pressed { background: var(--bg-active); }
 .background-menu { top: calc(100% + 6px); left: 0; right: 0; min-width: 360px; max-height: 320px; }
@@ -1607,8 +1640,11 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .run-dot.passed { background: var(--add); }
 .run-dot.failed { background: var(--del); }
-/* The chip under a turn's activity that ran tests; it opens the Tests tab. */
+/* The line under a turn's activity for its test runs: one collapsed line that expands to a line per run, each opening the Tests tab. */
 .test-chip svg { flex: none; width: 12px; height: 12px; }
+.test-runs .test-chip { max-width: 100%; }
+.test-run-command { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.test-run-summary { flex: none; color: var(--muted); }
 .test-chip.failed { color: var(--del); }
 .test-chip.failed:hover:not(:disabled) { color: var(--del); }
 
@@ -1653,7 +1689,31 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 /* Storage panel (a dialog from the title bar, sized like Settings): a bar of the whole scan split by kind, then the scan as a checklist
    grouped by kind, each row with a bar against the biggest item, and a bar at the bottom that deletes what is ticked. Each kind has its own colour (--storage-1…7). */
 .storage-bar { gap: 8px; }
-.storage-free { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+/* The disk at a glance: used of total, one bar (what stays, what is ticked, what macOS can purge, what is free), and four
+   numbers in large type, each with the colour of its piece of the bar. */
+.storage-hero { flex: none; padding: 12px 16px 14px; border-bottom: 1px solid var(--line); --tone-stays: color-mix(in srgb, var(--text) 32%, var(--bg-subtle)); --tone-selected: var(--del); --tone-purgeable: var(--warn); --tone-free: var(--add); --tone-after: var(--add); }
+.storage-hero-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.storage-hero-used { flex: 1; min-width: 0; font-size: calc(13px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.storage-hero-used strong { font-size: calc(22px * var(--font-scale)); font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+.storage-hero-found { flex: none; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.storage-meter { display: flex; height: 14px; overflow: hidden; border-radius: var(--radius-pill); background: var(--bg-subtle); }
+.storage-meter > span { flex: none; min-width: 0; height: 100%; transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.storage-meter-stays { background: var(--tone-stays); }
+.storage-meter-selected { background: var(--tone-selected); }
+.storage-meter-purgeable { background: var(--tone-purgeable); }
+.storage-meter-free { background: color-mix(in srgb, var(--tone-free) 30%, var(--bg-subtle)); }
+.storage-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 12px 0 0; }
+.storage-stat { min-width: 0; padding-left: 9px; border-left: 3px solid var(--tone); }
+.storage-stat.tone-free { --tone: var(--tone-free); }
+.storage-stat.tone-selected { --tone: var(--tone-selected); }
+.storage-stat.tone-purgeable { --tone: var(--tone-purgeable); }
+.storage-stat.tone-after { --tone: color-mix(in srgb, var(--tone-after) 45%, var(--line)); }
+.storage-stat dt { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.storage-stat dd { margin: 0; font-size: calc(24px * var(--font-scale)); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.storage-stat dd.storage-stat-sub { font-size: calc(11.5px * var(--font-scale)); font-weight: 400; letter-spacing: 0; line-height: 1.35; color: var(--muted-text); white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .storage-meter > span { transition: none; } }
+/* Expanded: nearly the whole window, for a long scan. Only this panel: .mode-guide's size is shared with Settings. */
+.mode-guide.storage-panel.big { width: calc(100vw - 32px); height: calc(100vh - 32px); max-width: none; max-height: none; }
 .storage-status { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1 !important; min-width: 0; }
 .storage-notes, .storage-result { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--text-2); }
 .storage-notes p, .storage-result p { margin: 2px 0; }
@@ -1683,6 +1743,7 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .storage-claude { font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 .storage-more { margin: 4px 12px 8px; }
 .storage-actions { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.storage-actions button { flex: none; white-space: nowrap; }
 .storage-confirm-list { margin: 4px 0 0; padding-left: 18px; font-size: calc(12px * var(--font-scale)); line-height: 1.45; overflow-wrap: anywhere; }
 .storage-selected { font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .storage-panel-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -1984,7 +2045,7 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 @container (max-width: 470px) { .steps-phase:not(.current) .steps-phase-name { display: none; } .steps-phase-sep { width: 6px; } }
 @container (max-width: 300px) { .steps-phase.current .steps-phase-name { display: none; } }
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
-.steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
+.steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working-text); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
 .steps-viewport { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .steps-track { display: flex; height: 100%; will-change: transform; transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -2124,7 +2185,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .step-command-output { margin: 2px 0 6px 24px; max-height: 240px; }
 .step-command-status .spinner { display: inline-block; width: 9px; height: 9px; vertical-align: -1px; }
 .step-command-note { flex: none; margin-left: auto; padding-left: 10px; font-size: calc(11px * var(--font-scale)); color: var(--muted); white-space: nowrap; }
-.step-command.background.running .step-command-note { color: var(--working); }
+.step-command.background.running .step-command-note { color: var(--working-text); }
 .step-command.background.error .step-command-note { color: var(--del); }
 /* Never squeezed: in a narrow pane the page circles give way (they scroll) instead. */
 
@@ -2365,7 +2426,7 @@ body::after { content: var(--crt-on); position: fixed; inset: 0; z-index: 214748
   --qr-paper: #ffffff;
   width: 132px; height: 132px; padding: 8px; background: var(--qr-paper); border-radius: var(--radius-inner); flex: none; image-rendering: pixelated; }
 .remote-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: calc(12.5px * var(--font-scale)); }
+.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 10px; border-radius: var(--radius-inner); background: var(--info-bg); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice button { margin-left: auto; }
 button.danger { color: var(--del); }
@@ -2535,7 +2596,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .edit-bar.conflict .edit-bar-text { color: var(--text); }
 .edit-bar.failed { background: var(--error-bg); }
 .edit-bar.failed .edit-bar-text { color: var(--del); }
-.tag.unsaved { color: var(--working); }
+.tag.unsaved { color: var(--working-text); }
 
 /* The Summary tab: Step by step's plan so far, a row per step; a row opens its page in the chat. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -2688,7 +2749,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .pr-check-state { flex: none; width: 66px; color: var(--muted-text); }
 .pr-check.fail .pr-check-state { color: var(--del); font-weight: 600; }
 .pr-check.pass .pr-check-state { color: var(--add); }
-.pr-check.pending .pr-check-state { color: var(--working); }
+.pr-check.pending .pr-check-state { color: var(--working-text); }
 .pr-check-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pr-check .pr-link { flex: none; font-weight: 400; }
 .pr-foot { flex: none; display: flex; flex-direction: column; gap: 8px; }
@@ -2751,6 +2812,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
 .worktree-chip { flex: 0 1 auto; min-width: 0; max-width: 130px; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); }
 .worktree-chip.off { opacity: 0.7; }
+.scope-anchor.worktree-anchor { margin-left: 2px; }
+.worktree-picker { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; font-size: calc(11.5px * var(--font-scale)); }
+.worktree-picker.pressed { background: var(--bg-hover); }
 .revert-all { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; white-space: nowrap; }
 /* Wide, it says Revert all; narrow, it's the arrow alone (named for VoiceOver and in its tooltip). */
 .revert-all svg { display: none; }
@@ -3331,23 +3395,37 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 
 /* The window below the title bar: the sidebar of projects, then the chat and the side panel. */
 .app-body { position: relative; flex: 1; display: flex; min-height: 0; }
-.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.app-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }  /* the Desk's Ask sheet is placed over it */
 
 /* Sidebar: one pane in three forms. Collapsed, it is a slim column with a square for each open chat and team; its panel keeps
    the column's 56px in the layout and opens over the chat from there, to the pinned width (--sb-open), the squares staying where
    they are and the names coming out beside them. Pinned, the panel is open at the saved width beside the chat, its edge a drag
    handle (its width never takes the room the chat and the side panel need: the window's minimum width is the sum of the three).
    A peek is the same open panel, slid in over the chat from the window's edge while the sidebar is hidden. */
-.sidebar { position: relative; z-index: 15; flex: none; width: 56px; }
+/* Its width is animated when it is pinned or collapsed (the same time and easing as the pane inside it), so the chat or Desk beside
+   it glides to its place instead of jumping; not while its edge is being dragged. */
+.sidebar { position: relative; z-index: 15; flex: none; width: 56px; min-width: 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), min-width var(--sb-close); }
 .sidebar.pinned { min-width: 200px; max-width: max(200px, calc(100vw - 840px)); }
-.sidebar.dragging { user-select: none; cursor: col-resize; }
+.sidebar.dragging { user-select: none; cursor: col-resize; transition: none; }
 .sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), box-shadow 0.22s; }
 .sb-panel.expanded { width: var(--sb-open, 260px); box-shadow: var(--panel-shadow); }
 /* Closing, the border (the shadow's ring) is kept at full strength while the width narrows, so it follows the edge in, and only
    fades once the pane is the bar, where it has no border. */
 .sb-panel.closing { box-shadow: var(--panel-shadow); }
 .sb-panel:not(.expanded):not(.closing) { transition: width var(--sb-close), box-shadow 0.12s; }
-.sidebar.pinned .sb-panel { width: 100%; box-shadow: none; transition: none; }
+/* Pinned, the pane is as wide as the sidebar is to be, from the first frame: the sidebar's width grows under it as the chat beside it
+   slides out from under, rather than the pane's contents being squeezed as it widens. */
+.sidebar.pinned .sb-panel { width: max(100%, min(var(--sb-open, 100%), max(200px, calc(100vw - 840px)))); box-shadow: none; transition: none; }
+/* Collapsing it, the pane is drawn open for a frame in the pinned look, then closes like the open bar does; it keeps the pinned
+   sidebar's edge (none, or the theme's own) all the way in, and the edge goes with the pane at the end, instead of one that isn't
+   there when it starts, grows as it shrinks and then goes. */
+.sb-panel.from-pinned:is(.expanded, .closing) { box-shadow: var(--panel-shadow-pinned, none); }
+/* Closing, the edge fades out while the pane settles into the bar (it is slowest at the end), instead of hanging on for the last
+   few pixels and then going in one frame. */
+@keyframes sb-edge-out { to { box-shadow: var(--panel-shadow-gone, 0 0 0 0 transparent); } }
+.sb-panel.closing { animation: sb-edge-out var(--sb-close) forwards; }
+/* Pinning the open bar: the pinned pane is the same on screen, so its labels aren't faded in again as on a pane opening. */
+.sb-panel.carried.expanded :is(.sb-text, .sb-project-name, .sb-new, .sb-unfold, .sb-side-glyph) { animation: none; }
 .sidebar.peek .sb-panel { transition: none; }
 .sb-head { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 6px 8px; }
 .sb-head button.sb-button { position: relative; width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
@@ -3398,9 +3476,9 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-title { overflow: hidden; text-overflow: ellipsis; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
 .sb-row.current .sb-title { font-weight: 600; }
 .sb-status { overflow: hidden; text-overflow: ellipsis; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
-.sb-status.running { color: var(--working); }
+.sb-status.running { color: var(--working-text); }
 .sb-status.waiting { color: var(--attn-text); }
-.sb-status.unread { color: var(--unread); }
+.sb-status.unread { color: var(--unread-text); }
 .sb-chip { position: relative; flex: none; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: none; border-radius: var(--radius-card); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(12px * var(--font-scale)); font-weight: 600; transition: background 0.12s, color 0.12s; }
 .sb-row:hover .sb-chip:not(.current) { background: color-mix(in srgb, var(--pc, var(--muted)) calc(var(--pc-tint) + 9%), var(--bg)); color: var(--text); }
 .sb-chip.current { background: var(--pc, var(--accent)); color: var(--on-color); }
@@ -3525,7 +3603,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
 .sb-panel:is(.closing, .opening) .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
 /* Between a team's square and the next, the list's own gap goes with the line that folds its agents. */
-.sb-panel:is(.closing, .opening) .sb-agents-wrap { margin-top: -6px; }
+.sb-panel:is(.closing, .opening) .sb-agents-wrap, .sb-panel:is(.closing, .opening) .sb-views-away { margin-top: -6px; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle > :not(.sb-project-initials), .sb-panel:is(.closing, .opening) .sb-note { opacity: 0; transition: opacity 0.12s; }
 .sb-header-toggle .sb-project-initials { transition: background 0.12s; }
 .sb-panel:is(.closing, .opening) .sb-header-toggle .sb-project-initials { background: transparent; }
@@ -3536,7 +3614,7 @@ nav > .sb-note { padding-left: 14px; }
 .sb-panel:is(.closing, .opening) .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
-  .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
+  .sidebar, .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
   .sb-unfold, .sb-side-glyph, .sb-side-glyph.leaving { animation: none; }
   .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new { animation: none; }
   .sb-section { transition: none; }
@@ -3731,7 +3809,14 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 980px; margin: 0 auto; padding: 16px 24px 24px; box-sizing: border-box; }
+/* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
+/* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
+:where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
+/* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. Not in
+   the theme whose bar is always there: hiding it would be the flash, and move the pane's edge twice. */
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing { scrollbar-width: none; }
+:where(:root:not([data-theme="posthog"])) .desk-main.resizing::-webkit-scrollbar { display: none; }
 .desk-side { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 16px 0 0; }
 .desk-side > .desk-h { padding: 0 16px; }
 .desk-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 18px; }
@@ -3814,13 +3899,15 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-tone-blocked { color: var(--del); }
 .desk-pr-link { color: var(--text); text-decoration: none; }
 .desk-pr-link:hover { text-decoration: underline; }
-/* The Desk's main page: one grid of tiles that lock together. What waits on you takes a whole row; Repos today two columns when
-   the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
-   project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. */
+/* The Desk's main page: one grid of tiles that lock together. What waits on you and Your work take a whole row each; a wide tile
+   two columns when the pane has them (asked of the pane, so a one-column pane never scrolls sideways); the summary and each project one. A
+   project tile has its name and last activity, its branch, then each fact on a line of its own, its label on the left. Tiles on
+   one row are as tall as the tallest, their Chats button at the bottom; nothing opens inside a tile (its chats drop down over
+   the Desk), so a row never grows for one tile. */
 .desk-main { container-type: inline-size; }
-.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; gap: 10px; }
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; gap: 10px; }
 .desk-projects { display: contents; }
-.desk-bento > .desk-needs { grid-column: 1 / -1; }
+.desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
 .desk-summary .desk-clear { margin: -2px -4px 2px; }
 .desk-summary .desk-facts { border-top: none; padding-top: 0; }
@@ -3847,17 +3934,92 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-changed { white-space: nowrap; }
 .desk-branch { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--mono); }
 
-/* Repos today: a line per merge, release, failing check or waiting draft. */
-.desk-repo-list { margin: 0; padding: 0; list-style: none; }
-.desk-repo-event:last-child { border-bottom: none; }
-.desk-repo-event { display: flex; align-items: baseline; gap: 8px; padding: 7px 12px; border-bottom: 0.5px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
-.desk-repo-mark { flex: none; width: 14px; text-align: center; font-weight: 700; color: var(--muted-text); }
-.desk-repo-event.merged .desk-repo-mark, .desk-repo-event.released .desk-repo-mark { color: var(--add); }
-.desk-repo-event.failing .desk-repo-mark { color: var(--del); }
-.desk-repo-event.draft .desk-repo-mark { color: var(--attn-text); }
-.desk-repo-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-repo-num { color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.desk-repo-name { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+
+/* Your work: next steps, then where each piece stands as a row of nodes (Local › PR › Checks › Review › Merge › Release). A state
+   has one colour, in its dot, its word and its node: blocked red, your call blue, on its way amber, local only purple, done green. */
+.yw-tone-bad { --yw: var(--del); }
+.yw-tone-you { --yw: var(--yw-you); }
+.yw-tone-wait { --yw: var(--yw-wait); }
+.yw-tone-local { --yw: var(--yw-local); }
+.yw-tone-done { --yw: var(--add); }
+.yw-tone-todo { --yw: var(--muted-text); }
+/* Several quiet pieces of work (Ready, or done) in one line that opens to them. */
+.yw-foldrow { padding-top: 7px; padding-bottom: 7px; }
+.yw-foldrow > .yw-fold { font: 600 calc(12px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.yw-foldrow > .yw-fold:hover { color: var(--text); }
+.yw-folded { margin: 8px -12px 0; border-top: 0.5px solid var(--line); }
+/* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
+.yw-row.yw-warn { --yw: var(--warn); }
+/* Blue and purple from the chart palette every theme sets for its own pane. */
+.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: var(--attn-text); --yw-local: var(--storage-4); }
+/* Next stands apart from where things stand: its own card, edged and headed in blue. */
+.yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
+.yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
+/* A group (a feature, or a project) is a box of its own on the card: a header band, then its work, each piece with a bar in its state's colour. */
+.yw-feature { margin: 10px 12px 0; border: 0.5px solid var(--line); border-radius: var(--radius-inner); overflow: hidden; }
+.yw-feature:last-of-type { margin-bottom: 12px; }
+.yw-feature-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: color-mix(in srgb, var(--text) 6%, var(--pane)); border-bottom: 0.5px solid var(--line); }
+.yw-head-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.yw-kicker { font: 600 calc(9.5px * var(--font-scale)) var(--ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-text); }
+.yw-feature-head h3 { margin: 0; font: 700 calc(14.5px * var(--font-scale)) var(--ui); color: var(--text); }
+.yw-feature-sum { margin-left: auto; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.yw-feature-head + .dp-list { border-top: none; }
+.yw-feature > .desk-more { margin: 0; }
+.yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+.yw-row .dp-title { white-space: normal; font-weight: 600; font-size: calc(13.5px * var(--font-scale)); }
+.yw-row .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
+.yw-issue { display: inline-flex; align-items: baseline; align-self: flex-start; gap: 7px; max-width: 100%; padding: 2px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--text) 7%, var(--pane)); font-size: calc(12px * var(--font-scale)); color: var(--text-2); text-decoration: none; }
+a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane)); }
+.yw-issue-id { flex: none; font-family: var(--mono); font-weight: 650; color: var(--text); }
+.yw-issue-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yw-issue-in { flex: none; color: var(--muted-text); }
+.yw-kicker + h3 { margin-top: 0; }
+/* Where things stand: what groups it and which states it shows, then groups that fold. */
+.yw-bar { display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 8px; border-bottom: 0.5px solid var(--line); }
+.yw-group { display: flex; align-items: center; gap: 2px; }
+.yw-bar-label { margin-right: 6px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+.yw-group button { padding: 2px 9px; border: 0.5px solid var(--line); background: none; color: var(--muted-text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-group button:first-of-type { border-radius: var(--radius-inner) 0 0 var(--radius-inner); }
+.yw-group button:last-of-type { border-radius: 0 var(--radius-inner) var(--radius-inner) 0; }
+.yw-group button.on { background: var(--text); border-color: var(--text); color: var(--pane); }
+.yw-group button:disabled { opacity: 0.4; cursor: default; }
+.yw-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.yw-pill { display: inline-flex; align-items: center; padding: 2px 9px 2px 7px; border: 0.5px solid var(--line); border-radius: var(--radius-inner); background: none; color: var(--text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; font-variant-numeric: tabular-nums; }
+.yw-pill .yw-dot { width: 7px; height: 7px; margin-right: 5px; }
+.yw-pill.on { border-color: var(--yw); background: color-mix(in srgb, var(--yw) 14%, var(--pane)); }
+.yw-fold { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; }
+/* A row's path is quiet: only the node it is at is named (the rest say their stage on hover). */
+.yw-node:not(.yw-now) { font-size: 0; gap: 0; }
+.yw-sub { margin: 0; padding: 8px 12px 2px; font: 600 calc(10.5px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
+.yw-sub + .dp-list { border-top: none; }
+.yw-card section + section { border-top: 0.5px solid var(--line); }
+.yw-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--yw); vertical-align: middle; }
+.yw-word { font-weight: 600; font-size: calc(11.5px * var(--font-scale)); color: var(--yw); white-space: nowrap; }
+.yw-num { color: var(--muted-text); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+.yw-sent { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+.dp-aside button.yw-yours { border: 1px solid var(--yw); background: none; color: var(--yw); }
+.dp-aside button.yw-bypass { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 14%, var(--pane)); color: var(--warn); font-weight: 600; }
+.yw-nodes { display: flex; margin: 4px 0 2px; padding: 0; list-style: none; }
+.yw-node { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 1 64px; min-width: 0; font-size: calc(10.5px * var(--font-scale)); color: var(--muted-text); }
+.yw-node > i { z-index: 1; box-sizing: border-box; width: 11px; height: 11px; border: 2px solid var(--line); border-radius: 50%; background: var(--pane); }
+.yw-node + .yw-node::before { content: ""; position: absolute; top: 4.5px; right: 50%; width: 100%; height: 2px; background: var(--line); }
+.yw-node.yw-past > i { border-color: var(--add); background: var(--add); }
+.yw-node.yw-past + .yw-node::before { background: var(--add); }
+.yw-node.yw-skip > i { border-style: dashed; background: var(--pane); }
+.yw-node.yw-skip + .yw-node::before { background: var(--line); }
+.yw-node.yw-now { color: var(--yw); font-weight: 650; }
+.yw-node.yw-now > i { width: 15px; height: 15px; margin-top: -2px; border: 3px solid var(--yw); background: color-mix(in srgb, var(--yw) 25%, var(--pane)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yw) 18%, transparent); }
+.yw-dots { display: inline-flex; flex-wrap: wrap; gap: 10px; }
+.yw-chip { display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.yw-chip .yw-dot { width: 7px; height: 7px; margin-right: 4px; }
+.yw-projects { display: flex; flex-direction: column; gap: 1px; }
+.linear-connect, .linear-connected { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
+.linear-connect input { flex: 1 1 220px; min-width: 0; }
+.linear-connect .settings-row-sub, .linear-connected .settings-row-sub { flex-basis: 100%; }
+.linear-error { color: var(--del); }
+.linear-teams-title { margin: 18px 0 6px; font-size: calc(12.5px * var(--font-scale)); font-weight: 650; }
+.yw-project { overflow-wrap: anywhere; }
 .desk-chat { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: none; color: var(--text); font-size: calc(13px * var(--font-scale)); font-weight: 650; text-align: left; }
 .desk-chat:hover { text-decoration: underline; }
 .desk-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
@@ -3878,6 +4040,10 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-detail { margin: 0 0 6px; max-height: 9em; overflow: auto; padding: 8px 10px; border-radius: var(--radius-inner); background: var(--code-bg, var(--field)); font: calc(12.5px * var(--font-scale)) / 1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .desk-actions .desk-next { margin-left: auto; padding: 0 4px; border: none; background: none; color: var(--muted-text); font-weight: 500; }
 .desk-actions .desk-next:hover { color: var(--text); }
+/* A request opened on the Desk: all of it, scrolled in its own box, over the chat's own card and its buttons. */
+.desk-request { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
+.desk-request .desk-request-full { max-height: 22em; }
+.desk-request .permission { margin: 0; }
 .desk-clear { padding: 9px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
 
 /* Just finished: one quiet line each. */
@@ -3966,3 +4132,63 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-box > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
 .desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }
+
+/* Where the keyboard is, on a field: the border swap alone (to --faint) is too faint to find. */
+.settings-page input:focus-visible, .settings-page textarea:focus-visible, .settings-page select:focus-visible,
+.notes-field:focus-visible, .setup-field:focus-visible, .skill-editor:focus-visible, .repro-input:focus-visible,
+.mcp-add input:focus-visible, .mcp-add select:focus-visible, .mcp-add textarea:focus-visible,
+.settings-search:focus-visible, .question-other:focus-visible {
+  outline: 1.5px solid var(--muted-text);
+  outline-offset: 1px;
+}
+/* Native checkboxes and radios follow the app's neutral accent instead of macOS's system blue. */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+/* A project tile's foot: its chats on the left, and the way to its page, where its work board lives. */
+.desk-tile-foot { margin-top: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.desk-tile-foot .desk-tile-chats { margin-top: 0; align-self: auto; }
+.desk-tile-foot .desk-more { color: var(--accent); white-space: nowrap; }
+
+/* A folded feature's one-line summary: what is in it, under its name; and the whole board's Expand all. */
+.yw-peek { margin: 1px 0 6px 22px; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yw-all { flex: none; margin-left: 8px; height: 22px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); }
+.yw-all:hover { background: var(--bg-hover); }
+.yw-bar-top { display: flex; align-items: center; gap: 8px; }
+.yw-bar-top .yw-all { margin-left: auto; }
+.yw-next-actions { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The Desk in one line: what needs you, then the counts that matter, each a quiet phrase. */
+.desk-pulse { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
+.desk-pulse .pulse-lead { color: var(--add); font-weight: 600; margin-right: 4px; }
+.desk-pulse .pulse-lead.wait { color: var(--attn-text); }
+.desk-pulse b { color: var(--text); font-weight: 600; }
+.desk-pulse > span:not(.pulse-lead) + span:not(.pulse-lead)::before { content: "·"; margin-right: 10px; color: var(--muted); }
+.desk-pulse .pulse-bad { color: var(--del); }
+
+/* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
+.desk-ask-bar { flex: none; display: flex; align-items: center; gap: 10px; margin: 0 24px 16px; height: 44px; padding: 0 14px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--card-shadow); }
+.desk-ask-bar:hover { color: var(--text-2); }
+.desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
+.desk-ask-sheet { position: relative; width: min(980px, 100%); height: min(72%, 620px); display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--shadow); }
+.desk-ask-sheet .desk-side { flex: 1; min-height: 0; }
+.desk-ask-close { position: absolute; top: 8px; right: 10px; z-index: 2; width: 24px; height: 24px; border: none; background: none; color: var(--muted-text); font-size: calc(16px * var(--font-scale)); }
+
+/* A project's page with nothing on its board: what is next, and a way to start a chat. */
+.dp-landing-hero { padding: 18px 16px 6px; }
+.dp-landing-title { margin: 0; font-size: calc(16px * var(--font-scale)); font-weight: 650; }
+.dp-landing-sub { margin: 4px 0 0; font-size: calc(12.5px * var(--font-scale)); color: var(--muted-text); }
+.dp-landing-head { margin: 0; padding: 10px 16px 4px; font: 650 calc(11px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
+.dp-landing-start { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; }
+.dp-landing-start > :not(.dp-landing-head) { margin: 0 16px; }
+.dp-landing-start textarea { resize: none; padding: 8px 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
+.dp-landing-actions { display: flex; align-items: center; gap: 12px; }
+.dp-landing-actions .desk-more { align-self: center; margin: 0; }
+.dp-ideas { display: flex; flex-wrap: wrap; gap: 6px; }
+.dp-idea { height: 24px; padding: 0 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.dp-idea:hover { background: var(--bg-hover); }
+.desk-ask-sheet { outline: none; }
+.desk-ask-sheet .desk-h { padding-right: 40px; }
+/* In a button's text (not a flex row) the chevron needs a box of its own, or its width and height are ignored. */
+.desk-more .chev { display: inline-block; vertical-align: 1px; margin: 0 0 0 5px; }
+/* A folded feature's peek lines up with its name, past the chevron. */
+.yw-feature > .yw-peek { margin-left: 27px; }

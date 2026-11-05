@@ -181,12 +181,12 @@ describe("the way in, from the Mac's sheet", () => {
     const onStorage = jest.fn();
     const base = { onClose: jest.fn(), onUnpair: jest.fn(), onStorage };
     await renderWith(<MacSheet state={connectedWith(["storage"])} {...base} />, {});
-    await fireEvent.press(screen.getByRole("button", { name: "Mac storage" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Storage" }));
     expect(onStorage).toHaveBeenCalledTimes(1);
   });
 
   it("is not offered to an older Mac, which would end the connection at a request it doesn't know", async () => {
     await renderWith(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} onStorage={jest.fn()} />, {});
-    expect(screen.queryByRole("button", { name: "Mac storage" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Storage" })).toBeNull();
   });
 });

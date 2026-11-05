@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ToolItem } from "../store";
+import type { TestRunItem, ToolItem } from "../store";
+import type { TestRun } from "../types";
 import { ActivityGroup, SHOWN_OUTPUT_LINES } from "./ActivityGroup";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
@@ -46,6 +47,41 @@ describe("ActivityGroup", () => {
     fireEvent.click(line);
     expect(screen.getByRole("button", { name: /^src\/b\.ts/ })).toHaveTextContent("src/b.tsnew+3−1");
     expect(screen.getByRole("button", { name: /^src\/c\.ts/ })).toHaveTextContent("src/c.ts−1");
+  });
+
+  describe("test runs", () => {
+    const run = (id: string, command: string, over: Partial<TestRun> = {}): TestRunItem => ({ id, command, run: { framework: "vitest", outcome: "passed", passed: 3, failed: 0, skipped: 0, duration_ms: 10, cases: [], tail: "", ...over } });
+    const runs = [run("1", "npm test", { passed: 144 }), run("2", "npx vitest run a.test.ts", { outcome: "failed", passed: 1, failed: 2 }), run("3", "npm test", { passed: 146 })];
+    const steps = [tool("1", "Bash", { summary: "npm test" }), tool("2", "Bash", { summary: "npx vitest run a.test.ts" }), tool("3", "Bash", { summary: "npm test" }), tool("4", "Read")];
+    const withRuns = { ...handlers, testRunFor: (id: string) => runs.find((r) => r.id === id) };
+
+    it("are one collapsed line, like the changed files, that says how many failed and expands to a line per run", () => {
+      render(<ActivityGroup steps={steps} folder="/p" {...withRuns} onOpenTestRun={() => {}} />);
+      const line = screen.getByRole("button", { name: /3 test runs/ });
+      expect(line).toHaveTextContent("3 test runs1 failed");
+      expect(screen.queryByText("npx vitest run a.test.ts")).toBeNull();
+      fireEvent.click(line);
+      const list = within(screen.getByRole("list", { name: "Test runs" }));
+      expect(list.getAllByRole("listitem").map((n) => n.textContent)).toEqual(["npm test144 passed", "npx vitest run a.test.ts2 failed · 1 passed", "npm test146 passed"]);
+    });
+
+    it("open the Tests tab on the run that was clicked", () => {
+      const onOpenTestRun = vi.fn();
+      render(<ActivityGroup steps={steps} folder="/p" {...withRuns} onOpenTestRun={onOpenTestRun} />);
+      fireEvent.click(screen.getByRole("button", { name: /3 test runs/ }));
+      fireEvent.click(within(screen.getByRole("list", { name: "Test runs" })).getAllByRole("listitem")[1]);
+      expect(onOpenTestRun).toHaveBeenCalledWith("2");
+    });
+
+    it("say one run in the singular, with no failure noted when it passed", () => {
+      render(<ActivityGroup steps={[steps[0]]} folder="/p" {...withRuns} />);
+      expect(screen.getByRole("button", { name: /1 test run/ })).toHaveTextContent(/^1 test run$/);
+    });
+
+    it("are absent from a turn that ran none", () => {
+      render(<ActivityGroup steps={[steps[3]]} folder="/p" {...withRuns} />);
+      expect(screen.queryByRole("button", { name: /test run/ })).toBeNull();
+    });
   });
 
   it("while live, is one line naming the current step instead of a list", () => {

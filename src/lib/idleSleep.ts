@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { hasPendingPrompt, type State } from "../store";
+import { hasPendingPrompt, type ChatItem, type State, type ToolItem } from "../store";
 import type { Chats } from "../sessions";
 
 /**
@@ -44,23 +44,62 @@ export function useSleepMinutes(): number {
   return n;
 }
 
+/** How long a step still marked running counts as running: one Claude never finished (an interrupted turn) must not keep a chat awake for good. */
+const TOOL_LIVE_MS = 2 * 60 * 60_000;
+
+/** The steps of the chat that are still running, a subagent's included. `live`: only those that started lately (one with no start time is a replayed one, over). */
+function runningTools(items: ChatItem[], now: number, live: boolean): ToolItem[] {
+  return items.flatMap((it) => {
+    if (it.type !== "tool") return [];
+    const own = it.status === "running" && (!live || (it.startedAt !== undefined && now - it.startedAt < TOOL_LIVE_MS)) ? [it] : [];
+    return [...own, ...runningTools(it.children, now, live)];
+  });
+}
+
 /**
  * Whether a chat may go to sleep now: it is resting (nothing running, queued, waiting on the user or running in the
  * background), has a conversation to come back to, and isn't one of the chats that stay awake: the one on screen, a team's
  * Lead or agent, a routine's.
  */
-export function canSleep(s: State, own: { active: boolean; agent: boolean; routine: boolean; team?: boolean }): boolean {
+export function canSleep(s: State, own: { active: boolean; agent: boolean; routine: boolean; team?: boolean }, now = Date.now()): boolean {
   // A team's Lead or agent sleeps only with its whole team (`team`: it is being asked as one of its members).
   if (own.active || own.routine || (!own.team && (own.agent || s.orchestrator))) return false;
   // A merge card still open would be gone when its Lead wakes: it is the user's to answer first.
   if (s.proposals.some((p) => p.status === "open")) return false;
   if (s.status !== "idle" || s.thinking || !s.folder || !s.sessionId || s.items.length === 0) return false;
   if (s.queued.length > 0 || s.wakes.length > 0 || s.backgroundTasks.length > 0 || s.setup || hasPendingPrompt(s.items)) return false;
+  // A step still running (a build, an upload) means Claude is at work, whatever the chat's status says: asleep, its process and the step would be stopped.
+  if (runningTools(s.items, now, true).length > 0) return false;
   // A command the user started from the box, or the project's Run command: asleep, its process would be stopped.
   if (s.run?.status === "running" || s.items.some((it) => it.type === "shell" && it.status === "running")) return false;
   // What waits to go with the next message (output of commands, files put back, a flavour picked), or to be undone: sleeping loses it.
   if (s.revertNotes.length > 0 || s.revertUndo || s.restoreUndo || s.flavourPick || s.items.some((it) => it.type === "shell" && !it.shared)) return false;
   return true;
+}
+
+/**
+ * One line for sleep.log about a chat the window is putting to sleep: what it looked like to the window (never a word said in it),
+ * to set beside the hub's own line when a chat slept while it worked. `idleMs` is how long the clock had it idle.
+ */
+export function sleepNote(slot: string, s: State, why: string, idleMs: number, now = Date.now()): string {
+  const tools = s.items.filter((it): it is ToolItem => it.type === "tool");
+  const last = tools[tools.length - 1];
+  const at = last ? (last.endedAt ?? last.startedAt) : undefined;
+  const lastTool = last ? `${last.name}:${last.status}${at === undefined ? "" : `@${Math.round((now - at) / 1000)}s ago`}` : "none";
+  return [
+    `slot=${slot}`,
+    `why=${why}`,
+    `status=${s.status}`,
+    `thinking=${s.thinking}`,
+    `idle_for=${Math.round(idleMs / 1000)}s`,
+    `items=${s.items.length}`,
+    `last_item=${s.items[s.items.length - 1]?.type ?? "none"}`,
+    `last_tool=${lastTool}`,
+    `running_tools=${runningTools(s.items, now, false).length}`,
+    `queued=${s.queued.length}`,
+    `background=${s.backgroundTasks.length}`,
+    `wakes=${s.wakes.length}`,
+  ].join(" ");
 }
 
 /**

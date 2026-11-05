@@ -110,7 +110,7 @@ pub enum UiEvent {
         sent_by: Option<String>,
         /// How many pictures went with it (from a phone). The pictures themselves are never part of an event: they go to
         /// Claude and nowhere else, so the window and the phones are only told how many.
-        #[serde(skip_serializing_if = "is_zero")]
+        #[serde(default, skip_serializing_if = "is_zero")]
         images: u32,
     },
     Thinking { parent: Option<String> },

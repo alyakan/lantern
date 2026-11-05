@@ -101,6 +101,10 @@ pub struct Saved {
     /// It is only about what a phone may ask for: a chat already on Auto stays on it when this is turned off.
     #[serde(default)]
     pub allow_phone_auto: bool,
+    /// Paired phones may type `!` commands in a chat, as the window's own `!` does. Off until the user turns it on: a
+    /// command runs as them, so this is the one phone power that can change the Mac outside Claude's own approvals.
+    #[serde(default)]
+    pub allow_phone_shell: bool,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -158,6 +162,10 @@ impl RemoteStore {
         self.change(|s| s.allow_phone_auto = on)
     }
 
+    pub fn set_allow_phone_shell(&self, on: bool) -> Result<(), String> {
+        self.change(|s| s.allow_phone_shell = on)
+    }
+
     /// A new offer, in place of any other (an old QR code stops working).
     pub fn start_offer(&self, now: u64) -> Result<Offer, String> {
         let offer = Offer { secret: random_secret()?, expires_at: now + OFFER_TTL_MS };
@@ -174,6 +182,24 @@ impl RemoteStore {
     pub fn take_offer(&self, now: u64) -> Option<[u8; 32]> {
         let offer = self.offer.lock().unwrap().take()?;
         (now < offer.expires_at).then_some(offer.secret)
+    }
+
+    /// The open offer's secret, without using it up: the phone proves it knows the code first (see gateway::come_in).
+    pub fn offer_secret(&self, now: u64) -> Option<[u8; 32]> {
+        let offer = self.offer.lock().unwrap();
+        let offer = offer.as_ref()?;
+        (now < offer.expires_at).then_some(offer.secret)
+    }
+
+    /// Uses up the open offer, once a phone has proved it knows this secret. A peer that only starts a pairing and fails
+    /// never gets here, so it can't burn the code the user is showing.
+    pub fn take_offer_if(&self, now: u64, secret: &[u8; 32]) -> bool {
+        let mut offer = self.offer.lock().unwrap();
+        let same = offer.as_ref().is_some_and(|o| now < o.expires_at && o.secret.iter().zip(secret).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0);
+        if same {
+            *offer = None;
+        }
+        same
     }
 
     pub fn offer_open(&self, now: u64) -> bool {
@@ -295,11 +321,13 @@ mod tests {
         s.set_show_titles(true).unwrap();
         s.set_keep_awake(true).unwrap();
         assert!(!s.saved().allow_phone_auto, "phones may not use Auto until the user says so");
+        assert!(!s.saved().allow_phone_shell, "nor run commands on the Mac until the user says so");
         s.set_allow_phone_auto(true).unwrap();
+        s.set_allow_phone_shell(true).unwrap();
         let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10).unwrap();
         let again = RemoteStore::load(Some(dir.path().join("remote.json")));
         assert!(!again.saved().rich_notifications, "the words of a prompt stay off the lock screen until the user says");
-        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, rich_notifications: false, keep_awake: true, allow_phone_auto: true, devices: vec![d] });
+        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, rich_notifications: false, keep_awake: true, allow_phone_auto: true, allow_phone_shell: true, devices: vec![d] });
     }
 
     #[test]

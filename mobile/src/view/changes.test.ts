@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { changedFileOf, changedFiles, changesLine } from "./changes";
+import { changedFileOf, changedFiles, changesLine, fromMac, withLinked } from "./changes";
 
 const step = (id: string, edits: Extract<Item, { kind: "step" }>["edits"]): Item => ({ kind: "step", id, name: "Edit", summary: "", done: true, isError: false, edits, tests: null });
 
@@ -46,5 +46,21 @@ describe("changedFileOf", () => {
   it("finds none for a file it did not change, or one that only ends the same way", () => {
     expect(changedFileOf(files, "src/b.ts")).toBeNull();
     expect(changedFileOf(files, "xa.ts")).toBeNull();
+  });
+});
+
+describe("withLinked", () => {
+  const files = changedFiles([{ kind: "step", id: "s", tool: "Edit", summary: "a", status: "done", edits: [{ path: "/p/src/a.ts", created: false, added: 1, removed: 0 }] } as never]);
+  it("puts a file a link named first when it isn't listed, and leaves a listed one where it is", () => {
+    expect(withLinked(files, "src/x.ts").map((f) => [f.path, f.linked ?? false])).toEqual([
+      ["src/x.ts", true],
+      ["/p/src/a.ts", false],
+    ]);
+    expect(withLinked(files, "src/a.ts")).toBe(files);
+    expect(withLinked(files, null)).toBe(files);
+  });
+
+  it("takes the Mac's list as rows", () => {
+    expect(fromMac([{ path: "/p/src/view/b.ts", created: true, deleted: false, added: 2, removed: 0 }])).toEqual([{ path: "/p/src/view/b.ts", name: "b.ts", folder: "src/view", added: 2, removed: 0, created: true }]);
   });
 });

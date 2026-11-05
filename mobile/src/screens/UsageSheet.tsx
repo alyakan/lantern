@@ -5,6 +5,7 @@ import type { PlanUsage } from "../sync/reducer";
 import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
 import { useUsageHistory } from "../usageHistory";
 import { Button, Txt } from "../ui/components";
+import { WindowRow } from "./ChatExtras";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { dailyBars, daysKnown } from "../view/usageHistory";
@@ -31,10 +32,7 @@ function ProviderSection({ id, reading }: { id: string; reading?: ProviderUsage 
   const name = id === "claude" ? "Claude" : id === "codex" ? "Codex" : id;
   return <View style={{ gap: 8 }}>
     <Txt variant="heading">{name}</Txt>
-    {windows.length === 0 ? <Txt variant="body" tone="ink3">Usage unavailable</Txt> : windows.map(w => <View key={w.label} style={{ gap: 5 }}>
-      <Txt variant="body" tone={w.used >= 1 ? "stop" : "ink"}>{w.label}: {Math.round(w.used * 100)}% used{w.used >= 1 ? " · limit reached" : ""}{w.resets_at ? ` · resets ${new Date(w.resets_at * 1000).toLocaleString()}` : ""}</Txt>
-      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}><View style={{ width: `${Math.max(0, Math.min(100, w.used * 100))}%`, height: 4, backgroundColor: w.used >= 1 ? colors.stop : w.used >= .8 ? colors.hi : colors.go }} /></View>
-    </View>)}
+    {windows.length === 0 ? <Txt variant="body" tone="ink3">Usage unavailable</Txt> : windows.map(w => <WindowRow key={w.label} window={w} />)}
     {!!reading?.updated_at && <Txt variant="tiny" tone="ink3">Last updated {new Date(reading.updated_at * 1000).toLocaleTimeString()}</Txt>}
     <Txt variant="small" tone="ink3" style={{ fontWeight: "700", marginTop: 8 }}>Highest session use each day</Txt>
     <View testID={id === "claude" ? "usage-chart" : `usage-chart-${id}`} accessible accessibilityLabel={`${name}, highest session use each day: ${bars.map(b => `${b.label} ${b.peak === null ? "nothing seen" : `${b.peak} percent`}`).join(", ")}`} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: CHART_HEIGHT + 34 }}>

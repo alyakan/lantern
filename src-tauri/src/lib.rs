@@ -47,6 +47,7 @@ pub mod titles;
 pub mod desk;
 pub mod desk_agent;
 pub mod status;
+pub mod linear;
 pub mod trash;
 pub mod revert;
 pub mod checkpoint;
@@ -144,6 +145,13 @@ fn keep_awake(awake: State<'_, awake::Awake>, working: bool, allowed: bool) {
     awake.update(working, allowed);
 }
 
+/// The window says what a chat looked like when it put it to sleep (see lib/idleSleep.ts `sleepNote`): one line in sleep.log.
+#[tauri::command]
+fn sleep_log(line: String) {
+    let line: String = line.chars().filter(|c| !c.is_control()).take(400).collect();
+    remote::push_log::SLEEP.note(&format!("window {line}"));
+}
+
 /// The user changed how many agents may run at once (or the window started and says what it was set to).
 #[tauri::command]
 fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
@@ -193,6 +201,33 @@ fn phone_diff(path: &str, d: &FileDiff) -> String {
 
 /// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
 /// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
+/// Where a review of the checked-out branch may be: the folder the Changes pane reads (the worktree the chat last edited
+/// in), then the chat's own folder (see pr::review_branch).
+fn review_folders(s: &slots::Slot) -> Result<Vec<std::path::PathBuf>, String> {
+    let (view, own) = (s.view_folder()?, s.folder()?);
+    Ok(if view == own { vec![view] } else { vec![view, own] })
+}
+
+/// A file as the checked-out branch changed it, from where it left the default branch: only a text file in that repository,
+/// no bigger than a named file may be (outside::MAX_BYTES).
+fn branch_file(folder: &std::path::Path, path: &str) -> Result<FileDiff, String> {
+    // git names the repository by its real path, so a folder reached through a link is compared as git sees it (a deleted
+    // file has no real path: its own is used).
+    let real = std::path::Path::new(path).canonicalize().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_string());
+    let (range, _) = pr::branch(folder, std::slice::from_ref(&real), None)?;
+    if !std::path::Path::new(&real).starts_with(&range.root) {
+        return Err("That file isn't in this repository.".into());
+    }
+    let d = pr::file(&range, &real)?;
+    if [&d.original, &d.current].iter().any(|t| t.len() as u64 > outside::MAX_BYTES) {
+        return Err("That file is too big to show.".into());
+    }
+    if [&d.original, &d.current].iter().any(|t| t.contains('\0')) {
+        return Err("That file isn't text.".into());
+    }
+    Ok(d)
+}
+
 fn named_file_diff(path: &str, original: Option<String>, current: Option<String>) -> Result<String, String> {
     if original.is_none() && current.is_none() {
         return Err("There is no file by that name in the open folder.".into());
@@ -228,10 +263,11 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
     // app's, so trying things out never touches them.
     let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
     let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
-    // What the Mac did about each push (see remote/push_log.rs); a dev run keeps none.
+    // What the Mac did about each push, and each chat it put to sleep (see remote/push_log.rs); a dev run keeps none.
     if dev_file.is_none() {
         if let Ok(dir) = app.path().app_data_dir() {
             remote::push_log::set_path(dir.join("push.log"));
+            remote::push_log::SLEEP.set_path(dir.join("sleep.log"));
         }
     }
     let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
@@ -431,7 +467,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     cfg.auto_approve = auto;
     cfg.resume = running.or(cfg.resume);
     cfg.path_env = login_path(state).await;
-    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
+    if let Ok(helper) = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
     // Its claude restarts on Ask: it hears so with its next message, as a chat whose user switched does.
@@ -582,6 +618,15 @@ impl remote::gateway::Host for RemoteHost {
         Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
     }
 
+    fn work_step(&self, key: String, sig: String) -> remote::gateway::BoxFut<Result<(String, String), String>> {
+        let app = self.app.clone();
+        Box::pin(async move { request_work_step(&app, key, sig).await })
+    }
+
+    fn work_refresh(&self) -> Result<(), String> {
+        self.app.emit("remote-work-refresh", ()).map_err(|e| e.to_string())
+    }
+
     fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
         self.app.emit("remote-set-workflow", remote::SetWorkflowRequest { slot: slot.to_string(), workflow: workflow.as_str() }).map_err(|e| e.to_string())
     }
@@ -592,6 +637,10 @@ impl remote::gateway::Host for RemoteHost {
 
     fn set_preset(&self, slot: &str, preset: &str) -> Result<(), String> {
         self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
+    }
+
+    fn queue_switch(&self, slot: &str, change: serde_json::Value, when: remote::protocol::RemoteWhen) -> Result<(), String> {
+        self.app.emit("remote-queue-switch", serde_json::json!({ "slot": slot, "change": change, "when": when.as_str() })).map_err(|e| e.to_string())
     }
 
     fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
@@ -685,8 +734,63 @@ impl remote::gateway::Host for RemoteHost {
             // Any other file a message names (a script's edit, an earlier step, one only read): git's view of it, from the folder the Changes pane reads.
             let view = s.view_folder()?;
             let abs = if std::path::Path::new(&named).is_absolute() { std::path::PathBuf::from(&named) } else { view.join(&named) };
-            let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::named_sides(&view, &abs)).await.map_err(|e| e.to_string())??;
-            named_file_diff(&path, original, current)
+            let shown = path.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let (original, current) = outside::named_sides(&view, &abs)?;
+                // Nothing uncommitted: the change may be in a commit already, so the branch's change to it, when it has one.
+                if original.is_some() && original == current {
+                    if let Ok(d) = branch_file(&view, &abs.to_string_lossy()) {
+                        if d.original != d.current {
+                            return Ok(phone_diff(&shown, &d));
+                        }
+                    }
+                }
+                named_file_diff(&shown, original, current)
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        })
+    }
+
+    fn scoped_diff(&self, slot: String, path: String, scope: remote::protocol::RemoteChangeScope) -> remote::gateway::BoxFut<Result<String, String>> {
+        use remote::protocol::RemoteChangeScope as S;
+        if scope == S::Chat {
+            return self.diff(slot, path);
+        }
+        let app = self.app.clone();
+        Box::pin(async move {
+            let view = app.state::<AppState>().slots.get(&slot)?.view_folder()?;
+            let abs = if std::path::Path::new(&path).is_absolute() { std::path::PathBuf::from(&path) } else { view.join(&path) };
+            let shown = abs.to_string_lossy().into_owned();
+            if scope == S::Uncommitted {
+                // As a file a message names: inside the folder, not git's own, not ignored, small and text (outside::named_sides).
+                let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::named_sides(&view, &abs)).await.map_err(|e| e.to_string())??;
+                return named_file_diff(&shown, original, current);
+            }
+            let d = tauri::async_runtime::spawn_blocking(move || branch_file(&view, &shown)).await.map_err(|e| e.to_string())??;
+            Ok(phone_diff(&d.path.clone(), &d))
+        })
+    }
+
+    fn changes(&self, slot: String, scope: remote::protocol::RemoteChangeScope) -> remote::gateway::BoxFut<Result<remote::protocol::RemoteChanges, String>> {
+        use remote::protocol::RemoteChangeScope as S;
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let base = if scope == S::Branch {
+                let view = state.slots.get(&slot)?.view_folder()?;
+                tauri::async_runtime::spawn_blocking(move || pr::branch(&view, &[], None).map(|(_, review)| review.base)).await.map_err(|e| e.to_string())?.ok()
+            } else {
+                None
+            };
+            let scope = match scope {
+                S::Chat => changes::Scope::Session,
+                S::Uncommitted => changes::Scope::Git,
+                S::Branch => changes::Scope::Branch,
+            };
+            let files = summary_of(&state, &slot, Some(scope), None, None, None, None, None).await?;
+            let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+            Ok(remote::protocol::RemoteChanges { files: files.into_iter().map(|f| remote::protocol::RemoteChangedFile { path: f.path, created: f.created, deleted: f.deleted, added: count(f.added), removed: count(f.removed) }).collect(), base })
         })
     }
 
@@ -700,8 +804,8 @@ impl remote::gateway::Host for RemoteHost {
             let range = match target.pr {
                 Some(pr) => pr_range(&state, s.folder()?, Some(u32::try_from(pr).map_err(|_| "That pull request number is too big.")?), vec![path.clone()]).await?,
                 None => {
-                    let (folder, hints, base) = (s.view_folder()?, vec![path.clone()], target.base.clone());
-                    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
+                    let (folders, hints, base) = (review_folders(&s)?, vec![path.clone()], target.base.clone());
+                    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&folders, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
                 }
             };
             // Only a file in the repository: pr::file reads it from the review's two commits there.
@@ -945,7 +1049,7 @@ impl orchestra::Host for AppHost {
             }
             // The worker's folder is a worktree, but it belongs to its Lead's project: it gets the notes the Lead started with.
             let notes = cfg.helper.project_notes.clone();
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
+            cfg.helper = helper_config(&s, cfg.provider, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
@@ -1068,13 +1172,25 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // And the todo_* tools (see todos.rs), for the chat's project, naming this chat on what it adds or ticks.
     let todo_store = state.todos.clone();
     let (chat_id, hub) = (slot_id.to_string(), state.remote.hub.clone());
+    // And enter_worktree (see workdir.rs): it sets what the chat's slot reads Git and Branch from, so the bridge shares the
+    // slot's two cells (not the slot itself, which owns the bridge).
+    let (pin, view_main) = (slot.pin.clone(), slot.view_main.clone());
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
         let dashboards = dashboards.clone();
         let (todo_store, chat_id, hub) = (todo_store.clone(), chat_id.clone(), hub.clone());
+        let (pin, view_main) = (pin.clone(), view_main.clone());
         Box::pin(async move {
+            if tool == workdir::TOOL {
+                let result = tauri::async_runtime::spawn_blocking(move || workdir::call(folder.as_deref(), &pin, &view_main, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+                let (allow, text) = match result {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             if todos::TOOLS.contains(&tool.as_str()) {
                 let chat = (chat_id.clone(), hub.chat(&chat_id).and_then(|c| c.title));
                 let result = tauri::async_runtime::spawn_blocking(move || todos::call(&todo_store, folder.as_deref(), chat, &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
@@ -1404,9 +1520,10 @@ async fn storage_delete(state: State<'_, AppState>, ids: Vec<String>) -> Result<
 }
 
 /// `project_notes`: what the chat was started with (a restart passes its own on, a new chat the user's notes as they are now).
-fn helper_config(slot: &Slot, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
+fn helper_config(slot: &Slot, provider: ProviderId, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes })
+    let publish_artifacts = capabilities_of(provider).publishes_artifacts;
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes, publish_artifacts })
 }
 
 /// Where the git tool answers for a chat started with `cfg`: only for a read-only agent, and decided here from the role
@@ -1638,6 +1755,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         subagent_model: if gateway { None } else { checked_model(settings.subagent_model)? },
         helper: helper_config(
             slot,
+            settings.provider,
             match (settings.orchestrator, settings.worker) {
                 (true, _) => Role::Main,
                 (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared || w.read_only },
@@ -1686,23 +1804,24 @@ struct Login {
 #[tauri::command]
 async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result<Login, String> {
     let path_env = login_path(&state).await;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new(&claude_path);
-        cmd.args(["auth", "status"]).stdin(std::process::Stdio::null());
-        if let Some(path) = path_env {
-            cmd.env("PATH", path);
-        }
-        // On the API key there is no login to ask about: it needn't be signed in.
-        if provider_keys::claude_on_key() {
-            return Ok(Login { logged_in: true, account: Some("API key".into()) });
-        }
-        let out = cmd.output().map_err(|e| e.to_string())?;
-        // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
-        let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
-        Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let mut cmd = tokio::process::Command::new(&claude_path);
+    // A claude that hangs (a wrapper waiting on a terminal, a login prompt) mustn't leave the first screen spinning:
+    // the timeout drops the wait, and kill_on_drop stops the process.
+    cmd.args(["auth", "status"]).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    if let Some(path) = path_env {
+        cmd.env("PATH", path);
+    }
+    // On the API key there is no login to ask about: it needn't be signed in.
+    if provider_keys::claude_on_key() {
+        return Ok(Login { logged_in: true, account: Some("API key".into()) });
+    }
+    let out = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output())
+        .await
+        .map_err(|_| "claude didn't answer whether it is logged in. Run `claude auth status` in a terminal to check it, then try again.".to_string())?
+        .map_err(|e| e.to_string())?;
+    // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
+    let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
+    Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
 }
 
 /// An agent CLI the window can offer for a chat: what it can do, the models it takes, and where its program is (always None
@@ -2002,7 +2121,12 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
     let _control = s.control.lock().await;
     if state.remote.hub.has_background(slot) { return Err("This chat has background tasks. Stop them before clearing it.".into()); }
     let info = state.remote.hub.chat(slot).ok_or("This chat is not open")?;
-    if !matches!(info.status, remote::hub::ChatStatus::Idle) { return Err("Wait until the chat has finished.".into()); }
+    match info.status {
+        remote::hub::ChatStatus::Idle => {}
+        remote::hub::ChatStatus::Working => return Err("Wait until the chat has finished, or stop it.".into()),
+        remote::hub::ChatStatus::NeedsYou => return Err("This chat is waiting on you. Answer it or stop it first.".into()),
+        remote::hub::ChatStatus::Asleep | remote::hub::ChatStatus::Ended => return Err("This chat isn't running. Open it to start it again first.".into()),
+    }
     match action {
         "compact" => s.session.lock().await.as_mut().ok_or("The agent stopped")?.compact().await,
         "clear" => {
@@ -2060,7 +2184,7 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, role.clone(), cfg.helper.project_notes.clone())?;
+    cfg.helper = helper_config(&s, cfg.provider, role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
@@ -2103,7 +2227,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
+    cfg.helper = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     launch(&app, &slot, &s, cfg, false).await?;
@@ -2765,7 +2889,7 @@ fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<()
 async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>, base: Option<String>) -> Result<pr::BranchReview, String> {
     let s = state.slots.get(&slot)?;
     let hints = hints.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
 }
 
 /// The worktree the chat is working in (Claude entered one itself), which the Changes pane reads from instead of the
@@ -2775,6 +2899,8 @@ struct WorkView {
     #[serde(flatten)]
     folder: workdir::WorkFolder,
     main: bool,
+    /// The chat was put in it (`enter_worktree`, or the user's pick), not found from where it edited.
+    pinned: bool,
 }
 
 #[tauri::command]
@@ -2786,10 +2912,31 @@ async fn work_folder(state: State<'_, AppState>, slot: String) -> Result<Option<
             s.view_main.store(false, std::sync::atomic::Ordering::Relaxed);
             return None;
         };
-        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed) })
+        let pinned = s.pin.lock().unwrap().as_deref() == Some(std::path::Path::new(&folder.path));
+        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed), pinned })
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The project's linked worktrees, for the Changes pane's picker.
+#[tauri::command]
+async fn list_worktrees(state: State<'_, AppState>, slot: String) -> Result<Vec<workdir::WorkFolder>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || s.folder().map(|f| workdir::list(&f)).unwrap_or_default()).await.map_err(|e| e.to_string())
+}
+
+/// The user's pick in the Changes pane: put the chat in this worktree (`path` must be one of the project's linked worktrees),
+/// or with none let its latest edit decide again. Checked as `enter_worktree`'s is.
+#[tauri::command]
+async fn pin_worktree(state: State<'_, AppState>, slot: String, path: Option<String>) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = s.folder()?;
+        workdir::call(folder.to_str(), &s.pin, &s.view_main, &serde_json::json!({ "path": path })).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Chooses between the worktree and the chat's own folder for the Changes pane.
@@ -2853,19 +3000,25 @@ async fn change_summary(
     hints: Option<Vec<String>>,
     base: Option<String>,
 ) -> Result<Vec<changes::ChangeSummary>, String> {
-    let s = state.slots.get(&slot)?;
+    summary_of(&state, &slot, scope, turn, to_turn, pr, hints, base).await
+}
+
+/// change_summary's answer, for the window and for a phone's Changes pane.
+#[allow(clippy::too_many_arguments)]
+async fn summary_of(state: &AppState, slot: &str, scope: Option<changes::Scope>, turn: Option<usize>, to_turn: Option<usize>, pr: Option<u32>, hints: Option<Vec<String>>, base: Option<String>) -> Result<Vec<changes::ChangeSummary>, String> {
+    let s = state.slots.get(slot)?;
     if scope == Some(changes::Scope::Pr) {
-        let range = pr_range(&state, s.folder()?, pr, hints.unwrap_or_default()).await?;
+        let range = pr_range(state, s.folder()?, pr, hints.unwrap_or_default()).await?;
         return tauri::async_runtime::spawn_blocking(move || pr::summary(&range)).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Branch) {
         let hints = hints.unwrap_or_default();
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         return tauri::async_runtime::spawn_blocking(move || {
             let rows = outside::uncommitted(&s.view_folder()?).ok_or("This folder isn't in a git repository.")?;
-            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed }).collect();
+            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed, moved_from: None }).collect();
             out.sort_by(|a, b| a.path.cmp(&b.path));
             Ok(out)
         })
@@ -2909,6 +3062,12 @@ fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat
 #[tauri::command]
 fn remote_window_desk(state: State<'_, AppState>, desk: remote::desk::WindowDesk) {
     state.remote.window_desk(desk);
+}
+
+/// Where the user's work stands (Your work), for a phone's Work tab (see remote/work.rs).
+#[tauri::command]
+fn remote_window_work(state: State<'_, AppState>, work: remote::work::WindowWork) {
+    state.remote.window_work(work);
 }
 
 /// The sidebar's One project (None: every project), for the phones that follow it.
@@ -2962,6 +3121,12 @@ fn remote_set_keep_awake(state: State<'_, AppState>, on: bool) -> remote::Remote
 #[tauri::command]
 fn remote_set_allow_auto(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
     state.remote.view_after(state.remote.store.set_allow_phone_auto(on))
+}
+
+/// Whether paired phones may run `!` commands in a chat. Off by default: it runs what the phone types, as the user.
+#[tauri::command]
+fn remote_set_allow_shell(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_allow_phone_shell(on))
 }
 
 /// The most a push key file may weigh (Apple's are about 250 bytes): anything bigger isn't one, and isn't read.
@@ -3059,6 +3224,40 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, permiss
     listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
 }
 
+/// A phone asked for a step of the user's work: the window is asked (it knows what the item is and where the chat for it is), and
+/// answers with what it did, as ("sent" or "started", where), or why not.
+async fn request_work_step(app: &AppHandle, key: String, sig: String) -> Result<(String, String), String> {
+    let state = app.state::<AppState>();
+    let (id, answer) = state.remote.expect_work_step();
+    if let Err(e) = app.emit("remote-work-step", &remote::WorkStepRequest { id: id.clone(), key, sig }) {
+        state.remote.forget_new_chat(&id);
+        return Err(e.to_string());
+    }
+    match tokio::time::timeout(NEW_CHAT_WAIT, answer).await {
+        Ok(Ok(result)) => {
+            let said = result?;
+            let (kind, to) = said.split_once('\u{1f}').unwrap_or((said.as_str(), ""));
+            Ok((kind.to_string(), to.to_string()))
+        }
+        _ => {
+            state.remote.forget_new_chat(&id);
+            // The window may have sent it after all (it only answered late): don't invite a second one.
+            Err("Lantern didn't answer in time. The step may still have been sent: look in your chats before trying again.".into())
+        }
+    }
+}
+
+/// The window's answer to `remote-work-step`: what it did, or why not.
+#[tauri::command]
+fn remote_work_step_done(state: State<'_, AppState>, id: String, kind: Option<String>, to: Option<String>, error: Option<String>) {
+    let result = match (kind, error) {
+        (Some(kind), None) if matches!(kind.as_str(), "sent" | "started") => Ok((kind, to.unwrap_or_default().chars().take(120).filter(|c| !c.is_control()).collect())),
+        (_, Some(e)) => Err(e.chars().take(300).collect()),
+        _ => Err("Lantern didn't do that step.".to_string()),
+    };
+    state.remote.work_step_done(&id, result);
+}
+
 /// The window says where it found `claude`, for the calls the backend makes by itself (what to suggest on a phone).
 #[tauri::command]
 fn remote_claude_path(state: State<'_, AppState>, path: String) {
@@ -3122,9 +3321,13 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
 }
 
 /// How the projects with a chat open stand, for the Desk's board (read-only: see `status.rs`). The folders are the hub's
-/// open chats', less the workers' and other agents' worktrees.
+/// open chats', less the workers' and other agents' worktrees. `fresh`: the Desk's Refresh, which asks GitHub again rather
+/// than use what it said in the last 90 s (at most every 15 s).
 #[tauri::command]
-async fn desk_status(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<status::RepoStatus>, String> {
+async fn desk_status(app: AppHandle, state: State<'_, AppState>, fresh: Option<bool>) -> Result<Vec<status::RepoStatus>, String> {
+    if fresh == Some(true) {
+        status::forget_github();
+    }
     let path_env = login_path(&state).await;
     let workers = app.path().app_local_data_dir().ok().map(|d| d.join("worktrees"));
     let mut folders: Vec<String> = state
@@ -3139,6 +3342,29 @@ async fn desk_status(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<s
     folders.sort();
     folders.dedup();
     tauri::async_runtime::spawn_blocking(move || status::status(&folders, workers.as_deref(), path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
+/// The Keychain item for the Linear key: a dev run's own (LANTERN_REMOTE_FILE set), so trying things out never touches the real one.
+fn linear_service() -> &'static str {
+    if std::env::var_os("LANTERN_REMOTE_FILE").is_some() { linear::DEV_SERVICE } else { linear::SERVICE }
+}
+
+/// Checks a Linear API key and keeps it in the Keychain (see `linear.rs`); the key never comes back to the window.
+#[tauri::command]
+async fn linear_connect(key: String) -> Result<linear::LinearWork, String> {
+    linear::connect(linear_service(), &key).await
+}
+
+/// Forgets the Linear key.
+#[tauri::command]
+async fn linear_disconnect() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| linear::disconnect(linear_service())).await.map_err(|e| e.to_string())?
+}
+
+/// Your issues in Linear, for the Desk (read-only). `fresh`: the Desk's Refresh.
+#[tauri::command]
+async fn linear_work(fresh: Option<bool>) -> Result<linear::LinearWork, String> {
+    Ok(linear::work(linear_service(), fresh == Some(true)).await)
 }
 
 /// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call
@@ -3973,6 +4199,8 @@ pub fn run() {
             locate_claude,
             remote_window_chats,
             remote_window_desk,
+            remote_window_work,
+            remote_work_step_done,
             remote_window_single,
             remote_window_controls,
             remote_settings,
@@ -3982,6 +4210,7 @@ pub fn run() {
             remote_set_live_key,
             remote_set_keep_awake,
             remote_set_allow_auto,
+            remote_set_allow_shell,
             remote_pair,
             remote_pair_cancel,
             remote_remove_device,
@@ -3990,6 +4219,7 @@ pub fn run() {
             claude_login,
             sidebar_menu,
             keep_awake,
+            sleep_log,
             list_providers,
             list_endpoints,
             save_endpoints,
@@ -4073,6 +4303,8 @@ pub fn run() {
             stop_task,
             branch_review,
             work_folder,
+            list_worktrees,
+            pin_worktree,
             set_view_main,
             set_model,
             recent_folders,
@@ -4083,6 +4315,9 @@ pub fn run() {
             list_open_prs,
             pr_watch,
             desk_status,
+            linear_connect,
+            linear_disconnect,
+            linear_work,
             pr_failure_log,
             gh_access,
             set_subagents,
@@ -4196,7 +4431,7 @@ mod hooks_flow_tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         };
@@ -4361,6 +4596,32 @@ mod tests {
         assert!(named_file_diff("/p/a.swift", None, None).is_err());
     }
 
+    /// A phone's This branch view of a file: its change since the branch left main, and nothing from outside the repository.
+    #[test]
+    fn a_branch_file_is_its_change_since_main_and_only_in_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        // Not the real path: /var is a link to /private/var, as /tmp is to /private/tmp.
+        let d = dir.path().to_path_buf();
+        let sh = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&d).args(args).output().unwrap().status.success(), "git {args:?}");
+        sh(&["init", "-qb", "main"]);
+        sh(&["config", "user.email", "t@t"]);
+        sh(&["config", "user.name", "t"]);
+        std::fs::write(d.join("a.txt"), "one\n").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "init"]);
+        sh(&["checkout", "-qb", "feat/x"]);
+        std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
+        sh(&["commit", "-qam", "two"]);
+        let a = d.join("a.txt").to_string_lossy().into_owned();
+        let f = branch_file(&d, &a).unwrap();
+        assert_eq!((f.original.as_str(), f.current.as_str()), ("one\n", "one\ntwo\n"));
+        assert!(branch_file(&d, "/etc/passwd").is_err());
+        std::fs::write(d.join("pic.bin"), b"\x89PNG\0\0").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "pic"]);
+        assert_eq!(branch_file(&d, &d.join("pic.bin").to_string_lossy()).unwrap_err(), "That file isn't text.");
+    }
+
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.
     #[test]
     fn settings_saved_without_a_provider_are_claudes() {
@@ -4403,7 +4664,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
         }

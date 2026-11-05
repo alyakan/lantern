@@ -66,6 +66,8 @@ pub fn kind_name(kind: Kind) -> &'static str {
         Kind::BuildOutput => "build_output",
         Kind::Cache => "cache",
         Kind::Simulator => "simulator",
+        Kind::Archive => "archive",
+        Kind::Temp => "temp",
         Kind::Download => "download",
         Kind::Trash => "trash",
     }

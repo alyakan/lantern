@@ -19,14 +19,16 @@ const repo: RepoStatus = {
   folders: [{ folder: "/p/lantern", branch: "feat/desk", changed: 2 }],
   worktrees: [wt("/wt/clean"), wt("/wt/dirty"), wt("/lantern/worktrees/w1", { agent: true, branch: null })],
   gh: "ready",
-  prs: [{ number: 7, title: "feat: the Desk", author: "aly", branch: "feat/desk", draft: false, checks: "fail", review: "REVIEW_REQUIRED" }],
+  prs: [{ number: 7, title: "feat: the Desk", author: "aly", branch: "feat/desk", draft: false, checks: "fail", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [] }],
   merged: [],
   release: null,
   drafts: [],
+  viewer: "aly",
+  branches: [],
   error: null,
 };
-const item = (id: string, path: string, over: Partial<StorageItem> = {}): StorageItem => ({ id, kind: "worktree", name: path, path, bytes: 2e9, risk: "safe", removal: "worktree", note: "", warning: null, ticked: true, idle_days: 3, within: null, suggestion: null, ...over });
-const view = (items: StorageItem[] | null): StorageView => ({ items: items ?? [], scanning: false, progress: "", scanned_at: items ? 1 : null, free_bytes: null, snapshots: 0, notes: [], deleting: false });
+const item = (id: string, path: string, over: Partial<StorageItem> = {}): StorageItem => ({ id, kind: "worktree", name: path, path, bytes: 2e9, risk: "safe", removal: "worktree", note: "", warning: null, ticked: true, idle_days: 3, within: null, suggestion: null, shared: false, ...over });
+const view = (items: StorageItem[] | null): StorageView => ({ items: items ?? [], scanning: false, progress: "", scanned_at: items ? 1 : null, free_bytes: null, total_bytes: null, purgeable_bytes: null, snapshots: 0, notes: [], deleting: false });
 
 function setup(over: Partial<DeskProjectProps> = {}) {
   const props: DeskProjectProps = { row, chats: [chat], repo, now: Date.now(), onBack: vi.fn(), onOpen: vi.fn(), onNewChat: vi.fn(), ...over };
