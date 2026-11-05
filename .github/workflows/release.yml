@@ -119,6 +119,7 @@ jobs:
           name: lantern-binary
           path: compiled/lantern
           if-no-files-found: error
+          retention-days: 1
 
       # The kept target folder loses the builds this run replaced, failed run or not (see .github/prune-target.mjs). Never
       # what fails a release.
@@ -126,7 +127,6 @@ jobs:
         if: always() && runner.environment == 'self-hosted' && env.CARGO_TARGET_DIR != ''
         continue-on-error: true
         run: node .github/prune-target.mjs end
-          retention-days: 1
 
   release:
     needs: build
