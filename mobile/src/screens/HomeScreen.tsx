@@ -31,7 +31,8 @@ import { TOP_BAR_GAP, TOP_BAR_HEIGHT, TopBar } from "../ui/TopBar";
 import { UsageRing } from "../ui/UsageRing";
 import { tabBarRoom } from "../ui/TabBar";
 import { finished } from "../view/desk";
-import { InlineSearch } from "./HomeSearch";
+import { SearchBar, type BarSearch } from "./SearchBar";
+import { COMPOSER_FILL } from "../ui/Glass";
 import { Deck } from "./NeedsDeck";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 
@@ -420,8 +421,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setRefreshing(false);
   };
 
-  const top = (
-    <TopBar>
+  // A phone's search: a glass circle beside the bar, which grows into the field over it as the chat bar's does.
+  const listSearch: BarSearch = { active: searching, query, count: shown.length, position: 0, onOpen: () => setSearching(true), onChange: setQuery, onStep: () => {}, onCancel: closeSearch, placeholder: "Search chats", list: true };
+  const topRow = (
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected${usage ? `. ${tightestText(usage)}` : ""}` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, flexShrink: 1 }}>
           {/* The ring says enough while it is there: the dot stops pulsing inside it. */}
@@ -451,7 +453,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           )}
         </View>
       </View>
-    </TopBar>
+  );
+  const top = tabbed ? (
+    <View style={{ marginHorizontal: space.lg }}>
+      <SearchBar search={listSearch} capsule={{ minHeight: TOP_BAR_HEIGHT, borderRadius: radius.pill, paddingHorizontal: space.lg, paddingVertical: 6 }} fill={COMPOSER_FILL} lift={0.08}>
+        <View style={{ flex: 1, alignSelf: "stretch", justifyContent: "center" }}>{topRow}</View>
+      </SearchBar>
+    </View>
+  ) : (
+    <TopBar>{topRow}</TopBar>
   );
 
   // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
@@ -486,7 +496,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             )}
           </PressScale>
         )}
-        {tabbed && !loading && list.length > 0 && <InlineSearch query={query} found={shown.length} active={searching} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
