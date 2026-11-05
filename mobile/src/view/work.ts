@@ -3,6 +3,7 @@
  * drawn here. The same rules as the Mac's Desk (src/lib/yourWork.ts); nothing here decides what a step is or sends.
  */
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
+import type { RemoteWorkStack } from "../protocol/generated/RemoteWorkStack";
 import { ago } from "./home";
 
 export type Tone = "bad" | "wait" | "you" | "move" | "local" | "todo" | "ready" | "done";
@@ -52,6 +53,20 @@ export function metaOf(item: RemoteWorkItem, now: number): string {
 export function metaUnder(item: RemoteWorkItem, now: number, heading: string | null): string {
   const meta = metaOf(item, now);
   return heading === null ? meta : meta.split(" · ").filter((part) => part !== heading).join(" · ");
+}
+
+/** A stack's place in words: "stack 2 of 3 · on #410". */
+export const stackWord = (s: RemoteWorkStack): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
+
+/** A row's quiet line: what `metaUnder` says, and its place in a stack. */
+export const lineUnder = (item: RemoteWorkItem, now: number, heading: string | null): string => [metaUnder(item, now, heading), item.stack ? stackWord(item.stack) : ""].filter(Boolean).join(" · ");
+
+/** An item's pages: its pull request on GitHub and its issue on Linear, each only when it is one this phone opens. */
+export function linksOf(item: RemoteWorkItem): { github: string | null; linear: string | null } {
+  const url = safeLink(item.url) ? item.url : null;
+  const github = url?.startsWith("https://github.com/") ? url : null;
+  const linear = safeLink(item.issue_url) ? item.issue_url : url?.startsWith("https://linear.app/") ? url : null;
+  return { github, linear };
 }
 
 /** What to do next: yours to decide first, then what is blocked, then tickets to move, then branches to push, then issues to start. */

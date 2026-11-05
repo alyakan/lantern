@@ -3962,6 +3962,29 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-feature-head + .dp-list { border-top: none; }
 .yw-feature > .desk-more { margin: 0; }
 .yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+/* A row is one button that opens its details: two quiet lines, nothing else to aim at. */
+.yw-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.yw-row > .yw-open { width: 100%; }
+.yw-open:hover .yw-name { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
+.dp-row-top > .yw-open { display: block; flex: 1 1 auto; }
+/* A stack's pull requests, together: a rail on the left joins each to the one under it. */
+.yw-row.yw-stacked { position: relative; padding-left: 26px; }
+.yw-row.yw-stacked::before { content: ""; position: absolute; left: 13px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--yw-you) 45%, var(--line)); }
+.yw-row.yw-stack-first::before { top: 50%; }
+.yw-row.yw-stack-last::before { bottom: 50%; }
+.yw-row.yw-stacked::after { content: ""; position: absolute; left: 10px; top: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--pane); border: 2px solid var(--yw); box-sizing: border-box; }
+/* An item's details. */
+.yw-detail { width: min(520px, calc(100vw - 32px)); }
+.yw-detail .revert-title { overflow-wrap: anywhere; }
+.yw-detail-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
+.yw-detail-state .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
+.yw-detail .yw-nodes { margin: 6px 0; }
+.yw-detail .yw-node.yw-node { font-size: calc(10.5px * var(--font-scale)); gap: 3px; }
+.yw-detail-step { justify-content: space-between; padding: 8px 10px; border: 0.5px solid var(--line); border-radius: var(--radius-md); }
+.yw-detail-what { font-weight: 600; }
+.yw-detail-actions { flex-wrap: wrap; }
+.yw-detail-link { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-md); color: var(--text); text-decoration: none; }
+.yw-detail-link:hover { background: var(--bg-hover); }
 .yw-row .dp-title { white-space: normal; font-weight: 600; font-size: calc(13.5px * var(--font-scale)); }
 .yw-row .yw-word { padding: 1px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--yw) 15%, var(--pane)); }
 .yw-issue { display: inline-flex; align-items: baseline; align-self: flex-start; gap: 7px; max-width: 100%; padding: 2px 8px; border-radius: var(--radius-inner); background: color-mix(in srgb, var(--text) 7%, var(--pane)); font-size: calc(12px * var(--font-scale)); color: var(--text-2); text-decoration: none; }

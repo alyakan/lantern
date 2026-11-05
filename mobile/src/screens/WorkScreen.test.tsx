@@ -195,7 +195,7 @@ describe("Your work on the phone", () => {
     await fireEvent.press(card("Next").getByRole("button", { name: "Show 3 more" }));
     const all = within(screen.getByLabelText("All next steps"));
     expect(all.getByText(/More c/)).toBeTruthy();
-    expect(all.getAllByRole("button", { name: /^(Fix failing checks on|Merge|Start)/ })).toHaveLength(6);
+    expect(all.getAllByRole("button", { name: /^(Fix failing checks on|Merge|Start) (#\d+|.+)$/ }).filter((b) => b.props.accessibilityHint !== "Opens its details")).toHaveLength(6);
     await fireEvent.press(all.getByRole("button", { name: "Fix failing checks on #22" }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(session.lastOf("work_step")).toEqual({ op: "work_step", key: "more-c", sig: "m2" });
@@ -208,14 +208,19 @@ describe("Your work on the phone", () => {
     expect(session.lastOf("work_refresh")).toEqual({ op: "work_refresh" });
   });
 
-  it("opens a pull request or issue page, and never a link that isn't on GitHub or Linear", async () => {
+  it("opens an item's details from its name, with its pages on GitHub and Linear, and never a link that isn't one of them", async () => {
     const open_ = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
-    const evil = { ...work, items: [...work.items, item("x", { title: "Sneaky", tone: "bad", url: "https://evil.example/https://github.com/", next: step() })] };
+    const evil = { ...work, items: [...work.items, item("x", { title: "Sneaky", tone: "bad", url: "https://evil.example/https://github.com/", issue_url: "https://evil.example/", next: step() })] };
     await open({ work: evil });
-    await fireEvent.press(card("Next").getByRole("link", { name: /Retry fetchJson/ }));
+    await fireEvent.press(card("Next").getByRole("button", { name: /Retry fetchJson/ }));
+    const details = within(screen.getByLabelText("Details"));
+    await fireEvent.press(details.getByRole("button", { name: "GitHub" }));
     expect(open_).toHaveBeenCalledWith("https://github.com/aly/lantern/pull/7");
-    expect(card("Next").queryByRole("link", { name: /Sneaky/ })).toBeNull();
-    expect(card("Next").getByText(/Sneaky/)).toBeTruthy();
+    await fireEvent.press(details.getByRole("button", { name: "Done" }));
+    await fireEvent.press(card("Next").getAllByRole("button", { name: /Sneaky/ })[0]);
+    const sneaky = within(screen.getByLabelText("Details"));
+    expect(sneaky.queryByRole("button", { name: "GitHub" })).toBeNull();
+    expect(sneaky.queryByRole("button", { name: "Linear" })).toBeNull();
     open_.mockRestore();
   });
 

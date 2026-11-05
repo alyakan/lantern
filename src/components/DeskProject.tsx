@@ -226,7 +226,7 @@ export function DeskProject({ row, chats, repo, work, issues = false, onStep, on
 
       {/* Its own work first: where each pull request, branch and issue of this project stands, grouped by feature when Linear is on. */}
       {work && work.length > 0 && (
-        <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} standFirst />
+        <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} onOpen={onOpen} standFirst />
       )}
 
       {landing && <DeskProjectLanding label={row.label} repo={repo} here={here} todos={todos} onStartChat={startChat} onStartTodo={startTodo} />}

@@ -52,6 +52,9 @@ function linkOf(item: WorkItem): string | null {
   return item.number !== null && item.github && SLUG.test(item.github) ? `https://github.com/${item.github}/pull/${item.number}` : null;
 }
 
+/** An item's quiet line: its issue by identifier only (its title and feature are on the item's details and its heading). */
+const quiet = (i: WorkItem): string => (i.bare !== undefined ? [i.issue?.identifier, i.bare].filter(Boolean).join(" · ") : i.meta);
+
 /** The user's work as a phone is told it: where things stand (blocked first), then the steps with no row of their own. */
 export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, blind: string[]): WindowWork {
   const standing = whereThingsStand(items);
@@ -70,7 +73,7 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       stage: i.stage,
       tone: i.tone,
       word: i.word,
-      meta: i.at !== null ? i.meta.replace(RELATIVE, "{ago}") : i.meta,
+      meta: i.at !== null ? quiet(i).replace(RELATIVE, "{ago}") : quiet(i),
       at: i.at,
       number: i.number,
       feature: i.issue?.project ?? null,

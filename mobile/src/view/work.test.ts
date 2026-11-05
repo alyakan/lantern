@@ -1,5 +1,5 @@
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
-import { filterItems, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
+import { lineUnder, linksOf, filterItems, foldRows, foldWord, groupingFor, groupItems, metaOf, metaUnder, nextSteps, pathOf, safeLink, standing, stateCounts, toneOf } from "./work";
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: key, stage: "checks", tone: "bad", word: "Checks failing", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, ...over });
 const step = { what: "Fix", yours: false, button: "Do it", warn: false };
@@ -82,5 +82,13 @@ describe("Your work on the phone", () => {
   it("opens only an https page on GitHub or Linear", () => {
     for (const ok of ["https://github.com/aly/lantern/pull/7", "https://linear.app/team/issue/ENG-1"]) expect(safeLink(ok)).toBe(true);
     for (const bad of [null, "", "http://github.com/a/b", "https://github.com.evil.example/x", "https://github.com@evil.example/x", "https://github.com/", "javascript:alert(1)", "https://github.com/a b", "https://github.com/a\\b", "https://linear.app/\u0000x"]) expect(safeLink(bad)).toBe(false);
+  });
+
+  it("says a stacked pull request's place on its line, and offers only GitHub and Linear pages", () => {
+    const stacked = item("s", { meta: "ENG-1 · lantern · b", feature: "Sync", stack: { id: 4, pos: 2, of: 3, on: 4 } });
+    expect(lineUnder(stacked, 0, "lantern")).toBe("ENG-1 · b · stack 2 of 3 · on #4");
+    expect(linksOf(item("a", { url: "https://github.com/aly/lantern/pull/7", issue_url: "https://linear.app/a/issue/ENG-1" }))).toEqual({ github: "https://github.com/aly/lantern/pull/7", linear: "https://linear.app/a/issue/ENG-1" });
+    expect(linksOf(item("b", { url: "https://linear.app/a/issue/ENG-2" }))).toEqual({ github: null, linear: "https://linear.app/a/issue/ENG-2" });
+    expect(linksOf(item("c", { url: "https://evil.example/", issue_url: "javascript:x" }))).toEqual({ github: null, linear: null });
   });
 });

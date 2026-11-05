@@ -403,13 +403,28 @@ const BUSY: Record<InboxRow["state"], string> = { working: "is working", waiting
 export function targetFor(item: WorkItem, chats: InboxRow[], repos: RepoStatus[] | null): Target | null {
   const repo = repos?.find((r) => r.repo === item.repo);
   if (!repo) return null;
-  const onBranch = item.branch ? repo.folders.filter((f) => f.branch === item.branch).map((f) => f.folder) : [];
-  const here = chats.filter((c) => onBranch.includes(c.folder));
+  const here = chatsOn(item, chats, repos);
   const free = here.find((c) => c.state === "done");
   if (free) return { kind: "chat", slot: free.slot, title: free.title };
   if (here[0]) return { kind: "busy", slot: here[0].slot, title: here[0].title, why: BUSY[here[0].state] };
   const folder = repo.folders[0]?.folder;
   return folder ? { kind: "new", folder } : null;
+}
+
+/** The chats on the Desk whose folder is on the item's branch: the ones working on it. */
+export function chatsOn(item: WorkItem, chats: InboxRow[], repos: RepoStatus[] | null): InboxRow[] {
+  const repo = repos?.find((r) => r.repo === item.repo);
+  const onBranch = repo && item.branch ? repo.folders.filter((f) => f.branch === item.branch).map((f) => f.folder) : [];
+  return chats.filter((c) => onBranch.includes(c.folder));
+}
+
+/** A stack's place in words: "stack 2 of 3 · on #410". */
+export const stackWord = (s: StackPlace): string => `stack ${s.pos} of ${s.of}${s.on !== null ? ` · on #${s.on}` : ""}`;
+
+/** What the item's own line says, quietly: its issue, where it is (without a feature the heading says), and its place in a stack. */
+export function lineOf(item: WorkItem, feature: string | null): string {
+  const meta = (item.bare ?? item.meta).split(" · ").filter((part) => part !== feature);
+  return [item.issue && !item.key.startsWith("linear:") ? item.issue.identifier : null, ...meta, item.stack ? stackWord(item.stack) : null].filter(Boolean).join(" · ");
 }
 
 /** What the chat is told: the step, and, when the chat isn't on the item's branch, to work on it without moving this checkout. */

@@ -230,7 +230,7 @@ export function DeskView(props: DeskViewProps) {
           <div className="desk-bento">
             {waiting.length > 0 && <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} />}
             <DeskProjects rows={props.projects} chats={props.chats} repos={props.repos} items={work} now={now} onOpen={onOpen} onPage={props.onPage} />
-            <YourWork repos={props.repos} items={work} issues={issues} chats={props.chats} onStep={props.onStep} onRefresh={props.onRefreshRepos} nextOnly />
+            <YourWork repos={props.repos} items={work} issues={issues} chats={props.chats} onStep={props.onStep} onRefresh={props.onRefreshRepos} onOpen={onOpen} nextOnly />
           </div>
         )}
       </div>
