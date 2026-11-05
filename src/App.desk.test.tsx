@@ -12,12 +12,13 @@ vi.mock("@monaco-editor/react", () => ({ default: () => null, DiffEditor: () => 
 
 const FOLDER = "/Users/you/projects/acme-api";
 
-async function launch(startOnDesk: boolean) {
+async function launch(startOnDesk: boolean, waitOn = "acme-api") {
   const { installMockBackend } = await import("./dev/mockBackend");
   installMockBackend();
   const { default: App } = await import("./App");
   render(<App startOnDesk={startOnDesk} />);
-  await screen.findByRole("region", { name: "acme-api" });
+  // One project hides the other projects from the sidebar, so a test that picks another waits on the Desk instead.
+  await screen.findByRole("region", { name: waitOn });
 }
 
 const desk = () => screen.queryByRole("region", { name: "Desk" });
@@ -107,6 +108,26 @@ describe("the Desk in the app", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Open in Desk" }));
     expect(await screen.findByRole("region", { name: "Project acme-api" })).toBeInTheDocument();
     expect(within(desk()!).getByRole("region", { name: "Where things stand" })).toBeInTheDocument();
+  });
+
+  it("lists only the One project on the Desk, says so, and lists everything again on Show all", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify("/Users/you/projects/elsewhere"));
+    await launch(true, "Desk");
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    // acme-api is open, but it is not the one project: no tile, no count of its chat.
+    expect(within(desk()!).getByRole("status", { name: "Only elsewhere" })).toBeInTheDocument();
+    expect(within(desk()!).queryByRole("button", { name: "Show the chats of acme-api" })).toBeNull();
+    fireEvent.click(within(desk()!).getByRole("button", { name: "Show all" }));
+    expect(await within(desk()!).findByRole("button", { name: "Show the chats of acme-api" })).toBeInTheDocument();
+    expect(within(desk()!).queryByRole("status", { name: /^Only / })).toBeNull();
+  });
+
+  it("keeps the One project's tile on the Desk when it is the project that is open", async () => {
+    localStorage.setItem("sidebar.single", JSON.stringify(FOLDER));
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(within(desk()!).getByRole("status", { name: "Only acme-api" })).toBeInTheDocument();
+    expect(within(desk()!).getByRole("button", { name: "Show the chats of acme-api" })).toBeInTheDocument();
   });
 
   it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {

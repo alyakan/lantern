@@ -3807,7 +3807,12 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 
 /* The Desk, a dashboard: what needs you and the projects. Ask is the right pane; what happened is the sidebar's Timeline. */
 .desk { min-height: 0; }
-.desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
+.desk-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
+/* The One project's pill, in the project's colour as the sidebar's banner is. */
+.desk-only { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px 2px 10px; border-radius: var(--radius-chip); background: var(--pc, var(--accent)); color: var(--on-color); }
+.desk-only-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 calc(12px * var(--font-scale)) var(--ui); }
+.desk-only-all { padding: 2px 8px; border: none; border-radius: var(--radius-chip); background: none; color: inherit; font: 500 calc(12px * var(--font-scale)) var(--ui); opacity: 0.9; }
+.desk-only-all:hover { opacity: 1; background: color-mix(in srgb, var(--on-color) 18%, transparent); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
 /* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */

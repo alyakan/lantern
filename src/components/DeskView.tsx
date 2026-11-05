@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import type { InboxRow, ProjectRow } from "../lib/deskBoard";
 import { requestText, type InboxItem } from "../lib/inbox";
 import { elapsed } from "../lib/time";
@@ -42,6 +42,8 @@ export interface DeskViewProps {
   linear?: { work: LinearWork | null; teamOf: Record<string, string> };
   /** Answers a request from its own card, opened on the Desk: as the chat's card answers it (a note, a question's answers, a rule). */
   onAnswer?: (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
+  /** The sidebar's One project while it is on: the Desk lists only that project, and says so, in its colour, with the way back to all. */
+  only?: { label: string; color: string | null; onShowAll: () => void };
 }
 
 /** How often the times are redrawn. */
@@ -204,6 +206,14 @@ export function DeskView(props: DeskViewProps) {
     <section className="chat-pane desk" aria-label="Desk">
       <header className="desk-head">
         <h1 className="desk-title">Desk</h1>
+        {props.only && (
+          <div className="desk-only" role="status" aria-label={`Only ${props.only.label}`} style={{ "--pc": props.only.color ?? undefined } as CSSProperties}>
+            <span className="desk-only-name">Only {props.only.label}</span>
+            <button className="desk-only-all" onClick={props.only.onShowAll}>
+              Show all
+            </button>
+          </div>
+        )}
       </header>
       <div className="desk-main" ref={main}>
         {!pageRow && <Pulse needs={props.needs} projects={props.projects} repos={props.repos} />}

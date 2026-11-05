@@ -2815,14 +2815,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
   const deskShown = desk && Object.keys(openByProject).length > 0;
+  // The sidebar's One project narrows the Desk too: everything below (tiles, what needs you, Your work, Ask's routing, a phone's Work
+  // tab) is built from these two lists, so one filter on them covers it all.
+  const inSingle = (folder: string | null) => singleProject === null || folder === singleProject;
   // What the Desk on screen has: its projects' chats only.
-  const deskOpen = openOn(desks, desks.on, openByProject);
+  const deskOpen = Object.fromEntries(Object.entries(openOn(desks, desks.on, openByProject)).filter(([folder]) => inSingle(folder)));
   const onThisDesk = (slot: string) => {
     const folder = projectFolderOf(slot);
-    return folder !== null && deskOf(desks, folder) === desks.on;
+    return folder !== null && deskOf(desks, folder) === desks.on && inSingle(folder);
   };
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
-  const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
+  const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []).filter(inSingle))])];
   // A project's own page on the Desk (its folder), kept while you are in one of its chats; the Desk's button goes back to all.
   const [deskPage, setDeskPage] = useState<string | null>(null);
   const pageOn = deskPage !== null && deskFolders.includes(deskPage) ? deskPage : null;
@@ -3394,6 +3397,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     linear.refresh();
                   }}
                   onAsk={() => setAskSheet(true)}
+                  only={singleProject !== null ? { label: basename(singleProject), color: singleColor, onShowAll: () => setSingleProject(null) } : undefined}
                   linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
                 </ProjectColors.Provider>
