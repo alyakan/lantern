@@ -436,10 +436,11 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
 }
 
 /// Whether a restart into `cfg` changes what Claude was told about its Permissions or Workflow (`before`: the mode,
-/// whether it was on Auto, and the role it ran with; None: it never ran). Only Claude's prompt says them.
+/// whether it was on Auto, and the role it ran with; None: it never ran). Only Claude Code's prompt says them, which a chat
+/// on an endpoint runs too.
 fn settings_changed(before: Option<(Mode, bool, Role)>, cfg: &SessionConfig) -> bool {
     let after = (cfg.mode, args::is_auto(cfg.mode, cfg.auto_approve), cfg.helper.role.clone());
-    cfg.provider == ProviderId::Claude && before.is_some_and(|b| b != after)
+    matches!(cfg.provider, ProviderId::Claude | ProviderId::Gateway) && before.is_some_and(|b| b != after)
 }
 
 /// Whether a message can carry the settings note: not a slash command, which claude reads as one only at the very start
@@ -4841,7 +4842,9 @@ mod tests {
         // The same settings again (a new effort, a restart after Stop), or Step by step on Auto put the same way: no note.
         assert!(!settings_changed(was(Mode::Auto, false), &normal(Mode::Auto, false)));
         assert!(!settings_changed(was(Mode::Steps, true), &normal(Mode::Steps, true)));
-        // A chat that never ran has nothing to correct, and only Claude's prompt says these settings.
+        // A chat on an endpoint is Claude Code with the same prompt: it is told as well.
+        assert!(settings_changed(was(Mode::Ask, false), &SessionConfig { provider: ProviderId::Gateway, ..normal(Mode::Auto, false) }));
+        // A chat that never ran has nothing to correct, and only Claude Code's prompt says these settings.
         assert!(!settings_changed(None, &normal(Mode::Auto, false)));
         assert!(!settings_changed(was(Mode::Ask, false), &SessionConfig { provider: ProviderId::Fake, ..normal(Mode::Auto, false) }));
     }

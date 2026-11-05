@@ -298,7 +298,7 @@ async fn a_chat_on_an_endpoint_raises_a_card_a_phone_can_see_and_answer() {
         plugins_off: false,
         helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false },
         path_env: std::env::var("PATH").ok(),
-        endpoint: Some(GatewayLaunch { id: "fake".into(), url, key: None }),
+        endpoint: Some(GatewayLaunch { id: "fake".into(), url, key: None, auto_mode: false }),
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
     claude_pid.store(session.pid(), Ordering::SeqCst);

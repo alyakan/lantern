@@ -182,7 +182,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
                   <input type="checkbox" checked={r.auto_mode ?? false} onChange={(e) => change(r.key, { auto_mode: e.target.checked })} />
                   <span>Allow Auto mode</span>
                 </label>
-                <span className="settings-row-sub wide">Auto's safety check runs on this endpoint's model, so that model approves its own actions. A chat that is already open picks up a change when you reopen it or change its Permissions.</span>
+                <span className="settings-row-sub wide">Auto's safety check runs on this endpoint's model, so that model approves its own actions. A chat that is already open picks up a change when you reopen it.</span>
                 <div className="endpoint-actions">
                   <button type="button" disabled={!r.url.trim() || r.fetching} onClick={() => fetchModels(r)} title="Ask the endpoint which models it serves">
                     {r.fetching ? "Fetching…" : "Fetch models"}
