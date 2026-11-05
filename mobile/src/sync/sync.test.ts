@@ -305,6 +305,38 @@ describe("the phone's sync", () => {
     });
   });
 
+  describe("cruise", () => {
+    const drafts = { items: [{ id: "c1", title: "Re-run", why: "It failed.", message: "Re-run the tests.", target: { kind: "continue", slot: "a" } }], generated_at: 1 };
+    const connected = async (t: { now: number }, answers = {}, fail = {}) => {
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => t.now });
+      const s = fakeSession(7, answers, fail, ["cruise"]);
+      sync.onSession(s.session);
+      await settle();
+      return { sync, asked: () => s.asked.filter((r) => r.op === "cruise") };
+    };
+
+    it("asks the Mac every time, and says whether it was a refresh: only the Mac knows whether the chat moved on", async () => {
+      const t = { now: 1_000 };
+      const { sync, asked } = await connected(t, { cruise: drafts });
+      expect(await sync.cruise("a")).toEqual(drafts);
+      await sync.cruise("a");
+      await sync.cruise("a", true);
+      await sync.cruise("b");
+      expect(asked()).toEqual([
+        { op: "cruise", slot: "a", refresh: false },
+        { op: "cruise", slot: "a", refresh: false },
+        { op: "cruise", slot: "a", refresh: true },
+        { op: "cruise", slot: "b", refresh: false },
+      ]);
+    });
+
+    it("doesn't take an answer that isn't a list of drafts", async () => {
+      const t = { now: 1_000 };
+      const { sync } = await connected(t, { cruise: { items: "none" } });
+      await expect(sync.cruise("a")).rejects.toThrow("didn't come through");
+    });
+  });
+
   it("loads earlier turns when there are some, and says so when not connected", async () => {
     const { sync, frame } = rig();
     await expect(sync.wake("a")).rejects.toThrow("Not connected");

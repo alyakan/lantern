@@ -297,6 +297,16 @@ impl Host for FixtureHost {
         })
     }
 
+    fn cruise_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
+        // The prompt names the chat ("[chat id=<slot> | …"): one next step for it, after a pause like Claude's.
+        let slot = prompt.split_once("[chat id=").and_then(|(_, rest)| rest.split(' ').next()).unwrap_or_default().to_string();
+        let wait = self.pace * 6;
+        Box::pin(async move {
+            tokio::time::sleep(wait).await;
+            Ok(serde_json::json!([{ "kind": "continue", "slot": slot, "title": "Run the tests again", "why": "The last run was before the change.", "message": "Run the tests again and tell me what fails." }]).to_string())
+        })
+    }
+
     fn review_diff(&self, slot: String, path: String, _target: super::hub::ReviewTarget) -> BoxFut<Result<String, String>> {
         self.diff(slot, path)
     }

@@ -22,6 +22,8 @@ import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
+import { CruiseBar } from "./Cruise";
+import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
 import { StepNav, StepPager, type PagePlaces } from "./StepPager";
 import { keepOffset, keepPage, placeOf } from "../view/stepPlace";
@@ -149,6 +151,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
+  const canCruise = useMacCan("cruise");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
   // A Review page's file whose change is open, and the verdicts picked on each page not yet sent (by the page's message id).
@@ -397,6 +400,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
   const lastTurn = [...rows].reverse().find((r) => r.kind === "turn" || r.kind === "user");
+  // The turn Cruise asks about: the last one Claude finished (a message you just sent is no turn yet).
+  const turnKey = lastTurn?.kind === "turn" ? lastTurn.key : "";
   const lastUserText = [...rows].reverse().find((r) => r.kind === "user");
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
   // again would do it all over.
@@ -413,6 +418,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
   };
+  // Cruise: drafts the next step when the chat goes idle, shown over the box (see useCruise); it never sends by itself.
+  const cruise = useCruise({ slot, available: canCruise, status: chat?.status, turnKey, disabled: stepsChat, sync, send });
   // The chat bar's tools, beside Search. Compact and Clear are Claude's own commands, as the Mac's context meter sends them (not in
   // Step by step, whose pages they would cut across, not during a turn, which the Mac waits for too, and not while the chat sleeps);
   // Clear asks first, as the Mac does. To-dos opens this project's list, in the chat's sheet beside Changes and Artifacts.
@@ -654,6 +661,20 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             confirming.resolve(false);
             setConfirming(null);
           }}
+        />
+      )}
+      {canCruise && !asleep && !stepsChat && (
+        <CruiseBar
+          on={cruise.on}
+          resting={!working && !open}
+          asking={cruise.asking}
+          draft={cruise.draft}
+          error={cruise.error}
+          onToggle={cruise.toggle}
+          onAsk={cruise.nextStep}
+          onDo={cruise.doIt}
+          onAnother={cruise.another}
+          onStop={cruise.stop}
         />
       )}
       {asleep ? (

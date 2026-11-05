@@ -330,6 +330,20 @@ export class Sync {
   }
 
   /**
+   * What Claude would do next in one chat (Cruise): drafts made on the Mac from the chat's last few turns. Nothing is kept
+   * here: the Mac keeps them per chat and knows whether the chat has moved on since (a draft kept on this side would be
+   * the last turn's); `refresh` asks for more ("Another"). Never sent by itself: the caller shows them as a card and sends
+   * the one the user taps.
+   */
+  async cruise(slot: string, refresh = false): Promise<Suggestions> {
+    if (!this.has("cruise")) throw new Error("This Mac can't suggest a next step yet. Update Lantern on it.");
+    const value = await this.ask<Suggestions>({ op: "cruise", slot, refresh });
+    // Whatever the Mac sends is checked before it is shown.
+    if (!value || !Array.isArray(value.items)) throw new Error("Claude's next step didn't come through.");
+    return value;
+  }
+
+  /**
    * Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac. It is on Ask unless
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
    * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.

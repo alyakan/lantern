@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -1071,6 +1071,9 @@ pub enum Request {
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
+    /// What Claude would do next in this one chat, from its last few turns: up to three drafts, made by a Sonnet call and
+    /// kept per chat for a while (see suggest.rs); `refresh` asks again. Only sent to a Mac whose Welcome lists "cruise".
+    Cruise { slot: String, refresh: bool },
     /// One file's diff, as unified-diff text: from the chat's start, or (`scope`, only to a Mac whose Welcome lists
     /// "changescopes") against the last commit or where the branch left the default one. Without a scope: the chat's.
     Diff {
