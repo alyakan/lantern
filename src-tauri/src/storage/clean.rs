@@ -170,6 +170,9 @@ fn guard_shared_tmp(env: &Env, root: &Path, path: &Path, meta: &std::fs::Metadat
     if scan::busy(env, &canon) {
         return Err("A chat is working in it.".into());
     }
+    if scan::is_checkout(&canon) {
+        return Err(scan::CHECKOUT.into());
+    }
     match scan::tmp_open(env) {
         None => Err("Lantern couldn't check whether a program is using it.".into()),
         Some(open) if open.iter().any(|o| o.starts_with(&canon)) => Err("A program is using it now.".into()),
@@ -426,6 +429,12 @@ mod tests {
         }
         assert!(remove(&env, &temp(&root.join("open-build"))).error.unwrap().contains("using it"));
         assert!(remove(&env, &temp(&root.join("chat-here"))).error.unwrap().contains("chat"));
+        assert!(remove(&env, &temp(&root.join(format!("{claude}/-Users-me-proj/session-asleep")))).error.unwrap().contains("chat"));
+        // Whatever the scan said of it, a checkout is refused: only git can tell what in it is unsaved.
+        let mut checkout = temp(&root.join("checkout"));
+        checkout.risk = Risk::Safe;
+        assert!(remove(&env, &checkout).error.unwrap().contains("git checkout"));
+        assert!(root.join("checkout/.git").exists());
         assert!(remove(&env, &temp(&root.join("link"))).error.unwrap().contains("link"));
         // Never /tmp itself, Claude Code's folder or a project's folder in it, nor something deeper than the scan offers.
         for p in [root.clone(), root.join(&claude), root.join(format!("{claude}/-Users-me-proj")), root.join("fresh-build/f")] {

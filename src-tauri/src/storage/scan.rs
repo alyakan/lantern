@@ -663,6 +663,23 @@ pub fn is_claude_temp(name: &str) -> bool {
     name == format!("claude-{}", unsafe { libc::geteuid() })
 }
 
+/// The folders Claude Code keeps for these sessions in /tmp (`claude-<uid>/<project>/<session id>`): a chat that is idle or
+/// asleep has nothing open there, but its scratchpad and task output are still its own.
+pub fn claude_session_dirs(ids: &[String]) -> Vec<PathBuf> {
+    let Some(root) = shared_tmp() else { return vec![] };
+    let claude = root.join(format!("claude-{}", unsafe { libc::geteuid() }));
+    let projects = top_level(&claude, false);
+    ids.iter().filter(|id| is_uuid(id)).flat_map(|id| projects.iter().map(move |p| p.join(id))).filter(|p| p.is_dir()).collect()
+}
+
+/// Why a git checkout in /tmp is never deleted from there: it may hold work that is nowhere else, which only git can tell.
+pub const CHECKOUT: &str = "It's a git checkout, which may hold work that is nowhere else. A worktree of one of your projects is listed under Worktrees, where git checks it.";
+
+/// Whether `p` is a git clone or worktree (it has a `.git` folder or file).
+pub fn is_checkout(p: &Path) -> bool {
+    std::fs::symlink_metadata(p.join(".git")).is_ok()
+}
+
 /// A real folder or file (not a link) that the user owns.
 fn mine(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| !m.file_type().is_symlink() && m.uid() == unsafe { libc::geteuid() })
@@ -722,15 +739,12 @@ fn shared_tmp_items_over(env: &Env, cancel: &AtomicBool, min_bytes: u64) -> Scan
             None => Some("Lantern couldn't check whether a program is using it.".to_string()),
             Some(open) if open.iter().any(|o| o.starts_with(&p)) => Some("A program is using it now.".to_string()),
             _ if busy(env, &p) => Some("A chat is working in it.".to_string()),
+            _ if is_checkout(&p) => Some(CHECKOUT.to_string()),
             _ => None,
         };
         if let Some(why) = blocked {
             item.risk = Risk::Blocked;
             item.warning = Some(why);
-        } else if std::fs::symlink_metadata(p.join(".git")).is_ok() {
-            // A clone or a worktree may hold commits or changes that are nowhere else.
-            item.risk = Risk::Review;
-            item.warning = Some("It's a git checkout: anything in it that isn't pushed is lost with it.".into());
         } else if idle < SHARED_TMP_RECENT_DAYS {
             item.warning = Some(format!("Changed {idle} day(s) ago: whatever left it may still need it."));
         } else {
@@ -1306,12 +1320,14 @@ pub(crate) mod tests {
         }
         mk("fresh-build", 10_000, 0);
         mk("tiny", 10, 10);
-        for p in ["-Users-me-proj/session-old", "-Users-me-proj/session-live", "cdp-profile"] {
+        for p in ["-Users-me-proj/session-old", "-Users-me-proj/session-live", "-Users-me-proj/session-asleep", "cdp-profile"] {
             mk(&format!("{claude}/{p}"), 10_000, 10);
         }
         std::os::unix::fs::symlink(root.join("old-build"), root.join("link")).unwrap();
         let open = open.map(|o| o.iter().map(|p| root.join(p.replace("CLAUDE", &claude))).collect());
-        let env = Env { home: root.join("home"), path_env: None, now: now_secs(), in_use: vec![root.join("chat-here")], temp_base: None, shared_tmp: Some(root), tmp_open: std::sync::OnceLock::from(open) };
+        // A chat working in chat-here, and an open chat whose claude is asleep: nothing of its is open, but its folder is its own.
+        let in_use = vec![root.join("chat-here"), root.join(format!("{claude}/-Users-me-proj/session-asleep"))];
+        let env = Env { home: root.join("home"), path_env: None, now: now_secs(), in_use, temp_base: None, shared_tmp: Some(root), tmp_open: std::sync::OnceLock::from(open) };
         (dir, env, claude)
     }
 
@@ -1326,7 +1342,10 @@ pub(crate) mod tests {
         assert!(fresh.risk == Risk::Safe && !fresh.ticked && fresh.warning.as_deref().unwrap().contains("may still need it"));
         assert!(of("tmp/open-build").risk == Risk::Blocked && of("tmp/open-build").warning.as_deref().unwrap().contains("program"));
         assert!(of("tmp/chat-here").risk == Risk::Blocked && of("tmp/chat-here").warning.as_deref().unwrap().contains("chat"));
-        assert!(of("tmp/checkout").risk == Risk::Review && !of("tmp/checkout").ticked);
+        // A checkout's unsaved work only git can tell: never from here.
+        assert!(of("tmp/checkout").risk == Risk::Blocked && of("tmp/checkout").warning.as_deref().unwrap().contains("git checkout"));
+        let asleep = of(&format!("tmp/{claude}/-Users-me-proj/session-asleep"));
+        assert!(asleep.risk == Risk::Blocked && asleep.warning.as_deref().unwrap().contains("chat"));
         // Claude Code's folder is offered a session at a time, never whole: the sessions still running keep theirs there.
         let session = of(&format!("tmp/{claude}/-Users-me-proj/session-old"));
         assert!(session.ticked && session.note.contains("Claude Code session"));
