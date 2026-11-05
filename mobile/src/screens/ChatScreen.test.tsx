@@ -845,6 +845,19 @@ describe("what waits on you, in a chat", () => {
     expect(screen.getByLabelText("Swipe to approve")).toBeTruthy();
   });
 
+  it("shows an approval that comes while the chat is open, after one an earlier run of the Mac asked and was answered", async () => {
+    const earlier: RemoteEvent[] = [
+      { kind: "permission_requested", request_id: "perm-1", tool_name: "Approval", input: { action: "Push the branch" } },
+      { kind: "permission_resolved", request_id: "perm-1", allow: true, by: "desktop" },
+    ];
+    const { controller } = await withSession([...turn.slice(0, 2), ...earlier], {}, {}, { status: "working" });
+    const approval: RemoteEvent = { kind: "permission_requested", request_id: "perm-5f2a9c01b3e4-1", tool_name: "Approval", input: { action: "Push tag v1" } };
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 999, event: approval } }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    expect(screen.getByText("Approve Push tag v1?")).toBeTruthy();
+    expect(screen.getByLabelText("Swipe to approve")).toBeTruthy();
+  });
+
   it("has no swipe for a question: that is answered on the full screen, from Review", async () => {
     const { h } = await withSession([{ kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }], multiSelect: false }] } }]);
     expect(screen.queryByLabelText("Swipe to allow")).toBeNull();

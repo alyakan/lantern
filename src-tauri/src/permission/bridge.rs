@@ -58,10 +58,22 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+/// A bridge's part of its prompts' ids: random, or the time when there is no randomness.
+fn run_id() -> String {
+    let mut bytes = [0u8; 6];
+    match getrandom::fill(&mut bytes) {
+        Ok(()) => bytes.iter().map(|b| format!("{b:02x}")).collect(),
+        Err(_) => format!("{:x}", now_ms()),
+    }
+}
+
 /// Unix-socket server that turns helper requests into UI permission cards, or answers them by a rule.
 pub struct PermissionBridge {
     pub socket_path: PathBuf,
     pending: Mutex<HashMap<String, Waiting>>,
+    /// Each bridge's own, so its prompts' ids are never an earlier run's: a chat's saved events keep the old ones, and a
+    /// phone (or the window) replaying them would take a new "perm-1" for the one already answered.
+    run: String,
     counter: AtomicU64,
     /// The accept loop, stopped by `close`.
     accept: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -119,6 +131,7 @@ impl PermissionBridge {
         let bridge = Arc::new(Self {
             socket_path,
             pending: Mutex::new(HashMap::new()),
+            run: run_id(),
             counter: AtomicU64::new(0),
             accept: Mutex::new(None),
             chat_rules: Mutex::new(Vec::new()),
@@ -239,7 +252,7 @@ impl PermissionBridge {
         }
         // The helper sends nothing after its request, so its read half only tells us when it has gone.
         let mut read = reader.into_inner().into_inner();
-        let id = format!("perm-{}", self.counter.fetch_add(1, Ordering::SeqCst) + 1);
+        let id = format!("perm-{}-{}", self.run, self.counter.fetch_add(1, Ordering::SeqCst) + 1);
         // Looked at again right before the answer, so a link swapped in while this was looking is caught where that's cheap.
         // That narrows the window; it doesn't close it, since the command runs after the answer (see rules::matches).
         let matched = self.rule_for(&req.tool_name, &req.input);
@@ -459,6 +472,23 @@ mod tests {
         let id = next_request_id(&mut rx).await;
         assert!(bridge.respond(&id, false, None, None));
         assert!(!helper.await.unwrap().allow);
+    }
+
+    #[tokio::test]
+    async fn a_new_run_never_gives_a_prompt_an_id_an_earlier_one_gave() {
+        // Lantern restarted: the chat's bridge is a new one, and its saved events still hold the last run's ids.
+        let (first, mut rx, _dir) = setup();
+        let helper = ask_in_background(&first);
+        let earlier = next_request_id(&mut rx).await;
+        assert!(first.respond(&earlier, true, None, None));
+        helper.await.unwrap();
+        let (again, mut rx, _dir2) = setup();
+        let helper = ask_in_background(&again);
+        let now = next_request_id(&mut rx).await;
+        // Answered before it is checked: a helper still waiting would hold the test up instead of letting it fail.
+        assert!(again.respond(&now, true, None, None));
+        helper.await.unwrap();
+        assert_ne!(now, earlier);
     }
 
     #[tokio::test]
@@ -910,7 +940,8 @@ mod tests {
         let helper = ask_in_background(&bridge);
         match next_event(&mut rx).await {
             UiEvent::PermissionAutoAllowed { request_id, tool_name, input, scope, rule } => {
-                assert_eq!((request_id.as_str(), tool_name.as_str(), input["command"].as_str()), ("perm-1", "Bash", Some("npm test")));
+                assert!(request_id.starts_with("perm-") && request_id.ends_with("-1"), "{request_id}");
+                assert_eq!((tool_name.as_str(), input["command"].as_str()), ("Bash", Some("npm test")));
                 assert_eq!((scope, rule), (Scope::Chat, prefix_rule("npm test")));
             }
             other => panic!("unexpected {other:?}"),
