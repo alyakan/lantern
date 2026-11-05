@@ -40,7 +40,10 @@ pub struct Slot {
     /// The folder's state before each of the chat's messages, which "Restore files to here" puts back.
     pub checkpoints: crate::checkpoint::Checkpoints,
     /// The user chose to look at the chat's own folder even while it works in a worktree (see `view_folder`).
-    pub view_main: std::sync::atomic::AtomicBool,
+    pub view_main: Arc<std::sync::atomic::AtomicBool>,
+    /// The worktree the chat was put in, by `enter_worktree` or the Changes pane's picker: it wins over where the chat last
+    /// edited (see workdir.rs). Shared with the chat's permission bridge, which answers the tool.
+    pub pin: crate::workdir::Pin,
     /// The chat's Permissions or Workflow changed: the note telling Claude so (see args::settings_note), sent with the
     /// user's next message.
     pub settings_note: Mutex<Option<String>>,
@@ -80,7 +83,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { control: Default::default(), models: Default::default(), session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
+        let slot = Arc::new(Slot { control: Default::default(), models: Default::default(), session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), pin: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -139,11 +142,13 @@ impl Slot {
         self.config.lock().unwrap().as_ref().map(|c| c.folder.clone()).ok_or_else(|| "No folder is open".into())
     }
 
-    /// The linked worktree the chat is working in, if Claude entered one (see workdir.rs).
+    /// The linked worktree the chat is working in: the one it was put in, else the one Claude entered and edited in (see
+    /// workdir.rs).
     pub fn work_folder(&self) -> Option<crate::workdir::WorkFolder> {
         let folder = self.folder().ok()?;
         let last = self.changes.lock().unwrap().last_edit();
-        crate::workdir::find(&folder, last.as_deref())
+        let pin = self.pin.lock().unwrap().clone();
+        crate::workdir::current(&folder, pin.as_deref(), last.as_deref())
     }
 
     /// Where the Changes pane reads git from: the worktree the chat works in, unless the user asked for its own folder.

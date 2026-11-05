@@ -153,10 +153,13 @@ describe("a second team while another is working", () => {
     // A click that lands while the app is still re-rendering can leave the menu shut: open it again until the row shows.
     // The row is clicked in the same tick that finds it: waitFor hands control back before it resolves, and a re-render
     // in that gap replaces the row, so a click after it lands on a button that is no longer on screen.
+    // A row can be off while the chat works (Team, which starts only at an idle chat): wait until it can be picked.
     await waitFor(
       () => {
         if (find().getAttribute("aria-expanded") !== "true") fireEvent.click(find());
-        fireEvent.click(screen.getByRole("menuitemradio", { name: row }));
+        const item = screen.getByRole("menuitemradio", { name: row });
+        expect(item).toBeEnabled();
+        fireEvent.click(item);
       },
       { timeout: LOAD },
     );

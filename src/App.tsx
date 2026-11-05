@@ -4,14 +4,16 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
+import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
+import { changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
+import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { worktreeCalls } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
@@ -23,7 +25,7 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
@@ -92,9 +94,10 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_BAR, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, projectLabels, sidebarProjects } from "./lib/sidebar";
 import { clip, deskHistory, FULL_MAX, LOG_MAX, readLog, replyOf, routeCandidates, windowDesk, type DeskEntry } from "./lib/desk";
-import { addDesk, deskOf, NO_DESKS, openOn, readDesks, waitingBy } from "./lib/desks";
+import { deskOf, NO_DESKS, openOn } from "./lib/desks";
 import { DeskView } from "./components/DeskView";
 import { DeskAsk } from "./components/DeskAsk";
+import { AskSheet } from "./components/AskSheet";
 import { timelineEvents } from "./lib/timeline";
 import { deskInbox, deskProjects as projectRows } from "./lib/deskBoard";
 import { useDeskStatus } from "./lib/deskStatus";
@@ -266,9 +269,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [view, setView] = useState<"chat" | "canvas">("chat");
   // The Desk: every open chat at once, in place of the chat (see DeskView). Going to a chat puts it away.
   const [desk, setDesk] = useState(startOnDesk);
-  // The Desks (see lib/desks.ts) and the messages typed on them (see lib/desk.ts), kept across launches.
-  const [desksStored, setDesks] = usePersistentState<unknown>("desk.desks", NO_DESKS);
-  const desks = useMemo(() => readDesks(desksStored), [desksStored]);
+  // One Desk holds every project (see lib/desks.ts); the messages typed on it are kept across launches.
+  const desks = NO_DESKS;
   const [deskLog, setDeskLog] = useState<DeskEntry[]>(() => readLog(readStored("desk.log", [])));
   useEffect(() => {
     try {
@@ -323,9 +325,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     else setCollapsedDefault(collapsed);
   };
   const [splitRatio, setSplitRatio] = usePersistentState("review.ratio", 0.5);
-  // On the Desk the right pane is Ask: open or not, and how wide, its own, not the project's Changes.
-  const [askCollapsed, setAskCollapsed] = usePersistentState("desk.askCollapsed", false);
-  const [askRatio, setAskRatio] = usePersistentState("desk.askRatio", 0.68);
+  // The Desk's Ask is a sheet over the board (⌘J): open or not is its own, and it never takes the board's width.
+  const [askSheet, setAskSheet] = useState(false);
   // The Changes pane's filter: everything this chat changed, or only what the last turn changed.
   const [changeScope, setChangeScope] = usePersistentState<ChangeScope>("review.scope", "session");
   const [turnFiles, setTurnFiles] = useState<ChangedFile[]>([]);
@@ -535,16 +536,22 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return capabilitiesOf(provider).supports_effort ? s : { ...s, effort: null };
   };
 
+  // Changes to a working chat's settings, waiting for it (lib/pendingSwitch.ts), from the Mac's menus or a phone. `phone`: a phone
+  // asked for it, so Auto is checked against the Mac's setting again when it is applied, and it doesn't become the project's.
+  const [switches, setSwitches] = useState<Record<string, Pending & { phone?: boolean }>>({});
+  // A change picked at the Mac while the chat works, until it is answered: now, once it finishes, or not at all.
+  const [askSwitch, setAskSwitch] = useState<{ slot: string; change: Change } | null>(null);
   /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
   const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
     to(slot)({ type: "restarting" });
     api.restartSession(slot, mode, withEffort, (change.autoApprove ?? chats.slots[slot]?.autoApprove ?? false) && capsOf(slot).supports_auto_mode, change.team ?? null).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
-  // If Stop made claude exit instead of just ending the turn, resume the session.
+  // If Stop made claude exit instead of just ending the turn, resume the session. Not for a chat a change waits for: applying it
+  // restarts claude with the new settings (see `switches`), and a resume here would race it with the old ones.
   useEffect(() => {
-    for (const [slot, s] of Object.entries(chats.slots)) if (s.status === "ended" && s.stopRequested) restart(slot, s.mode);
-  }, [chats.slots]);
+    for (const [slot, s] of Object.entries(chats.slots)) if (s.status === "ended" && s.stopRequested && !switches[slot]) restart(slot, s.mode);
+  }, [chats.slots, switches]);
 
   // Removes a chat and closes its claude. The reducer never removes the chat on screen, so after a switch this is
   // safe for the chat left behind, even though `active` here still names it.
@@ -1391,7 +1398,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const held = (slot: string) => guards.heldSlots.includes(slot);
+    // A chat stopped for a change keeps its queue for after the change (it goes with the carry-on message), and its notes too.
+    const held = (slot: string) => guards.heldSlots.includes(slot) || (!!switches[slot] && !(switches[slot].phase === "waiting" && switches[slot].when === "finished"));
     const due = queuesToSend(prevStatus.current, chats.slots).filter(({ slot }) => !held(slot));
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
@@ -1410,7 +1418,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots, paused, guards.heldSlots.join(",")]);
+  }, [chats.slots, paused, guards.heldSlots.join(","), switches]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -1538,12 +1546,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const changePermissions = (permissions: Permissions, slot = active) => {
     delete phoneMode.current[slot];
     const s = chats.slots[slot];
-    if (s && permissionsOf(s) !== permissions) setSettings(slot, permissions, workflowOf(s));
+    if (!s) return;
+    // Back to what it runs while a change waits: that change is dropped.
+    if (switches[slot] && permissionsOf(s) === permissions) return queueSwitch(slot, { permissions }, switches[slot].when);
+    if (permissionsOf(s) !== permissions) changeOrAsk(slot, { permissions }, () => setSettings(slot, permissions, workflowOf(s)));
   };
   const changeWorkflow = (workflow: Workflow, slot = active) => {
     delete phoneFlow.current[slot];
     const s = chats.slots[slot];
-    if (s && workflowOf(s) !== workflow) setSettings(slot, permissionsOf(s), workflow);
+    if (!s) return;
+    // A Team is started and left at an idle chat: its agents and canvas come with it.
+    if (workflow !== "team" && switches[slot] && workflowOf(s) === workflow) return queueSwitch(slot, { workflow }, switches[slot].when);
+    if (workflowOf(s) === workflow) return;
+    if (workflow === "team" || workflowOf(s) === "team") return isBusy(s) ? to(slot)({ type: "notice", text: "Wait until this chat has finished before starting or leaving a team." }) : setSettings(slot, permissionsOf(s), workflow);
+    changeOrAsk(slot, { workflow }, () => setSettings(slot, permissionsOf(s), workflow));
   };
 
   // Step by step's flavour as you see it (and whether Explain as you go is on): one you picked and haven't sent yet, or
@@ -1585,7 +1601,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * Switches a chat to a preset (and makes it its folder's): its claude restarts on the same session with the
    * preset's models, as for a new mode.
    */
-  const switchHarness = (h: Harness, slot = active) => unlessBackground(slot, () => applyHarness(h, slot));
+  const switchHarness = (h: Harness, slot = active) => changeOrAsk(slot, { preset: h.id }, () => unlessBackground(slot, () => applyHarness(h, slot)));
   // `remember`: it also becomes the folder's preset, for the project's next chats; a phone's switch doesn't (nobody chose it at the Mac).
   const applyHarness = (h: Harness, slot: string, remember = true) => {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
@@ -1595,6 +1611,153 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     to(slot)({ type: "restarting" });
     api.applyHarness(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
+  const putSwitch = (slot: string, p: (Pending & { phone?: boolean }) | null) =>
+    setSwitches((all) => {
+      const { [slot]: _gone, ...rest } = all;
+      return p ? { ...rest, [slot]: p } : rest;
+    });
+  // What the window knows the chat runs on: the provider's model and effort it may not (a phone changed them on the backend).
+  const currentOf = (slot: string): Current => {
+    const s = chats.slots[slot];
+    return { permissions: s ? permissionsOf(s) : "ask", workflow: s ? workflowOf(s) : "chat", preset: harnessOf(slot).id, conversation: {} };
+  };
+  const queueSwitch = (slot: string, change: Change, when: When, phone = false) => {
+    const s = chats.slots[slot];
+    if (!s) return;
+    const prev = switches[slot];
+    if (prev && prev.phase !== "waiting") return to(slot)({ type: "notice", text: "This chat is switching already. Change it again once it has." });
+    const next = queueChange(prev, change, when, currentOf(slot));
+    putSwitch(slot, next && { ...next, phone: !!prev?.phone || phone });
+    // Stopped once: another change asked for now doesn't stop it again.
+    if (next?.when === "now" && !s.stopRequested && (s.status === "running" || hasPendingPrompt(s.items))) stopIn(slot);
+  };
+  // A change picked at the Mac: made at once on a chat doing nothing, else asked about.
+  const changeOrAsk = (slot: string, change: Change, apply: () => void) => {
+    const s = chats.slots[slot];
+    if (!s || !isBusy(s)) return apply();
+    // A team's Lead and agents work together: one isn't stopped and restarted under the others.
+    if (s.orchestrator || chats.agents[slot]) return to(slot)({ type: "notice", text: "A team's Lead and agents change once they have finished their turn." });
+    setAskSwitch({ slot, change });
+  };
+  const applyConversation = (slot: string, change: ConversationChange) => {
+    to(slot)({ type: "restarting" });
+    api.conversationSettings(slot, change).then(
+      (config) => {
+        to(slot)({ type: "provider_set", provider: { id: config.provider, capabilities: config.capabilities } });
+        to(slot)({ type: "session_ready" });
+      },
+      (e) => {
+        to(slot)({ type: "session_ready" });
+        to(slot)({ type: "failed", text: errText(e) });
+      },
+    );
+  };
+  /** Marks the slot's switch: `over` lays fields on it as it is now (another render may have moved it on). */
+  const touchSwitch = (slot: string, over: Partial<Pending>) => setSwitches((all) => (all[slot] ? { ...all, [slot]: { ...all[slot], ...over } } : all));
+  const applyStep = (slot: string, s: State, step: "settings" | "preset" | "conversation", p: Pending & { phone?: boolean }) => {
+    const c = p.change;
+    if (step === "preset" && c.preset) {
+      // Only a preset the window still has (one deleted while it waited isn't swapped for the default).
+      const h = presets.find((x) => x.id === c.preset);
+      if (!h) return touchSwitch(slot, { note: "That preset is gone, so this chat stays on its own." });
+      return applyHarness(h, slot, !p.phone);
+    }
+    if (step === "conversation" && c.conversation) return applyConversation(slot, c.conversation);
+    const workflow = c.workflow ?? workflowOf(s);
+    const settle = (permissions: Permissions) => {
+      // Nothing left to change (the Auto asked for was refused): no restart for nothing.
+      if (permissions === permissionsOf(s) && workflow === workflowOf(s)) return;
+      if (p.phone) {
+        if (c.permissions) phoneMode.current[slot] = permissions;
+        if (c.workflow) phoneFlow.current[slot] = c.workflow;
+      }
+      setSettings(slot, permissions, workflow);
+    };
+    if (!(p.phone && c.permissions === "auto")) return settle(c.permissions ?? permissionsOf(s));
+    // Auto from a phone is the Mac's to allow, then as now: it may have been turned off while the change waited. Nothing else is
+    // done while it is asked; the reason is said once everything is done (a restart clears what the chat's banner says).
+    touchSwitch(slot, { inFlight: true });
+    remoteContext().then(
+      (ctx) => {
+        settle(ctx.allowAuto ? "auto" : permissionsOf(s));
+        touchSwitch(slot, { inFlight: false, ...(ctx.allowAuto ? {} : { note: "Auto from a phone was turned off on this Mac, so this chat stays on Ask." }) });
+      },
+      () => touchSwitch(slot, { inFlight: false, note: "Lantern couldn't read its Settings, so this chat stays on Ask." }),
+    );
+  };
+  // The end of a switch: what was refused along the way is said now, after any restart and the carry-on message.
+  const endSwitch = (slot: string, p: Pending) => {
+    putSwitch(slot, null);
+    if (p.note) to(slot)({ type: "notice", text: p.note });
+  };
+  // A waiting change is applied once the chat can take it, a restart at a time; after a stop, the agent is told to carry on.
+  useEffect(() => {
+    for (const [slot, p] of Object.entries(switches)) {
+      const s = chats.slots[slot];
+      if (!s || s.status === "asleep") {
+        putSwitch(slot, null);
+        continue;
+      }
+      if (p.inFlight) continue;
+      if (p.phase === "continuing") {
+        if (s.status === "ended") endSwitch(slot, p);
+        if (s.status !== "idle") continue;
+        // What the user queued behind the stopped turn is theirs: it goes as their message, with Lantern's note in front.
+        if (s.queued.length) {
+          to(slot)({ type: "queue_set", items: [] });
+          sendIn(slot, `${CONTINUE_TEXT}\n\n${s.queued.join("\n\n")}`);
+        } else sendIn(slot, CONTINUE_TEXT, undefined, true);
+        endSwitch(slot, p);
+        continue;
+      }
+      if (p.phase === "waiting" ? !switchReady(s, p) : s.status !== "idle" && s.status !== "ended") continue;
+      const stopped = p.phase === "waiting" ? p.when === "now" && wasStopped(s) : !!p.stopped;
+      const next = nextStep(p.change);
+      if (!next) {
+        if (stopped) putSwitch(slot, { ...p, phase: "continuing", stopped });
+        else endSwitch(slot, p);
+        continue;
+      }
+      // A claude the stop made exit is started again first, so the provider's settings meet a running chat.
+      if (next.step === "conversation" && s.status === "ended") {
+        putSwitch(slot, { ...p, phase: "applying", stopped });
+        restart(slot, s.mode);
+        continue;
+      }
+      putSwitch(slot, { ...p, change: next.rest, phase: "applying", stopped });
+      applyStep(slot, s, next.step, p);
+    }
+  }, [chats.slots, switches]);
+  // A phone's change to a working chat (the backend checked it as it checks one to an idle chat; this window checks it again):
+  // held until it is applied. Not a team's Lead or agent, which a phone doesn't switch.
+  const remoteQueueRef = useRef<(r: { slot: string; change: unknown; when: string }) => void>(() => {});
+  // What was waiting when the Settings read comes back, not when the phone asked.
+  const queueSwitchRef = useRef(queueSwitch);
+  queueSwitchRef.current = queueSwitch;
+  remoteQueueRef.current = (r) => {
+    const s = chats.slots[r.slot];
+    const change = changeOf(r.change);
+    const when = r.when === "now" || r.when === "finished" ? r.when : null;
+    if (!s || !change || !when || s.orchestrator || chats.agents[r.slot] || s.status === "asleep" || s.backgroundTasks.length > 0) return;
+    // The provider's settings are checked by the backend when they are applied.
+    if (change.conversation) return queueSwitch(r.slot, change, when, true);
+    // The rest as a phone's change to an idle chat is (any window can emit this): a preset this window lists, Auto only where
+    // Settings let phones and the provider has one, no Claude preset on another provider.
+    remoteContext().then((ctx) => {
+      const onId = s.provider ? providerIdOf(s.provider) : CLAUDE;
+      const target = { known: true, idle: true, asleep: false, background: 0, provider: onId === CLAUDE ? null : { name: providerName(onId), auto: capabilitiesOf(s.provider).supports_auto_mode } };
+      const one = change.permissions ? { permissions: change.permissions } : change.workflow ? { workflow: change.workflow } : { preset: change.preset ?? "" };
+      if (checkRemoteSwitch(one, target, ctx)) return;
+      queueSwitchRef.current(r.slot, change, when, true);
+    });
+  };
+  useEffect(() => {
+    const off = api.onRemoteQueueSwitch((r) => remoteQueueRef.current(r)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
+    };
+  }, []);
+
   // Changing model or effort on a chat with a preset makes it Custom: that preset with the change.
   const customize = (patch: Partial<Harness>) => {
     const custom = customOf(harnessOf(active), patch);
@@ -1673,9 +1836,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       live = false;
     };
   }, [active, state.folder, state.changedFiles, state.status, turnAsked, turnTo, turnKnown]);
-  // The worktree this chat is working in, when Claude entered one itself: Git and Branch read from it (the backend
-  // decides from the chat's latest edit), and `worktreeKey` makes them read again when it, or the user's choice of the
-  // chat's own folder instead, changes.
+  // The worktree this chat is working in: one it was put in (Claude's enter_worktree, or the picker), else the one Claude
+  // entered itself (the backend decides from the chat's latest edit). Git and Branch read from it, and `worktreeKey` makes
+  // them read again when it, or the user's choice of the chat's own folder instead, changes. `worktreeCalls` changes as
+  // soon as Claude's enter_worktree has been answered, before any edit.
+  const pinCalls = worktreeCalls(state.items);
   const [worktree, setWorktree] = useState<{ slot: string; view: WorkView | null } | null>(null);
   useEffect(() => {
     if (!state.folder) return setWorktree(null);
@@ -1684,13 +1849,33 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return () => {
       live = false;
     };
-  }, [active, state.folder, state.changedFiles, state.status]);
+  }, [active, state.folder, state.changedFiles, state.status, pinCalls]);
   const shownWorktree = worktree?.slot === active ? worktree.view : null;
   const worktreeKey = shownWorktree ? `${shownWorktree.path}:${shownWorktree.main}` : "";
   const chooseWorktreeView = (main: boolean) => {
     if (!shownWorktree) return;
     const slot = active;
     api.setViewMain(slot, main).then(() => setWorktree((w) => (w?.slot === slot && w.view ? { slot, view: { ...w.view, main } } : w)), () => {});
+  };
+  // The project's worktrees, for the picker beside the chip.
+  const [worktreeList, setWorktreeList] = useState<{ slot: string; list: Worktree[] } | null>(null);
+  useEffect(() => {
+    if (!state.folder) return setWorktreeList(null);
+    let live = true;
+    api.listWorktrees(active).then((list) => live && setWorktreeList({ slot: active, list }), () => live && setWorktreeList(null));
+    return () => {
+      live = false;
+    };
+  }, [active, state.folder, state.status, pinCalls]);
+  const worktrees = worktreeList?.slot === active ? worktreeList.list : [];
+  // The user's pick: that worktree, or (null) whichever the chat's latest edit says again.
+  const pickWorktree = (path: string | null) => {
+    const slot = active;
+    api.pinWorktree(slot, path).then(
+      () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
+      // Only a worktree removed since the list was read is refused: read the list again.
+      () => api.listWorktrees(slot).then((list) => setWorktreeList({ slot, list }), () => {}),
+    );
   };
   // "Git": everything uncommitted, whoever changed it (an interrupted command, another editor). Asked for only while
   // it's the filter, since it reads git.
@@ -1714,7 +1899,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const peek = branchPeek?.slot === active ? branchPeek : null;
   const reviewing = ((flavour === "review" || reviewTarget !== null) && state.items.length > 0) || peek !== null;
   const reviewPr = peek || !reviewing ? null : reviewTarget ? reviewTarget.pr : prNumberOf(state.items);
-  const reviewBranch = reviewing && reviewPr === null;
+  // A worktree the chat was put in is looked at the same way: its branch since it left its base, without a review.
+  const pinnedBranch = !reviewing && shownWorktree !== null && shownWorktree.pinned && !shownWorktree.main;
+  const reviewBranch = (reviewing && reviewPr === null) || pinnedBranch;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
   const hintKey = hints.join("\n");
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
@@ -1728,6 +1915,16 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     prPicked.current = key;
     setChangeScope(reviewPr !== null ? "pr" : "branch");
   }, [active, reviewing, reviewPr]);
+  // Put in a worktree (by Claude, or by the user's pick): its branch is what the pane shows, once for each worktree.
+  const pinPicked = useRef<string | null>(null);
+  const pinnedPath = shownWorktree?.pinned && !shownWorktree.main ? shownWorktree.path : null;
+  useEffect(() => {
+    if (pinnedPath === null) return void (pinPicked.current = null);
+    const key = `${active}:${pinnedPath}`;
+    if (pinPicked.current === key) return;
+    pinPicked.current = key;
+    if (!reviewing) setChangeScope("branch");
+  }, [active, pinnedPath, reviewing]);
   const [branchFiles, setBranchFiles] = useState<{ key: string; review: BranchReview | null; files: ChangedFile[]; error: string | null } | null>(null);
   useEffect(() => {
     if (scope !== "branch" || !state.folder) return;
@@ -1773,7 +1970,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     setReviewCollapsed(false);
   };
 
-  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskCollapsed(!askCollapsed) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
+  useAction("toggle-changes", () => (desk && Object.keys(chats.slots).length > 0 ? setAskSheet((open) => !open) : setReviewCollapsed(!reviewCollapsed)), !!state.folder || desk);
 
   // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
   // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
@@ -2036,11 +2233,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const sleepAfter = useSleepMinutes();
   const idleClock = useRef<Record<string, number>>({});
   // A team goes to sleep as one, once every member has rested: its Lead's slot stands for it in the clock.
-  const sleepSlots = (slots: string[]) => {
+  const sleepSlots = (slots: string[], idleMs: number) => {
     // What each one is, saved before any of them is put to sleep (an agent's is its place in the team: its Lead's session).
     const saved = Object.fromEntries(slots.map((slot) => [slot, savedChatOf(slot, chats.slots, active, drafts.current, titles, chats.agents)]));
     for (const slot of slots) {
       const s = chats.slots[slot];
+      // What it looked like when it went (sleep.log), to tell a chat that was idle from one that was at work.
+      api.sleepLog(sleepNote(slot, s, slots.length > 1 ? "idle-team" : "idle", idleMs)).catch(() => {});
       delete idleClock.current[slot];
       delete relaunch.current[slot];
       // Asleep first, so the end of its process (which closing it makes) is not taken for a crash.
@@ -2060,12 +2259,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
     idleClock.current = clock;
     for (const slot of due) {
+      const idleMs = Date.now() - clock[slot];
       // An agent has its claude stopped and stays in its team and on the canvas (the backend says when it has: it refuses when
       // the agent is in the middle of something). A Lead stands for its team: the Lead first in the list, its agents after it.
       if (agents.includes(slot)) {
         delete idleClock.current[slot];
+        if (chats.slots[slot]) api.sleepLog(sleepNote(slot, chats.slots[slot], "idle-agent", idleMs)).catch(() => {});
         api.sleepAgent(slot).catch(() => {});
-      } else sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot]);
+      } else sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot], idleMs);
     }
   };
   const sweepNow = useRef(sleepSweep);
@@ -2503,7 +2704,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const id = s?.provider ? providerIdOf(s.provider) : ((s?.sessionId && providerBySession[s.sessionId]) || CLAUDE);
     return id !== CLAUDE ? providerName(id) : null;
   };
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel);
+  const presetLabel = (id: string) => presets.find((h) => h.id === id)?.name ?? id;
+  const pendingOf = (slot: string): WindowPending | null => {
+    const p = switches[slot];
+    if (!p || p.phase === "continuing") return null;
+    const { permissions, workflow, preset } = p.change;
+    return { when: p.when, text: describeChange(p.change, presetLabel), ...(permissions ? { permissions } : {}), ...(workflow ? { workflow } : {}), ...(preset ? { preset } : {}) };
+  };
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel, pendingOf);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});
@@ -2588,6 +2796,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const deskCandidates = routeCandidates(chats, askOpen);
   const deskTargets = deskCandidates.map((c) => ({ slot: c.id, title: c.title, where: c.project }));
   const deskProjects = askFolders.map((folder, i) => ({ folder, label: projectLabels(askFolders)[i] }));
+  // Ask is a sheet over the Desk: it goes with it.
+  useEffect(() => {
+    if (!deskShown) setAskSheet(false);
+  }, [deskShown]);
   // The board's to-do counts, read only while the Desk is on screen.
   const deskTodos = useTodoCounts(deskShown ? deskFolders : []);
   // And how its repositories stand (branches, pull requests, releases): the Mac's, for this Desk's projects only.
@@ -2794,6 +3006,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const canStart = !!state.folder && state.status !== "starting";
   useAction("session-history", toggleHistory, true);
   useAction("show-desk", () => { setDeskPage(null); setDesk(true); }, Object.keys(openByProject).length > 0);
+  // The Desk's Ask, from anywhere on it; deskShown is settled by here.
+  useAction("ask-desk", () => setAskSheet((open) => !open), deskShown);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
@@ -2823,6 +3037,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
     onProjectNotes: (folder: string) => setEditingNotes(folder),
+    onOpenInDesk: (folder: string) => {
+      setDeskPage(folder);
+      setDesk(true);
+    },
     onSetup: (folder: string) => setSettingUp(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
@@ -2978,6 +3196,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
+      pendingSwitch={
+        switches[active] && switches[active].phase === "waiting"
+          ? { text: describeChange(switches[active].change, presetLabel), when: switches[active].when, onNow: () => queueSwitch(active, {}, "now"), onCancel: () => putSwitch(active, null) }
+          : null
+      }
       history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
       skillIndex={skillIndex}
@@ -3042,9 +3265,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
-          reviewCollapsed={deskShown ? askCollapsed : reviewCollapsed}
+          reviewCollapsed={deskShown ? !askSheet : reviewCollapsed}
           onOpenFolder={openFolder}
-          onToggleReview={deskShown ? () => setAskCollapsed(!askCollapsed) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
+          onToggleReview={deskShown ? () => setAskSheet((open) => !open) : state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
@@ -3083,10 +3306,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} onDismiss={guards.dismiss} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
-          ratio={deskShown ? askRatio : splitRatio}
-          collapsed={deskShown ? askCollapsed : reviewCollapsed || !state.folder}
+          ratio={splitRatio}
+          collapsed={deskShown ? true : reviewCollapsed || !state.folder}
           scope={deskShown ? "desk" : showCanvas ? "canvas" : (state.folder ?? "")}
-          onRatio={deskShown ? setAskRatio : setSplitRatio}
+          onRatio={setSplitRatio}
           left={
             deskShown ? (
               <ErrorBoundary name="desk">
@@ -3107,20 +3330,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   page={pageOn}
                   onPage={setDeskPage}
                   onNewChat={sidebarHandlers.onNewChatIn}
-                  desks={{
-                    value: desks,
-                    waiting: waitingBy(desks, openByProject),
-                    projects: (() => {
-                      const all = [...new Set([...Object.keys(openByProject), ...desks.list.flatMap((d) => d.projects)])];
-                      const labels = projectLabels(all);
-                      return all.map((folder, i) => ({ folder, label: labels[i] }));
-                    })(),
-                    onChange: setDesks,
-                    onAdd: (name) => {
-                      const next = addDesk(desks, name, `desk-${Date.now().toString(36)}`);
-                      if (next) setDesks(next);
-                    },
-                  }}
+                  onStartChat={leaveDesk((folder: string, first: string) => startFresh(folder, false, false, first))}
+                  onStartTodo={leaveDesk(startTodo)}
                   onOpen={switchTo}
                   onGo={goToInbox}
                   onDecide={answerFromInbox}
@@ -3138,6 +3349,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     refreshRepos();
                     linear.refresh();
                   }}
+                  onAsk={() => setAskSheet(true)}
                   linear={{ work: linear.work, teamOf: teamOfRepo(deskRepos, linear.work, linearTeams) }}
                 />
               </ErrorBoundary>
@@ -3195,25 +3407,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           }
           right={
             <>
-            {deskShown && (
-              <ErrorBoundary name="desk ask">
-                <DeskAsk
-                  entries={deskLog.filter((e) => e.desk === desks.on)}
-                  targets={deskTargets}
-                  across={askFolders.length > 1}
-                  about={pageOn ? deskProjects[0]?.label : undefined}
-                  canSend={agentReady}
-                  onSend={deskSend}
-                  onSendTo={deskSendTo}
-                  onStartIn={(entry, folder) => deskStartIn(entry, folder)}
-                  onOpenPast={(hit) => {
-                    setDesk(false);
-                    openSession(hit.id, hit.folder);
-                  }}
-                  onOpen={switchTo}
-                />
-              </ErrorBoundary>
-            )}
             {/* Kept while the Desk is up (unsaved edits in Files live in it), only not shown. */}
             <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
@@ -3231,6 +3424,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 scope={scope}
                 onScope={setChangeScope}
                 worktree={shownWorktree ? { name: shownWorktree.name, branch: shownWorktree.branch, main: shownWorktree.main, onToggle: () => chooseWorktreeView(!shownWorktree.main) } : undefined}
+                worktrees={worktrees.length > 0 ? { list: worktrees, current: shownWorktree && !shownWorktree.main ? shownWorktree.path : null, pinned: shownWorktree?.pinned ?? false, onPick: pickWorktree } : undefined}
                 scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
                 gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
                 pr={reviewPr}
@@ -3285,6 +3479,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             </>
           }
         />
+        {deskShown && askSheet && (
+          <AskSheet onClose={() => setAskSheet(false)}>
+            <ErrorBoundary name="desk ask">
+              <DeskAsk
+                entries={deskLog.filter((e) => e.desk === desks.on)}
+                targets={deskTargets}
+                across={askFolders.length > 1}
+                about={pageOn ? deskProjects[0]?.label : undefined}
+                canSend={agentReady}
+                onSend={deskSend}
+                onSendTo={deskSendTo}
+                onStartIn={(entry, folder) => deskStartIn(entry, folder)}
+                onOpenPast={(hit) => {
+                  setDesk(false);
+                  openSession(hit.id, hit.folder);
+                }}
+                onOpen={switchTo}
+              />
+            </ErrorBoundary>
+          </AskSheet>
+        )}
         </div>
         </div>
         <SettingsView
@@ -3376,6 +3591,25 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           />
         )}
         {settingUp && <ProjectSetupDialog folder={settingUp} saved={setupBy[settingUp]} onSave={(setup: ProjectSetup) => setSetupBy({ ...setupBy, [settingUp]: setup })} onClose={() => setSettingUp(null)} />}
+        {askSwitch && chats.slots[askSwitch.slot] && (
+          <div className="app-modal">
+            <ConfirmDialog
+              title="Change this chat's settings now?"
+              confirmLabel="Apply now"
+              busyLabel="Applying…"
+              busy={false}
+              alternative={{ label: "When it finishes", onClick: () => (queueSwitch(askSwitch.slot, askSwitch.change, "finished"), setAskSwitch(null)) }}
+              onConfirm={() => (queueSwitch(askSwitch.slot, askSwitch.change, "now"), setAskSwitch(null))}
+              onCancel={() => setAskSwitch(null)}
+            >
+              <p>
+                {agentName(chats.slots[askSwitch.slot].provider)} is working. <strong>Apply now</strong> stops its turn, switches to {describeChange(askSwitch.change, presetLabel)}, and tells it to carry on where it left off.{" "}
+                <strong>When it finishes</strong> switches once its turn is done, with nothing stopped.
+                {chats.slots[askSwitch.slot].backgroundTasks.length > 0 && " Switching restarts it, which also stops its background tasks."}
+              </p>
+            </ConfirmDialog>
+          </div>
+        )}
         {closingFull && (
           <div className="app-modal">
             <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>

@@ -37,11 +37,11 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     expect(deskButton()).toHaveAttribute("aria-pressed", "true");
-    // Ask is the right pane, and its button puts it away and back.
-    expect(within(ask()!).getByText(/Nothing asked here yet/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument());
+    // Ask is a sheet: the title bar's panel button opens it, and puts it away again.
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    expect(within(await screen.findByRole("region", { name: "Ask" })).getByText(/Nothing asked here yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide side panel" }));
+    await waitFor(() => expect(ask()).toBeNull());
     // The Desk has the chat's project, whose tile drops the chat down.
     const table = within(desk()!).getByRole("region", { name: "Projects" });
     fireEvent.click(within(table).getByRole("button", { name: "Show the chats of acme-api" }));
@@ -55,6 +55,58 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(desk()).toBeInTheDocument());
     fireEvent.click(deskButton());
     await waitFor(() => expect(desk()).toBeNull());
+  });
+
+  it("opens Ask from the bar at the foot of the Desk, and ⌘J opens and puts it away", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(ask()).toBeNull();
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    expect(await screen.findByRole("region", { name: "Ask" })).toBeInTheDocument();
+    // A second press within 150 ms is dropped as the same keystroke arriving twice (see runAction).
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    await waitFor(() => expect(ask()).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+    expect(await screen.findByRole("region", { name: "Ask" })).toBeInTheDocument();
+  });
+
+  it("puts the Ask sheet away on Escape and on a click behind it, but not on a click inside it", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    const open = async () => {
+      if (!ask()) fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+      return screen.findByRole("region", { name: "Ask" });
+    };
+    const inside = await open();
+    fireEvent.mouseDown(inside);
+    expect(ask()).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(ask()).toBeNull());
+    await open();
+    fireEvent.mouseDown(document.querySelector(".desk-ask-overlay")!);
+    await waitFor(() => expect(ask()).toBeNull());
+  });
+
+  it("closes the Ask sheet when the Desk is left, so it is not waiting when the Desk comes back", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Ask across your projects" }));
+    await screen.findByRole("region", { name: "Ask" });
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeNull());
+    fireEvent.click(deskButton());
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    expect(ask()).toBeNull();
+  });
+
+  it("opens a project's page on the Desk from its sidebar right-click menu", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.contextMenu(document.querySelector(".sidebar .sb-header")!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in Desk" }));
+    expect(await screen.findByRole("region", { name: "Project acme-api" })).toBeInTheDocument();
+    expect(within(desk()!).getByRole("region", { name: "Where things stand" })).toBeInTheDocument();
   });
 
   it("goes back to the Desk from a chat opened from it, but not from one left by the Desk's own button", async () => {
@@ -77,7 +129,10 @@ describe("the Desk in the app", () => {
     fireEvent.click(within(within(desk()!).getByRole("region", { name: "Projects" })).getByRole("button", { name: "acme-api" }));
     const page = () => screen.getByRole("region", { name: "Project acme-api" });
     expect(within(page()).getByRole("heading", { name: "acme-api" })).toBeInTheDocument();
+    await openAsk();
     expect(within(ask()!).getByRole("heading", { name: "Ask about acme-api" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Ask" }));
+    await waitFor(() => expect(ask()).toBeNull());
     // Its worktrees, with the Storage scan's word on each once it has scanned.
     const wts = await within(page()).findByRole("region", { name: "Worktrees" });
     fireEvent.click(await within(wts).findByRole("button", { name: "Scan now" }));
@@ -88,10 +143,17 @@ describe("the Desk in the app", () => {
     await waitFor(() => expect(page()).toBeInTheDocument());
     fireEvent.click(within(page()).getByRole("button", { name: "‹ All projects" }));
     await waitFor(() => expect(within(desk()!).getByRole("region", { name: "Projects" })).toBeInTheDocument());
+    await openAsk();
     expect(within(ask()!).getByRole("heading", { name: "Ask" })).toBeInTheDocument();
   });
 
+  const openAsk = async () => {
+    if (!ask()) fireEvent.click(screen.getByRole("button", { name: /^Ask (across|about)/ }));
+    return screen.findByRole("region", { name: "Ask" });
+  };
+
   const type = async (text: string) => {
+    await openAsk();
     const box = await screen.findByRole("textbox", { name: "Tell Lantern" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeDisabled());
     fireEvent.change(box, { target: { value: text } });
@@ -121,6 +183,7 @@ describe("the Desk in the app", () => {
     const { default: App } = await import("./App");
     render(<App startOnDesk />);
     await waitFor(() => expect(desk()).toBeInTheDocument());
+    await openAsk();
     const to = screen.getByRole("combobox", { name: "Send to" });
     const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
     fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
@@ -155,6 +218,7 @@ describe("the Desk in the app", () => {
   it("sends what is typed to the chat picked in the box, and says where it went", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
+    await openAsk();
     const to = screen.getByRole("combobox", { name: "Send to" });
     const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
     fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });

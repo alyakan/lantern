@@ -842,6 +842,27 @@ async function playAside(aside: string, text: string) {
   await done();
 }
 
+/** A short turn that ends by itself ("quick"), with nothing asked. */
+async function playQuickTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(800);
+  await streamText(send, "q1:0", "Done.");
+  await send({ kind: "turn_done", is_error: false, result: "Done.", cost_usd: 0, duration_ms: 800, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
+/** A turn that works until it is stopped ("keep going"), then ends as a stopped one does. */
+async function playLongTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await send({ kind: "tool_started", parent: null, tool_use_id: "long-1", name: "Bash", summary: "npm test" });
+  await new Promise<void>((resolve) => (pendingInterrupt[slot] = resolve));
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "long-1", is_error: true, output: "interrupted" });
+  await send({ kind: "turn_done", is_error: true, result: null, cost_usd: 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
+}
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -1362,7 +1383,7 @@ function mockDashboardRun(values: Record<string, unknown>, form = "org"): Dashbo
 
 // The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
-  id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
+  id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, shared: false, ...over,
 });
 let mockStorageItems = [
   mockStorageItem("a1", "worktree", "acme-api/wt-retry", 3.2, { ticked: true, note: "A worktree of acme-api on lantern/retry. Removing it leaves the branch and its commits in the repository." }),
@@ -1380,6 +1401,12 @@ let mockStorageItems = [
   mockStorageItem("g2", "download", "Downloads/Screen Recording.mov", 1.2, { removal: "trash", idle_days: 30, note: "Yours: it goes to the Trash." }),
   mockStorageItem("a3", "worktree", "web-dashboard/wt-charts", 0.9, { within: null, idle_days: 21 }),
   mockStorageItem("c3", "build_output", "acme-api/wt-retry/target", 2.2, { within: "a1", ticked: true, note: "Inside the worktree above: it goes with it." }),
+  mockStorageItem("c4", "build_output", "actions-runner/_work/cargo-target", 19.4, { risk: "review", warning: "Kept on purpose so CI stays quick: the next run takes longer.", idle_days: 0 }),
+  mockStorageItem("h1", "archive", "2026-10-24/Lantern 2026-10-24, 14.03.xcarchive", 1.2, { risk: "review", warning: "Its debug symbols go with it: keep it if you read crash reports for this build in Xcode.", idle_days: 11 }),
+  mockStorageItem("h2", "archive", "2026-11-04/Lantern 2026-11-04, 09.12.xcarchive", 0.4, { risk: "review", warning: "One of your 3 newest archives: you may still want to export or upload it again.", idle_days: 0 }),
+  mockStorageItem("i1", "temp", "Chrome copy ylXeHR", 1.4, { ticked: true, shared: true, idle_days: 6, note: "A copy of Chrome it made when it started and never removed." }),
+  mockStorageItem("i2", "temp", "Chrome copy UcFwKy", 1.4, { risk: "blocked", shared: true, warning: "Chrome is running and may be using this copy: quit Chrome first.", idle_days: 0 }),
+  mockStorageItem("i3", "temp", "Temporary caches/com.apple.dt.Instruments", 4.9, { ticked: true, idle_days: 147 }),
 ];
 let mockStorageScannedAt: number | null = null;
 // The Memory tab's snapshot in the browser preview: a 16 GB Mac with the usual apps, sizes drifting a little on each read so the bars move.
@@ -1617,8 +1644,17 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
-          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false } : null;
+          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false, pinned: false } : null;
         case "set_view_main":
+          return undefined;
+        case "list_worktrees":
+          return new URLSearchParams(location.search).get("worktree")
+            ? [
+                { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix" },
+                { path: `${FOLDER}/.claude/worktrees/new-sheet`, name: "new-sheet", branch: "worktree-new-sheet" },
+              ]
+            : [];
+        case "pin_worktree":
           return undefined;
         case "branch_review":
           return {
@@ -1886,7 +1922,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
             turnCount[slot] = (turnCount[slot] ?? -1) + 1;
             return turnCount[slot];
           }
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : /\bkeep going\b/i.test(String(a.text)) ? playLongTurn(slot) : /\bquick\b|^\[Lantern: the user changed this chat's settings/i.test(String(a.text)) ? playQuickTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
@@ -1914,6 +1950,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "set_subagents":
         case "set_agent_limit":
         case "keep_awake":
+        case "sleep_log":
         case "sidebar_menu":
           return null;
         case "list_permission_rules":
@@ -2087,7 +2124,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           void emit("network-changed");
           return true;
         case "storage_state":
-          return { items: mockStorageScannedAt ? mockStorageItems : [], scanning: false, progress: "", scanned_at: mockStorageScannedAt, free_bytes: 8_300_000_000, snapshots: 0, notes: [], deleting: false };
+          return { items: mockStorageScannedAt ? mockStorageItems : [], scanning: false, progress: "", scanned_at: mockStorageScannedAt, free_bytes: 8_300_000_000, total_bytes: 494_000_000_000, purgeable_bytes: mockStorageScannedAt ? 2_600_000_000 : null, snapshots: 0, notes: [], deleting: false };
         case "storage_scan":
           mockStorageScannedAt = Date.now();
           void emit("storage-changed");

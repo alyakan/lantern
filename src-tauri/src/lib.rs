@@ -141,6 +141,13 @@ fn keep_awake(awake: State<'_, awake::Awake>, working: bool, allowed: bool) {
     awake.update(working, allowed);
 }
 
+/// The window says what a chat looked like when it put it to sleep (see lib/idleSleep.ts `sleepNote`): one line in sleep.log.
+#[tauri::command]
+fn sleep_log(line: String) {
+    let line: String = line.chars().filter(|c| !c.is_control()).take(400).collect();
+    remote::push_log::SLEEP.note(&format!("window {line}"));
+}
+
 /// The user changed how many agents may run at once (or the window started and says what it was set to).
 #[tauri::command]
 fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
@@ -190,6 +197,13 @@ fn phone_diff(path: &str, d: &FileDiff) -> String {
 
 /// A file a message names that the chat never edited, as a phone reads it: its changes since the last commit, or the
 /// whole file as one hunk of unchanged lines when it has none. Err when there is no such file.
+/// Where a review of the checked-out branch may be: the folder the Changes pane reads (the worktree the chat last edited
+/// in), then the chat's own folder (see pr::review_branch).
+fn review_folders(s: &slots::Slot) -> Result<Vec<std::path::PathBuf>, String> {
+    let (view, own) = (s.view_folder()?, s.folder()?);
+    Ok(if view == own { vec![view] } else { vec![view, own] })
+}
+
 /// A file as the checked-out branch changed it, from where it left the default branch: only a text file in that repository,
 /// no bigger than a named file may be (outside::MAX_BYTES).
 fn branch_file(folder: &std::path::Path, path: &str) -> Result<FileDiff, String> {
@@ -245,10 +259,11 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
     // app's, so trying things out never touches them.
     let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
     let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
-    // What the Mac did about each push (see remote/push_log.rs); a dev run keeps none.
+    // What the Mac did about each push, and each chat it put to sleep (see remote/push_log.rs); a dev run keeps none.
     if dev_file.is_none() {
         if let Ok(dir) = app.path().app_data_dir() {
             remote::push_log::set_path(dir.join("push.log"));
+            remote::push_log::SLEEP.set_path(dir.join("sleep.log"));
         }
     }
     let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
@@ -620,6 +635,10 @@ impl remote::gateway::Host for RemoteHost {
         self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
     }
 
+    fn queue_switch(&self, slot: &str, change: serde_json::Value, when: remote::protocol::RemoteWhen) -> Result<(), String> {
+        self.app.emit("remote-queue-switch", serde_json::json!({ "slot": slot, "change": change, "when": when.as_str() })).map_err(|e| e.to_string())
+    }
+
     fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -781,8 +800,8 @@ impl remote::gateway::Host for RemoteHost {
             let range = match target.pr {
                 Some(pr) => pr_range(&state, s.folder()?, Some(u32::try_from(pr).map_err(|_| "That pull request number is too big.")?), vec![path.clone()]).await?,
                 None => {
-                    let (folder, hints, base) = (s.view_folder()?, vec![path.clone()], target.base.clone());
-                    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
+                    let (folders, hints, base) = (review_folders(&s)?, vec![path.clone()], target.base.clone());
+                    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&folders, &hints, base.as_deref()).map(|(range, _)| range)).await.map_err(|e| e.to_string())??
                 }
             };
             // Only a file in the repository: pr::file reads it from the review's two commits there.
@@ -1149,13 +1168,25 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // And the todo_* tools (see todos.rs), for the chat's project, naming this chat on what it adds or ticks.
     let todo_store = state.todos.clone();
     let (chat_id, hub) = (slot_id.to_string(), state.remote.hub.clone());
+    // And enter_worktree (see workdir.rs): it sets what the chat's slot reads Git and Branch from, so the bridge shares the
+    // slot's two cells (not the slot itself, which owns the bridge).
+    let (pin, view_main) = (slot.pin.clone(), slot.view_main.clone());
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
         let dashboards = dashboards.clone();
         let (todo_store, chat_id, hub) = (todo_store.clone(), chat_id.clone(), hub.clone());
+        let (pin, view_main) = (pin.clone(), view_main.clone());
         Box::pin(async move {
+            if tool == workdir::TOOL {
+                let result = tauri::async_runtime::spawn_blocking(move || workdir::call(folder.as_deref(), &pin, &view_main, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+                let (allow, text) = match result {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             if todos::TOOLS.contains(&tool.as_str()) {
                 let chat = (chat_id.clone(), hub.chat(&chat_id).and_then(|c| c.title));
                 let result = tauri::async_runtime::spawn_blocking(move || todos::call(&todo_store, folder.as_deref(), chat, &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
@@ -2748,7 +2779,7 @@ fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<()
 async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>, base: Option<String>) -> Result<pr::BranchReview, String> {
     let s = state.slots.get(&slot)?;
     let hints = hints.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
 }
 
 /// The worktree the chat is working in (Claude entered one itself), which the Changes pane reads from instead of the
@@ -2758,6 +2789,8 @@ struct WorkView {
     #[serde(flatten)]
     folder: workdir::WorkFolder,
     main: bool,
+    /// The chat was put in it (`enter_worktree`, or the user's pick), not found from where it edited.
+    pinned: bool,
 }
 
 #[tauri::command]
@@ -2769,10 +2802,31 @@ async fn work_folder(state: State<'_, AppState>, slot: String) -> Result<Option<
             s.view_main.store(false, std::sync::atomic::Ordering::Relaxed);
             return None;
         };
-        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed) })
+        let pinned = s.pin.lock().unwrap().as_deref() == Some(std::path::Path::new(&folder.path));
+        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed), pinned })
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The project's linked worktrees, for the Changes pane's picker.
+#[tauri::command]
+async fn list_worktrees(state: State<'_, AppState>, slot: String) -> Result<Vec<workdir::WorkFolder>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || s.folder().map(|f| workdir::list(&f)).unwrap_or_default()).await.map_err(|e| e.to_string())
+}
+
+/// The user's pick in the Changes pane: put the chat in this worktree (`path` must be one of the project's linked worktrees),
+/// or with none let its latest edit decide again. Checked as `enter_worktree`'s is.
+#[tauri::command]
+async fn pin_worktree(state: State<'_, AppState>, slot: String, path: Option<String>) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = s.folder()?;
+        workdir::call(folder.to_str(), &s.pin, &s.view_main, &serde_json::json!({ "path": path })).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Chooses between the worktree and the chat's own folder for the Changes pane.
@@ -2849,12 +2903,12 @@ async fn summary_of(state: &AppState, slot: &str, scope: Option<changes::Scope>,
     }
     if scope == Some(changes::Scope::Branch) {
         let hints = hints.unwrap_or_default();
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         return tauri::async_runtime::spawn_blocking(move || {
             let rows = outside::uncommitted(&s.view_folder()?).ok_or("This folder isn't in a git repository.")?;
-            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed }).collect();
+            let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed, moved_from: None }).collect();
             out.sort_by(|a, b| a.path.cmp(&b.path));
             Ok(out)
         })
@@ -4055,6 +4109,7 @@ pub fn run() {
             claude_login,
             sidebar_menu,
             keep_awake,
+            sleep_log,
             list_providers,
             list_endpoints,
             save_endpoints,
@@ -4132,6 +4187,8 @@ pub fn run() {
             stop_task,
             branch_review,
             work_folder,
+            list_worktrees,
+            pin_worktree,
             set_view_main,
             set_model,
             recent_folders,

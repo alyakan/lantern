@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../api";
-import { GROUPS, groupOf, idleText, isTicked, kindColour, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText, type Segment } from "../lib/storage";
+import { diskBar, diskFigures, GROUPS, groupOf, idleText, isTicked, kindColour, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText, type DiskFigures, type Segment } from "../lib/storage";
 import { relativeTime } from "../lib/time";
 import type { StorageItem, StorageKind, StorageView } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -30,6 +30,28 @@ export const suggestedCount = (view: StorageView | null) => view?.items.filter((
 export const FREE_UP_SPACE_REQUEST = "Free up disk space: scan this Mac with the storage tools, then mark what is safe to delete (storage_suggest) with a short reason each. I'll review it in the Storage panel (the disk button in the title bar) and delete from there.";
 
 const SHOWN = 40;
+/** How often the disk's free space is read while the tab is open, as the menu bar panel does: a scan or a delete is not
+ * the only thing that changes it. */
+const DISK_MS = 3000;
+
+/** The disk's free space and size, read now and every DISK_MS while the tab is open; null until the first read. */
+function useLiveDisk(): { free: number | null; total: number | null } | null {
+  const [disk, setDisk] = useState<{ free: number | null; total: number | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    const read = () => api.menubarStats().then((s) => live && setDisk({ free: s.disk_free, total: s.disk_total }), () => {});
+    read();
+    const timer = window.setInterval(read, DISK_MS);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  return disk;
+}
+
+/** Safe, and nothing about it gives pause (not changed today, not a cache in use): what "Tick all safe" ticks. */
+const plainSafe = (i: StorageItem) => i.risk === "safe" && i.warning === null;
 
 interface Props {
   view: StorageView | null;
@@ -54,6 +76,8 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   const items = useMemo(() => view?.items ?? [], [view]);
   const sel = useMemo(() => selection(items, touched), [items, touched]);
   const total = useMemo(() => GROUPS.reduce((n, g) => n + groupOf(items, g.kind).bytes, 0), [items]);
+  const live = useLiveDisk();
+  const disk = useMemo(() => (view ? diskFigures({ total_bytes: live?.total ?? view.total_bytes, free_bytes: live?.free ?? view.free_bytes, purgeable_bytes: view.purgeable_bytes }, sel) : null), [view, sel, live]);
   const working = deleting || !!view?.deleting;
   // What the confirmation names: ticked items that need a judgement (review risk) or that only Claude's suggestion ticked.
   const look = useMemo(() => {
@@ -62,7 +86,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   }, [items, sel]);
 
   if (!view) return <TabEmpty title="Storage">Looking at the disk…</TabEmpty>;
-  const goTo = (kind: StorageKind) => body.current?.querySelector(`[data-kind="${kind}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  const goTo = (kind: StorageKind) => body.current?.querySelector(`section.storage-group[data-kind="${kind}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 
   const set = (ids: string[], on: boolean) => setTouched((t) => new Map([...t, ...ids.map((id) => [id, on] as const)]));
   const scan = () => {
@@ -107,9 +131,6 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   return (
     <>
       <div className="review-bar storage-bar">
-        <span className="storage-free" title="Free space on this Mac's disk">
-          {view.free_bytes !== null ? `${sizeText(view.free_bytes)} free` : "Free space unknown"}
-        </span>
         <span className="storage-status" role="status">
           {view.scanning ? view.progress || "Scanning…" : view.scanned_at !== null ? `Scanned ${relativeTime(view.scanned_at)}` : ""}
         </span>
@@ -119,6 +140,9 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
             Ask Claude
           </button>
         )}
+        <button className="ghost" disabled={working || !items.some(plainSafe)} onClick={() => set(items.filter(plainSafe).map((i) => i.id), true)} title="Tick every safe item nothing warns about, in every group">
+          Tick all safe
+        </button>
         {suggested > 0 && (
           <button className="ghost" onClick={onlyClaudes} title="Tick only what Claude suggested">
             Claude's picks ({suggested})
@@ -134,26 +158,28 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
           </button>
         )}
       </div>
-      {(view.snapshots > 0 || view.notes.length > 0) && (
-        <div className="storage-notes">
-          {view.snapshots > 0 && <p>{view.snapshots === 1 ? "A local Time Machine snapshot exists" : `${view.snapshots} local Time Machine snapshots exist`}: macOS keeps what they hold until it needs the room, so free space can lag behind what you delete.</p>}
-          {view.notes.map((n) => (
-            <p key={n}>{n}</p>
-          ))}
-        </div>
-      )}
-      {result && (
-        <div className="storage-result" role="status">
-          <p>{result.text}</p>
-          {result.failures.map((f) => (
-            <p key={f.name} className="storage-failure">
-              {f.name}: {f.error}
-            </p>
-          ))}
-        </div>
-      )}
-      {parts.length > 0 && <Distribution parts={parts} hot={hot} onHot={setHot} onPick={goTo} />}
+      {/* One scroll for everything between the bars at the top and bottom, so the list keeps its room at the panel's usual size. */}
       <div className="storage-body" ref={body}>
+        {disk ? <DiskSummary f={disk} count={sel.ids.length} found={total} purgeableKnown={view.purgeable_bytes !== null} /> : <div className="storage-notes">Free space unknown.</div>}
+        {(view.snapshots > 0 || view.notes.length > 0) && (
+          <div className="storage-notes">
+            {view.snapshots > 0 && <p>{view.snapshots === 1 ? "A local Time Machine snapshot exists" : `${view.snapshots} local Time Machine snapshots exist`}: macOS keeps what they hold until it needs the room, so free space can lag behind what you delete.</p>}
+            {view.notes.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+          </div>
+        )}
+        {result && (
+          <div className="storage-result" role="status">
+            <p>{result.text}</p>
+            {result.failures.map((f) => (
+              <p key={f.name} className="storage-failure">
+                {f.name}: {f.error}
+              </p>
+            ))}
+          </div>
+        )}
+        {parts.length > 0 && <Distribution parts={parts} hot={hot} onHot={setHot} onPick={goTo} />}
         {items.length === 0 && !view.scanning && <div className="tests-note storage-empty">Nothing to clear was found.</div>}
         {GROUPS.map(({ kind, title, hint }) => {
           const g = groupOf(items, kind);
@@ -198,7 +224,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
         </span>
         <div className="spacer" />
         <button className="danger" disabled={sel.ids.length === 0 || working || view.scanning} onClick={() => setConfirming(true)}>
-          {working ? "Deleting…" : "Delete…"}
+          {working ? "Deleting…" : sel.ids.length > 0 ? `Delete ${sizeText(sel.bytes)}…` : "Delete…"}
         </button>
       </div>
       {confirming && (
@@ -224,6 +250,53 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
         </ConfirmDialog>
       )}
     </>
+  );
+}
+
+/** The disk at a glance: how much is used of it, as one bar (what stays, what is ticked to delete, what macOS can purge,
+ * what is free), and the four numbers that matter in large type under it. What goes to the Trash frees nothing yet, so it
+ * isn't counted in what deleting frees. */
+function DiskSummary({ f, count, found, purgeableKnown }: { f: DiskFigures; count: number; found: number; purgeableKnown: boolean }) {
+  const bar = diskBar(f);
+  const selected = `${f.upTo ? "up to " : ""}${sizeText(f.frees)}`;
+  const pieces: { tone: string; width: number; label: string }[] = [
+    { tone: "stays", width: bar.stays, label: `Used and staying: ${sizeText((bar.stays / 100) * f.total)}` },
+    { tone: "selected", width: bar.selected, label: `Freed by deleting what is ticked: ${selected}` },
+    { tone: "purgeable", width: bar.purgeable, label: `Purgeable: ${sizeText(f.purgeable)}` },
+    { tone: "free", width: bar.free, label: `Free: ${sizeText(f.free)}` },
+  ];
+  return (
+    <section className="storage-hero" aria-label="Disk">
+      <div className="storage-hero-head">
+        <span className="storage-hero-used">
+          <strong>{sizeText(f.used)}</strong> used of {sizeText(f.total)}
+        </span>
+        <span className="storage-hero-found">{sizeText(found)} found to clear</span>
+      </div>
+      <div className="storage-meter" role="img" aria-label={pieces.map((p) => p.label).join(". ")}>
+        {pieces.map((p) => p.width > 0 && <span key={p.tone} className={`storage-meter-${p.tone}`} style={{ width: `${p.width}%` }} title={p.label} />)}
+      </div>
+      <dl className="storage-stats">
+        <div className="storage-stat tone-free">
+          <dt>Free now</dt>
+          <dd>{sizeText(f.free)}</dd>
+        </div>
+        <div className="storage-stat tone-selected">
+          <dt>Deleting frees</dt>
+          <dd>{selected}</dd>
+          <dd className="storage-stat-sub">{count === 0 ? "Nothing ticked" : `${count} item${count === 1 ? "" : "s"} ticked${f.upTo ? ", some may share space with what stays" : ""}`}</dd>
+        </div>
+        <div className="storage-stat tone-purgeable">
+          <dt>Purgeable</dt>
+          <dd>{purgeableKnown ? sizeText(f.purgeable) : "–"}</dd>
+          <dd className="storage-stat-sub">{purgeableKnown ? "macOS frees it by itself when it needs the room" : "Measured by the next scan"}</dd>
+        </div>
+        <div className="storage-stat tone-after">
+          <dt>Free after deleting</dt>
+          <dd>{`${f.upTo && f.frees > 0 ? "up to " : ""}${sizeText(f.freeAfter)}`}</dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

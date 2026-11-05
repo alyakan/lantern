@@ -99,6 +99,35 @@ const ARTIFACT_NAME_MAX: usize = 300;
 /// The most ids a phone may name in one clear: a little over what it is ever shown.
 const STORAGE_IDS_MAX: usize = 80;
 
+/// Whether asking for `wanted` changes nothing: it is what a change waiting for the chat puts it on, or (with none waiting for
+/// that setting) what it runs on now. `pending` is None when no change waits, and Some(None) when one waits for other settings.
+fn unchanged(now: Option<&str>, pending: Option<Option<&str>>, wanted: &str) -> bool {
+    match pending.flatten() {
+        Some(p) => p == wanted,
+        None => now == Some(wanted),
+    }
+}
+
+/// Whether a change to a chat's provider, model or effort is well formed, as conversation_settings checks it: an object of only
+/// those, each text (the provider) or text or null, none long.
+fn conversation_change_ok(change: &serde_json::Value) -> Result<(), String> {
+    let object = change.as_object().ok_or("Settings must be an object")?;
+    if object.is_empty() || object.keys().any(|k| !["provider", "model", "effort"].contains(&k.as_str())) {
+        return Err("Unknown conversation setting".into());
+    }
+    for (k, v) in object {
+        let ok = match v {
+            serde_json::Value::String(s) => !s.is_empty() && s.len() <= 200 && !s.chars().any(char::is_control),
+            serde_json::Value::Null => k != "provider",
+            _ => false,
+        };
+        if !ok {
+            return Err(format!("{k} isn't a setting Lantern knows."));
+        }
+    }
+    Ok(())
+}
+
 const AUTO_OFF: &str = "Auto from a phone is off. Turn it on in Lantern's Settings, under Remote control.";
 
 /// What the gateway asks of the app. `by` is who asked: the phone's device id (with its message id for a send).
@@ -153,6 +182,12 @@ pub trait Host: Send + Sync + 'static {
     fn set_permissions(&self, slot: &str, permissions: protocol::RemotePermissions) -> Result<(), String>;
     /// Puts an open chat on one of the presets listed, as above.
     fn set_preset(&self, slot: &str, preset: &str) -> Result<(), String>;
+    /// Hands the window a change to a chat that is working (the gateway has checked it as it checks a change to an idle chat):
+    /// `change` is one of `{"permissions"}`, `{"workflow"}`, `{"preset"}` or `{"conversation": {provider?, model?, effort?}}`.
+    /// The window holds it, and applies it `when` asked: stopping the turn and telling it to carry on, or once it ends.
+    fn queue_switch(&self, _slot: &str, _change: serde_json::Value, _when: protocol::RemoteWhen) -> Result<(), String> {
+        Err("Update Lantern on your Mac to change a chat while it works.".into())
+    }
     /// Asks a small model, with no tools and no saved session, and gives its reply (see suggest.rs, which asks for this
     /// rarely and checks what comes back).
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
@@ -593,6 +628,22 @@ impl Gateway {
         match chat.status {
             S::Idle => Ok(chat),
             S::Working | S::NeedsYou => Err("Claude is busy in this chat. Change it once it has finished.".into()),
+            S::Asleep => Err("This chat is asleep. Wake it first.".into()),
+            S::Ended => Err("This chat has stopped.".into()),
+        }
+    }
+
+    /// The chat, and whether its change waits for it: an idle chat is switched now, as before; one that is working or waiting on
+    /// the user is too only when the phone said `when` (the window holds the change: see Host::queue_switch). Never over background
+    /// tasks, which the restart would stop with nobody at the Mac to ask.
+    fn switch_target(&self, slot: &str, when: Option<protocol::RemoteWhen>) -> Result<(super::hub::ChatInfo, bool), String> {
+        use super::hub::ChatStatus as S;
+        let Some(_) = when else { return self.switchable(slot).map(|c| (c, false)) };
+        let chat = self.hub.chat(slot).ok_or("That chat isn't open on your Mac.")?;
+        match chat.status {
+            S::Idle => Ok((chat, false)),
+            S::Working | S::NeedsYou if self.hub.has_background(slot) => Err("This chat has background tasks running, which switching would stop.".into()),
+            S::Working | S::NeedsYou => Ok((chat, true)),
             S::Asleep => Err("This chat is asleep. Wake it first.".into()),
             S::Ended => Err("This chat has stopped.".into()),
         }
@@ -1058,6 +1109,13 @@ impl<'a> Session<'a> {
                 events = merge_current_turn(events, live);
             }
         }
+        // What still waits on the user is Home's list (`waiting`), and the chat shows the same: a prompt the replay lost (a message came
+        // after it, or the hub let it go) is told again, last, where an open prompt belongs.
+        for p in self.gw.host.pending(slot).await {
+            if !events.iter().any(|e| matches!(e, RemoteEvent::PermissionRequested { request_id, .. } if *request_id == p.request_id)) {
+                events.push(RemoteEvent::PermissionRequested { request_id: p.request_id, tool_name: p.tool_name, input: protocol::trimmed(&p.input) });
+            }
+        }
         // What claude offers after a "/", its plan and the context it holds: the latest of each, since the kept events may not reach them.
         if extras {
             events.extend(self.gw.hub.extras(slot));
@@ -1199,33 +1257,44 @@ impl<'a> Session<'a> {
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
             Request::NewChat { project, text, permissions, preset, workflow, provider } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider).await,
-            Request::SetWorkflow { slot, workflow } => {
+            Request::SetWorkflow { slot, workflow, when } => {
                 if workflow == protocol::RemoteWorkflow::Team {
                     return Err(TEAM_ON_MAC.into());
                 }
-                let chat = self.gw.switchable(&slot)?;
+                let (chat, waits) = self.gw.switch_target(&slot, when)?;
                 if chat.workflow.as_deref() == Some("team") {
                     return Err("This chat leads a team: change it on your Mac.".into());
                 }
-                // What it already is is not asked again: each switch restarts claude.
-                if chat.workflow.as_deref() == Some(workflow.as_str()) {
+                // What it already is (or is about to be) is not asked again: each switch restarts claude.
+                if unchanged(chat.workflow.as_deref(), chat.pending.as_ref().map(|p| p.workflow.map(|w| w.as_str())), workflow.as_str()) {
                     return Ok(serde_json::Value::Null);
+                }
+                if let (true, Some(when)) = (waits, when) {
+                    return host.queue_switch(&slot, serde_json::json!({ "workflow": workflow.as_str() }), when).map(|()| serde_json::Value::Null);
                 }
                 host.set_workflow(&slot, workflow).map(|()| serde_json::Value::Null)
             }
-            Request::ConversationSettings { slot, change } => {
+            Request::ConversationSettings { slot, change, when } => {
                 self.chat_known(&slot)?;
-                if change.is_some() { self.gw.switchable(&slot)?; }
-                host.conversation_settings(slot, change).await
+                let Some(change) = change else { return host.conversation_settings(slot, None).await };
+                let (_, waits) = self.gw.switch_target(&slot, when)?;
+                if let (true, Some(when)) = (waits, when) {
+                    // Checked as the backend checks it when it is applied, so nothing odd is held for later.
+                    conversation_change_ok(&change)?;
+                    host.queue_switch(&slot, serde_json::json!({ "conversation": change }), when)?;
+                    // What it runs on until then.
+                    return host.conversation_settings(slot, None).await;
+                }
+                host.conversation_settings(slot, Some(change)).await
             }
             Request::ConversationAction { slot, action } => {
                 self.gw.switchable(&slot)?;
                 host.conversation_action(slot, action).await.map(|_| serde_json::Value::Null)
             }
             Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets(), providers: Some(self.gw.hub.providers()) })),
-            Request::SetPermissions { slot, permissions } => {
+            Request::SetPermissions { slot, permissions, when } => {
                 self.gw.check_choice(permissions, None)?;
-                let chat = self.gw.switchable(&slot)?;
+                let (chat, waits) = self.gw.switch_target(&slot, when)?;
                 // A chat on another provider than Claude's has no auto mode (a model approving its own commands is no safety): a phone
                 // that still offers Auto (an older one) is told why, and nothing is restarted. The window and the backend hold the line too.
                 if let (protocol::RemotePermissions::Auto, Some(name)) = (permissions, &chat.provider) {
@@ -1233,21 +1302,28 @@ impl<'a> Session<'a> {
                         return Err(format!("{name} has no Auto mode: it asks before it acts."));
                     }
                 }
-                // What it already is is not asked again: each switch restarts claude, and a phone can't make it do so over and over.
-                if chat.permissions.as_deref() == Some(permissions.as_str()) {
+                // What it already is (or is about to be) is not asked again: each switch restarts claude, and a phone can't make it do
+                // so over and over.
+                if unchanged(chat.permissions.as_deref(), chat.pending.as_ref().map(|p| p.permissions.map(|v| v.as_str())), permissions.as_str()) {
                     return Ok(serde_json::Value::Null);
+                }
+                if let (true, Some(when)) = (waits, when) {
+                    return host.queue_switch(&slot, serde_json::json!({ "permissions": permissions.as_str() }), when).map(|()| serde_json::Value::Null);
                 }
                 host.set_permissions(&slot, permissions).map(|()| serde_json::Value::Null)
             }
-            Request::SetPreset { slot, preset } => {
+            Request::SetPreset { slot, preset, when } => {
                 self.gw.check_choice(protocol::RemotePermissions::Ask, Some(&preset))?;
-                let chat = self.gw.switchable(&slot)?;
+                let (chat, waits) = self.gw.switch_target(&slot, when)?;
                 // The Mac's presets are Claude Code's models: a chat on another provider runs on its own.
                 if let Some(name) = &chat.provider {
                     return Err(format!("{name} runs on its own model: the presets don't apply to it."));
                 }
-                if chat.preset.as_deref() == Some(preset.as_str()) {
+                if unchanged(chat.preset.as_deref(), chat.pending.as_ref().map(|p| p.preset.as_deref()), &preset) {
                     return Ok(serde_json::Value::Null);
+                }
+                if let (true, Some(when)) = (waits, when) {
+                    return host.queue_switch(&slot, serde_json::json!({ "preset": preset }), when).map(|()| serde_json::Value::Null);
                 }
                 host.set_preset(&slot, &preset).map(|()| serde_json::Value::Null)
             }
@@ -1594,6 +1670,10 @@ pub(crate) mod tests {
         }
         fn set_workflow(&self, slot: &str, workflow: protocol::RemoteWorkflow) -> Result<(), String> {
             self.switched.lock().unwrap().push(format!("{slot}:workflow:{}", workflow.as_str()));
+            Ok(())
+        }
+        fn queue_switch(&self, slot: &str, change: serde_json::Value, when: protocol::RemoteWhen) -> Result<(), String> {
+            self.switched.lock().unwrap().push(format!("{slot}:queued:{}:{change}", when.as_str()));
             Ok(())
         }
         fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>> {
@@ -2440,7 +2520,7 @@ pub(crate) mod tests {
         r.hub.opened("busy", "/p");
         r.hub.record(&BusEvent { slot: "busy".into(), seq: 1, event: user("go") });
         let (_, mut p) = paired(&r).await;
-        let set = |slot: &str, workflow| Request::SetWorkflow { slot: slot.into(), workflow };
+        let set = |slot: &str, workflow| Request::SetWorkflow { slot: slot.into(), workflow, when: None };
         assert!(p.ask(set("a", Steps)).await.1.is_none());
         assert_eq!(*r.host.switched.lock().unwrap(), vec!["a:workflow:steps".to_string()]);
         // What it already is isn't asked again (the hub still says Chat: the window hasn't said otherwise).
@@ -2621,16 +2701,16 @@ pub(crate) mod tests {
         let (_, mut p) = paired(&r).await;
         use protocol::RemotePermissions::{Ask, Auto};
         for (slot, name) in [("local", "Ollama"), ("codex", "Codex")] {
-            let (ok, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Auto }).await;
+            let (ok, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Auto, when: None }).await;
             assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} has no Auto mode: it asks before it acts.")), "{slot}");
-            let (ok, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "balanced".into() }).await;
+            let (ok, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "balanced".into(), when: None }).await;
             assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} runs on its own model: the presets don't apply to it.")), "{slot}");
         }
         assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
         // Ask is always fine, and a Claude chat is as it was.
-        assert!(p.ask(Request::SetPermissions { slot: "local".into(), permissions: Ask }).await.1.is_none());
-        assert!(p.ask(Request::SetPermissions { slot: "claude".into(), permissions: Auto }).await.1.is_none());
-        assert!(p.ask(Request::SetPreset { slot: "claude".into(), preset: "balanced".into() }).await.1.is_none());
+        assert!(p.ask(Request::SetPermissions { slot: "local".into(), permissions: Ask, when: None }).await.1.is_none());
+        assert!(p.ask(Request::SetPermissions { slot: "claude".into(), permissions: Auto, when: None }).await.1.is_none());
+        assert!(p.ask(Request::SetPreset { slot: "claude".into(), preset: "balanced".into(), when: None }).await.1.is_none());
         assert_eq!(*r.host.switched.lock().unwrap(), vec!["local:ask".to_string(), "claude:auto".to_string(), "claude:preset:balanced".to_string()]);
     }
 
@@ -2718,7 +2798,7 @@ pub(crate) mod tests {
         r.hub.opened("a", "/p");
         r.hub.controls("a", "ask", Some("balanced"));
         let (_, mut p) = paired(&r).await;
-        let set = |permissions| Request::SetPermissions { slot: "a".into(), permissions };
+        let set = |permissions| Request::SetPermissions { slot: "a".into(), permissions, when: None };
         let (ok, err, _) = p.ask(set(Auto)).await;
         assert!(ok.is_none() && err.is_some_and(|e| e.contains("Auto from a phone is off")));
         assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
@@ -2731,7 +2811,7 @@ pub(crate) mod tests {
         assert!(p.ask(set(Ask)).await.1.is_none());
         assert_eq!(r.host.switched.lock().unwrap().last().map(String::as_str), Some("a:ask"));
         // A chat that isn't open is refused.
-        let (_, err, _) = p.ask(Request::SetPermissions { slot: "nope".into(), permissions: Ask }).await;
+        let (_, err, _) = p.ask(Request::SetPermissions { slot: "nope".into(), permissions: Ask, when: None }).await;
         assert!(err.is_some_and(|e| e.contains("isn't open")));
     }
 
@@ -2744,11 +2824,11 @@ pub(crate) mod tests {
         r.hub.set_presets(vec![preset("balanced"), preset("max")]);
         let (_, mut p) = paired(&r).await;
         for _ in 0..3 {
-            assert!(p.ask(Request::SetPermissions { slot: "a".into(), permissions: Ask }).await.1.is_none());
-            assert!(p.ask(Request::SetPreset { slot: "a".into(), preset: "balanced".into() }).await.1.is_none());
+            assert!(p.ask(Request::SetPermissions { slot: "a".into(), permissions: Ask, when: None }).await.1.is_none());
+            assert!(p.ask(Request::SetPreset { slot: "a".into(), preset: "balanced".into(), when: None }).await.1.is_none());
         }
         assert!(r.host.switched.lock().unwrap().is_empty(), "the app was never asked");
-        assert!(p.ask(Request::SetPreset { slot: "a".into(), preset: "max".into() }).await.1.is_none());
+        assert!(p.ask(Request::SetPreset { slot: "a".into(), preset: "max".into(), when: None }).await.1.is_none());
         assert_eq!(*r.host.switched.lock().unwrap(), vec!["a:preset:max".to_string()]);
     }
 
@@ -2765,12 +2845,56 @@ pub(crate) mod tests {
         r.hub.opened("asks", "/p");
         r.hub.record(&BusEvent { slot: "asks".into(), seq: 1, event: UiEvent::PermissionRequested { request_id: "q".into(), tool_name: "Bash".into(), input: json!({}) } });
         for (slot, why) in [("busy", "busy"), ("asleep", "Wake it first"), ("asks", "busy")] {
-            let (_, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Ask }).await;
+            let (_, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Ask, when: None }).await;
             assert!(err.as_deref().is_some_and(|e| e.contains(why)), "{slot}: {err:?}");
-            let (_, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "max".into() }).await;
+            let (_, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "max".into(), when: None }).await;
             assert!(err.as_deref().is_some_and(|e| e.contains(why)), "{slot}: {err:?}");
         }
         assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
+    }
+
+    #[tokio::test]
+    async fn a_busy_chat_s_change_with_when_is_handed_to_the_window_with_every_check_still_made() {
+        use protocol::RemotePermissions::{Ask, Auto};
+        use protocol::RemoteWhen::{Finished, Now};
+        let r = rig();
+        r.hub.set_presets(vec![preset("balanced"), preset("max")]);
+        r.hub.opened("busy", "/p");
+        r.hub.controls("busy", "ask", Some("balanced"));
+        r.hub.record(&BusEvent { slot: "busy".into(), seq: 1, event: user("go") });
+        let (_, mut p) = paired(&r).await;
+        // Auto is still the Mac's to allow: refused, and nothing is held.
+        let (_, err, _) = p.ask(Request::SetPermissions { slot: "busy".into(), permissions: Auto, when: Some(Now) }).await;
+        assert!(err.is_some_and(|e| e.contains("Auto from a phone is off")));
+        // What it already runs changes nothing; a new value is held for the window, when asked.
+        assert!(p.ask(Request::SetPermissions { slot: "busy".into(), permissions: Ask, when: Some(Now) }).await.1.is_none());
+        assert!(p.ask(Request::SetPreset { slot: "busy".into(), preset: "max".into(), when: Some(Finished) }).await.1.is_none());
+        assert!(p.ask(Request::SetWorkflow { slot: "busy".into(), workflow: protocol::RemoteWorkflow::Steps, when: Some(Now) }).await.1.is_none());
+        assert_eq!(*r.host.switched.lock().unwrap(), vec![r#"busy:queued:finished:{"preset":"max"}"#.to_string(), r#"busy:queued:now:{"workflow":"steps"}"#.to_string()]);
+        // Once the window says that is waiting, asking for it again is nothing too: a phone can't keep stopping the chat.
+        r.hub.set_pending("busy", Some(protocol::RemotePending { when: Now, text: "Step by step".into(), permissions: None, workflow: Some(protocol::RemoteWorkflow::Steps), preset: None }));
+        assert!(p.ask(Request::SetWorkflow { slot: "busy".into(), workflow: protocol::RemoteWorkflow::Steps, when: Some(Now) }).await.1.is_none());
+        assert_eq!(r.host.switched.lock().unwrap().len(), 2);
+        // Asking for what it runs now, over a different waiting value, is passed on: the window drops that change.
+        assert!(p.ask(Request::SetWorkflow { slot: "busy".into(), workflow: protocol::RemoteWorkflow::Chat, when: Some(Now) }).await.1.is_none());
+        assert_eq!(r.host.switched.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_busy_chat_s_change_is_still_refused_over_background_tasks_and_a_provider_change_must_be_well_formed() {
+        use protocol::RemoteWhen::Now;
+        let r = rig();
+        r.hub.opened("busy", "/p");
+        r.hub.record(&BusEvent { slot: "busy".into(), seq: 1, event: user("go") });
+        let (_, mut p) = paired(&r).await;
+        for change in [json!({ "shell": "rm" }), json!({ "model": 3 }), json!({ "provider": null }), json!({ "model": "x\u{7}" })] {
+            let (_, err, _) = p.ask(Request::ConversationSettings { slot: "busy".into(), change: Some(change.clone()), when: Some(Now) }).await;
+            assert!(err.is_some(), "{change}");
+        }
+        assert!(r.host.switched.lock().unwrap().is_empty());
+        r.hub.record(&BusEvent { slot: "busy".into(), seq: 2, event: UiEvent::BackgroundTasks { tasks: vec![crate::ui_event::BackgroundTask { id: "b".into(), task_type: "local_bash".into(), description: "npm run dev".into() }] } });
+        let (_, err, _) = p.ask(Request::SetPermissions { slot: "busy".into(), permissions: protocol::RemotePermissions::Ask, when: Some(Now) }).await;
+        assert!(err.is_some_and(|e| e.contains("background")));
     }
 
     #[tokio::test]
@@ -2779,7 +2903,7 @@ pub(crate) mod tests {
         r.hub.opened("a", "/p");
         r.hub.set_presets(vec![preset("balanced")]);
         let (_, mut p) = paired(&r).await;
-        let (_, err, _) = p.ask(Request::SetPreset { slot: "a".into(), preset: "made-up".into() }).await;
+        let (_, err, _) = p.ask(Request::SetPreset { slot: "a".into(), preset: "made-up".into(), when: None }).await;
         assert!(err.is_some_and(|e| e.contains("isn't one of your presets")));
         assert!(r.host.switched.lock().unwrap().is_empty());
     }
@@ -3135,6 +3259,21 @@ pub(crate) mod tests {
         assert!(err.is_none());
         let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
         assert_eq!(page.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_reset_still_carries_a_prompt_that_is_waiting_when_a_message_came_after_it() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.bus.publish("a", user("push the branch"));
+        r.bus.publish("a", UiEvent::PermissionRequested { request_id: "ap1".into(), tool_name: "Approval".into(), input: json!({"action": "Push"}) });
+        *r.host.pending.lock().unwrap() = vec![Pending { request_id: "ap1".into(), tool_name: "Approval".into(), input: json!({"action": "Push"}), at: 1 }];
+        // The user types while it waits: the live turn the reset replays now starts after the prompt.
+        r.bus.publish("a", user("and tell me when it is done"));
+        let (_, mut p) = paired(&r).await;
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        let asked = before.iter().any(|m| matches!(m, ServerMessage::Reset { events, .. } if events.iter().any(|e| matches!(e, RemoteEvent::PermissionRequested { request_id, .. } if request_id == "ap1"))));
+        assert!(asked, "the chat shows what Home shows");
     }
 
     #[tokio::test]

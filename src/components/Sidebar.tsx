@@ -72,6 +72,8 @@ export interface SidebarHandlers {
   onHistory: () => void;
   onNewChatIn: (folder: string) => void;
   onNewTeamIn: (folder: string) => void;
+  /** Opens the project's page on the Desk: its work, pull requests, worktrees and to-dos. */
+  onOpenInDesk: (folder: string) => void;
   onBringOld: (folder: string) => void;
   /** Opens the project's notes: the text every new chat in it starts with. */
   onProjectNotes: (folder: string) => void;
@@ -563,6 +565,9 @@ function ProjectMenu({ group, h, moves, finished, onOnly, onClose, onClosed }: {
   };
   return (
     <div className="menu sb-menu project-menu" role="menu" aria-label={`${group.label} actions`} ref={root} style={style} onKeyDown={menuKeys}>
+      <button role="menuitem" className="menu-row" title="Its page on the Desk: where its work, pull requests, worktrees and to-dos are" onClick={pick(() => h.onOpenInDesk(group.folder))}>
+        <span className="menu-row-title">Open in Desk</span>
+      </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onNewTeamIn(group.folder))}>
         <span className="menu-row-title">New team</span>
       </button>
@@ -684,7 +689,14 @@ function Project({ group, color, noted, todos, expanded, phase, onToggle, curren
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
   return (
     <section className={`sb-section${current ? " current" : ""}${reorder.lifted ? " lifted" : ""}`} aria-label={group.label} data-reorder-id={group.folder} style={{ ...reorder.style, "--pc": color } as CSSProperties}>
-      <div className="sb-header" {...reorder.handle}>
+      <div
+        className="sb-header"
+        {...reorder.handle}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu(true);
+        }}
+      >
         <button className="sb-header-toggle" aria-expanded={expanded} title={group.folder} onClick={onToggle} onKeyDown={(e) => moveByKey(e, reorder.moves)}>
           <span className="sb-project-initials" aria-hidden>
             {group.initials}
@@ -1070,6 +1082,7 @@ export function Sidebar(props: Props) {
           onNewTeamIn: then(handlers.onNewTeamIn),
           onBringOld: then(handlers.onBringOld),
           onProjectNotes: then(handlers.onProjectNotes),
+          onOpenInDesk: then(handlers.onOpenInDesk),
           onSetup: then(handlers.onSetup),
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxRow } from "./deskBoard";
 import type { LinearIssue, LinearWork, RepoStatus } from "../types";
 import { teamOfRepo } from "./linear";
-import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, yourWork, type WorkItem } from "./yourWork";
+import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projectsOf, stateCounts, safeRef, stepMessage, targetFor, toneCounts, unknownViewer, whereThingsStand, withLinear, workOfRepo, yourWork, type WorkItem } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
@@ -179,6 +179,17 @@ describe("Your work with Linear", () => {
     expect(step.next!.text).toBe("Start on the Linear issue ENG-5 (https://linear.app/acme/issue/ENG-5). Read it with your Linear tools if you have them, or ask me what it says. Plan the work and show me the plan before you change any code. Then work on a new branch with ENG-5 in its name, in a git worktree of your own, and leave this checkout as it is.");
     expect(nextSteps(items).map((i) => i.next!.kind)).toEqual(["merge", "merge", "push", "start", "start"]);
     expect(projectsOf(items, "/p/lantern")).toEqual([{ project: "Offline mode", doing: 1, todo: 3 }]);
+  });
+
+  it("lists on a repository's page the issues of a team no project is in, only for a feature being worked on there", () => {
+    const other = repo({ repo: "/p/web", github: "aly/web", folders: [{ folder: "/p/web", branch: "main", changed: 0 }] });
+    const issues = [issue("ENG-1"), issue("WEB-9"), issue("WEB-10", { project: "Unrelated" }), issue("WEB-11", { project: null }), issue("WEB-12", { state: "Done", state_type: "completed", project: "Offline mode" })];
+    const items = withLinear(yourWork([r], NOW), work(issues), { "/p/lantern": "ENG" }, [r], NOW);
+    const ids = (rows: WorkItem[]) => rows.flatMap((i) => (i.issue ? [i.issue.identifier] : [])).sort();
+    // WEB-9 and the Done WEB-12 share the feature the pull request on ENG-1 is in; WEB-10 and WEB-11 are in no feature of this page.
+    expect(ids(workOfRepo(items, "/p/lantern"))).toEqual(["ENG-1", "WEB-12", "WEB-9"]);
+    // A repository with nothing in that feature gets none of them.
+    expect(workOfRepo(items, other.repo)).toEqual([]);
   });
 
   // Linear files In Review, Testing and Ready under "completed", though they aren't done (Ready: merged, waiting for a release).
