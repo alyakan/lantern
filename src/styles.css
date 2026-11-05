@@ -4034,13 +4034,13 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-kicker + h3 { margin-top: 0; }
 /* Where things stand: what groups it and which states it shows, then groups that fold. */
 .yw-bar { display: flex; flex-direction: column; gap: 7px; padding: 9px 12px 8px; border-bottom: 0.5px solid var(--line); }
-.yw-group { display: flex; align-items: center; gap: 2px; }
-.yw-bar-label { margin-right: 6px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
-.yw-group button { padding: 2px 9px; border: 0.5px solid var(--line); background: none; color: var(--muted-text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; }
-.yw-group button:first-of-type { border-radius: var(--radius-inner) 0 0 var(--radius-inner); }
-.yw-group button:last-of-type { border-radius: 0 var(--radius-inner) var(--radius-inner) 0; }
-.yw-group button.on { background: var(--text); border-color: var(--text); color: var(--pane); }
-.yw-group button:disabled { opacity: 0.4; cursor: default; }
+/* Grouping is a setting, not a filter: plain text that opens a menu, so it doesn't look like the state chips under it. */
+.yw-gby { position: relative; align-self: flex-start; }
+.yw-gby-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: none; background: none; color: var(--muted-text); font: 500 calc(12px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-gby-btn:hover, .yw-gby-btn[aria-expanded="true"] { color: var(--text); }
+.yw-stand { overflow: visible; }
+.yw-gmenu { top: calc(100% + 4px); left: -8px; min-width: 190px; }
+.yw-gmenu .menu-row:disabled { opacity: 0.45; }
 .yw-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .yw-pill { display: inline-flex; align-items: center; padding: 2px 9px 2px 7px; border: 0.5px solid var(--line); border-radius: var(--radius-inner); background: none; color: var(--text); font: 500 calc(11.5px * var(--font-scale)) var(--ui); cursor: pointer; font-variant-numeric: tabular-nums; }
 .yw-pill .yw-dot { width: 7px; height: 7px; margin-right: 5px; }
@@ -4256,10 +4256,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 /* A folded feature's one-line summary: what is in it, under its name; and the whole board's Expand all. */
 .yw-peek { margin: 1px 0 6px 22px; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.yw-all { flex: none; margin-left: 8px; height: 22px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); }
-.yw-all:hover { background: var(--bg-hover); }
-.yw-bar-top { display: flex; align-items: center; gap: 8px; }
-.yw-bar-top .yw-all { margin-left: auto; }
 .yw-next-actions { display: inline-flex; align-items: center; gap: 6px; }
 
 /* The Desk in one line: what needs you, then the counts that matter, each a quiet phrase. */

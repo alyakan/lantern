@@ -40,6 +40,9 @@ const needs = () => screen.getByRole("region", { name: "Needs you" });
 /** The list layout of where things stand (the default is cards): these tests are about the list. */
 const list = () => localStorage.setItem("desk.work.layout", JSON.stringify("list"));
 
+/** Opens the list's grouping menu (a quiet line of text above the state chips). */
+const groupMenu = (stand: ReturnType<typeof within>) => fireEvent.click(stand.getByRole("button", { name: /^(Grouped by|Not grouped)/ }));
+
 /** What a row of where things stand is: a button that opens its details. */
 const ROW = "Details, links and the chat on it";
 
@@ -313,7 +316,8 @@ describe("the Desk", () => {
     expect(within(screen.getByRole("region", { name: "Next" })).getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
     const stand = screen.getByRole("region", { name: "Where things stand" });
     // Features start folded; the whole board opens from its one control.
-    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
+    groupMenu(within(stand));
+    fireEvent.click(within(stand).getByRole("menuitem", { name: "Expand all" }));
     const sync = within(stand).getByRole("region", { name: "Sync" });
     expect(sync).toHaveTextContent("1 doing");
     // Under its feature's heading, a row doesn't name the feature again, but names the issue it is the work of; its details link to it.
@@ -340,7 +344,7 @@ describe("the Desk", () => {
     setup({ repos: linearRepos(), linear: linearOf(), page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = screen.getByRole("region", { name: "Where things stand" });
     // No filter bar or grouping switch: the cards and their tabs are how it is looked at.
-    expect(within(stand).queryByRole("radiogroup", { name: "Group by" })).toBeNull();
+    expect(within(stand).queryByRole("button", { name: /^(Grouped by|Not grouped)/ })).toBeNull();
     expect(within(stand).getByRole("button", { name: /^No feature, 1 open/ })).toBeInTheDocument();
     fireEvent.click(within(stand).getByRole("button", { name: /^Sync, 1 open/ }));
     const sync = within(screen.getByRole("region", { name: "Sync" }));
@@ -368,10 +372,10 @@ describe("the Desk", () => {
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
     expect(stand().getByRole("button", { name: "Cards" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(stand().getByRole("button", { name: "List" }));
-    expect(stand().getByRole("radiogroup", { name: "Group by" })).toBeInTheDocument();
+    expect(stand().getByRole("button", { name: "Grouped by Feature" })).toBeInTheDocument();
     expect(localStorage.getItem("desk.work.layout")).toBe('"list"');
     fireEvent.click(stand().getByRole("button", { name: "Cards" }));
-    expect(stand().queryByRole("radiogroup", { name: "Group by" })).toBeNull();
+    expect(stand().queryByRole("button", { name: /^Grouped by/ })).toBeNull();
     expect(localStorage.getItem("desk.work.layout")).toBe('"cards"');
   });
 
@@ -498,9 +502,13 @@ describe("the Desk", () => {
     // Folded: no rows, but the feature says what is in it.
     expect(within(stand).queryAllByTitle(ROW)).toHaveLength(0);
     expect(stand).toHaveTextContent("#7 PR 7");
-    fireEvent.click(within(stand).getByRole("button", { name: "Expand all" }));
+    groupMenu(within(stand));
+    fireEvent.click(within(stand).getByRole("menuitem", { name: "Expand all" }));
     expect(within(stand).getAllByTitle(ROW).length).toBeGreaterThan(0);
-    expect(within(stand).getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+    // The menu closed on the choice; opened again it offers the way back.
+    expect(within(stand).queryByRole("menu")).toBeNull();
+    groupMenu(within(stand));
+    expect(within(stand).getByRole("menuitem", { name: "Collapse all" })).toBeInTheDocument();
   });
 
   it("gives a project's page its own work first, and only that project's", () => {
@@ -552,9 +560,15 @@ describe("the Desk", () => {
     list();
     setup({ repos: [repo("/p/lantern", { prs: [pr(7, "pending"), pr(8, "pending")] })], page: "/p/lantern", projects: [project("/p/lantern")] });
     const stand = () => within(screen.getByRole("region", { name: "Where things stand" }));
-    expect(stand().getByRole("radio", { name: "Feature" })).toBeDisabled();
-    fireEvent.click(stand().getByRole("radio", { name: "None" }));
-    expect(stand().getByRole("radio", { name: "None" })).toBeChecked();
+    // Without Linear it is grouped by project; Feature is in the menu but can't be chosen.
+    expect(stand().getByRole("button", { name: "Grouped by Project" })).toBeInTheDocument();
+    groupMenu(stand());
+    expect(stand().getByRole("menuitemradio", { name: "Feature" })).toBeDisabled();
+    fireEvent.click(stand().getByRole("menuitemradio", { name: "None" }));
+    expect(stand().getByRole("button", { name: "Not grouped" })).toBeInTheDocument();
+    groupMenu(stand());
+    expect(stand().getByRole("menuitemradio", { name: "None" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(stand().queryAllByRole("heading", { level: 3 })).toHaveLength(0);
     expect(stand().getAllByTitle(ROW)).toHaveLength(2);
     // Kept for next time.
@@ -583,7 +597,9 @@ describe("the Desk", () => {
     });
     const stand = () => screen.getByRole("region", { name: "Where things stand" });
     // Only one group: a click on the feature opens it (no Expand all), and the choice is saved by grouping and feature name.
-    expect(within(stand()).queryByRole("button", { name: "Expand all" })).toBeNull();
+    groupMenu(within(stand()));
+    expect(within(stand()).queryByRole("menuitem", { name: "Expand all" })).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(within(stand()).getByRole("button", { name: /Sync/ }));
     expect(JSON.parse(localStorage.getItem("desk.work.open") ?? "[]")).toEqual(["feature:Sync"]);
     expect(within(stand()).getAllByTitle(ROW).length).toBeGreaterThan(0);
