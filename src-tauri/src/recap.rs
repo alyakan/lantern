@@ -33,6 +33,8 @@ pub async fn generate(claude: &Path, folder: &Path, path_env: Option<&str>, sess
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    // On the user's API key when they chose it for Claude Code; a key that can't be had means no recap, not one on the sign-in.
+    crate::provider_keys::apply_claude_tokio(&mut cmd).ok()?;
     let out = tokio::time::timeout(Duration::from_secs(60), cmd.output()).await.ok()?.ok()?;
     if !out.status.success() {
         return None;
