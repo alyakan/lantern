@@ -20,10 +20,11 @@ use crate::git;
 const GH_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long what GitHub said about a repository is used before it is asked again.
 const GH_FRESH: Duration = Duration::from_secs(90);
-/// The open pull requests and the merged ones listed, at most.
+/// The open pull requests and the merged ones listed, at most. More merged ones: a busy repository merges 30 in a week, and a
+/// Linear issue still In Review is matched to its merged pull request among them.
 const OPEN_MAX: &str = "30";
 const OPEN_FIELDS: &str = "number,title,author,headRefName,baseRefName,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus,reviewRequests";
-const MERGED_MAX: &str = "30";
+const MERGED_MAX: &str = "100";
 /// The local branches looked at, newest commit first, at most (each costs one `git rev-list`).
 const BRANCHES_MAX: &str = "20";
 /// Asked for fresh at most this often (the Desk's Refresh), so a held-down button can't hammer GitHub.

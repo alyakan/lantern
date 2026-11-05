@@ -182,11 +182,14 @@ function stackOf(r: RepoStatus, p: Pr): StackPlace | undefined {
 
 /**
  * A stacked pull request is merged with the ones under it, from the bottom up, into the bottom one's base: only when each of them
- * could be merged now. Until then it waits on the first that can't. The bottom one merges on its own, as any other.
+ * is yours and could be merged now. Until then it waits on the first that can't, and one of someone else's is never merged from
+ * here. The bottom one merges on its own, as any other.
  */
 function stacked(r: RepoStatus, p: Pr, s: ReturnType<typeof openStage>): ReturnType<typeof openStage> {
   const under = below(r, p);
   if (!under.length || s.next?.kind !== "merge") return s;
+  const theirs = under.find((q) => !r.viewer || q.author.toLowerCase() !== r.viewer.toLowerCase());
+  if (theirs) return { stage: s.stage, tone: "wait", word: `Stacked on #${theirs.number} by @${theirs.author}`, next: null };
   const stuck = under.find((q) => openStage(r, q).next?.kind !== "merge");
   if (stuck) return { stage: s.stage, tone: "wait", word: `Waiting on #${stuck.number}`, next: null };
   const all = [...under, p];
@@ -469,9 +472,11 @@ export const isFinished = (issue: LinearIssue) => issue.state_type === "complete
  * ticket needs moving. Testing can rightly come after a merge; Ready, Done and Closed are where a merged one goes. */
 export const lagsMerge = (issue: LinearIssue) => !isReady(issue) && !isFinished(issue) && issue.state_type !== "canceled" && issue.state.trim().toLowerCase() !== "testing";
 
-/** The pull request of `issue` that merged in this repository (one of the latest GitHub listed), when there is one. */
+/** Your pull request of `issue` that merged in this repository (one of the latest GitHub listed), when there is one. Someone
+ * else's that names it (a follow-up) doesn't say its ticket is behind. */
 function mergedPull(issue: LinearIssue, r: RepoStatus): RepoStatus["merged"][number] | null {
-  return r.merged.find((m) => isIssueOf(issue, { number: m.number, github: r.github, branch: m.branch, title: m.title })) ?? null;
+  const mine = (author: string) => !!r.viewer && author.toLowerCase() === r.viewer.toLowerCase();
+  return r.merged.find((m) => mine(m.author) && isIssueOf(issue, { number: m.number, github: r.github, branch: m.branch, title: m.title })) ?? null;
 }
 
 const MOVED = "Merged · move the ticket";

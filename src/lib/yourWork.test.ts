@@ -68,6 +68,9 @@ describe("Your work", () => {
     // Its own trouble comes first: failing checks are fixed whatever is under it.
     const own = yourWork([repo({ prs: [pr(2, { checks: "fail", branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
     expect(own.next!.kind).toBe("checks");
+    // One under it is someone else's: it is never merged from here.
+    const theirs = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1", author: "sara" })] })], NOW).find((i) => i.number === 2)!;
+    expect([theirs.tone, theirs.word, theirs.next]).toEqual(["wait", "Stacked on #1 by @sara", null]);
     // Nobody approved one of them: the stack's merge goes around the rule, and says so.
     const bypass = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
     expect([bypass.next!.warn, bypass.next!.text.includes("bypasses a required review")]).toEqual([true, true]);
@@ -243,14 +246,14 @@ describe("Your work with Linear", () => {
   it("says a ticket needs moving when its pull request merged and Linear still has it In Progress or In Review, and offers to update the feature", () => {
     const merged = (number: number, branch: string, title = `PR ${number}`) => ({ number, title, author: "aly", branch, merged_at: "2026-11-02T10:00:00Z" });
     // No release in this repository (as on a team that ships elsewhere): nothing merged is listed for one, only matched to its issue.
-    const m = repo({ merged: [merged(20, "aly/eng-20-x"), merged(21, "b21"), merged(22, "aly/eng-22-y"), merged(23, "b23")] });
+    const m = repo({ merged: [merged(20, "aly/eng-20-x"), merged(21, "b21"), merged(22, "aly/eng-22-y"), merged(23, "b23"), { ...merged(25, "sara/eng-24-follow-up"), author: "sara" }] });
     const issues = [
       issue("ENG-20", review),
       issue("ENG-21", { state: "In Progress", state_type: "started", project: "Testo integration", links: ["https://github.com/aly/lantern/pull/21"] }),
       // Testing can rightly come after a merge, and Ready is where a merged one goes: neither is behind.
       issue("ENG-22", { state: "Testing", state_type: "completed", project: "Testo integration" }),
       issue("ENG-23", { ...ready, links: ["https://github.com/aly/lantern/pull/23"] }),
-      // No pull request of it merged: on its way, as before.
+      // No pull request of it merged (only someone else's follow-up that names it): on its way, as before.
       issue("ENG-24", review),
     ];
     const items = withLinear(yourWork([m], NOW), work(issues), { "/p/lantern": "ENG" }, [m], NOW);

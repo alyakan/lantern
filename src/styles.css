@@ -3945,9 +3945,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-foldrow > .yw-fold:hover { color: var(--text); }
 .yw-folded { margin: 8px -12px 0; border-top: 0.5px solid var(--line); }
 /* A step that goes around a rule (merging a pull request nobody approved) takes the warning colour over its state's. */
-.yw-row.yw-warn { --yw: var(--warn); }
+.yw-row.yw-warn, .yw-detail.yw-warn { --yw: var(--warn); }
 /* Blue and purple from the chart palette every theme sets for its own pane. */
-.yw-card, .desk-tile { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
+.yw-card, .desk-tile, .yw-detail { --yw-you: var(--storage-1); --yw-wait: color-mix(in srgb, var(--storage-1) 30%, var(--muted-text)); --yw-local: var(--storage-4); }
 /* Next stands apart from where things stand: its own card, edged and headed in blue. */
 .yw-next { border-color: color-mix(in srgb, var(--storage-1) 45%, var(--line)); }
 .yw-next > .dp-card-head { background: color-mix(in srgb, var(--storage-1) 9%, var(--pane)); border-bottom-color: color-mix(in srgb, var(--storage-1) 30%, var(--line)); }
