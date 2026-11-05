@@ -7,6 +7,7 @@ import type { ChatHit, ChatSearchResults, RepoStatus } from "../types";
 import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
+import { useMenuKeys } from "./useMenuKeys";
 
 export interface YourWorkProps {
   repos: RepoStatus[] | null;
@@ -486,30 +487,79 @@ const GROUPS: { by: GroupBy; label: string }[] = [
   { by: "none", label: "None" },
 ];
 
-/** What groups the list, and which states it shows: a switch for the grouping, a chip for each state in the list. */
+/** How the list is grouped, as a line of quiet text that opens a menu (a setting that changes the layout, so it isn't drawn as a filter),
+ * with Expand all / Collapse all in the same menu. */
+function GroupMenu({ by, issues, onBy, grouped, allOpen, onAll }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; grouped: boolean; allOpen: boolean; onAll: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const label = GROUPS.find((g) => g.by === by)?.label ?? "";
+  return (
+    <div className="yw-gby" ref={root}>
+      <button className="yw-gby-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="How the work is grouped">
+        {by === "none" ? "Not grouped" : `Grouped by ${label}`}
+        <span className="chev down" aria-hidden />
+      </button>
+      {open && (
+        <div className="menu yw-gmenu" role="menu" aria-label="Group by" onKeyDown={keys.onKeyDown}>
+          {GROUPS.map((g) => {
+            const off = g.by === "feature" && !issues;
+            return (
+              <button
+                key={g.by}
+                role="menuitemradio"
+                aria-checked={by === g.by}
+                disabled={off}
+                className={`menu-row${by === g.by ? " current" : ""}`}
+                onClick={() => {
+                  setOpen(false);
+                  onBy(g.by);
+                }}
+                title={off ? "Connect Linear in Settings to group by feature" : g.by === "feature" ? "A feature is the Linear project an issue is in; a pull request joins it by its issue's link or its branch name" : undefined}
+              >
+                <span className="menu-row-title">{g.label}</span>
+              </button>
+            );
+          })}
+          {/* Every feature open or folded at once. Only when there is something to group. */}
+          {grouped && (
+            <>
+              <div className="menu-sep" />
+              <button
+                role="menuitem"
+                className="menu-row"
+                onClick={() => {
+                  setOpen(false);
+                  onAll();
+                }}
+              >
+                <span className="menu-row-title">{allOpen ? "Collapse all" : "Expand all"}</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** How the list is grouped (a quiet menu), and under it a chip for each state in the list, to look at only some. */
 function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }: { by: GroupBy; issues: boolean; onBy: (b: GroupBy) => void; counts: Partial<Record<Tone, number>>; only: Tone[]; onOnly: (t: Tone[]) => void; grouped: boolean; allOpen: boolean; onAll: () => void }) {
   const tones = FILTER_TONES.filter((t) => counts[t]);
   return (
     <div className="yw-bar">
-      <div className="yw-bar-top">
-      <div className="yw-group" role="radiogroup" aria-label="Group by">
-        <span className="yw-bar-label">Group by</span>
-        {GROUPS.map((g) => {
-          const off = g.by === "feature" && !issues;
-          return (
-            <button key={g.by} role="radio" aria-checked={by === g.by} disabled={off} className={by === g.by ? "on" : ""} onClick={() => onBy(g.by)} title={off ? "Connect Linear in Settings to group by feature" : g.by === "feature" ? "A feature is the Linear project an issue is in; a pull request joins it by its issue's link or its branch name" : undefined}>
-              {g.label}
-            </button>
-          );
-        })}
-      </div>
-      {/* Every feature open or folded at once. Only when there is something to group. */}
-      {grouped && (
-        <button className="yw-all" onClick={onAll}>
-          {allOpen ? "Collapse all" : "Expand all"}
-        </button>
-      )}
-      </div>
+      <GroupMenu by={by} issues={issues} onBy={onBy} grouped={grouped} allOpen={allOpen} onAll={onAll} />
       <div className="yw-filter" role="group" aria-label="Show only">
         {tones.map((t) => {
           const on = only.includes(t);
