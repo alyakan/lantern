@@ -157,6 +157,14 @@ function mockLinearWork() {
       issue("ACME-21", "Audit log page", { state: "Backlog", state_type: "backlog", project: "Offline mode", project_id: "p-off" }),
       issue("WEB-3", "Weekly digest email", { state: "In Progress", state_type: "started", project: "Dashboard polish", project_id: "p-dash" }),
       issue("WEB-7", "Empty states for every chart", { priority: 1, project: "Dashboard polish", project_id: "p-dash" }),
+      // Their pull requests merged, and Linear wasn't told: Your work says the tickets need moving.
+      issue("ACME-9", "Log every retry with its delay", { state: "In Review", state_type: "completed", project: "Reliability", project_id: "p-rel", branch: "feat/retry-log", links: ["https://github.com/you/acme-api/pull/126"] }),
+      issue("ACME-8", "Jittered backoff", { state: "In Progress", state_type: "started", project: "Reliability", project_id: "p-rel", branch: "ada/acme-8-jitter" }),
+      // Merged and waiting for a release: Ready, in teal.
+      issue("ACME-7", "Timeouts per route", { state: "Ready", state_type: "completed", project: "Reliability", project_id: "p-rel" }),
+      issue("ACME-6", "Retry budget per client", { state: "Ready", state_type: "completed", project: "Reliability", project_id: "p-rel" }),
+      // A stack of three pull requests.
+      issue("ACME-30", "Split the export pipeline", { state: "In Review", state_type: "completed", project: "Exports", project_id: "p-exp", branch: "ada/acme-30-export-1" }),
     ],
   };
 }
@@ -1000,6 +1008,7 @@ const CHAT_TEXT: { id: string; folder: string; title: string; updated_ms: number
   { id: "9b7e01", folder: FOLDER, title: "Add retries with backoff to fetchJson", updated_ms: Date.now() - 26 * HOUR, said: [["user", "fetchJson fails on a 503. Can it retry with backoff, and not retry a 404?"], ["assistant", "Done: three tries, doubling the wait each time (200 ms, 400 ms, 800 ms). A 404 is returned at once. The redirect handling is untouched."]] },
   { id: "a11ce5", folder: FOLDER, title: "Why does the build fail on CI but not locally?", updated_ms: Date.now() - 6 * 24 * HOUR, said: [["user", "The build passes on my machine and fails on CI with 'Cannot find module'."], ["assistant", "CI runs a clean install, and the module is only in your local node_modules. It needs to be added to package.json."]] },
   { id: "d4a501", folder: "/Users/you/projects/web-dashboard", title: "Chart tooltips clip at the edge", updated_ms: Date.now() - 3 * HOUR, said: [["user", "The tooltip is cut off at the right edge of the chart; I'd like it to flip to the left, like the redirect arrows in the nav."], ["assistant", "I'll measure the tooltip against the chart's bounds and flip it when it would overflow."]] },
+  { id: "e7a301", folder: FOLDER, title: "Stream the export as CSV", updated_ms: Date.now() - 4 * HOUR, said: [["user", "On ada/acme-30-export-2, stream the CSV instead of building it in memory."], ["assistant", "Streaming now: rows go out as they're read, so a big export no longer holds everything in memory."]] },
   { id: "1f0a01", folder: "/Users/you/src/infra", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, said: [["user", "Rotate the staging database credentials and update the secret in the deploy config."], ["assistant", "Rotated. The new secret is in the staging vault; the old one stays valid for ten minutes."]] },
 ];
 
@@ -2210,7 +2219,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           // The open chats' folders, each its own repository on GitHub, as status.rs would find them. The first has your work at
           // every stage the Desk's "Your work" tells apart; you are "ada".
           const ago = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
-          const pr = (number: number, title: string, branch: string, more: Record<string, unknown> = {}) => ({ number, title, author: "ada", branch, draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...more });
+          const pr = (number: number, title: string, branch: string, more: Record<string, unknown> = {}) => ({ number, title, author: "ada", branch, base: "main", draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...more });
           const folders = [...new Set(Object.values(slotFolder))];
           return folders.map((folder, i) => ({
             repo: folder,
@@ -2233,13 +2242,21 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
                     pr(129, "Cache the user's settings for a minute", "ada/acme-12-settings-cache"),
                     pr(130, "Show usage bars on the account page", "feat/usage-bars", { checks: "pending", mergeable: "UNKNOWN", merge_state: "UNKNOWN" }),
                     pr(127, "Fix the crash saving a form with an empty title", "fix/empty-title", { author: "grace", checks: "pending", review: null, review_requests: ["ada"] }),
+                    // A stack: 140 on main, 141 on 140, 142 on 141. All approved and green: 142 merges the stack up to it.
+                    pr(140, "Export: read rows in batches", "ada/acme-30-export-1", { review: "APPROVED", merge_state: "CLEAN" }),
+                    pr(141, "Export: stream the CSV", "ada/acme-30-export-2", { base: "ada/acme-30-export-1", review: "APPROVED", merge_state: "CLEAN" }),
+                    pr(142, "Export: progress in the UI", "ada/acme-30-export-3", { base: "ada/acme-30-export-2", review: "APPROVED", merge_state: "CLEAN" }),
                   ]
                 : i === 1
                   ? [pr(61, "Weekly digest email", "ada/web-3-weekly-digest", { review: "CHANGES_REQUESTED" })]
                   : [],
             merged:
               i === 0
-                ? [{ number: 126, title: "Log every retry with its delay", author: "ada", branch: "feat/retry-log", merged_at: ago(3) }]
+                ? [
+                    { number: 126, title: "Log every retry with its delay", author: "ada", branch: "feat/retry-log", merged_at: ago(3) },
+                    // Merged before the last release, so only its ticket (still In Progress) is listed.
+                    { number: 120, title: "Jittered backoff", author: "ada", branch: "ada/acme-8-jitter", merged_at: ago(40) },
+                  ]
                 : i === 1
                   ? [
                       { number: 58, title: "Chart tooltips flip at the right edge", author: "ada", branch: "fix/tooltips", merged_at: ago(5) },
