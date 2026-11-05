@@ -1,6 +1,6 @@
 import type { Request } from "../protocol/generated/Request";
 import { ANSWER_WAIT, UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
-import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import { Sync, CRUISE_KEPT_MS, SUGGESTIONS_KEPT_MS } from "./sync";
 
 /** A session that records what it was asked and answers from a table. */
 function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}, features: string[] = []) {
@@ -302,6 +302,42 @@ describe("the phone's sync", () => {
     it("can't be asked while not connected", async () => {
       const sync = new Sync({ schedule: (fn) => fn() });
       await expect(sync.suggest()).rejects.toThrow("Not connected");
+    });
+  });
+
+  describe("cruise", () => {
+    const drafts = { items: [{ id: "c1", title: "Re-run", why: "It failed.", message: "Re-run the tests.", target: { kind: "continue", slot: "a" } }], generated_at: 1 };
+    const connected = async (t: { now: number }, answers = {}, fail = {}) => {
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => t.now });
+      const s = fakeSession(7, answers, fail, ["cruise"]);
+      sync.onSession(s.session);
+      await settle();
+      return { sync, asked: () => s.asked.filter((r) => r.op === "cruise") };
+    };
+
+    it("is asked per chat, kept for a couple of minutes, and a refresh asks again", async () => {
+      const t = { now: 1_000 };
+      const { sync, asked } = await connected(t, { cruise: drafts });
+      expect(await sync.cruise("a")).toEqual(drafts);
+      await sync.cruise("a");
+      expect(asked()).toEqual([{ op: "cruise", slot: "a", refresh: false }]);
+      t.now += CRUISE_KEPT_MS - 1;
+      await sync.cruise("a");
+      expect(asked()).toHaveLength(1);
+      t.now += 1;
+      await sync.cruise("a");
+      expect(asked()).toHaveLength(2);
+      await sync.cruise("a", true);
+      expect(asked()[2]).toEqual({ op: "cruise", slot: "a", refresh: true });
+      // Each chat has its own draft.
+      await sync.cruise("b");
+      expect(asked()[3]).toEqual({ op: "cruise", slot: "b", refresh: false });
+    });
+
+    it("doesn't take or keep an answer that isn't a list of drafts", async () => {
+      const t = { now: 1_000 };
+      const { sync } = await connected(t, { cruise: { items: "none" } });
+      await expect(sync.cruise("a")).rejects.toThrow("didn't come through");
     });
   });
 

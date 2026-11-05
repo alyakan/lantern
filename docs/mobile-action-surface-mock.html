@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lantern mobile — action-surface mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #eef1f4;
+    --card: #ffffff;
+    --ink: #15212e;
+    --ink2: #566272;
+    --ink3: #8a94a1;
+    --onInk: #ffffff;
+    --onHi: #15212e;
+    --rule: #dce2e8;
+    --hi: #ffc21a;
+    --hiSoft: #fff3cc;
+    --cobalt: #2f5bff;
+    --go: #1f9d55;
+    --stop: #d93b3b;
+    --working: #d4693f;
+    --display: "Bricolage Grotesque", -apple-system, "SF Pro Display", system-ui, sans-serif;
+    --body: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #e6eaef;
+    color: var(--ink);
+    font-family: var(--body);
+    padding: 32px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .head { max-width: 1180px; margin: 0 auto 28px; }
+  .head h1 { font-family: var(--display); font-size: 26px; font-weight: 800; letter-spacing: -0.6px; }
+  .head p { color: var(--ink2); font-size: 13.5px; margin-top: 6px; max-width: 720px; line-height: 1.45; }
+  .head .note { display: inline-block; margin-top: 10px; font-size: 12px; color: var(--ink3); background: #fff; border: 1px solid var(--rule); border-radius: 999px; padding: 4px 12px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; max-width: 1180px; margin: 0 auto; }
+  .variant { flex: 1 1 300px; max-width: 380px; }
+  .variant h2 { font-family: var(--display); font-size: 15px; font-weight: 700; margin: 14px 2px 6px; letter-spacing: -0.2px; }
+  .variant h2 .tag { font-family: var(--body); font-size: 11px; font-weight: 700; color: var(--onHi); background: var(--hi); border-radius: 999px; padding: 2px 8px; margin-right: 6px; vertical-align: 1px; }
+  .variant .why { font-size: 12px; color: var(--ink2); margin: 0 2px 12px; line-height: 1.4; }
+  .phone {
+    width: 320px;
+    background: var(--paper);
+    border: 1px solid #d5dbe2;
+    border-radius: 44px;
+    padding: 12px 10px 16px;
+    box-shadow: 0 18px 40px rgba(21,33,46,0.18);
+    position: relative;
+    margin: 0 auto;
+  }
+  .status { display: flex; justify-content: space-between; align-items: center; padding: 0 14px 6px; font-size: 12px; font-weight: 600; color: var(--ink); }
+  .status .icons { display: flex; gap: 4px; align-items: center; }
+  .status .icons span { display: inline-block; width: 12px; height: 7px; border-radius: 2px; background: var(--ink); }
+  .status .icons .wifi { width: 12px; height: 7px; background: transparent; border-top: 2px solid var(--ink); border-radius: 50% 50% 0 0 / 100% 100% 0 0; transform: rotate(0deg); }
+  /* the glass top capsule */
+  .capsule {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 46px; border-radius: 999px; padding: 4px 16px;
+    background: rgba(255,255,255,0.72); backdrop-filter: blur(18px) saturate(1.4);
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 8px 20px rgba(21,33,46,0.10);
+    margin: 0 0 10px;
+  }
+  .mac { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink2); font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--go); box-shadow: 0 0 0 3px rgba(31,157,85,0.18); }
+  .seg { display: flex; gap: 2px; }
+  .seg div { font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; color: var(--ink2); white-space: nowrap; }
+  .seg .on { background: var(--ink); color: var(--onInk); }
+  .badge { min-width: 20px; height: 20px; border-radius: 10px; padding: 0 6px; display: flex; align-items: center; justify-content: center; background: var(--hi); color: var(--onHi); font-size: 11px; font-weight: 800; }
+  .scroll { display: flex; flex-direction: column; gap: 10px; }
+  .headline { font-family: var(--display); font-size: 27px; font-weight: 800; letter-spacing: -0.7px; line-height: 1.05; padding: 4px 6px 0; }
+  .headline .n { color: var(--hi); }
+  .sub { font-size: 12px; color: var(--ink2); padding: 0 6px; margin-top: -4px; }
+  /* decision deck */
+  .deck { position: relative; margin: 2px 0 4px; }
+  .deck .back { position: absolute; left: 12px; right: 12px; top: 8px; bottom: -6px; background: var(--card); border-radius: 24px; opacity: 0.7; }
+  .deck .back2 { position: absolute; left: 6px; right: 6px; top: 4px; bottom: -2px; background: var(--card); border-radius: 24px; opacity: 0.88; }
+  .card {
+    position: relative; background: var(--card); border-radius: 24px; padding: 16px; gap: 6px;
+    box-shadow: 0 12px 24px rgba(21,33,46,0.10);
+    display: flex; flex-direction: column;
+  }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .chip { font-size: 10.5px; font-weight: 800; color: var(--onHi); background: var(--hi); border-radius: 999px; padding: 2px 9px; }
+  .chip.ask { background: var(--hiSoft); }
+  .h { font-family: var(--display); font-size: 17px; font-weight: 700; letter-spacing: -0.3px; margin-top: 6px; }
+  .from { font-size: 12px; color: var(--ink2); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.5; color: var(--ink); background: var(--paper); border-radius: 14px; padding: 8px 10px; margin-top: 6px; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { flex: 1; text-align: center; font-size: 12.5px; font-weight: 700; padding: 10px 0; border-radius: 14px; }
+  .btn.ghost { color: var(--ink); background: var(--paper); }
+  .btn.primary { color: var(--onInk); background: var(--ink); }
+  /* suggestion card */
+  .sugg { background: var(--card); border-radius: 24px; padding: 13px 14px; box-shadow: 0 8px 18px rgba(21,33,46,0.07); display: flex; flex-direction: column; gap: 3px; }
+  .sugg .k { font-size: 11px; font-weight: 800; color: var(--cobalt); }
+  .sugg .t { font-family: var(--display); font-size: 15.5px; font-weight: 700; letter-spacing: -0.2px; }
+  .sugg .w { font-size: 12px; color: var(--ink2); }
+  .sugg .m { font-size: 12px; color: var(--ink3); margin-top: 3px; font-style: italic; }
+  .fold { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--ink); margin: 2px 6px 0; }
+  .fold .ch { color: var(--ink2); }
+  .fold .new { margin-left: auto; color: var(--cobalt); font-weight: 800; }
+  /* bottom dock */
+  .dock {
+    margin-top: 6px; border-radius: 999px; background: rgba(255,255,255,0.72); backdrop-filter: blur(18px) saturate(1.4);
+    border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 10px 24px rgba(21,33,46,0.12);
+    display: flex; align-items: center; gap: 4px; padding: 6px 8px; min-height: 54px;
+  }
+  .dock .seg { flex: 1; justify-content: space-around; }
+  .cruise { display: flex; align-items: center; gap: 6px; background: var(--cobalt); color: #fff; font-size: 12.5px; font-weight: 800; border-radius: 999px; padding: 9px 14px; box-shadow: 0 6px 16px rgba(47,91,255,0.35); }
+  .cruise .spark { width: 9px; height: 9px; border-radius: 50%; background: #fff; }
+  /* floating orb */
+  .orbwrap { position: absolute; right: 18px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .tray {
+    background: var(--card); border-radius: 20px; padding: 6px; width: 180px;
+    box-shadow: 0 16px 36px rgba(21,33,46,0.22);
+  }
+  .tray .handle { text-align: center; color: var(--ink3); font-size: 10px; padding: 3px 0 5px; }
+  .tray .act { display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 700; padding: 9px 11px; border-radius: 14px; }
+  .tray .act .i { width: 20px; height: 20px; border-radius: 50%; background: var(--paper); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .tray .act.hot { background: var(--ink); color: var(--onInk); }
+  .tray .act.hot .i { background: rgba(255,255,255,0.16); }
+  .orb {
+    width: 58px; height: 58px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #6b8aff, var(--cobalt) 62%, #1f43d6);
+    box-shadow: 0 0 0 6px rgba(47,91,255,0.16), 0 14px 30px rgba(47,91,255,0.45);
+    display: flex; align-items: center; justify-content: center;
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .orb .lamp { width: 20px; height: 24px; background: rgba(255,255,255,0.96); border-radius: 8px 8px 10px 10px; position: relative; }
+  .orb .lamp::after { content: ""; position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); width: 8px; height: 8px; background: rgba(255,255,255,0.96); border-radius: 2px 2px 4px 4px; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 6px rgba(47,91,255,0.16), 0 14px 30px rgba(47,91,255,0.42); } 50% { box-shadow: 0 0 0 10px rgba(47,91,255,0.10), 0 14px 34px rgba(47,91,255,0.55); } }
+  .callout { font-size: 10.5px; color: var(--cobalt); font-weight: 700; margin-top: 4px; text-align: right; }
+
+  /* iPad */
+  .ipad { width: 100%; max-width: 720px; margin: 0 auto; background: var(--paper); border: 1px solid #d5dbe2; border-radius: 20px; padding: 14px; box-shadow: 0 18px 40px rgba(21,33,46,0.18); }
+  .ipad .cols { display: flex; gap: 12px; }
+  .ipad .chat { flex: 1.15; background: var(--card); border-radius: 18px; padding: 14px; box-shadow: 0 8px 18px rgba(21,33,46,0.08); min-height: 320px; display: flex; flex-direction: column; }
+  .ipad .chat .title { font-family: var(--display); font-size: 15px; font-weight: 700; padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 10px; }
+  .msg { max-width: 82%; font-size: 12.5px; line-height: 1.5; padding: 9px 12px; border-radius: 16px; margin-bottom: 8px; }
+  .msg.ass { background: var(--paper); align-self: flex-start; }
+  .msg.user { background: var(--ink); color: var(--onInk); align-self: flex-end; }
+  .rail { flex: 0.9; display: flex; flex-direction: column; gap: 8px; }
+  .rail .rhead { font-family: var(--display); font-size: 13px; font-weight: 700; color: var(--ink2); padding: 2px 2px 0; }
+  .railcard { background: var(--card); border-radius: 16px; padding: 11px 12px; box-shadow: 0 6px 14px rgba(21,33,46,0.08); display: flex; flex-direction: column; gap: 3px; }
+  .railcard .lbl { font-size: 10.5px; font-weight: 800; color: var(--ink2); }
+  .railcard .txt { font-size: 12.5px; font-weight: 600; }
+  .railcard .sub { font-size: 11px; color: var(--ink3); padding: 0; margin: 0; }
+  .railcard.need { border-left: 4px solid var(--hi); }
+  .railcard.cruise { border-left: 4px solid var(--cobalt); }
+  .legend { max-width: 1180px; margin: 26px auto 0; font-size: 12px; color: var(--ink2); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>Lantern mobile — where should the action surface live?</h1>
+  <p>Three phone-portrait candidates and one iPad candidate for the orb-vs-navbar question, drawn with the app's real tokens
+     (cobalt, the <b style="color:var(--onHi);background:var(--hi);padding:0 4px;border-radius:4px">hi</b> highlighter, pill radii,
+     Bricolage headings). This is a <b>wireframe</b> — it shows placement and gesture flow, not the native Liquid Glass.</p>
+  <span class="note">Assumption: you wanted both phone and iPad; phone leads, iPad rail is the follow-on.</span>
+</div>
+
+<div class="grid">
+
+  <!-- A: top stays actionable -->
+  <div class="variant">
+    <h2><span class="tag">A</span>Top stays the action surface</h2>
+    <p class="why">Today's capsule, extended: ModeSwitch + a Cruise chip stay at the top. Nothing new to reach for; but the top is the hardest thumb reach.</p>
+    <div class="phone" style="height: 760px;">
+      <div class="status"><span>9:41</span><span class="icons"><span class="wifi"></span><span></span></span></div>
+      <div class="capsule">
+        <span class="mac"><span class="dot"></span>Lantern</span>
+        <span class="seg"><span class="on">Desk</span><span>Work</span><span>Chats</span></span>
+      </div>
+      <div class="scroll">
+        <div class="headline">3 things <span class="n">need you</span></div>
+        <div class="sub">Pull to refresh · the dots under the Mac's name say it's working</div>
+        <div class="deck">
+          <div class="back2"></div><div class="back"></div>
+          <div class="card">
+            <div class="row"><span class="chip">Wants to run</span></div>
+            <div class="h">npm run test</div>
+            <div class="from">lantern · just now</div>
+            <div class="mono">$ npm run test<br/>&gt; 14 tests · 1 failing</div>
+            <div class="btns"><span class="btn ghost">Open chat</span><span class="btn primary">Review</span></div>
+          </div>
+        </div>
+        <div class="sugg">
+          <span class="k">NEXT · Carry on</span>
+          <span class="t">Fix the one failing test</span>
+          <span class="w">The run found a red in &quot;revertStore&quot;.</span>
+          <span class="m">“Run the tests, then fix the red in revertStore.”</span>
+        </div>
+        <div class="fold"><span class="ch">▸</span> Claude suggests <span class="new">New ideas</span></div>
+      </div>
+      <div class="cruise" style="margin:10px 2px 0;">&#10024; Cruise is on — suggesting each next step</div>
+    </div>
+  </div>
+
+  <!-- B: bottom dock -->
+  <div class="variant">
+    <h2><span class="tag">B</span>Bottom dock (thumb-first)</h2>
+    <p class="why">The capsule becomes status-only; Desk/Work/Chats + Cruise move to a glass dock at the thumb. More reachable, no floating overlay.</p>
+    <div class="phone" style="height: 760px;">
+      <div class="status"><span>9:41</span><span class="icons"><span class="wifi"></span><span></span></span></div>
+      <div class="capsule">
+        <span class="mac"><span class="dot"></span>Lantern</span>
+        <span class="badge">3</span>
+      </div>
+      <div class="scroll">
+        <div class="headline">3 things <span class="n">need you</span></div>
+        <div class="sub">Everything you steer sits in the dock below</div>
+        <div class="deck">
+          <div class="back2"></div><div class="back"></div>
+          <div class="card">
+            <div class="row"><span class="chip">Wants to run</span></div>
+            <div class="h">npm run test</div>
+            <div class="from">lantern · just now</div>
+            <div class="mono">$ npm run test<br/>&gt; 14 tests · 1 failing</div>
+            <div class="btns"><span class="btn ghost">Open chat</span><span class="btn primary">Review</span></div>
+          </div>
+        </div>
+        <div class="sugg">
+          <span class="k">NEXT · Carry on</span>
+          <span class="t">Fix the one failing test</span>
+          <span class="w">The run found a red in &quot;revertStore&quot;.</span>
+          <span class="m">“Run the tests, then fix the red in revertStore.”</span>
+        </div>
+      </div>
+      <div class="dock">
+        <span class="seg"><span class="on">Desk</span><span>Work</span><span>Chats</span></span>
+        <span class="cruise"><span class="spark"></span>Cruise</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- C: floating orb -->
+  <div class="variant">
+    <h2><span class="tag">C</span>Floating orb + tray</h2>
+    <p class="why">A lantern orb glows when something needs you. Tap = act on the top thing; drag up = a tray of actions; drag left/right = cycle waiting chats.</p>
+    <div class="phone" style="height: 760px;">
+      <div class="status"><span>9:41</span><span class="icons"><span class="wifi"></span><span></span></span></div>
+      <div class="capsule">
+        <span class="mac"><span class="dot"></span>Lantern</span>
+        <span class="badge">3</span>
+      </div>
+      <div class="scroll">
+        <div class="headline">3 things <span class="n">need you</span></div>
+        <div class="sub">The orb is the whole &quot;needs me now&quot; surface</div>
+        <div class="deck">
+          <div class="back2"></div><div class="back"></div>
+          <div class="card">
+            <div class="row"><span class="chip">Wants to run</span></div>
+            <div class="h">npm run test</div>
+            <div class="from">lantern · just now</div>
+            <div class="mono">$ npm run test<br/>&gt; 14 tests · 1 failing</div>
+            <div class="btns"><span class="btn ghost">Open chat</span><span class="btn primary">Review</span></div>
+          </div>
+        </div>
+        <div class="sugg">
+          <span class="k">NEXT · Carry on</span>
+          <span class="t">Fix the one failing test</span>
+          <span class="w">The run found a red in &quot;revertStore&quot;.</span>
+          <span class="m">“Run the tests, then fix the red in revertStore.”</span>
+        </div>
+      </div>
+      <div class="orbwrap">
+        <div class="tray">
+          <div class="handle">drag up to unfold ⌄</div>
+          <div class="act hot"><span class="i">✓</span> Do the suggestion</div>
+          <div class="act"><span class="i">↻</span> Another</div>
+          <div class="act"><span class="i">≡</span> Approve all safe</div>
+          <div class="act"><span class="i">■</span> Stop Cruise</div>
+        </div>
+        <div class="orb"><div class="lamp"></div></div>
+        <div class="callout">tap = act · drag ⬅ ➡ = cycle</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- iPad rail -->
+  <div class="variant" style="flex-basis:100%; max-width:100%;">
+    <h2><span class="tag">iPad</span>Decision rail (always-visible steering)</h2>
+    <p class="why">Landscape: the chat/diff stays read-only on the left; everything that needs you — the waiting decision, the Cruise next step, the plan's step, the due todo — lives in a rail on the right. Tap = act, swipe = decide.</p>
+    <div class="ipad">
+      <div class="cols">
+        <div class="chat">
+          <div class="title">lantern · fix/revert-store</div>
+          <div class="msg ass">Ran the suite. One red: <code>revertStore.test.ts</code> — the teardown still fires after the test passes.</div>
+          <div class="msg user">fix it</div>
+          <div class="msg ass">On it — I've edited the teardown guard. Want me to re-run the suite, then commit?</div>
+        </div>
+        <div class="rail">
+          <div class="rhead">Needs you</div>
+          <div class="railcard need">
+            <span class="lbl">WANTS TO RUN · 1 of 3</span>
+            <span class="txt">npm run test</span>
+            <span class="sub">swipe right = allow · left = deny</span>
+          </div>
+          <div class="rhead">Next step</div>
+          <div class="railcard cruise">
+            <span class="lbl">CRUISE</span>
+            <span class="txt">Re-run the suite, then commit</span>
+            <span class="sub">tap = do · ↻ another · ✕ stop</span>
+          </div>
+          <div class="rhead">Plan</div>
+          <div class="railcard">
+            <span class="lbl">STEP 2 OF 5</span>
+            <span class="txt">Verify the teardown fix</span>
+          </div>
+          <div class="rhead">Today</div>
+          <div class="railcard">
+            <span class="lbl">DUE 17:00</span>
+            <span class="txt">Cut the 0.1.104 release</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <b>What to compare:</b> A keeps everything at the top (hardest reach, most familiar). B drops the actions into a thumb dock
+  (reachable, no overlay, but the dock is a second bar to learn). C makes the orb the single &quot;needs me now&quot; surface
+  (least chrome, but a floating overlay has to be right about when it shows and what it covers). The iPad rail is independent
+  of the phone choice — it replaces navigation with a permanent steering column.
+</div>
+
+</body>
+</html>

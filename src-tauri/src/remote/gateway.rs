@@ -191,6 +191,11 @@ pub trait Host: Send + Sync + 'static {
     /// Asks a small model, with no tools and no saved session, and gives its reply (see suggest.rs, which asks for this
     /// rarely and checks what comes back).
     fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
+    /// Asks a model for the next step in one chat (Cruise): Sonnet, no tools, no saved session. A Mac that doesn't know
+    /// Cruise falls back to the Home suggestion call.
+    fn cruise_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
+        self.suggest_reply(prompt)
+    }
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
     /// A file's diff in one of the Changes pane's other views (Uncommitted: against the last commit; Branch: against where the
@@ -301,6 +306,8 @@ pub struct Gateway {
     started: Mutex<HashMap<String, Vec<u64>>>,
     /// What Claude suggests next, kept and shared by every phone.
     suggester: super::suggest::Suggester,
+    /// Cruise's next steps, kept per chat and asked rarely (see suggest.rs::Cruiser).
+    cruiser: super::suggest::Cruiser,
     /// Which phone started each command, so only that phone answers or stops it.
     shells: Mutex<ShellOwners>,
 }
@@ -363,6 +370,7 @@ impl Gateway {
             on_open: Mutex::new(None),
             started: Mutex::default(),
             suggester: Default::default(),
+            cruiser: Default::default(),
             shells: Mutex::default(),
         })
     }
@@ -410,6 +418,15 @@ impl Gateway {
         let projects = host.projects().await;
         let chats = super::suggest::digests(&self.hub);
         let suggestions = self.suggester.get((self.now)(), &chats, &projects, refresh, |prompt| host.suggest_reply(prompt)).await?;
+        serde_json::to_value(&suggestions).map_err(|e| e.to_string())
+    }
+
+    /// What Claude would do next in this one chat (Request::Cruise): the last few turns of it, a Sonnet call, and only
+    /// drafts for this chat. Kept per chat by the Cruiser, so "Another" and a screen that comes back don't ask again at once.
+    async fn cruise(&self, slot: String, refresh: bool) -> Result<serde_json::Value, String> {
+        let digest = super::suggest::cruise_digest(&self.hub, &slot).ok_or("That chat isn't open on your Mac.")?;
+        let host = self.host.clone();
+        let suggestions = self.cruiser.get((self.now)(), &digest, refresh, |prompt| host.cruise_reply(prompt)).await?;
         serde_json::to_value(&suggestions).map_err(|e| e.to_string())
     }
 
@@ -950,10 +967,11 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } | Request::WorkStep { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::Cruise { .. } | Request::NewChat { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } | Request::WorkStep { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
+                        Request::Cruise { slot, refresh } => slow.push(Box::pin(async move { (id, gw.cruise(slot, refresh).await) })),
                         Request::DeskRoute { desk, text } => slow.push(Box::pin(async move { (id, gw.desk_route(desk, text).await) })),
                         Request::DeskTalk { desk, text, history } => slow.push(Box::pin(async move { (id, gw.desk_talk(desk, text, history).await) })),
                         Request::DeskReply { desk, slot, text, after } => slow.push(Box::pin(async move { (id, gw.desk_reply(desk, slot, text, after).await) })),
@@ -1394,6 +1412,7 @@ impl<'a> Session<'a> {
                 host.shell_stop(&slot, &id).map(|()| serde_json::Value::Null)
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
+            Request::Cruise { slot, refresh } => self.gw.cruise(slot, refresh).await,
             Request::Desk => Ok(json(&self.gw.hub.desk.phone().0)),
             Request::Work => Ok(json(&self.gw.hub.work.phone().0)),
             Request::WorkStep { key, sig } => self.gw.work_step(&self.device, key, sig).await,
