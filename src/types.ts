@@ -841,7 +841,7 @@ export interface RepoStatus {
   gh: "ready" | "missing" | "logged_out" | "not_github" | "failed";
   /** `mergeable`: MERGEABLE, CONFLICTING or UNKNOWN; `merge_state`: GitHub's mergeStateStatus (CLEAN, BEHIND, BLOCKED, DIRTY…);
    * `review_requests`: the logins asked to review it. */
-  prs: { number: number; title: string; author: string; branch: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null; mergeable: string | null; merge_state: string | null; review_requests: string[] }[];
+  prs: { number: number; title: string; author: string; branch: string; base: string; draft: boolean; checks: "pass" | "fail" | "pending" | "none"; review: string | null; mergeable: string | null; merge_state: string | null; review_requests: string[] }[];
   /** The latest merged pull requests, newest first; `merged_at` is ISO 8601. */
   merged: { number: number; title: string; author: string; branch: string; merged_at: string }[];
   release: { tag: string; published_at: string | null } | null;

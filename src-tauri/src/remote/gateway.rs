@@ -3432,6 +3432,9 @@ pub(crate) mod tests {
             step_only: false,
             fold: None,
             next: next.then(|| RemoteWorkNext { what: "Fix failing checks on".into(), yours: false, button: "Do it".into(), warn: false }),
+            issue_url: None,
+            branch: None,
+            stack: None,
         };
         crate::remote::work::WindowWork { issues: false, looked: true, blind: vec![], items: vec![item("/p/app:pr:7", true), item("/p/app:pr:8", false)] }
     }

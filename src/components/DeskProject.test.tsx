@@ -19,7 +19,7 @@ const repo: RepoStatus = {
   folders: [{ folder: "/p/lantern", branch: "feat/desk", changed: 2 }],
   worktrees: [wt("/wt/clean"), wt("/wt/dirty"), wt("/lantern/worktrees/w1", { agent: true, branch: null })],
   gh: "ready",
-  prs: [{ number: 7, title: "feat: the Desk", author: "aly", branch: "feat/desk", draft: false, checks: "fail", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [] }],
+  prs: [{ number: 7, title: "feat: the Desk", author: "aly", branch: "feat/desk", base: "main", draft: false, checks: "fail", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [] }],
   merged: [],
   release: null,
   drafts: [],

@@ -5,7 +5,7 @@ import { withLinear, yourWork } from "./yourWork";
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
-const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks: "pass", review: null, mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
+const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, base: "main", draft: false, checks: "pass", review: null, mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
 const issue = (identifier: string, over: Partial<LinearIssue> = {}): LinearIssue => ({ identifier, title: `Issue ${identifier}`, url: `https://linear.app/a/issue/${identifier}`, priority: 1, due: null, state: "Todo", state_type: "unstarted", team: "ENG", project: "Sync", project_id: "p", branch: null, links: [], ...over });
 const linearWork = (issues: LinearIssue[]): LinearWork => ({ connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }], issues, error: null });
 

@@ -22,7 +22,7 @@ const GH_TIMEOUT: Duration = Duration::from_secs(30);
 const GH_FRESH: Duration = Duration::from_secs(90);
 /// The open pull requests and the merged ones listed, at most.
 const OPEN_MAX: &str = "30";
-const OPEN_FIELDS: &str = "number,title,author,headRefName,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus,reviewRequests";
+const OPEN_FIELDS: &str = "number,title,author,headRefName,baseRefName,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus,reviewRequests";
 const MERGED_MAX: &str = "30";
 /// The local branches looked at, newest commit first, at most (each costs one `git rev-list`).
 const BRANCHES_MAX: &str = "20";
@@ -54,6 +54,8 @@ pub struct PrStatus {
     pub title: String,
     pub author: String,
     pub branch: String,
+    /// The branch it would merge into: another open pull request's branch when it is stacked on that one.
+    pub base: String,
     pub draft: bool,
     /// "pass", "fail", "pending" or "none" (no checks).
     pub checks: &'static str,
@@ -220,6 +222,7 @@ pub fn parse_open(json: &[u8]) -> Result<Vec<PrStatus>, String> {
                 title: pr["title"].as_str().unwrap_or("").to_string(),
                 author: pr["author"]["login"].as_str().unwrap_or("").to_string(),
                 branch: pr["headRefName"].as_str().unwrap_or("").to_string(),
+                base: pr["baseRefName"].as_str().unwrap_or("").to_string(),
                 draft: pr["isDraft"].as_bool().unwrap_or(false),
                 checks: rollup(&pr["statusCheckRollup"]),
                 review: pr["reviewDecision"].as_str().filter(|s| !s.is_empty()).map(String::from),
@@ -524,12 +527,13 @@ mod tests {
 
     #[test]
     fn parses_open_and_merged_pull_requests() {
-        let open = br#"[{"number":7,"title":"feat: x","author":{"login":"aly"},"headRefName":"feat/x","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":"","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","reviewRequests":[{"login":"sara"},{"name":"core-team"}]},{"title":"no number"}]"#;
+        let open = br#"[{"number":7,"title":"feat: x","author":{"login":"aly"},"headRefName":"feat/x","baseRefName":"feat/w","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE"}],"reviewDecision":"","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","reviewRequests":[{"login":"sara"},{"name":"core-team"}]},{"title":"no number"}]"#;
         let prs = parse_open(open).unwrap();
         assert_eq!(prs.len(), 1);
         assert_eq!((prs[0].number, prs[0].checks, prs[0].review.clone()), (7, "fail", None));
         assert_eq!((prs[0].mergeable.as_deref(), prs[0].merge_state.as_deref()), (Some("CONFLICTING"), Some("DIRTY")));
         assert_eq!(prs[0].review_requests, vec!["sara"]);
+        assert_eq!(prs[0].base, "feat/w");
         let merged = br#"[{"number":1,"title":"a","author":{"login":"aly"},"headRefName":"feat/a","mergedAt":"2026-10-30T10:00:00Z"},{"number":2,"title":"b","mergedAt":"2026-10-31T09:00:00Z"},{"number":3,"title":"c"}]"#;
         let merged = parse_merged(merged).unwrap();
         assert_eq!(merged.iter().map(|m| m.number).collect::<Vec<_>>(), vec![2, 1]);

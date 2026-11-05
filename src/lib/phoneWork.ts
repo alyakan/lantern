@@ -24,6 +24,10 @@ export interface WindowWorkItem {
   /** ready or done: quiet enough to fold with its kind in a list. */
   fold: string | null;
   next: { what: string; yours: boolean; button: string; warn: boolean } | null;
+  /** Its Linear issue's page, when `url` is the pull request's (or both are the issue's). */
+  issue_url: string | null;
+  branch: string | null;
+  stack: { id: number; pos: number; of: number; on: number | null } | null;
 }
 
 export interface WindowWork {
@@ -76,6 +80,9 @@ export function phoneWork(items: WorkItem[], issues: boolean, looked: boolean, b
       step_only: !!i.stepOnly,
       fold: i.fold ?? null,
       next: i.next ? { what: i.next.what, yours: i.next.yours, button: i.next.button, warn: !!i.next.warn } : null,
+      issue_url: i.issue && safeIssueUrl(i.issue.url) ? i.issue.url : null,
+      branch: i.branch,
+      stack: i.stack ?? null,
     })),
   };
 }

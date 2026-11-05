@@ -6,7 +6,7 @@ import { byFeature, filterWork, foldRows, foldWord, groupWork, nextSteps, projec
 
 const NOW = new Date(2026, 10, 2, 18, 0).getTime();
 const repo = (over: Partial<RepoStatus> = {}): RepoStatus => ({ repo: "/p/lantern", github: "aly/lantern", folders: [{ folder: "/p/lantern", branch: "main", changed: 0 }], worktrees: [], gh: "ready", prs: [], merged: [], release: null, drafts: [], viewer: "aly", branches: [], error: null, ...over });
-const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
+const pr = (number: number, over: Partial<RepoStatus["prs"][number]> = {}): RepoStatus["prs"][number] => ({ number, title: `PR ${number}`, author: "aly", branch: `b${number}`, base: "main", draft: false, checks: "pass", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE", merge_state: "BLOCKED", review_requests: [], ...over });
 const one = (p: RepoStatus["prs"][number]) => yourWork([repo({ prs: [p] })], NOW)[0];
 const chat = (slot: string, folder: string, state: InboxRow["state"] = "done"): InboxRow => ({ slot, title: `Chat ${slot}`, folder, where: "lantern", workflow: "Chat", state, unread: false, at: null, line: "" });
 
@@ -43,6 +43,34 @@ describe("Your work", () => {
     // Conflicts, failing checks and requested changes still come first.
     expect(one(pr(1, { checks: "fail" })).next?.warn).toBeUndefined();
     expect(one(pr(1, { review: "CHANGES_REQUESTED" })).next?.warn).toBeUndefined();
+  });
+
+  it("finds stacks by base branch, keeps each together bottom first, and merges one up to a pull request only when all under it can", () => {
+    const ready = { review: "APPROVED", merge_state: "CLEAN" };
+    const r = repo({ prs: [pr(3, { ...ready, branch: "s3", base: "s2" }), pr(9, { checks: "fail" }), pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1", base: "main" })] });
+    const items = yourWork([r], NOW);
+    const by = (n: number) => items.find((i) => i.number === n)!;
+    expect([1, 2, 3].map((n) => by(n).stack)).toEqual([
+      { id: 1, pos: 1, of: 3, on: null },
+      { id: 1, pos: 2, of: 3, on: 1 },
+      { id: 1, pos: 3, of: 3, on: 2 },
+    ]);
+    expect(by(9).stack).toBeUndefined();
+    // The bottom one merges on its own; one above it merges the stack up to it, into the bottom's base, after one approval card.
+    expect([by(1).next!.button, by(2).next!.button, by(3).next!.button]).toEqual(["Merge…", "Merge stack to here…", "Merge stack to here…"]);
+    expect(by(3).word).toBe("Ready to merge · 3 in the stack");
+    expect(by(3).next!.text).toContain("#1, #2, #3 in aly/lantern, into the bottom one's base branch (main)");
+    expect(by(3).next!.text).toContain("request_approval once, naming every pull request");
+    expect(whereThingsStand(items).map((i) => i.number)).toEqual([9, 1, 2, 3]);
+    // One under it that can't be merged holds it.
+    const held = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { checks: "pending", branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect([held.tone, held.word, held.next]).toEqual(["wait", "Waiting on #1", null]);
+    // Its own trouble comes first: failing checks are fixed whatever is under it.
+    const own = yourWork([repo({ prs: [pr(2, { checks: "fail", branch: "s2", base: "s1" }), pr(1, { ...ready, branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect(own.next!.kind).toBe("checks");
+    // Nobody approved one of them: the stack's merge goes around the rule, and says so.
+    const bypass = yourWork([repo({ prs: [pr(2, { ...ready, branch: "s2", base: "s1" }), pr(1, { branch: "s1" })] })], NOW).find((i) => i.number === 2)!;
+    expect([bypass.next!.warn, bypass.next!.text.includes("bypasses a required review")]).toEqual([true, true]);
   });
 
   it("follows your pull requests and the ones that ask you to review, not everyone's", () => {

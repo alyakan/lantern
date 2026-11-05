@@ -76,6 +76,17 @@ export interface WorkItem {
   bare?: string;
   /** What is quiet enough to fold with its kind in a list (see `foldRows`): work merged and waiting for a release, or done. */
   fold?: Fold;
+  /** Where a pull request sits in a stack of them (see `stackOf`). */
+  stack?: StackPlace;
+}
+
+/** A pull request based on another open pull request's branch is stacked on it. `id`: the bottom one's number, which the stack is
+ * known by; `pos`: 1 at the bottom; `of`: how tall the stack is; `on`: the number of the one it is based on. */
+export interface StackPlace {
+  id: number;
+  pos: number;
+  of: number;
+  on: number | null;
 }
 
 /** ready: merged, waiting for a release (a Ready issue, or a pull request merged since the last release); done: finished. */
@@ -146,6 +157,58 @@ function openStage(r: RepoStatus, p: Pr): Pick<WorkItem, "stage" | "tone" | "wor
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/** The open pull requests `p` is stacked on, the bottom one first (none when it is based on a branch no open pull request has). */
+function below(r: RepoStatus, p: Pr): Pr[] {
+  const out: Pr[] = [];
+  const seen = new Set([p.number]);
+  for (let q = r.prs.find((x) => x.branch === p.base); q && !seen.has(q.number); q = r.prs.find((x) => x.branch === q!.base)) {
+    seen.add(q.number);
+    out.unshift(q);
+  }
+  return out;
+}
+
+/** Where `p` sits in its stack, when it is in one (two or more pull requests, each based on the one below). */
+function stackOf(r: RepoStatus, p: Pr): StackPlace | undefined {
+  const under = below(r, p);
+  const bottom = under[0] ?? p;
+  const heights = r.prs.flatMap((q) => {
+    const b = below(r, q);
+    return (b[0] ?? q).number === bottom.number ? [b.length + 1] : [];
+  });
+  if (heights.length < 2) return undefined;
+  return { id: bottom.number, pos: under.length + 1, of: Math.max(...heights), on: under.length ? under[under.length - 1].number : null };
+}
+
+/**
+ * A stacked pull request is merged with the ones under it, from the bottom up, into the bottom one's base: only when each of them
+ * could be merged now. Until then it waits on the first that can't. The bottom one merges on its own, as any other.
+ */
+function stacked(r: RepoStatus, p: Pr, s: ReturnType<typeof openStage>): ReturnType<typeof openStage> {
+  const under = below(r, p);
+  if (!under.length || s.next?.kind !== "merge") return s;
+  const stuck = under.find((q) => openStage(r, q).next?.kind !== "merge");
+  if (stuck) return { stage: s.stage, tone: "wait", word: `Waiting on #${stuck.number}`, next: null };
+  const all = [...under, p];
+  const warn = all.some((q) => q === p ? s.next?.warn : openStage(r, q).next?.warn);
+  const into = safeRef(under[0].base) ? ` (${under[0].base})` : "";
+  const nums = all.map((q) => `#${q.number}`).join(", ");
+  return {
+    stage: "merge",
+    tone: "you",
+    word: `Ready to merge · ${all.length} in the stack`,
+    next: {
+      kind: "merge",
+      what: "Merge the stack up to",
+      yours: true,
+      button: "Merge stack to here…",
+      onBranch: false,
+      ...(warn ? { warn } : {}),
+      text: `${cap(prRef(r, p.number))} is stacked on others. Merge the stack from the bottom up to it, ${nums}${r.github ? ` in ${r.github}` : ""}, into the bottom one's base branch${into}. Check each once more with gh first. Merge them the way this repository merges stacks: GitHub's own stack merge if it uses stacked pull requests, otherwise each in turn from the bottom, pointing the next one's base at that branch with gh pr edit --base before merging it. Ask me with request_approval once, naming every pull request${warn ? ", and say on the card that it bypasses a required review" : ""}. Merge them only if I say yes.`,
+    },
+  };
+}
+
 /** Every piece of your work in the repositories, in no order (see `nextSteps`, `whereThingsStand`). */
 export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
   const out: WorkItem[] = [];
@@ -157,8 +220,9 @@ export function yourWork(repos: RepoStatus[] | null, now: number): WorkItem[] {
     const mine = (author: string) => !!viewer && author.toLowerCase() === viewer.toLowerCase();
     for (const p of r.prs) {
       if (mine(p.author)) {
-        const s = openStage(r, p);
-        out.push({ ...base, key: `${r.repo}:pr:${p.number}`, number: p.number, branch: p.branch, title: p.title, ...s, meta: `${name} · ${p.branch}`, at: null, sig: `${s.stage}:${s.word}` });
+        const s = stacked(r, p, openStage(r, p));
+        const stack = stackOf(r, p);
+        out.push({ ...base, key: `${r.repo}:pr:${p.number}`, number: p.number, branch: p.branch, title: p.title, ...s, meta: `${name} · ${p.branch}`, at: null, sig: `${s.stage}:${s.word}`, ...(stack ? { stack } : {}) });
       } else if (viewer && p.review_requests.some((l) => l.toLowerCase() === viewer.toLowerCase())) {
         out.push({
           ...base,
@@ -277,7 +341,22 @@ export function nextSteps(items: WorkItem[]): WorkItem[] {
 /** Every item, blocked first, then yours, tickets to move, on its way, local, Ready and done: what's done and branches with nothing to do come last. */
 export function whereThingsStand(items: WorkItem[]): WorkItem[] {
   const rank = (i: WorkItem) => ({ bad: 0, you: 1, move: 2, wait: 3, local: 4, todo: 6, ready: 7, done: 8 })[i.tone] + (i.tone === "local" && !i.next ? 1 : 0);
-  return items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0));
+  return stackTogether(items.filter((i) => !i.stepOnly).sort((a, b) => rank(a) - rank(b) || (b.at ?? 0) - (a.at ?? 0)));
+}
+
+/** The list with each stack's pull requests together, bottom first, at the place of the most pressing of them. */
+function stackTogether(items: WorkItem[]): WorkItem[] {
+  const out: WorkItem[] = [];
+  const placed = new Set<string>();
+  for (const i of items) {
+    if (placed.has(i.key)) continue;
+    const members = i.stack ? items.filter((j) => j.repo === i.repo && j.stack?.id === i.stack!.id).sort((a, b) => a.stack!.pos - b.stack!.pos) : [i];
+    for (const m of members) {
+      out.push(m);
+      placed.add(m.key);
+    }
+  }
+  return out;
 }
 
 /** A row of a list of work: an item, or several quiet ones (`fold`) in one line that opens to them. */
