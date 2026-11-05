@@ -23,14 +23,16 @@
   --line-strong: #d4d4d9;
   --text: #1d1d1f;
   --text-2: #48484a;
-  --muted: #86868b;
+  --muted: #6e6e73;        /* icons, rings and the focus outline: 4.7:1 on the sidebar, so a word set in it reads too */
   --faint: #aeaeb2;
-  --muted-text: #6e6e73;   /* small text in the muted grey: 4.7:1 on the sidebar, where --muted is 3.3:1 */
+  --muted-text: #5f5f64;   /* small secondary text: 5.8:1 on the sidebar, a step darker than --muted */
   --accent: #1d1d1f;       /* neutral: buttons are black/white, never blue */
   --accent-soft: #ececee;
   --accent-text: #ffffff;
   --working: #d4693f;      /* Claude's orange, only while it works */
+  --working-text: #b5542c; /* the same orange as text: 4.5:1 on the sidebar, where --working is 3.3:1 */
   --unread: #0a84ff;       /* a chat finished in the background, not opened yet */
+  --unread-text: #0a6fd0;  /* the same blue as text: 4.6:1 on the sidebar, where --unread is 3.4:1 */
   --attn: #c47f00;         /* an agent on the canvas that is waiting for you: rings, tethers, dots */
   --attn-text: #8a5d00;    /* the same, as small text: 5.2:1 on the sidebar, where --attn is 2.9:1 */
   --add: #1a7f37;
@@ -138,14 +140,16 @@
     --line-strong: #3c3c43;
     --text: #dfdfe0;
     --text-2: #b9b9bd;
-    --muted: #8e8e93;
+    --muted: #919196;
     --faint: #5d5d63;
-    --muted-text: #98989d;   /* 5.0:1 on the sidebar, where --muted is 4.4:1 */
+    --muted-text: #98989d;   /* 5.0:1 on the sidebar, where --muted is 4.6:1 */
     --accent: #e6e6e7;
     --accent-soft: #2a2a2a;
     --accent-text: #1a1a1d;
     --working: #ef8a5c;
+    --working-text: var(--working);
     --unread: #0a84ff;
+    --unread-text: #4a9eff;   /* 5.3:1 on the sidebar, where --unread is 4.0:1 */
     --attn: #f0b44c;
     --attn-text: #f0b44c;
     --add: #6bd488;
@@ -182,14 +186,16 @@
   --line-strong: #3c3c43;
   --text: #dfdfe0;
   --text-2: #b9b9bd;
-  --muted: #8e8e93;
+  --muted: #919196;
   --faint: #5d5d63;
   --muted-text: #98989d;
   --accent: #e6e6e7;
   --accent-soft: #2a2a2a;
   --accent-text: #1a1a1d;
   --working: #ef8a5c;
+  --working-text: var(--working);
   --unread: #0a84ff;
+  --unread-text: #4a9eff;
   --attn: #f0b44c;
   --attn-text: #f0b44c;
   --add: #6bd488;
@@ -240,7 +246,9 @@
   --accent-text: #0d1117;
   --on-status: #0d1117;
   --working: #e3b341;
+  --working-text: var(--working);
   --unread: #79c0ff;
+  --unread-text: var(--unread);
   --attn: #e3b341;
   --attn-text: #e3b341;
   --add: #7ee787;
@@ -343,7 +351,9 @@
   --accent-text: #021207;
   --on-status: #020a04;
   --working: #ffb000;
+  --working-text: var(--working);
   --unread: #6bffe0;
+  --unread-text: var(--unread);
   --attn: #ffc933;
   --attn-text: #ffc933;
   --add: #8dffb0;
@@ -451,7 +461,9 @@
   --md-quote-bar: #2aa198;
   --md-pre-head-text: #8a9c9e;
   --working: #e2814e;
+  --working-text: var(--working);
   --unread: #4aa3e8;
+  --unread-text: var(--unread);
   --attn: #b58900;
   --attn-text: #d9a520;
   --add: #6dc870;
@@ -498,7 +510,9 @@
   --on-status: #2e3440;
   --md-quote-bar: #88c0d0;
   --working: #dea491;
+  --working-text: var(--working);
   --unread: #9ab4cd;
+  --unread-text: var(--unread);
   --attn: #ebcb8b;
   --attn-text: #ebcb8b;
   --add: #a3be8c;
@@ -546,7 +560,9 @@
   --md-quote-bar: #6b3f1d;
   --md-pre-head-text: #675b4c;
   --working: #ac4813;
+  --working-text: var(--working);
   --unread: #1d69ba;
+  --unread-text: var(--unread);
   --attn: #a86300;
   --attn-text: #7c4a00;
   --add: #236d37;
@@ -596,7 +612,9 @@
   --accent-hover: #f9bd2b;
   --on-attn: #151515;
   --working: #bd3e00;
+  --working-text: var(--working);
   --unread: #1d4aff;
+  --unread-text: var(--unread);
   --attn: #b87800;
   --attn-text: #805600;
   --add: #17722f;
@@ -886,7 +904,7 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .viewer-crumb { flex: none; width: 5px; height: 5px; margin: 0 2px 0 0; border-right: 1.3px solid var(--faint); border-bottom: 1.3px solid var(--faint); transform: rotate(-45deg); }
 .viewer-status { flex: 0 0 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .viewer-detail { color: var(--muted); }
-.viewer.working .viewer-status { color: var(--working); }
+.viewer.working .viewer-status { color: var(--working-text); }
 /* While Claude works, an orange glint runs along the viewer's bottom edge. It moves by transform, which WebKit animates off
    the main thread: moved by `left`, it laid the page out every frame for as long as Claude worked. */
 .viewer-progress { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--working) 18%, transparent); }
@@ -1564,7 +1582,7 @@ button.hud-sound:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .viewer-issue:disabled { opacity: 1; }
 .viewer-issue.failed { color: var(--del); }
 /* Still running in the background: a count with a spinner, and the list under the viewer. */
-.viewer-issue.background { color: var(--working); }
+.viewer-issue.background { color: var(--working-text); }
 .viewer-issue.background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
 .viewer-issue.pressed { background: var(--bg-active); }
 .background-menu { top: calc(100% + 6px); left: 0; right: 0; min-width: 360px; max-height: 320px; }
@@ -2027,7 +2045,7 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 @container (max-width: 470px) { .steps-phase:not(.current) .steps-phase-name { display: none; } .steps-phase-sep { width: 6px; } }
 @container (max-width: 300px) { .steps-phase.current .steps-phase-name { display: none; } }
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
-.steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
+.steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working-text); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
 .steps-viewport { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .steps-track { display: flex; height: 100%; will-change: transform; transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -2167,7 +2185,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .step-command-output { margin: 2px 0 6px 24px; max-height: 240px; }
 .step-command-status .spinner { display: inline-block; width: 9px; height: 9px; vertical-align: -1px; }
 .step-command-note { flex: none; margin-left: auto; padding-left: 10px; font-size: calc(11px * var(--font-scale)); color: var(--muted); white-space: nowrap; }
-.step-command.background.running .step-command-note { color: var(--working); }
+.step-command.background.running .step-command-note { color: var(--working-text); }
 .step-command.background.error .step-command-note { color: var(--del); }
 /* Never squeezed: in a narrow pane the page circles give way (they scroll) instead. */
 
@@ -2408,7 +2426,7 @@ body::after { content: var(--crt-on); position: fixed; inset: 0; z-index: 214748
   --qr-paper: #ffffff;
   width: 132px; height: 132px; padding: 8px; background: var(--qr-paper); border-radius: var(--radius-inner); flex: none; image-rendering: pixelated; }
 .remote-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: calc(12.5px * var(--font-scale)); }
+.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 10px; border-radius: var(--radius-inner); background: var(--info-bg); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice button { margin-left: auto; }
 button.danger { color: var(--del); }
@@ -2578,7 +2596,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .edit-bar.conflict .edit-bar-text { color: var(--text); }
 .edit-bar.failed { background: var(--error-bg); }
 .edit-bar.failed .edit-bar-text { color: var(--del); }
-.tag.unsaved { color: var(--working); }
+.tag.unsaved { color: var(--working-text); }
 
 /* The Summary tab: Step by step's plan so far, a row per step; a row opens its page in the chat. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -2731,7 +2749,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .pr-check-state { flex: none; width: 66px; color: var(--muted-text); }
 .pr-check.fail .pr-check-state { color: var(--del); font-weight: 600; }
 .pr-check.pass .pr-check-state { color: var(--add); }
-.pr-check.pending .pr-check-state { color: var(--working); }
+.pr-check.pending .pr-check-state { color: var(--working-text); }
 .pr-check-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pr-check .pr-link { flex: none; font-weight: 400; }
 .pr-foot { flex: none; display: flex; flex-direction: column; gap: 8px; }
@@ -3449,9 +3467,9 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-title { overflow: hidden; text-overflow: ellipsis; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
 .sb-row.current .sb-title { font-weight: 600; }
 .sb-status { overflow: hidden; text-overflow: ellipsis; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
-.sb-status.running { color: var(--working); }
+.sb-status.running { color: var(--working-text); }
 .sb-status.waiting { color: var(--attn-text); }
-.sb-status.unread { color: var(--unread); }
+.sb-status.unread { color: var(--unread-text); }
 .sb-chip { position: relative; flex: none; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: none; border-radius: var(--radius-card); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(12px * var(--font-scale)); font-weight: 600; transition: background 0.12s, color 0.12s; }
 .sb-row:hover .sb-chip:not(.current) { background: color-mix(in srgb, var(--pc, var(--muted)) calc(var(--pc-tint) + 9%), var(--bg)); color: var(--text); }
 .sb-chip.current { background: var(--pc, var(--accent)); color: var(--on-color); }
@@ -4106,6 +4124,16 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }
 
+/* Where the keyboard is, on a field: the border swap alone (to --faint) is too faint to find. */
+.settings-page input:focus-visible, .settings-page textarea:focus-visible, .settings-page select:focus-visible,
+.notes-field:focus-visible, .setup-field:focus-visible, .skill-editor:focus-visible, .repro-input:focus-visible,
+.mcp-add input:focus-visible, .mcp-add select:focus-visible, .mcp-add textarea:focus-visible,
+.settings-search:focus-visible, .question-other:focus-visible {
+  outline: 1.5px solid var(--muted-text);
+  outline-offset: 1px;
+}
+/* Native checkboxes and radios follow the app's neutral accent instead of macOS's system blue. */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* A project tile's foot: its chats on the left, and the way to its page, where its work board lives. */
 .desk-tile-foot { margin-top: auto; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .desk-tile-foot .desk-tile-chats { margin-top: 0; align-self: auto; }

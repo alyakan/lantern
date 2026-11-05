@@ -1442,7 +1442,7 @@ exports[`single provider: the whole window > the empty chat's box, and what a tu
           />
         </svg>
         <span>
-          New chat
+          Past chats
         </span>
         <span
           aria-hidden="true"

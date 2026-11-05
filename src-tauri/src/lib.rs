@@ -1782,19 +1782,20 @@ struct Login {
 #[tauri::command]
 async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result<Login, String> {
     let path_env = login_path(&state).await;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new(&claude_path);
-        cmd.args(["auth", "status"]).stdin(std::process::Stdio::null());
-        if let Some(path) = path_env {
-            cmd.env("PATH", path);
-        }
-        let out = cmd.output().map_err(|e| e.to_string())?;
-        // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
-        let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
-        Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let mut cmd = tokio::process::Command::new(&claude_path);
+    // A claude that hangs (a wrapper waiting on a terminal, a login prompt) mustn't leave the first screen spinning:
+    // the timeout drops the wait, and kill_on_drop stops the process.
+    cmd.args(["auth", "status"]).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    if let Some(path) = path_env {
+        cmd.env("PATH", path);
+    }
+    let out = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output())
+        .await
+        .map_err(|_| "claude didn't answer whether it is logged in. Run `claude auth status` in a terminal to check it, then try again.".to_string())?
+        .map_err(|e| e.to_string())?;
+    // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
+    let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
+    Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
 }
 
 /// An agent CLI the window can offer for a chat: what it can do, the models it takes, and where its program is (always None
@@ -3012,6 +3013,12 @@ fn remote_set_allow_auto(state: State<'_, AppState>, on: bool) -> remote::Remote
     state.remote.view_after(state.remote.store.set_allow_phone_auto(on))
 }
 
+/// Whether paired phones may run `!` commands in a chat. Off by default: it runs what the phone types, as the user.
+#[tauri::command]
+fn remote_set_allow_shell(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_allow_phone_shell(on))
+}
+
 /// The most a push key file may weigh (Apple's are about 250 bytes): anything bigger isn't one, and isn't read.
 const PUSH_KEY_FILE_MAX: u64 = 4096;
 
@@ -4093,6 +4100,7 @@ pub fn run() {
             remote_set_live_key,
             remote_set_keep_awake,
             remote_set_allow_auto,
+            remote_set_allow_shell,
             remote_pair,
             remote_pair_cancel,
             remote_remove_device,

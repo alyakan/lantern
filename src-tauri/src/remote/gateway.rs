@@ -775,12 +775,12 @@ impl Gateway {
             return Err(Refused::NoCode);
         }
         let first = recv(link).await.ok_or(Refused::Protocol("closed".into()))?;
+        // The code is only used up once a phone has proved it knows it (see finish below): a peer without it can't burn the
+        // one on screen by starting a pairing and then failing.
+        let mut pairing_secret: Option<[u8; 32]> = None;
         let mut hs = if pairing {
-            // Used up by this attempt whether it works or not: a code can be tried once.
-            let secret = self.store.take_offer((self.now)()).ok_or(Refused::NoCode);
-            // The code on screen is used up (Settings takes it away).
-            self.changed();
-            let secret = secret?;
+            let secret = self.store.offer_secret((self.now)()).ok_or(Refused::NoCode)?;
+            pairing_secret = Some(secret);
             Handshake::pair_responder(&self.mac, &secret)
         } else {
             Handshake::connect_responder(&self.mac)
@@ -791,6 +791,13 @@ impl Gateway {
         let third = recv(link).await.ok_or(Refused::Protocol("closed".into()))?;
         hs.read(&third).map_err(Refused::Handshake)?;
         let (key, mut channel) = hs.finish().map_err(Refused::Handshake)?;
+        if let Some(secret) = pairing_secret {
+            // Proved: now it is used up, and the code goes from Settings.
+            if !self.store.take_offer_if((self.now)(), &secret) {
+                return Err(Refused::NoCode);
+            }
+            self.changed();
+        }
         let known = self.store.device_by_key(&key);
         if !pairing && known.is_none() {
             return Err(Refused::NotPaired);
@@ -1367,6 +1374,10 @@ impl<'a> Session<'a> {
             }
             Request::Shell { slot, id, command } => {
                 use super::hub::ChatStatus as S;
+                // Off unless the user turned it on: a command runs as them, outside Claude's own approvals (Settings ▸ Remote control).
+                if !self.gw.store.saved().allow_phone_shell {
+                    return Err("Running commands from a phone is off on this Mac. Turn it on in Settings ▸ Remote control.".into());
+                }
                 let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
                 check_shell(&id, Some(&command))?;
                 if chat.status == S::Asleep {
@@ -1897,15 +1908,19 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_code_works_once_and_not_at_all_when_none_is_on_screen() {
+    async fn a_wrong_guess_leaves_the_code_on_screen_and_a_right_one_uses_it_up() {
         let r = rig();
         assert!(phone(&r.gw, &generate_keypair().unwrap(), Some([1u8; 32]), PROTOCOL_VERSION).await.is_err(), "no code on screen");
         let secret = offer_secret(&r.store);
         let mut wrong = secret;
         wrong[0] ^= 1;
         assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(wrong), PROTOCOL_VERSION).await.is_err(), "a wrong guess");
-        assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(secret), PROTOCOL_VERSION).await.is_err(), "the code was used up by the guess");
-        assert!(r.store.saved().devices.is_empty());
+        assert!(r.store.offer_open(super::super::now_ms()), "and it can't burn the code the user is showing");
+        let key = generate_keypair().unwrap();
+        assert!(phone(&r.gw, &key, Some(secret), PROTOCOL_VERSION).await.is_ok(), "the real code still pairs");
+        assert!(!r.store.offer_open(super::super::now_ms()), "and it is used up now");
+        assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(secret), PROTOCOL_VERSION).await.is_err(), "so it can't be used twice");
+        assert_eq!(r.store.saved().devices.len(), 1);
     }
 
     #[tokio::test]
@@ -2379,8 +2394,22 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_phone_cannot_run_a_command_until_the_mac_allows_it() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        let run = Request::Shell { slot: "a".into(), id: "ph-abcd1234".into(), command: "git status".into() };
+        let (_, err, _) = p.ask(run).await;
+        assert!(err.is_some_and(|e| e.contains("off on this Mac")), "off by default");
+        assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
+        r.store.set_allow_phone_shell(true).unwrap();
+        assert!(p.ask(Request::Shell { slot: "a".into(), id: "ph-abcd1234".into(), command: "git status".into() }).await.1.is_none());
+    }
+
+    #[tokio::test]
     async fn a_phone_runs_a_command_in_an_awake_chat_and_answers_and_stops_only_its_own() {
         let r = rig();
+        r.store.set_allow_phone_shell(true).unwrap();
         r.hub.opened("a", "/p");
         r.hub.asleep("zzz", "/p", None, None);
         let (_, mut p) = paired(&r).await;
@@ -2432,6 +2461,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_tab_in_a_command_is_fine_and_so_are_accents_and_other_scripts() {
         let r = rig();
+        r.store.set_allow_phone_shell(true).unwrap();
         r.hub.opened("a", "/p");
         let (_, mut p) = paired(&r).await;
         let run = |command: &str| Request::Shell { slot: "a".into(), id: "ph-abcd1234".into(), command: command.into() };
@@ -2443,6 +2473,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn only_the_phone_that_started_a_command_answers_or_stops_it() {
         let r = rig();
+        r.store.set_allow_phone_shell(true).unwrap();
         r.hub.opened("a", "/p");
         let (_, mut first) = paired(&r).await;
         let (_, mut second) = paired(&r).await;

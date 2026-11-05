@@ -8,7 +8,7 @@ describe("SessionPill", () => {
   it("opens the session menu below the capsule and picks a session", async () => {
     const onOpen = vi.fn();
     render(<SessionPill loadSessions={async () => sessions} onOpen={onOpen} />);
-    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Past chats/ }));
     fireEvent.click(await screen.findByText("Fix the login redirect"));
     expect(onOpen).toHaveBeenCalledWith("s1");
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -16,7 +16,7 @@ describe("SessionPill", () => {
 
   it("closes on Escape from a chat in the list, with focus back on its button", async () => {
     render(<SessionPill loadSessions={async () => sessions} onOpen={() => {}} />);
-    const pill = screen.getByRole("button", { name: /New chat/ });
+    const pill = screen.getByRole("button", { name: /Past chats/ });
     fireEvent.click(pill);
     const row = await screen.findByRole("button", { name: /Fix the login redirect/ });
     row.focus();
@@ -27,7 +27,7 @@ describe("SessionPill", () => {
 
   it("walks the search box and the chats with the arrow keys", async () => {
     render(<SessionPill loadSessions={async () => sessions} onOpen={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Past chats/ }));
     const search = await screen.findByPlaceholderText("Search chats");
     search.focus();
     fireEvent.keyDown(search, { key: "ArrowDown" });
@@ -38,6 +38,6 @@ describe("SessionPill", () => {
 
   it("is disabled when told to be", () => {
     render(<SessionPill loadSessions={async () => []} onOpen={() => {}} disabled />);
-    expect(screen.getByRole("button", { name: /New chat/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Past chats/ })).toBeDisabled();
   });
 });

@@ -32,6 +32,7 @@ pub const ACTIONS: &[(&str, &str, Option<&str>)] = &[
     ("find-in-file", "Find in File   ⌘F", None),
     ("toggle-sidebar", "Hide Sidebar", Some("Ctrl+CmdOrCtrl+S")),
     ("toggle-compact", "Collapse Sidebar", None),
+    ("show-desk", "Desk", Some("Shift+CmdOrCtrl+D")),
     ("toggle-changes", "Show/Hide Side Panel", Some("CmdOrCtrl+Backslash")),
     ("command-palette", "Command Palette…", Some("Shift+CmdOrCtrl+P")),
     ("settings", "Settings…", Some("CmdOrCtrl+Comma")),
@@ -152,6 +153,8 @@ fn build(app: &AppHandle, recent: &[String]) -> tauri::Result<Menu<Wry>> {
         "View",
         true,
         &[
+            &action("show-desk")?,
+            &separator()?,
             &action("session-history")?,
             &action("find-file")?,
             &action("search-files")?,

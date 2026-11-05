@@ -254,6 +254,8 @@ pub struct RemoteView {
     /// The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home.
     pub tailnet: Vec<String>,
     pub allow_phone_auto: bool,
+    /// Paired phones may run `!` commands on the Mac (off until the user turns it on).
+    pub allow_phone_shell: bool,
     pub devices: Vec<DeviceView>,
     /// The ids of the devices connected now.
     pub connected: Vec<String>,
@@ -370,7 +372,7 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, rich_notifications: saved.rich_notifications, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, rich_notifications: saved.rich_notifications, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, allow_phone_shell: saved.allow_phone_shell, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.

@@ -3005,6 +3005,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
   useAction("session-history", toggleHistory, true);
+  useAction("show-desk", () => { setDeskPage(null); setDesk(true); }, Object.keys(openByProject).length > 0);
   // The Desk's Ask, from anywhere on it; deskShown is settled by here.
   useAction("ask-desk", () => setAskSheet((open) => !open), deskShown);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
