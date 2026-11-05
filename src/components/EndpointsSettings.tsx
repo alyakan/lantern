@@ -21,6 +21,13 @@ interface Row extends Endpoint {
   /** The models as typed (one per line, or separated by commas or spaces). */
   modelsText: string;
   keySet: boolean | null;
+  /** A key is saved for it in the Keychain (it wins over the variable). */
+  savedKey: boolean;
+  /** The address it was saved with: a saved key is only sent there, so Fetch names the endpoint only while the address is that one. */
+  savedUrl: string;
+  /** A key being typed for it (never kept past Save), and why saving or removing one failed. */
+  keyDraft: string;
+  keyError: string | null;
   /** Why Fetch didn't fill the models in. */
   fetchError: string | null;
   fetching: boolean;
@@ -30,12 +37,12 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 const parseModels = (text: string) => [...new Set(text.split(/[\s,]+/).filter(Boolean))];
 let nextKey = 0;
 
-const rowOf = (e: Endpoint, keySet: boolean | null): Row => ({ ...e, key: `row-${nextKey++}`, modelsText: e.models.join("\n"), keySet, fetchError: null, fetching: false });
+const rowOf = (e: Endpoint, keySet: boolean | null, savedKey = false): Row => ({ ...e, key: `row-${nextKey++}`, modelsText: e.models.join("\n"), keySet, savedKey, savedUrl: e.url, keyDraft: "", keyError: null, fetchError: null, fetching: false });
 const endpointOf = (r: Row): Endpoint => ({ id: r.id, name: r.name, url: r.url, key_env: r.key_env?.trim() ? r.key_env.trim() : null, models: parseModels(r.modelsText) });
 
 /**
  * Settings → Endpoints: where a chat can run besides Anthropic's. Claude Code is sent to the endpoint (a LiteLLM or OpenRouter
- * URL, a local Ollama or LM Studio), on one of the models listed here. Only the NAME of the variable holding a key is kept.
+ * URL, a local Ollama or LM Studio), on one of the models listed here. A key is kept in the Keychain, or only the NAME of the variable holding it.
  */
 export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -47,7 +54,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
   const load = () =>
     api.listEndpoints().then(
       (list: EndpointStatus[]) => {
-        setRows(list.map((e) => rowOf(e, e.key_set)));
+        setRows(list.map((e) => rowOf(e, e.key_set, e.saved_key)));
         setSaved(JSON.stringify(list.map((e) => endpointOf(rowOf(e, null)))));
         setError(null);
       },
@@ -74,9 +81,23 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
   };
   const fetchModels = (r: Row) => {
     change(r.key, { fetching: true, fetchError: null });
-    api.fetchEndpointModels(r.url, r.key_env?.trim() ? r.key_env.trim() : null).then(
+    api.fetchEndpointModels(r.url, r.key_env?.trim() ? r.key_env.trim() : null, r.id && r.url.trim() === r.savedUrl ? r.id : null).then(
       (models) => change(r.key, { fetching: false, modelsText: models.join("\n") }),
       (e) => change(r.key, { fetching: false, fetchError: errText(e) }),
+    );
+  };
+  const saveKey = (r: Row) => {
+    change(r.key, { keyError: null });
+    api.endpointKeySet(r.id, r.keyDraft).then(
+      () => change(r.key, { savedKey: true, keyDraft: "" }),
+      (e) => change(r.key, { keyError: errText(e) }),
+    );
+  };
+  const removeKey = (r: Row) => {
+    change(r.key, { keyError: null });
+    api.endpointKeyClear(r.id).then(
+      () => change(r.key, { savedKey: false }),
+      (e) => change(r.key, { keyError: errText(e) }),
     );
   };
   const save = () => {
@@ -105,7 +126,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
           </p>
         </div>
       </div>
-      <p className="settings-muted">Lantern keeps no keys: give the name of the environment variable that holds one, and set it in your shell (~/.zshrc or ~/.zprofile).</p>
+      <p className="settings-muted">A key goes either in a field here, kept in your Mac's Keychain and sent only to this endpoint (over https, or to this Mac's own network), or in an environment variable you name and set in your shell (~/.zshrc or ~/.zprofile). A saved key wins over the variable.</p>
       {error && (
         <div className="settings-error" role="alert">
           {error}
@@ -130,7 +151,27 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
                   Key variable <span className="settings-row-sub">(optional)</span>
                   <input value={r.key_env ?? ""} placeholder="OPENROUTER_API_KEY" spellCheck={false} onChange={(e) => change(r.key, { key_env: e.target.value || null, keySet: null })} />
                 </label>
-                {r.key_env && r.keySet !== null && !dirty && <span className="settings-row-sub">{r.keySet ? `${r.key_env} is set in your login shell.` : `${r.key_env} isn't set in your login shell: a chat on this endpoint won't start.`}</span>}
+                {r.key_env && !r.savedKey && r.keySet !== null && !dirty && <span className="settings-row-sub">{r.keySet ? `${r.key_env} is set in your login shell.` : `${r.key_env} isn't set in your login shell: a chat on this endpoint won't start.`}</span>}
+                <div className="endpoint-keybox wide">
+                  {!r.id ? (
+                    <span className="settings-row-sub">Save the endpoint first, then its key can be added here.</span>
+                  ) : r.savedKey ? (
+                    <>
+                      <span className="settings-row-sub">A key is saved in your Mac's Keychain for this endpoint. It is only sent to this address: changing the address removes it.</span>
+                      <button type="button" className="link-button" onClick={() => removeKey(r)}>
+                        Remove key
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input type="password" autoComplete="off" spellCheck={false} aria-label={`API key for ${r.name || "this endpoint"}`} placeholder="API key (optional)" value={r.keyDraft} onChange={(e) => change(r.key, { keyDraft: e.target.value })} />
+                      <button type="button" disabled={!r.keyDraft.trim() || dirty} title={dirty ? "Save the endpoint's changes first" : undefined} onClick={() => saveKey(r)}>
+                        Save key
+                      </button>
+                    </>
+                  )}
+                  {r.keyError && <span className="settings-row-sub endpoint-fetch-error">{r.keyError}</span>}
+                </div>
                 <label className="wide">
                   Models <span className="settings-row-sub">(one per line; the first is a new chat's)</span>
                   <textarea rows={3} value={r.modelsText} placeholder={"qwen3-coder:30b\nopenai/gpt-5"} spellCheck={false} onChange={(e) => change(r.key, { modelsText: e.target.value })} />

@@ -52,6 +52,8 @@ pub async fn ask_claude(claude: &std::path::Path, path_env: Option<&str>, prompt
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    // On the user's API key when they chose it for Claude Code; a key that can't be had means no call, not one on the sign-in.
+    crate::provider_keys::apply_claude_tokio(&mut cmd)?;
     let out = match tokio::time::timeout(ASK_TIME, cmd.output()).await {
         Err(_) => return Err("Claude didn't answer in time.".into()),
         Ok(Err(_)) => return Err("Lantern couldn't start Claude.".into()),

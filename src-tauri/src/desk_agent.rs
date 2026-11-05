@@ -242,6 +242,8 @@ fn start(agent: &Arc<Agent>, dir: &Path, binary: &Path, path_env: Option<&str>) 
     if let Some(p) = path_env {
         cmd.env("PATH", p);
     }
+    // Reads no settings files (`--setting-sources ""`), so the plain key helper applies, as for titles and suggestions.
+    crate::provider_keys::apply_claude_tokio(&mut cmd)?;
     let turn = agent.turn.clone();
     let sink: Sink = Arc::new(move |ev: UiEvent| {
         let mut t = turn.lock().unwrap();
