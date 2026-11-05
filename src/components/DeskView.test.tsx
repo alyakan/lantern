@@ -375,6 +375,14 @@ describe("the Desk", () => {
     expect(localStorage.getItem("desk.work.layout")).toBe('"cards"');
   });
 
+  it("keeps a card for each feature whatever grouping the list was left on", () => {
+    localStorage.setItem("desk.work.groupBy", JSON.stringify("none"));
+    setup({ repos: linearRepos(), linear: linearOf(), page: "/p/lantern", projects: [project("/p/lantern")] });
+    const stand = within(screen.getByRole("region", { name: "Where things stand" }));
+    expect(stand.getByRole("button", { name: /^Sync, 1 open/ })).toBeInTheDocument();
+    expect(stand.getByRole("button", { name: /^No feature, 1 open/ })).toBeInTheDocument();
+  });
+
   it("opens straight to the page when everything is in one feature or project, with no card to go back to", () => {
     setup({ repos: linearRepos(), page: "/p/lantern", projects: [project("/p/lantern")] });
     const page = within(screen.getByRole("region", { name: "lantern" }));

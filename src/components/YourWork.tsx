@@ -647,8 +647,8 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
       </Card>
   );
   const viewToggle = <ViewToggle layout={layout} onLayout={setLayout} />;
-  // The cards ignore the list's state filter: the tabs are the filter.
-  const cardGroups = groupWork(items, by);
+  // The cards ignore the list's state filter (the tabs are the filter) and its grouping: a card is a feature with Linear, a project without.
+  const cardGroups = groupWork(items, issues ? "feature" : "project");
   // One feature (or project) needs no card to open it: its page is the list.
   const alone = cardGroups.length === 1;
   const cardOpen = alone ? cardGroups[0] : cardPage !== null ? cardGroups.find((g) => g.key === cardPage) : undefined;
