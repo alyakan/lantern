@@ -390,4 +390,13 @@ describe("Settings' nav", () => {
     expect(screen.getByRole("button", { name: "MCP servers" }).querySelector(".dot.warn")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Updates" }).querySelector(".dot")).not.toBeNull();
   });
+
+  it("puts Linear inside Integrations, and still finds it by name", async () => {
+    view({ linear: { folders: [], teams: {}, onTeams: () => {}, work: null, onWork: () => {} } });
+    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Linear" })).toBeNull();
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await act(async () => fireEvent.change(search, { target: { value: "linear" } }));
+    expect(screen.getByRole("button", { name: "Integrations" })).toBeInTheDocument();
+  });
 });

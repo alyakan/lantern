@@ -378,3 +378,11 @@ export const SunIcon = () => (
     <path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.9 2.9l1.1 1.1M10 10l1.1 1.1M11.1 2.9 10 4M4 10l-1.1 1.1" />
   </svg>
 );
+
+// A plug: the services Lantern talks to.
+export const PlugIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M5.4 1.8v3.2M8.6 1.8v3.2M3.4 5h7.2v2.2a3.6 3.6 0 0 1-7.2 0Z" />
+    <path d="M7 10.8v1.6" />
+  </svg>
+);

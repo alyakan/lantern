@@ -25,17 +25,17 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
-import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, HexIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
+import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "linear";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", linear: "Linear" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "integrations";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
 
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
   { title: "Lantern", tabs: ["general", "appearance", "updates"] },
   { title: "Claude", tabs: ["harness", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
-  { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "linear", "remote"] },
+  { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "integrations", "remote"] },
 ];
 
 /** What else a page can be found by: the search matches these as well as its name. */
@@ -52,7 +52,7 @@ const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
   mcp: ["servers", "tools"],
   endpoints: ["api", "provider", "url"],
   apikeys: ["api", "key", "keys", "token"],
-  linear: ["issues", "teams"],
+  integrations: ["linear", "issues", "teams", "github", "slack"],
   remote: ["phone", "iphone", "ipad", "pair"],
 };
 
@@ -70,7 +70,7 @@ const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
   mcp: ServerIcon,
   endpoints: GlobeIcon,
   apikeys: KeyIcon,
-  linear: HexIcon,
+  integrations: PlugIcon,
   remote: PhoneIcon,
 };
 
@@ -136,7 +136,7 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
   const searchRef = useRef<HTMLInputElement>(null);
   // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
   const available = (t: SettingsTab) =>
-    (t !== "linear" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
   const q = query.trim().toLowerCase();
   const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
   const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
@@ -233,8 +233,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <PermissionRules slot={page.slot} />
             ) : tab === "prs" && prChecks ? (
               <PrChecksSettings {...prChecks} />
-            ) : tab === "linear" && linear ? (
-              <LinearSettings {...linear} />
+            ) : tab === "integrations" && linear ? (
+              <IntegrationsPage linear={linear} />
             ) : (
               <McpPage {...page} />
             )}
@@ -489,6 +489,29 @@ interface AuthReply {
   authUrl?: string;
   requiresUserAction?: boolean;
   callbackExpected?: boolean;
+}
+
+/** Integrations: the services Lantern talks to. Linear today; more arrive here rather than as new pages. */
+function IntegrationsPage({ linear }: { linear: LinearSettingsProps }) {
+  return (
+    <>
+      <div className="settings-head">
+        <div>
+          <h2 className="mode-guide-title">Integrations</h2>
+          <p className="mode-guide-summary">The services Lantern talks to. Each is set up once, on this Mac.</p>
+        </div>
+      </div>
+      <section className="general-section" aria-labelledby="integrations-linear">
+        <h3 id="integrations-linear" className="general-title">
+          Linear
+        </h3>
+        <LinearSettings {...linear} embedded />
+      </section>
+      <p className="settings-muted" style={{ marginTop: 14 }}>
+        More integrations arrive here — GitHub, Slack — without a new Settings page.
+      </p>
+    </>
+  );
 }
 
 function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
