@@ -36,10 +36,14 @@ pub struct Env {
     /// The user's own folder under /var/folders (the real path of the parent of `getconf DARWIN_USER_DIR`), which holds
     /// their temporary (T), cache (C) and code-sign (X) folders. None when it can't be found: nothing there is scanned.
     pub temp_base: Option<PathBuf>,
+    /// The shared temporary folder, /private/tmp (see `shared_tmp`). None: nothing there is scanned.
+    pub shared_tmp: Option<PathBuf>,
+    /// What running programs have open under `shared_tmp`, read once when first needed (see `tmp_open`).
+    pub tmp_open: std::sync::OnceLock<Option<Vec<PathBuf>>>,
 }
 
 /// Whether a chat or an agent is working in `path` or somewhere inside it.
-fn busy(env: &Env, path: &Path) -> bool {
+pub(crate) fn busy(env: &Env, path: &Path) -> bool {
     let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     env.in_use.iter().any(|f| f.starts_with(&real))
 }
@@ -463,6 +467,7 @@ fn system_jobs(env: &Env) -> Vec<Job> {
     jobs.push(Box::new(archives));
     jobs.push(Box::new(runner_caches));
     jobs.push(Box::new(temp_items));
+    jobs.push(Box::new(shared_tmp_items));
     jobs
 }
 
@@ -611,6 +616,125 @@ pub fn temp_items(env: &Env, cancel: &AtomicBool) -> Scanned {
         item.ticked = idle >= RECENT_DAYS;
         if !item.ticked {
             item.warning = Some(format!("Changed {idle} day(s) ago: it is probably in use, and clearing it makes that app slower for a while."));
+        }
+        out.items.push(item);
+    }
+    out
+}
+
+// ---------- /tmp ----------
+
+/// Something in /tmp that changed within this many days may still be needed by whatever left it there: shown, not ticked.
+const SHARED_TMP_RECENT_DAYS: u64 = 2;
+
+/// /private/tmp (what /tmp points at), where builds, downloads and tools leave their working copies. None if it isn't there.
+pub fn shared_tmp() -> Option<PathBuf> {
+    std::fs::canonicalize("/tmp").ok().filter(|p| p == Path::new("/private/tmp") && p.is_dir())
+}
+
+/// What running programs have open under /tmp (their files and their working folders), from one `lsof` of the whole Mac,
+/// read once per scan or delete. None when lsof can't say: nothing in /tmp is then offered.
+pub fn tmp_open(env: &Env) -> Option<&[PathBuf]> {
+    let root = env.shared_tmp.as_deref()?;
+    env.tmp_open
+        .get_or_init(|| {
+            let out = run_program("/usr/sbin/lsof", &["-Fn", "-w"], Duration::from_secs(90)).ok()?;
+            Some(parse_open(&out, root))
+        })
+        .as_deref()
+}
+
+/// The paths under `root` in `lsof -Fn` output (its `n` lines), with /tmp read as the /private/tmp it is.
+pub(crate) fn parse_open(out: &str, root: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = out
+        .lines()
+        .filter_map(|l| l.strip_prefix('n'))
+        .map(|p| p.strip_prefix("/tmp/").map(|rest| format!("/private/tmp/{rest}")).unwrap_or_else(|| p.to_string()))
+        .map(PathBuf::from)
+        .filter(|p| p.starts_with(root) && p != root)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Claude Code's own folder in /tmp (`claude-<uid>`): a folder per project, a folder per session in each.
+pub fn is_claude_temp(name: &str) -> bool {
+    name == format!("claude-{}", unsafe { libc::geteuid() })
+}
+
+/// A real folder or file (not a link) that the user owns.
+fn mine(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| !m.file_type().is_symlink() && m.uid() == unsafe { libc::geteuid() })
+}
+
+/// What can be cleared in /tmp: each thing the user left there, and in Claude Code's own folder each session's files
+/// rather than the whole folder, since the sessions still running keep theirs there. Anything a program has open, or a
+/// chat works in, is blocked; anything changed in the last two days is left unticked.
+pub fn shared_tmp_items(env: &Env, cancel: &AtomicBool) -> Scanned {
+    shared_tmp_items_over(env, cancel, TEMP_MIN_BYTES)
+}
+
+/// `shared_tmp_items`, listing what takes at least `min_bytes`.
+fn shared_tmp_items_over(env: &Env, cancel: &AtomicBool, min_bytes: u64) -> Scanned {
+    let mut out = Scanned::default();
+    let Some(root) = env.shared_tmp.as_deref() else { return out };
+    let mut places: Vec<(PathBuf, bool)> = vec![];
+    for entry in top_level(root, false).into_iter().filter(|p| mine(p)) {
+        if !is_claude_temp(&file_name(&entry)) {
+            places.push((entry, false));
+            continue;
+        }
+        for inner in top_level(&entry, false).into_iter().filter(|p| mine(p)) {
+            if file_name(&inner).starts_with('-') {
+                places.extend(top_level(&inner, false).into_iter().filter(|p| mine(p)).map(|p| (p, true)));
+            } else {
+                places.push((inner, false));
+            }
+        }
+    }
+    let mut sized: Vec<(PathBuf, bool, Usage)> = vec![];
+    for (p, session) in places {
+        if cancel.load(Ordering::Relaxed) {
+            return out;
+        }
+        let u = usage(&p, cancel);
+        if u.bytes >= min_bytes {
+            sized.push((p, session, u));
+        }
+    }
+    if sized.is_empty() {
+        return out;
+    }
+    let open = tmp_open(env);
+    for (p, session, u) in sized {
+        let note = if session {
+            "A Claude Code session's temporary files (its scratchpad and task output). Nothing needs them once the session has ended."
+        } else {
+            "Left in /tmp by a build, a download or a tool. Nothing makes it again, and nothing should need it once its work is done."
+        };
+        let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().into_owned();
+        let mut item = Item::new(Kind::Temp, &p, format!("tmp/{rel}"), u.bytes, Removal::Permanent, note);
+        let mtime = std::fs::symlink_metadata(&p).map(|m| m.mtime()).unwrap_or(0);
+        let idle = days_since(env, u.newest.max(mtime));
+        item.idle_days = Some(idle);
+        let blocked = match open {
+            None => Some("Lantern couldn't check whether a program is using it.".to_string()),
+            Some(open) if open.iter().any(|o| o.starts_with(&p)) => Some("A program is using it now.".to_string()),
+            _ if busy(env, &p) => Some("A chat is working in it.".to_string()),
+            _ => None,
+        };
+        if let Some(why) = blocked {
+            item.risk = Risk::Blocked;
+            item.warning = Some(why);
+        } else if std::fs::symlink_metadata(p.join(".git")).is_ok() {
+            // A clone or a worktree may hold commits or changes that are nowhere else.
+            item.risk = Risk::Review;
+            item.warning = Some("It's a git checkout: anything in it that isn't pushed is lost with it.".into());
+        } else if idle < SHARED_TMP_RECENT_DAYS {
+            item.warning = Some(format!("Changed {idle} day(s) ago: whatever left it may still need it."));
+        } else {
+            item.ticked = true;
         }
         out.items.push(item);
     }
@@ -873,7 +997,7 @@ pub(crate) mod tests {
         git(&repo, &["commit", "-m", "first"]);
         git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
         git(&repo, &["push", "-u", "origin", "main"]);
-        let env = Env { home: home_path, path_env: None, now: now_secs(), in_use: vec![], temp_base: None };
+        let env = Env { home: home_path, path_env: None, now: now_secs(), in_use: vec![], temp_base: None, shared_tmp: None, tmp_open: Default::default() };
         World { _home: home, repo, env }
     }
 
@@ -970,7 +1094,7 @@ pub(crate) mod tests {
         // Used today: not offered.
         assert!(repo_item(&w.repo, &w.env, &cancel).is_none());
         // 90 days on, pushed and clean: safe.
-        let later = Env { home: w.env.home.clone(), path_env: None, now: w.env.now + 90 * 86_400, in_use: vec![], temp_base: None };
+        let later = Env { home: w.env.home.clone(), path_env: None, now: w.env.now + 90 * 86_400, in_use: vec![], temp_base: None, shared_tmp: None, tmp_open: Default::default() };
         let item = repo_item(&w.repo, &later, &cancel).unwrap();
         assert_eq!((item.risk, item.ticked, item.removal), (Risk::Safe, true, Removal::Trash), "{:?}", item.warning);
         // An unpushed commit blocks it.
@@ -1011,13 +1135,13 @@ pub(crate) mod tests {
     }
 
     fn clone_env(e: &Env) -> Env {
-        Env { home: e.home.clone(), path_env: e.path_env.clone(), now: e.now, in_use: e.in_use.clone(), temp_base: e.temp_base.clone() }
+        Env { home: e.home.clone(), path_env: e.path_env.clone(), now: e.now, in_use: e.in_use.clone(), temp_base: e.temp_base.clone(), shared_tmp: None, tmp_open: Default::default() }
     }
 
     #[test]
     fn a_cache_written_this_week_is_shown_but_not_ticked() {
         let home = tempfile::tempdir().unwrap();
-        let env = Env { home: std::fs::canonicalize(home.path()).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None };
+        let env = Env { home: std::fs::canonicalize(home.path()).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None, shared_tmp: None, tmp_open: Default::default() };
         let fresh = env.home.join("Library/Developer/Xcode/DerivedData/App-abc");
         std::fs::create_dir_all(&fresh).unwrap();
         std::fs::write(fresh.join("x"), vec![1u8; 10_000]).unwrap();
@@ -1078,7 +1202,7 @@ pub(crate) mod tests {
     #[test]
     #[ignore]
     fn scan_this_mac() {
-        let env = Env { home: PathBuf::from(std::env::var("HOME").unwrap()), path_env: None, now: now_secs(), in_use: vec![], temp_base: temp_base() };
+        let env = Env { home: PathBuf::from(std::env::var("HOME").unwrap()), path_env: None, now: now_secs(), in_use: vec![], temp_base: temp_base(), shared_tmp: shared_tmp(), tmp_open: Default::default() };
         let started = std::time::Instant::now();
         let out = scan(&env, &AtomicBool::new(false), &|p| eprintln!("  {p}"));
         eprintln!("{} items in {:?}", out.items.len(), started.elapsed());
@@ -1112,7 +1236,7 @@ pub(crate) mod tests {
     #[test]
     fn runner_caches_and_archives_are_found_and_left_for_the_user_to_tick() {
         let home = tempfile::tempdir().unwrap();
-        let env = Env { home: std::fs::canonicalize(home.path()).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None };
+        let env = Env { home: std::fs::canonicalize(home.path()).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None, shared_tmp: None, tmp_open: Default::default() };
         let mk = |p: &str| {
             std::fs::create_dir_all(env.home.join(p)).unwrap();
             std::fs::write(env.home.join(p).join("f"), vec![1u8; 10_000]).unwrap();
@@ -1139,7 +1263,7 @@ pub(crate) mod tests {
     fn chromes_copies_and_temporary_caches_are_found_in_the_temporary_folder() {
         let base = tempfile::tempdir().unwrap();
         let base_path = std::fs::canonicalize(base.path()).unwrap();
-        let env = Env { home: base_path.join("home"), path_env: None, now: now_secs(), in_use: vec![], temp_base: Some(base_path.clone()) };
+        let env = Env { home: base_path.join("home"), path_env: None, now: now_secs(), in_use: vec![], temp_base: Some(base_path.clone()), shared_tmp: None, tmp_open: Default::default() };
         let mk = |p: &str, bytes: usize| {
             std::fs::create_dir_all(base_path.join(p)).unwrap();
             std::fs::write(base_path.join(p).join("f"), vec![1u8; bytes]).unwrap();
@@ -1160,6 +1284,69 @@ pub(crate) mod tests {
         assert!(copy.kind == Kind::Temp && copy.ticked && copy.risk == Risk::Safe && copy.shared);
         // Without the temporary folder, nothing.
         assert!(temp_items(&Env { temp_base: None, ..clone_env(&env) }, &AtomicBool::new(false)).items.is_empty());
+    }
+
+    /// A fake /tmp: what is left there, and in Claude Code's folder each session, with what a program has open.
+    pub(crate) fn tmp_world(open: Option<Vec<&str>>) -> (tempfile::TempDir, Env, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let claude = format!("claude-{}", unsafe { libc::geteuid() });
+        let mk = |p: &str, bytes: usize, days: i64| {
+            let d = root.join(p);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("f"), vec![1u8; bytes]).unwrap();
+            if days > 0 {
+                set_old(&d.join("f"), days);
+                set_old(&d, days);
+            }
+        };
+        std::fs::create_dir_all(root.join("checkout/.git")).unwrap();
+        for p in ["old-build", "open-build", "chat-here", "checkout"] {
+            mk(p, 10_000, 10);
+        }
+        mk("fresh-build", 10_000, 0);
+        mk("tiny", 10, 10);
+        for p in ["-Users-me-proj/session-old", "-Users-me-proj/session-live", "cdp-profile"] {
+            mk(&format!("{claude}/{p}"), 10_000, 10);
+        }
+        std::os::unix::fs::symlink(root.join("old-build"), root.join("link")).unwrap();
+        let open = open.map(|o| o.iter().map(|p| root.join(p.replace("CLAUDE", &claude))).collect());
+        let env = Env { home: root.join("home"), path_env: None, now: now_secs(), in_use: vec![root.join("chat-here")], temp_base: None, shared_tmp: Some(root), tmp_open: std::sync::OnceLock::from(open) };
+        (dir, env, claude)
+    }
+
+    #[test]
+    fn what_is_left_in_tmp_is_offered_unless_a_program_or_a_chat_uses_it_or_it_is_new() {
+        let (_dir, env, claude) = tmp_world(Some(vec!["open-build/f", "CLAUDE/-Users-me-proj/session-live/f"]));
+        let items = shared_tmp_items_over(&env, &AtomicBool::new(false), 5000).items;
+        let of = |name: &str| items.iter().find(|i| i.name == name).unwrap_or_else(|| panic!("{name} not in {:?}", items.iter().map(|i| &i.name).collect::<Vec<_>>()));
+        let old = of("tmp/old-build");
+        assert!(old.kind == Kind::Temp && old.risk == Risk::Safe && old.ticked && old.idle_days == Some(10));
+        let fresh = of("tmp/fresh-build");
+        assert!(fresh.risk == Risk::Safe && !fresh.ticked && fresh.warning.as_deref().unwrap().contains("may still need it"));
+        assert!(of("tmp/open-build").risk == Risk::Blocked && of("tmp/open-build").warning.as_deref().unwrap().contains("program"));
+        assert!(of("tmp/chat-here").risk == Risk::Blocked && of("tmp/chat-here").warning.as_deref().unwrap().contains("chat"));
+        assert!(of("tmp/checkout").risk == Risk::Review && !of("tmp/checkout").ticked);
+        // Claude Code's folder is offered a session at a time, never whole: the sessions still running keep theirs there.
+        let session = of(&format!("tmp/{claude}/-Users-me-proj/session-old"));
+        assert!(session.ticked && session.note.contains("Claude Code session"));
+        assert_eq!(of(&format!("tmp/{claude}/-Users-me-proj/session-live")).risk, Risk::Blocked);
+        assert!(of(&format!("tmp/{claude}/cdp-profile")).ticked);
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        for gone in ["tmp/tiny", "tmp/link", &format!("tmp/{claude}"), &format!("tmp/{claude}/-Users-me-proj")] {
+            assert!(!names.contains(&gone), "{gone}");
+        }
+        // When lsof can't say what is open, nothing is offered.
+        let (_dir, unknown, _) = tmp_world(None);
+        assert!(shared_tmp_items_over(&unknown, &AtomicBool::new(false), 5000).items.iter().all(|i| i.risk == Risk::Blocked && !i.ticked));
+        // Without /tmp, nothing.
+        assert!(shared_tmp_items(&Env { shared_tmp: None, ..clone_env(&env) }, &AtomicBool::new(false)).items.is_empty());
+    }
+
+    #[test]
+    fn open_files_under_tmp_are_read_from_lsof_as_private_tmp() {
+        let out = "p1\nfcwd\nn/private/tmp/build\nf3\nn/tmp/other/f.log\nn/Users/me/x\nn/private/tmp\np2\nn/private/tmp/build\n";
+        assert_eq!(parse_open(out, Path::new("/private/tmp")), [PathBuf::from("/private/tmp/build"), PathBuf::from("/private/tmp/other/f.log")]);
     }
 
     #[test]

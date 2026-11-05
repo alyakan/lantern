@@ -22,7 +22,7 @@ export const GROUPS: { kind: StorageKind; title: string; hint: string }[] = [
   { kind: "simulator", title: "Simulators", hint: "Runtimes and devices Xcode can download or make again" },
   { kind: "archive", title: "Xcode archives", hint: "One per upload to App Store Connect; each keeps that build's debug symbols" },
   { kind: "cache", title: "Caches and logs", hint: "Apps and package managers make them again" },
-  { kind: "temp", title: "Temporary folder", hint: "Chrome's leftover copies of itself and app caches, outside your home folder" },
+  { kind: "temp", title: "Temporary folder", hint: "Chrome's leftover copies of itself, app caches, and what builds, downloads and Claude sessions left in /tmp" },
   { kind: "download", title: "Downloads", hint: "Yours: they go to the Trash" },
   { kind: "trash", title: "Trash", hint: "Deleting these gives the space back" },
 ];
