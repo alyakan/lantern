@@ -58,12 +58,14 @@ function Glyph({ id, color }: { id: Tab; color: string }) {
   );
 }
 
-/** Starting a chat: a plus of the same bars, centred in its circle. */
-function Plus({ color }: { color: string }) {
+/** Starting a chat: the chats' lines, shorter each time, ending in a cursor, centred in its circle. */
+function Compose({ color }: { color: string }) {
   return (
-    <View accessibilityElementsHidden style={{ width: 18, height: 18 }}>
-      <Bar x={7} y={0} w={4} h={18} color={color} />
-      <Bar x={0} y={7} w={18} h={4} color={color} />
+    <View accessibilityElementsHidden style={{ width: 22, height: 22 }}>
+      <Bar x={1} y={2} w={16} color={color} />
+      <Bar x={1} y={8} w={12} color={color} />
+      <Bar x={1} y={14} w={6} color={color} />
+      <View style={{ position: "absolute", left: 13, top: 12, width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
     </View>
   );
 }
@@ -96,7 +98,7 @@ export function TabBar({ tabs, value, onChange, onCompose, onComposeVoice }: { t
       </Glass>
       <PressScale accessibilityRole="button" accessibilityLabel="New chat" accessibilityHint="Hold to talk" onPress={onCompose} onLongPress={onComposeVoice} delayLongPress={300} accessibilityActions={[{ name: "longpress", label: "New chat by voice" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onComposeVoice()} haptic="light" scaleTo={0.9}>
         <Glass lift={0.12} style={{ width: TAB_BAR_HEIGHT, height: TAB_BAR_HEIGHT, borderRadius: TAB_BAR_HEIGHT / 2, alignItems: "center", justifyContent: "center" }}>
-          <Plus color={colors.ink} />
+          <Compose color={colors.ink} />
         </Glass>
       </PressScale>
     </View>
