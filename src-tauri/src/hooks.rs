@@ -154,6 +154,9 @@ struct Inner {
     done_only: bool,
     /// The last thing Claude said in the turn being worked on is a Done page.
     ended_on_done: bool,
+    /// A tool ran since the post-hook last did (its own turn's tools don't count): turns that only talked are not followed by
+    /// it, since each run sends the whole chat again.
+    worked: bool,
 }
 
 /// Whether `text` is Step by step's Done page: its first line is `# Done — <title>` (the shape the phone reads as well).
@@ -225,6 +228,15 @@ impl SlotHooks {
         self.0.lock().unwrap().ended_on_done = is_done_page(text);
     }
 
+    /// A tool started (Claude's or a subagent's): there is work for the post-hook to follow. The post-hook's own turn's
+    /// tools are its work, not the user's.
+    pub fn used_tool(&self) {
+        let mut inner = self.0.lock().unwrap();
+        if !matches!(inner.post, Post::Running(_)) {
+            inner.worked = true;
+        }
+    }
+
     /// The post-hook was not sent after all (the message that would carry it didn't go).
     pub fn forget_post(&self) {
         let mut inner = self.0.lock().unwrap();
@@ -236,10 +248,11 @@ impl SlotHooks {
     /// A turn ended: what to do with it.
     pub fn turn_ended(&self, ended: UiEvent) -> TurnEnd {
         let mut inner = self.0.lock().unwrap();
-        let skipped = inner.done_only && !inner.ended_on_done;
+        let skipped = (inner.done_only && !inner.ended_on_done) || !inner.worked;
         match (std::mem::take(&mut inner.post), &ended) {
             (Post::Armed(post), UiEvent::TurnDone { is_error: false, .. }) if !skipped => {
                 let message = if inner.done_only { post_message_in_steps(&post) } else { post_message(&post) };
+                inner.worked = false;
                 inner.post = Post::Running(Box::new(ended));
                 TurnEnd::SendPost(message)
             }
@@ -393,6 +406,7 @@ mod tests {
     fn the_post_hook_follows_a_turn_and_the_two_end_as_one() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         assert_eq!(h.turn_ended(done(false, Some(0.10), 0.10)), TurnEnd::SendPost(post_message("update the brain")));
         // The hook's own turn ends: one end for both, with both costs and how the session stands now.
         let TurnEnd::Publish(ev) = h.turn_ended(done(false, Some(0.02), 0.12)) else { panic!("published") };
@@ -411,6 +425,7 @@ mod tests {
     fn a_turn_that_failed_is_not_followed_by_the_post_hook() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         let ev = done(true, None, 0.1);
         assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
         let next = done(false, None, 0.1);
@@ -421,6 +436,7 @@ mod tests {
     fn a_post_hook_that_fails_shows_in_the_turn_that_ends() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         h.turn_ended(done(false, Some(0.1), 0.1));
         let TurnEnd::Publish(ev) = h.turn_ended(done(true, None, 0.1)) else { panic!("published") };
         let UiEvent::TurnDone { is_error, result, cost_usd, .. } = *ev else { panic!("a turn end") };
@@ -433,6 +449,7 @@ mod tests {
     fn a_post_hook_that_could_not_be_sent_gives_back_the_turn_it_held() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         let held = done(false, Some(0.1), 0.1);
         h.turn_ended(held.clone());
         assert_eq!(h.post_failed(), Some(held));
@@ -443,10 +460,12 @@ mod tests {
     fn a_message_sent_while_the_post_hook_runs_does_not_cancel_it_and_a_session_ending_does() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         h.turn_ended(done(false, None, 0.1));
         h.follow_with(None);
         assert!(matches!(h.turn_ended(done(false, None, 0.1)), TurnEnd::Publish(_)));
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         h.turn_ended(done(false, None, 0.1));
         h.session_ended();
         assert_eq!(h.post_failed(), None);
@@ -457,11 +476,13 @@ mod tests {
         let h = SlotHooks::default();
         // Held for a hook that is running: it is given back, once.
         h.follow_with(Some("save".into()));
+        h.used_tool();
         let held = done(false, Some(0.1), 0.1);
         h.turn_ended(held.clone());
         assert_eq!(h.post_failed(), Some(held));
         // Still to come, for a turn that was cut off: nothing to give back, and it doesn't follow the next turn that ends.
         h.follow_with(Some("save".into()));
+        h.used_tool();
         assert_eq!(h.post_failed(), None);
         let next = done(false, None, 0.2);
         assert_eq!(h.turn_ended(next.clone()), TurnEnd::Publish(Box::new(next)));
@@ -484,11 +505,13 @@ mod tests {
         let h = SlotHooks::default();
         // A step: no hook, and it isn't kept for the turn after.
         h.follow_after_done(Some("update the brain".into()));
+        h.used_tool();
         h.said("# Step 2 of 4 — Bump the version\n\nDone in the file.");
         let ev = done(false, None, 0.1);
         assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
         // The Done page: the hook goes, and the two end as one.
         h.follow_after_done(Some("update the brain".into()));
+        h.used_tool();
         h.said("# Step 4 of 4 — Tag it");
         h.said("# Done — Release 0.1.82\n\nShipped.");
         let TurnEnd::SendPost(sent) = h.turn_ended(done(false, Some(0.10), 0.10)) else { panic!("the hook goes") };
@@ -499,6 +522,7 @@ mod tests {
         assert!(matches!(h.turn_ended(done(false, Some(0.02), 0.12)), TurnEnd::Publish(_)));
         // A question about the Done page, answered in plain words: no hook for that turn.
         h.follow_after_done(Some("update the brain".into()));
+        h.used_tool();
         h.said("# Done — Release 0.1.82");
         h.said("It touched four files.");
         let ev = done(false, None, 0.2);
@@ -509,23 +533,58 @@ mod tests {
     fn a_done_page_from_an_earlier_turn_does_not_carry_over() {
         let h = SlotHooks::default();
         h.follow_after_done(Some("save".into()));
+        h.used_tool();
         h.said("# Done — it");
         h.turn_ended(done(false, None, 0.1));
         h.turn_ended(done(false, None, 0.1));
         // The next message's turn says nothing of the sort.
         h.follow_after_done(Some("save".into()));
+        h.used_tool();
         let ev = done(false, None, 0.2);
         assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
         // And outside Step by step the hook follows whatever was said.
         h.follow_with(Some("save".into()));
+        h.used_tool();
         h.said("plain");
         assert_eq!(h.turn_ended(done(false, None, 0.3)), TurnEnd::SendPost(post_message("save")));
+    }
+
+    #[test]
+    fn a_turn_that_only_talked_is_not_followed_by_the_post_hook() {
+        let h = SlotHooks::default();
+        h.follow_with(Some("update the brain".into()));
+        let ev = done(false, None, 0.1);
+        assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
+        // A tool in the next turn: it follows that one.
+        h.follow_with(Some("update the brain".into()));
+        h.used_tool();
+        assert_eq!(h.turn_ended(done(false, None, 0.2)), TurnEnd::SendPost(post_message("update the brain")));
+        // The hook's own tools don't count as work for the next turn, which only talks.
+        h.used_tool();
+        h.turn_ended(done(false, None, 0.2));
+        h.follow_with(Some("update the brain".into()));
+        let ev = done(false, None, 0.3);
+        assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));
+    }
+
+    #[test]
+    fn work_in_a_turn_the_post_hook_did_not_follow_is_kept_for_the_next_one() {
+        // Step by step: the steps did the work, and the Done page that only talks is followed.
+        let h = SlotHooks::default();
+        h.follow_after_done(Some("update the brain".into()));
+        h.used_tool();
+        h.said("# Step 1 of 2 — Edit it");
+        h.turn_ended(done(false, None, 0.1));
+        h.follow_after_done(Some("update the brain".into()));
+        h.said("# Done — Edited");
+        assert_eq!(h.turn_ended(done(false, None, 0.2)), TurnEnd::SendPost(post_message_in_steps("update the brain")));
     }
 
     #[test]
     fn a_message_that_did_not_go_takes_its_post_hook_back() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));
+        h.used_tool();
         h.forget_post();
         let ev = done(false, None, 0.1);
         assert_eq!(h.turn_ended(ev.clone()), TurnEnd::Publish(Box::new(ev)));

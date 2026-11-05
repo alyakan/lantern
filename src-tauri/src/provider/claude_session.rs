@@ -48,9 +48,13 @@ fn deliver(replies: &Replies, line: &str) -> bool {
 fn command(cfg: &SessionConfig) -> Command {
     let mut cmd = Command::new(&cfg.binary);
     let worker = matches!(cfg.helper.role, Role::Worker { .. });
-    // A worker starts with none of the user's plugins: which those are is read from their settings (see launch_args).
-    let plugins = if worker { std::env::var_os("HOME").map(|home| enabled_plugins(std::path::Path::new(&home), &cfg.folder)).unwrap_or_default() } else { vec![] };
+    // A worker, and a chat whose preset turns plugins off, start with none of the user's plugins: which those are is read from
+    // their settings (see launch_args).
+    let plugins = if worker || cfg.plugins_off { std::env::var_os("HOME").map(|home| enabled_plugins(std::path::Path::new(&home), &cfg.folder)).unwrap_or_default() } else { vec![] };
     let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
+    if !worker && cfg.plugins_off {
+        crate::args::without_plugins(&mut args, &plugins);
+    }
     // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
     // go there, a command line is readable by any process), and the token and what to take out in the environment.
     // Subagents off: claude starts without the tools that start them.
@@ -416,6 +420,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
+            plugins_off: false,
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,

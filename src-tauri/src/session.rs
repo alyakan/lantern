@@ -36,6 +36,8 @@ pub struct SessionConfig {
     /// The model subagents run on (CLAUDE_CODE_SUBAGENT_MODEL); None leaves it to each subagent, SUBAGENTS_OFF starts claude
     /// without the tool that starts them.
     pub subagent_model: Option<String>,
+    /// A harness preset's Plugins off: claude starts with none of the user's plugins, as a worker does (see launch_args).
+    pub plugins_off: bool,
     pub helper: HelperConfig,
     /// PATH for the child (the user's login-shell PATH); None inherits ours.
     pub path_env: Option<String>,

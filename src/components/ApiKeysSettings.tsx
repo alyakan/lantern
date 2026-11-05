@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { AuthState } from "../types";
+import { HermesSettings } from "./HermesSettings";
 import { HostedProviders } from "./HostedProviders";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
@@ -92,6 +93,7 @@ export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: (
         <p className="settings-muted">{state.not_yet}</p>
       </section>
       <HostedProviders onChanged={onProvidersChanged} />
+      <HermesSettings />
       <section className="settings-section">
         <h3 className="settings-subhead">Other endpoints</h3>
         <p className="settings-muted">An endpoint's key (OpenRouter, LiteLLM and the like) is set on the endpoint itself, in Endpoints.</p>

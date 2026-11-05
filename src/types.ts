@@ -118,6 +118,12 @@ export interface AuthState {
   not_yet: string;
 }
 
+/** Hermes Agent (the backend's `HermesStatus`): its CLI is installed, and it runs on the Claude subscription plugin. */
+export interface HermesStatus {
+  installed: boolean;
+  on: boolean;
+}
+
 export type UiEvent =
   | { kind: "provider_changed"; provider: ProviderInfo; key: string }
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
@@ -330,8 +336,12 @@ export interface FileDiff {
 export interface ModelCost {
   model: string;
   cost_usd: number;
+  /** Every input token: fresh, read from the cache and written to it. */
   input_tokens: number;
   output_tokens: number;
+  /** The part of the input read from the prompt cache, and the part written to it. */
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
 }
 
 /** A slash command claude offers: built-in, custom (.claude/commands) or a skill. */
@@ -403,6 +413,8 @@ export interface Settings {
   /** The harness: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
   advisor?: string | null;
   subagent_model?: string | null;
+  /** Start claude without the user's plugins (a harness preset's Plugins: Off). */
+  plugins_off?: boolean;
   /** Start the chat as the main agent of an orchestra: it can spawn workers. */
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */

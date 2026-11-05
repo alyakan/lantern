@@ -31,6 +31,19 @@ pub fn codex_candidate_paths(home: &Path) -> Vec<PathBuf> {
     ]
 }
 
+/// The Hermes Agent CLI (see hermes.rs): the usual places, else the login shell's PATH. Most Macs have none, so a search
+/// that found none stands for a while, as Codex's does: Settings asks each time it opens.
+pub fn locate_hermes() -> Result<PathBuf, String> {
+    static NOT_FOUND: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    const MISSING: &str = "Hermes Agent isn't installed.";
+    if NOT_FOUND.lock().unwrap().is_some_and(|at| at.elapsed() < NOT_FOUND_FOR) {
+        return Err(MISSING.into());
+    }
+    let found = locate_cli("hermes", None, crate::hermes::candidate_paths, MISSING);
+    *NOT_FOUND.lock().unwrap() = found.is_err().then(Instant::now);
+    found
+}
+
 /// How long a search that found no Codex stands: a main agent looks for it every time it starts, and without it each of
 /// those would wait on the login shell.
 const NOT_FOUND_FOR: Duration = Duration::from_secs(60);

@@ -11,7 +11,7 @@ import type { ArtifactListing } from "./lib/artifacts";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
-import type { AsideEvent, AuthState, ChatSearchResults, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -94,6 +94,9 @@ export const api = {
   fetchEndpointModels: (url: string, keyEnv: string | null, endpointId: string | null = null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv, endpointId }),
   /** Which providers run on an API key and which keys are saved. Never a key. */
   providerAuthState: () => invoke<AuthState>("provider_auth_state"),
+  /** Hermes Agent: installed, and running on the Claude subscription plugin (see hermes.rs). */
+  hermesStatus: () => invoke<HermesStatus>("hermes_status"),
+  hermesSet: (on: boolean) => invoke<HermesStatus>("hermes_set", { on }),
   /** Saves Claude Code's API key in the Keychain; the key is not sent back. Rejects, in words, for a key that isn't one. */
   providerClaudeKeySet: (key: string) => invoke<AuthState>("provider_claude_key_set", { key }),
   providerClaudeKeyClear: () => invoke<AuthState>("provider_claude_key_clear"),
@@ -108,13 +111,15 @@ export const api = {
   hostedProviderConnect: (id: string, key: string) => invoke<HostedProvider[]>("hosted_provider_connect", { id, key }),
   hostedProviderDisconnect: (id: string) => invoke<HostedProvider[]>("hosted_provider_disconnect", { id }),
   conversationMetadata: (sessionId: string) => invoke<string | null>("conversation_metadata", { sessionId }),
+  /** Continues a long chat in a fresh session with only its words carried over (see continue_fresh in lib.rs). */
+  continueFresh: (slot: string) => invoke<void>("continue_fresh", { slot }),
   conversationSettings: (slot: string, change?: { provider?: string; model?: string | null; effort?: string | null }) => invoke<import("../mobile/src/protocol/generated/ConversationConfiguration").ConversationConfiguration>("conversation_settings", { slot, change: change ?? null }),
   conversationAction: (slot: string, action: "compact" | "clear") => invoke<void>("conversation_action", { slot, action }),
   onConversationConfigured: (f: (r: { slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }) => void) => listen<{ slot: string; provider: import("./types").ProviderInfo; mode: import("./types").Mode; autoApprove: boolean; model: string | null; effort: string | null }>("conversation-configured", (e) => f(e.payload)),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
-  applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>
-    invoke<void>("apply_harness", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model }),
+  applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null; plugins_off?: boolean }) =>
+    invoke<void>("apply_harness", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model, pluginsOff: h.plugins_off ?? false }),
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */

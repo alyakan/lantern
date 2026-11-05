@@ -222,6 +222,22 @@ describe("reducer", () => {
     expect(s).toMatchObject({ contextUsed: null, contextWindow: 200_000 });
   });
 
+  it("keeps how big the first call was and how much of the input came from the cache", () => {
+    let s = ev(running, { kind: "context_used", tokens: 42_000 });
+    s = ev(s, { kind: "context_used", tokens: 47_000 });
+    s = ev(s, { kind: "model_usage", models: [{ model: "sonnet", cost_usd: 0.1, input_tokens: 50_000, output_tokens: 900, cache_read_tokens: 45_000, cache_write_tokens: 4_000 }] });
+    s = ev(s, { kind: "model_usage", models: [{ model: "sonnet", cost_usd: 0.1, input_tokens: 50_000, output_tokens: 900, cache_read_tokens: 40_000 }, { model: "haiku", cost_usd: 0, input_tokens: 0, output_tokens: 0 }] });
+    expect(s).toMatchObject({ firstCall: 42_000, inputSeen: 100_000, cacheReadSeen: 85_000 });
+    // A reopened chat's first call carries its history: it says nothing of where a message starts.
+    const reopened = { ...running, items: [{ type: "user" as const, id: "u1", text: "earlier", at: 0 }, { type: "user" as const, id: "u2", text: "now", at: 1 }] };
+    expect(ev(reopened, { kind: "context_used", tokens: 300_000 }).firstCall).toBeNull();
+    expect(ev({ ...running, earlierTurns: 3 }, { kind: "context_used", tokens: 300_000 }).firstCall).toBeNull();
+    // A /clear starts the conversation again: its first call is the new start.
+    s = ev(s, { kind: "conversation_reset" });
+    expect(s.firstCall).toBeNull();
+    expect(ev(s, { kind: "context_used", tokens: 41_000 }).firstCall).toBe(41_000);
+  });
+
   it("a new folder forgets the last background task, a Stop and a /clear from the one before", () => {
     const s = reducer({ ...running, lastEndedTask: "npm run dev", stopRequested: true, cleared: true }, { type: "folder_opened", folder: "/q" });
     expect(s).toMatchObject({ lastEndedTask: null, stopRequested: false, cleared: false });

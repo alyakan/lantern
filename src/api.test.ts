@@ -29,8 +29,8 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["startSession", () => api.startSession("s1", "/bin/claude", "/repo", settings), ["start_session", { slot: "s1", claudePath: "/bin/claude", folder: "/repo", settings }]],
   [
     "applyHarness",
-    () => api.applyHarness("s1", { model: "opus", effort: "high", advisor: null, subagent_model: "haiku" }),
-    ["apply_harness", { slot: "s1", model: "opus", effort: "high", advisor: null, subagentModel: "haiku" }],
+    () => api.applyHarness("s1", { model: "opus", effort: "high", advisor: null, subagent_model: "haiku", plugins_off: true }),
+    ["apply_harness", { slot: "s1", model: "opus", effort: "high", advisor: null, subagentModel: "haiku", pluginsOff: true }],
   ],
   ["closeSession", () => api.closeSession("s1"), ["close_session", { slot: "s1" }]],
   ["setModel", () => api.setModel("s1", null), ["set_model", { slot: "s1", model: null }]],
