@@ -81,8 +81,8 @@ async function collectFailures(folder: string, checks: PrCheck[]): Promise<Faile
  * aren't done (every 30 seconds at first, then less often, for up to an hour), and runs the project's choice: Off, Tell me
  * (the card and an inbox row) or Fix it myself (see `step`). Looking only reads, through the GitHub CLI; the one thing sent
  * is the failure, once per failing run, to the chat working on the pull request: the one that had the last try, else one
- * in a worktree where the pull request was found, else a new chat Lantern starts in the project. A chat in the project's own folder
- * isn't sent to unless it had the last try: being in the project doesn't make a chat the pull request's.
+ * in a worktree where the pull request was found (or the project's folder's only chat, when the folder is on it), else a
+ * new chat Lantern starts in the project: being in the project doesn't make a chat the pull request's.
  */
 export function usePrChecks(opts: PrChecksOptions) {
   const o = useRef(opts);
@@ -134,6 +134,10 @@ export function usePrChecks(opts: PrChecksOptions) {
     if (had) return { chat: had, pending: false };
     const inWorktrees = live().filter((c) => c.folder === folder && c.work !== folder);
     const on = inWorktrees.filter((c) => looksRef.current[c.work]?.snap?.pr.number === number);
+    // The project's folder itself on the branch (no worktrees): its chat when it is the only one there; with more, none of
+    // them is known to be the pull request's.
+    const inFolder = live().filter((c) => c.folder === folder && c.work === folder);
+    if (looksRef.current[folder]?.snap?.pr.number === number && inFolder.length === 1) on.push(inFolder[0]);
     const chat = on.find((c) => c.slot === o.current.active) ?? on[on.length - 1] ?? null;
     return { chat, pending: !chat && inWorktrees.some((c) => lastLook.current[c.work] === undefined) };
   };

@@ -308,8 +308,15 @@ describe("the pull request loop", () => {
   it("Fix it myself: a worktree gh can't look at doesn't hold the project's failure back for ever", async () => {
     // The worktree was removed while a chat still works there: gh fails in it every time.
     prWatch.mockImplementation(async (place) => (place === FOLDER ? FAILED() : Promise.reject("no such directory")));
-    const { start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), chat(false, "s1")]);
+    const { start } = setup({ mode: "fix", tries: 3 }, [inFolder("s2"), inFolder("s3"), chat(false, "s1")]);
     await settle();
     expect(start).toHaveBeenCalledTimes(1);
+  });
+  it("Fix it myself: with no worktrees, the project's folder's only chat is the one on its branch", async () => {
+    prWatch.mockResolvedValue(FAILED());
+    const { send, start } = setup({ mode: "fix", tries: 3 }, inFolder("s1"));
+    await settle();
+    expect(start).not.toHaveBeenCalled();
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["s1"]);
   });
 });

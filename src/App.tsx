@@ -2774,7 +2774,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       if (!agentReady) return null;
       const slot = `s${++slotSeq.current}`;
       dispatchChats({ type: "add", slot });
-      startIn(slot, folder, false, false, text);
+      // Its first message is CI's output, which is untrusted: it runs on Ask, like a chat a phone step starts.
+      startIn(slot, folder, false, false, text, undefined, undefined, { permissions: "ask", preset: null, workflow: "chat" });
       return slot;
     },
     onFailed: (folder, slot, snap) => {
