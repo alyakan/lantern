@@ -6,10 +6,11 @@ import { CUSTOM_DEFAULT, THEMES } from "../lib/themes";
 import { autoMergeTests } from "../lib/mergeTests";
 import { api } from "../api";
 
-vi.mock("../api", () => ({ api: {} }));
+vi.mock("../api", () => ({ api: { ghAccess: () => Promise.resolve("ready") } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
 
 import { SettingsView, type GeneralSettingsProps } from "./SettingsView";
+import type { HarnessSettingsProps } from "./HarnessSettings";
 
 describe("Settings' General page", () => {
   let general: GeneralSettingsProps;
@@ -30,7 +31,8 @@ describe("Settings' General page", () => {
       onTextSize: vi.fn(),
     };
   });
-  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
+  const view = (tab: "general" | "appearance" = "general") => render(<SettingsView open={tab} onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
+  const prView = () => render(<SettingsView open="prs" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} prChecks={{ folders: [], saved: {}, onChange: () => {} }} />);
 
   it("is the first tab, and opens on it", () => {
     view();
@@ -51,7 +53,7 @@ describe("Settings' General page", () => {
   it("offers running the tests when a merge is proposed, off until chosen, and tells the backend", () => {
     const set = vi.fn(() => Promise.resolve());
     (api as unknown as { setAutoMergeTests: typeof set }).setAutoMergeTests = set;
-    view();
+    prView();
     const box = screen.getByRole("checkbox", { name: "Run tests when a merge is proposed" });
     expect(box).not.toBeChecked();
     fireEvent.click(box);
@@ -63,7 +65,7 @@ describe("Settings' General page", () => {
   });
 
   it("warns that merge tests run the project's own command without asking", () => {
-    view();
+    prView();
     expect(screen.getByText(/comes from the project, including code the agent has just written/)).toBeInTheDocument();
     expect(screen.getByText(/without asking you/)).toBeInTheDocument();
   });
@@ -128,7 +130,7 @@ describe("Settings' General page", () => {
   });
 
   it("chooses the theme and the text size", () => {
-    view();
+    view("appearance");
     fireEvent.click(screen.getByLabelText("Dark"));
     expect(general.onTheme).toHaveBeenCalledWith("dark");
     fireEvent.click(screen.getByLabelText("Large"));
@@ -136,7 +138,7 @@ describe("Settings' General page", () => {
   });
 
   it("offers every preset theme, Follow macOS and Custom", () => {
-    view();
+    view("appearance");
     const names = within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio").map((r) => r.closest("label")?.textContent);
     expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Fallout", "Solarized Dark", "Nord", "Paper", "PostHog", "Custom"]);
     fireEvent.click(screen.getByLabelText("Terminal"));
@@ -146,6 +148,7 @@ describe("Settings' General page", () => {
   });
 
   describe("Customize…", () => {
+    const view = () => render(<SettingsView open="appearance" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
     it("starts from the theme that's on, switching to Custom so the app shows the colours as they're picked", () => {
       general.theme = "paper";
       view();
@@ -203,7 +206,8 @@ describe("Settings' General page", () => {
 
 describe("Settings' Teams section: quiet agents and the plan's limit", () => {
   const props = (): GeneralSettingsProps => ({ keepAwake: true, onKeepAwake: vi.fn(), notify: { ...NOTIFY_DEFAULTS }, onNotify: vi.fn(), theme: "system", customTheme: CUSTOM_DEFAULT, onTheme: vi.fn(), onCustomTheme: vi.fn(), textSize: "default", onTextSize: vi.fn() });
-  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
+  const harness: HarnessSettingsProps = { saved: [], onSave: () => {}, folder: null, folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null };
+  const view = () => render(<SettingsView open="harness" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} harness={harness} />);
   beforeEach(() => localStorage.clear());
 
   it("sets how long an agent may be quiet, 3 minutes until chosen", () => {
@@ -236,6 +240,7 @@ describe("Settings' Teams section: quiet agents and the plan's limit", () => {
   });
 
   describe("Menu bar", () => {
+    const view = () => render(<SettingsView open="appearance" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
     const saved = () => JSON.parse(localStorage.getItem("lantern.menuBar") ?? "{}");
     const mode = (name: string) => screen.getByRole("radio", { name });
 

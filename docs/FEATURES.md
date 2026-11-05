@@ -439,21 +439,23 @@ The **disk button** in the title bar, just before the Settings gear, opens **Sto
 
 ## Settings
 
-**⌘,** opens Settings, with seven tabs:
+**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Appearance, Updates), **Claude** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Integrations, Remote control) — with a search at the top that finds a page by name or by what it sets, or a setting inside one ("awake" offers Keep my Mac awake). Enter opens the first match, and ⌘F focuses the search. Each setting's help is a line or two; **More** opens the rest.
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and, for teams, **Agents running at once**, **Say an agent is quiet after** and **Pause agents when their provider's usage reaches**.
-- **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, restore points before each message, whether the sidebar moves a chat up when it does something, and whether starting a team asks first.
+- **Appearance**: the theme (see below), the text size and the menu bar.
+- **Models**: the model presets (who does the work, the advisor and the subagents) that the Models chip offers, and, for teams, **Agents running at once**, **Say an agent is quiet after**, **Tidy up an agent after its merge** and **Pause agents when their provider's usage reaches**.
 - **Routines**: prompts that Lantern sends by itself at set times (see [Away](#away)).
-- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
+- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on its row and on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
 - **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. **Add a rule** makes one by hand: pick the tool (Bash, Read, Edit, Write, WebFetch, WebSearch, or another tool typed by name, like an MCP tool), what it covers (a command's start like `npm test`, one exact command, a folder's files, or every call) and whether it's for this chat or this folder. It says in words what the rule means before you add it, and explains why a rule can't be made (a command's start can only be a read-only, build or test command; anything else is one exact command). A very broad rule (every call of a tool, every file, an exact `rm` or `sudo` command, a huge folder) is shown in amber and asks for a second click. Hand-made rules are the same as the ones a card makes, and there's still no Deny rule: a rule only ever allows. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
+- **Integrations**: the services Lantern talks to. **Linear** is one: connect a workspace with a personal API key, and pick each project's team. More arrive here without a new page.
 - **Updates**: Lantern updates itself. When a new release is out, "Update ready" appears under the chat box; click it to restart onto the new version, or leave it and it installs when you quit. **Lantern ▸ Check for Updates…** looks right now.
 
 ### Themes
 
-Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of each:
+Settings ▸ Appearance ▸ Theme picks how Lantern looks, with a small preview of each:
 
 ![The theme picker in Settings, with Terminal, Fallout and Nord among the choices](images/themes-picker.png)
 

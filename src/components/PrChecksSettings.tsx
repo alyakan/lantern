@@ -1,5 +1,7 @@
 import { PR_MODES, settingFor, type PrMode, type PrSetting } from "../lib/prChecks";
 import { projectLabels } from "../lib/sidebar";
+import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
+import { SettingsRow } from "./SettingsRow";
 import { FIX_NOTE, GH_NOTE, TRIES_OPTIONS, useGhAccess } from "./PrChecksDialog";
 
 export interface PrChecksSettingsProps {
@@ -13,6 +15,7 @@ export interface PrChecksSettingsProps {
 /** Settings → Pull requests: what happens after a pull request's checks run, for each project. */
 export function PrChecksSettings({ folders, saved, onChange }: PrChecksSettingsProps) {
   const access = useGhAccess();
+  const autoTests = useAutoMergeTests();
   const labels = projectLabels(folders);
   return (
     <>
@@ -22,6 +25,17 @@ export function PrChecksSettings({ folders, saved, onChange }: PrChecksSettingsP
           <p className="mode-guide-summary">What happens once a pull request is open and its checks run, chosen for each project. Saved on this Mac. Lantern only reads the checks; it never merges.</p>
         </div>
       </div>
+      <section className="general-section" aria-labelledby="prs-merge-tests">
+        <h3 id="prs-merge-tests" className="general-title">
+          Merges
+        </h3>
+        <SettingsRow
+          lead
+          label="Run tests when a merge is proposed"
+          control={<input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />}
+          hint="Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests."
+        />
+      </section>
       {access !== null && access !== "ready" && (
         <div className="ship-warning" role="note">
           {GH_NOTE}

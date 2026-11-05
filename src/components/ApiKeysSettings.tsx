@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { AuthState } from "../types";
 import { HermesSettings } from "./HermesSettings";
 import { HostedProviders } from "./HostedProviders";
+import { SettingsHint } from "./SettingsRow";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -81,12 +82,12 @@ export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: (
             </button>
           </div>
         )}
-        <p className="settings-muted">
+        <SettingsHint>
           With the key on, every Claude Code chat uses it, and so do the side question, chat titles and the phone's suggestions. If the key can't be read (the Keychain is locked, say), a chat does not start, and never falls back to your sign-in instead.
-        </p>
-        <p className="settings-muted">
+        </SettingsHint>
+        <SettingsHint>
           The key is passed to Claude Code, so commands Claude runs in a chat can read it, just as they could a key you exported in your shell. Use a key with a spending limit. On a key, Claude Code doesn't load your claude.ai connectors (such as Linear or Slack).
-        </p>
+        </SettingsHint>
       </section>
       <section className="settings-section">
         <h3 className="settings-subhead">Codex</h3>
@@ -96,7 +97,7 @@ export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: (
       <HermesSettings />
       <section className="settings-section">
         <h3 className="settings-subhead">Other endpoints</h3>
-        <p className="settings-muted">An endpoint's key (OpenRouter, LiteLLM and the like) is set on the endpoint itself, in Endpoints.</p>
+        <SettingsHint>An endpoint's key (OpenRouter, LiteLLM and the like) is set on the endpoint itself, in Endpoints.</SettingsHint>
       </section>
     </>
   );

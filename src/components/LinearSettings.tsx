@@ -13,6 +13,8 @@ export interface LinearSettingsProps {
   /** What Linear said, shared with the Desk (connecting and disconnecting change it). */
   work: LinearWork | null;
   onWork: (w: LinearWork | null) => void;
+  /** Drawn inside Integrations, which has its own heading: the page's own title is left out. */
+  embedded?: boolean;
 }
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
@@ -22,7 +24,7 @@ const AUTO = "auto";
  * Settings → Linear: connect a workspace with a personal API key (kept in the Keychain, never shown again), and which team each
  * project's work is in. Lantern only reads from Linear: your issues that aren't done, for the Desk's Your work.
  */
-export function LinearSettings({ folders, teams, onTeams, work, onWork }: LinearSettingsProps) {
+export function LinearSettings({ folders, teams, onTeams, work, onWork, embedded = false }: LinearSettingsProps) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,14 +54,16 @@ export function LinearSettings({ folders, teams, onTeams, work, onWork }: Linear
     );
   return (
     <>
-      <div className="settings-head">
-        <div>
-          <h2 className="mode-guide-title">Linear</h2>
-          <p className="mode-guide-summary">
-            Your issues in Linear show on the Desk's Your work until they are Done, Closed or Canceled: each pull request with its issue and project, and what you haven't started. Issues that are Ready (merged, waiting for a release) fold into one line, and so do the Done ones of a feature still going. Lantern only reads from Linear; it never changes anything there.
-          </p>
+      {!embedded && (
+        <div className="settings-head">
+          <div>
+            <h2 className="mode-guide-title">Linear</h2>
+            <p className="mode-guide-summary">
+              Your issues in Linear show on the Desk's Your work until they are Done, Closed or Canceled: each pull request with its issue and project, and what you haven't started. Issues that are Ready (merged, waiting for a release) fold into one line, and so do the Done ones of a feature still going. Lantern only reads from Linear; it never changes anything there.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
       {work?.connected ? (
         <div className="settings-row linear-connected">
           <span className="settings-row-name">

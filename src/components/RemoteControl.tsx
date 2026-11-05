@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
 import { keyIdFromFile, lastSeen, LANTERN_TEAM_ID, timeLeft, type PairView, type RemoteView } from "../lib/remoteControl";
+import { SettingsHint } from "./SettingsRow";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -112,7 +113,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
         <div>
           <h2 className="mode-guide-title">Remote control</h2>
           <p className="mode-guide-summary">Paired phones can see your open chats, answer their cards, send messages and wake sleeping chats, on the same Wi-Fi as this Mac or from anywhere over Tailscale.</p>
-          <p className="settings-muted">A message to a chat on Auto can run commands on this Mac, so pair only your own devices. Everything between the phone and this Mac is encrypted end to end.</p>
+          <SettingsHint>A message to a chat on Auto can run commands on this Mac, so pair only your own devices. Everything between the phone and this Mac is encrypted end to end.</SettingsHint>
         </div>
       </div>
       {error && (
@@ -130,7 +131,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.enabled} onChange={(e) => setEnabled(e.target.checked)} />
               <span>Let paired phones control Lantern</span>
             </label>
-            <span className="settings-muted">While this is off, nothing on this Mac listens for phones.</span>
+            <SettingsHint>While this is off, nothing on this Mac listens for phones.</SettingsHint>
             {view.enabled && !view.listening && (
               <p className="settings-error" role="status">
                 It's on, but Lantern isn't listening for phones right now. Turn it off and on again; if that doesn't help, another app may be using its port.
@@ -151,7 +152,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                       <button onClick={copyLink}>{copied ? "Copied" : "Copy the link"}</button>
                       <button onClick={cancelPair}>Stop pairing</button>
                     </div>
-                    <p className="settings-muted">The link is the same code as text, for a phone that can't scan the screen: paste it in Lantern on the phone.</p>
+                    <SettingsHint>The link is the same code as text, for a phone that can't scan the screen: paste it in Lantern on the phone.</SettingsHint>
                   </div>
                 </div>
               ) : (
@@ -160,7 +161,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                   <button onClick={startPair}>{used ? "Show a new code" : "Show a pairing code"}</button>
                 </>
               )}
-              <span className="settings-muted">If the phone can't connect, check that macOS lets Lantern accept incoming connections (System Settings › Network › Firewall).</span>
+              <SettingsHint>If the phone can't connect, check that macOS lets Lantern accept incoming connections (System Settings › Network › Firewall).</SettingsHint>
             </section>
           )}
           {view.enabled && (
@@ -169,17 +170,17 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                 Away from home
               </h3>
               {view.tailnet.length > 0 ? (
-                <span className="settings-muted">
+                <SettingsHint>
                   Tailscale is on: phones on your tailnet reach this Mac at {view.tailnet.join(", ")}. Install Tailscale on the phone and sign in to the same account. A phone that is paired already picks the address up the next time it connects.
-                </span>
+                </SettingsHint>
               ) : (
-                <span className="settings-muted">Tailscale isn't on this Mac. Install it here and on the phone, sign in to the same account on both, and a phone can reach this Mac from anywhere. Show a new pairing code after that.</span>
+                <SettingsHint>Tailscale isn't on this Mac. Install it here and on the phone, sign in to the same account on both, and a phone can reach this Mac from anywhere. Show a new pairing code after that.</SettingsHint>
               )}
               <label className="general-option">
                 <input type="checkbox" checked={view.keep_awake} onChange={(e) => act(api.remoteSetKeepAwake(e.target.checked))} />
                 <span>Keep this Mac awake while Remote control is on</span>
               </label>
-              <span className="settings-muted">A sleeping Mac can't be reached, and a phone can't wake it. This stops the Mac sleeping from idling (the screen can still turn off, and closing the lid still sleeps it). Off, the Mac sleeps on its usual schedule.</span>
+              <SettingsHint>A sleeping Mac can't be reached, and a phone can't wake it. This stops the Mac sleeping from idling (the screen can still turn off, and closing the lid still sleeps it). Off, the Mac sleeps on its usual schedule.</SettingsHint>
             </section>
           )}
           <section className="general-section" aria-labelledby="remote-devices">
@@ -213,9 +214,9 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.allow_phone_auto} onChange={(e) => act(api.remoteSetAllowAuto(e.target.checked))} />
               <span>Let paired phones use Auto</span>
             </label>
-            <span className="settings-muted">
+            <SettingsHint>
               Off, chats a phone starts are on Ask and it can't switch a chat to Auto. On, a phone can choose Auto, where a classifier approves most actions and nobody has to be at the Mac. Turning it off doesn't change chats already on Auto.
-            </span>
+            </SettingsHint>
           </section>
           <section className="general-section" aria-labelledby="remote-shell">
             <h3 id="remote-shell" className="general-title">
@@ -225,9 +226,9 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.allow_phone_shell} onChange={(e) => act(api.remoteSetAllowShell(e.target.checked))} />
               <span>Let paired phones run ! commands</span>
             </label>
-            <span className="settings-muted">
+            <SettingsHint>
               Off, a command typed after ! on a phone is refused. On, it runs in the chat's folder as you, with no Allow card on this Mac: anyone holding your unlocked phone can change these files. Unpair the phone to take that away.
-            </span>
+            </SettingsHint>
           </section>
           <section className="general-section" aria-labelledby="remote-notify">
             <h3 id="remote-notify" className="general-title">
@@ -237,22 +238,22 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.show_titles} onChange={(e) => act(api.remoteSetShowTitles(e.target.checked))} />
               <span>Show chat and to-do titles in notifications</span>
             </label>
-            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or stopped with an error (a chat that finished well shows on the lock-screen card, not as a notification). On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use; a to-do's reminder gives the to-do's title.</span>
+            <SettingsHint>Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or stopped with an error (a chat that finished well shows on the lock-screen card, not as a notification). On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use; a to-do's reminder gives the to-do's title.</SettingsHint>
             <label className="general-option">
               <input type="checkbox" checked={view.rich_notifications} onChange={(e) => act(api.remoteSetRichNotifications(e.target.checked))} />
               <span>Show what Claude asks in notifications</span>
             </label>
-            <span className="settings-muted">
+            <SettingsHint>
               On, a notification that asks to run a command, change a file or use a tool shows the whole command, the file and what changes, or the question, so you can judge it from the lock screen. It is encrypted on this Mac with a key your phone made, so Apple's servers carry only bytes they can't read; the phone decrypts it itself. Only a phone on a recent build of the app can, and any other still gets the short words. It is on your lock screen, so the phone's own Show Previews setting (Settings › Notifications) still applies.
-            </span>
+            </SettingsHint>
           </section>
           <section className="general-section" aria-labelledby="remote-live">
             <h3 id="remote-live" className="general-title">
               Lock screen cards
             </h3>
-            <span className="settings-muted">
+            <SettingsHint>
               A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, with the chat's title, how far its plan has got, what it needs in a word and the plan's usage when it has them, never a command, a file or a question.
-            </span>
+            </SettingsHint>
             <p>{view.live_key ? `Push key: ${view.live_key}` : "No push key yet, so no card is kept up to date."}</p>
             {keyForm ? (
               <div className="remote-pair-actions">
@@ -270,7 +271,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
             ) : (
               <button onClick={chooseKey}>{view.live_key ? "Replace the push key…" : "Import the push key…"}</button>
             )}
-            <span className="settings-muted">Choose the AuthKey_….p8 file. It is kept in this Mac's Keychain; the file itself is left where it is, so keep your own backup of it.</span>
+            <SettingsHint>Choose the AuthKey_….p8 file. It is kept in this Mac's Keychain; the file itself is left where it is, so keep your own backup of it.</SettingsHint>
             {view.live_last && <span className="settings-muted">Apple last said: {view.live_last}</span>}
           </section>
         </>

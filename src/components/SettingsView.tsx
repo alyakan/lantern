@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand } from "../types";
 import { capabilitiesOf } from "../lib/provider";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
-import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
-import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
-import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
-import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
-import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { setMenuBar, useMenuBar, type MenuBarMode } from "../lib/menuBar";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
 import { SLEEP_MINUTES, setSleepMinutes, useSleepMinutes } from "../lib/idleSleep";
@@ -30,9 +25,89 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
+import { SettingsHint, SettingsRow } from "./SettingsRow";
+import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "linear";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", linear: "Linear" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "integrations";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
+
+/** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
+const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
+  { title: "Lantern", tabs: ["general", "appearance", "updates"] },
+  { title: "Claude", tabs: ["harness", "permissions", "skills"] },
+  { title: "Automation", tabs: ["routines", "hooks", "prs"] },
+  { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "integrations", "remote"] },
+];
+
+/** What else a page can be found by: the search matches these as well as its name. */
+const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
+  general: ["notifications", "sound", "memory", "sleep", "awake", "restore points", "sidebar"],
+  appearance: ["theme", "text size", "menu bar", "look", "dark", "light"],
+  updates: ["version", "update", "release"],
+  harness: ["models", "presets", "advisor", "subagents", "effort"],
+  permissions: ["allow", "rules", "always allow", "deny"],
+  skills: ["plugins", "agents"],
+  routines: ["schedule", "prompts", "cron"],
+  hooks: ["pre", "post", "prompts"],
+  prs: ["pull request", "checks", "merge", "tests"],
+  mcp: ["servers", "tools"],
+  endpoints: ["api", "provider", "url"],
+  apikeys: ["api", "key", "keys", "token"],
+  integrations: ["linear", "issues", "teams", "github", "slack"],
+  remote: ["phone", "iphone", "ipad", "pair"],
+};
+
+/** The settings inside the pages, so the search finds one by name and not only its page. `anchor` is the section to scroll to. */
+const SETTING_INDEX: { tab: SettingsTab; label: string; anchor?: string }[] = [
+  { tab: "general", label: "Notifications", anchor: "general-notify" },
+  { tab: "general", label: "Pause notifications for an hour", anchor: "general-notify" },
+  { tab: "general", label: "Keep my Mac awake while Claude works", anchor: "general-awake" },
+  { tab: "general", label: "Put a chat to sleep", anchor: "general-memory" },
+  { tab: "general", label: "Toast sound", anchor: "general-sound" },
+  { tab: "general", label: "Restore points", anchor: "general-behaviour" },
+  { tab: "general", label: "Move a chat up the sidebar", anchor: "general-behaviour" },
+  { tab: "general", label: "Ask before starting a team", anchor: "general-behaviour" },
+  { tab: "appearance", label: "Theme", anchor: "appearance-look" },
+  { tab: "appearance", label: "Text size", anchor: "appearance-look" },
+  { tab: "appearance", label: "Menu bar readout", anchor: "appearance-menubar" },
+  { tab: "appearance", label: "Show Lantern in the menu bar", anchor: "appearance-menubar" },
+  { tab: "harness", label: "Agents running at once", anchor: "models-teams" },
+  { tab: "harness", label: "Say an agent is quiet after", anchor: "models-teams" },
+  { tab: "harness", label: "Tidy up an agent after its merge", anchor: "models-teams" },
+  { tab: "harness", label: "Pause agents at a usage limit", anchor: "models-teams" },
+  { tab: "prs", label: "Run tests when a merge is proposed", anchor: "prs-merge-tests" },
+  { tab: "integrations", label: "Linear", anchor: "integrations-linear" },
+  { tab: "remote", label: "Pair a phone" },
+  { tab: "apikeys", label: "API keys" },
+  { tab: "mcp", label: "Log in to a server" },
+];
+
+/** The small line icon each page wears in the nav. */
+const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
+  general: GearIcon,
+  appearance: SunIcon,
+  updates: DownloadIcon,
+  harness: SparkIcon,
+  permissions: ShieldIcon,
+  skills: LearnIcon,
+  routines: ClockIcon,
+  hooks: LinkIcon,
+  prs: BranchIcon,
+  mcp: ServerIcon,
+  endpoints: GlobeIcon,
+  apikeys: KeyIcon,
+  integrations: PlugIcon,
+  remote: PhoneIcon,
+};
+
+function TabIcon({ tab }: { tab: SettingsTab }) {
+  const Icon = TAB_ICON[tab];
+  return (
+    <span className="mode-icon">
+      <Icon />
+    </span>
+  );
+}
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -70,16 +145,40 @@ interface Props {
   linear?: LinearSettingsProps;
   /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
   provider?: ProviderInfo | null;
+  /** MCP servers that are down or need a login ("sentry needs you to log in"): the MCP row wears a warning dot. */
+  mcpIssues?: string[];
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, linear, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
   // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
   const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor);
   const tab = offered(picked) ? picked : "general";
+  // The search narrows the nav; ⌘F focuses it and Enter opens the first match.
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
+  const available = (t: SettingsTab) =>
+    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+  const q = query.trim().toLowerCase();
+  const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
+  const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
+  const firstMatch = groups.flatMap((g) => g.tabs)[0];
+  // The settings inside the pages, so "awake" or "text size" finds the row and not only the page it lives on.
+  const settingMatches = q === "" ? [] : SETTING_INDEX.filter((s) => available(s.tab) && s.label.toLowerCase().includes(q));
+  const goToSetting = (s: { tab: SettingsTab; anchor?: string }) => {
+    setTab(s.tab);
+    setQuery("");
+    // The page is drawn by the next frame; then its section comes into view (jsdom has no scrollIntoView).
+    requestAnimationFrame(() => {
+      if (s.anchor) document.getElementById(s.anchor)?.scrollIntoView?.({ block: "center" });
+    });
+  };
+  // A search from last time doesn't narrow the next visit.
+  useEffect(() => setQuery(""), [open]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -96,24 +195,87 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
   }, [open]);
 
   return (
-    <dialog ref={ref} className="mode-guide settings" aria-label="Settings" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <dialog ref={ref} className="mode-guide settings" aria-label="Settings" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()} onKeyDown={(e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    }}>
       {open && (
         <div className="mode-guide-body">
-          <nav className="mode-guide-nav" aria-label="Settings">
-            <div className="mode-guide-group">
-              <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "endpoints", "apikeys", "routines", "hooks", "mcp", "skills", "permissions", "prs", "linear", "remote", "updates"] as const)
-                .filter((t) => (t !== "linear" || linear) && (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t))
-                .map((t) => (
-                  <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
-                    {TAB_LABEL[t]}
+          <nav
+            className="mode-guide-nav"
+            aria-label="Settings"
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+              if ((e.target as HTMLElement).tagName === "INPUT") return;
+              const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(".mode-guide-tab"));
+              const at = items.indexOf(document.activeElement as HTMLElement);
+              if (at === -1) return;
+              e.preventDefault();
+              items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+            }}
+          >
+            <input
+              ref={searchRef}
+              type="search"
+              className="settings-search"
+              placeholder="Search settings"
+              aria-label="Search settings"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && query) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setQuery("");
+                } else if (e.key === "Enter" && (firstMatch || settingMatches[0])) {
+                  e.preventDefault();
+                  if (firstMatch) {
+                    setTab(firstMatch);
+                    setQuery("");
+                  } else if (settingMatches[0]) {
+                    goToSetting(settingMatches[0]);
+                  }
+                }
+              }}
+            />
+            {groups.map((g) => (
+              <div key={g.title} className="mode-guide-group" role="group" aria-label={g.title}>
+                <div className="mode-guide-group-title">{g.title}</div>
+                {g.tabs.map((t) => (
+                  <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} title={t === "mcp" && mcpIssues.length > 0 ? `MCP servers: ${mcpIssues.join(" · ")}` : undefined} onClick={() => { setTab(t); setQuery(""); }}>
+                    <TabIcon tab={t} />
+                    <span className="settings-tab-label">{TAB_LABEL[t]}</span>
+                    {t === "mcp" && mcpIssues.length > 0 && <span className="dot warn" aria-hidden="true" />}
+                    {t === "updates" && updates?.ready && <span className="dot ready" aria-hidden="true" />}
                   </button>
                 ))}
-            </div>
+              </div>
+            ))}
+            {settingMatches.length > 0 && (
+              <div className="mode-guide-group" role="group" aria-label="Settings found">
+                <div className="mode-guide-group-title">Settings</div>
+                {settingMatches.slice(0, 8).map((s) => (
+                  <button key={`${s.tab}:${s.label}`} className="mode-guide-tab settings-result" onClick={() => goToSetting(s)}>
+                    <span className="settings-result-label">{s.label}</span>
+                    <span className="settings-result-tab">{TAB_LABEL[s.tab]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {q !== "" && groups.length === 0 && settingMatches.length === 0 && (
+              <p className="settings-search-none" role="status">
+                No settings match “{query.trim()}”.
+              </p>
+            )}
           </nav>
           <article className="mode-guide-page settings-page">
             {tab === "general" && general ? (
               <GeneralPage {...general} />
+            ) : tab === "appearance" && general ? (
+              <AppearancePage {...general} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
             ) : tab === "endpoints" && endpoints ? (
@@ -134,8 +296,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <PermissionRules slot={page.slot} />
             ) : tab === "prs" && prChecks ? (
               <PrChecksSettings {...prChecks} />
-            ) : tab === "linear" && linear ? (
-              <LinearSettings {...linear} />
+            ) : tab === "integrations" && linear ? (
+              <IntegrationsPage linear={linear} />
             ) : (
               <McpPage {...page} />
             )}
@@ -177,17 +339,11 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
   { key: "failed", label: "A turn fails" },
 ];
 
-/** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
+/** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how it behaves while you're away. */
+function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
   const sound = useChimeOn();
-  const agentLimit = useAgentLimit();
-  const quiet = useQuietMinutes();
-  const tidy = useTidyMode();
-  const pauseAt = usePauseAtPercent();
-  const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
   const sleepAfter = useSleepMinutes();
-  const menuBar = useMenuBar();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -195,7 +351,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
       <div className="settings-head">
         <div>
           <h2 className="mode-guide-title">General</h2>
-          <p className="mode-guide-summary">When Lantern tells you about a chat, and how it looks. Saved on this Mac.</p>
+          <p className="mode-guide-summary">When Lantern tells you about a chat, and how it behaves while you're away. Saved on this Mac.</p>
         </div>
       </div>
       <section className="general-section" aria-labelledby="general-notify">
@@ -232,27 +388,30 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
         <h3 id="general-awake" className="general-title">
           Away
         </h3>
-        <label className="general-option">
-          <input type="checkbox" checked={keepAwake} onChange={(e) => onKeepAwake(e.target.checked)} />
-          <span>Keep my Mac awake while Claude works</span>
-        </label>
-        <span className="settings-muted">Stops the Mac from going to sleep on its own while any chat or agent is working, so a long turn finishes while you're away. The screen may still turn off, and closing the lid still sleeps the Mac.</span>
+        <SettingsRow
+          lead
+          label="Keep my Mac awake while Claude works"
+          control={<input type="checkbox" checked={keepAwake} onChange={(e) => onKeepAwake(e.target.checked)} />}
+          hint="Stops the Mac from going to sleep on its own while any chat or agent is working, so a long turn finishes while you're away. The screen may still turn off, and closing the lid still sleeps the Mac."
+        />
       </section>
       <section className="general-section" aria-labelledby="general-memory">
         <h3 id="general-memory" className="general-title">
           Memory
         </h3>
-        <label className="general-option">
-          <span>Put a chat to sleep after it has been idle for</span>
-          <select aria-label="Put a chat to sleep after it has been idle for" value={sleepAfter} onChange={(e) => setSleepMinutes(Number(e.target.value))}>
-            {SLEEP_MINUTES.map((n) => (
-              <option key={n} value={n}>
-                {n === 0 ? "Never" : `${n} minutes`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Every open chat keeps a Claude process and its messages in memory. A chat you aren't looking at that has been idle this long is put to sleep: its process stops and its messages are let go, and it stays in the sidebar. Opening it brings it back where it was. A chat that is working, waiting for you or running a command is never put to sleep. A team sleeps and wakes as one (its Lead and its agents), once every one of them is resting and none is the chat you're looking at; a merge card still waiting for you keeps it awake. In a team that goes on, an agent that has been idle this long has its process stopped too (it stays on the canvas, shows as Asleep, and wakes when its Lead or you write to it), unless the team checks what its builders make.</span>
+        <SettingsRow
+          label="Put a chat to sleep after it has been idle for"
+          control={
+            <select aria-label="Put a chat to sleep after it has been idle for" value={sleepAfter} onChange={(e) => setSleepMinutes(Number(e.target.value))}>
+              {SLEEP_MINUTES.map((n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? "Never" : `${n} minutes`}
+                </option>
+              ))}
+            </select>
+          }
+          hint="Every open chat keeps a Claude process and its messages in memory. A chat you aren't looking at that has been idle this long is put to sleep: its process stops and its messages are let go, and it stays in the sidebar. Opening it brings it back where it was. A chat that is working, waiting for you or running a command is never put to sleep. A team sleeps and wakes as one (its Lead and its agents), once every one of them is resting and none is the chat you're looking at; a merge card still waiting for you keeps it awake. In a team that goes on, an agent that has been idle this long has its process stopped too (it stays on the canvas, shows as Asleep, and wakes when its Lead or you write to it), unless the team checks what its builders make."
+        />
       </section>
       <section className="general-section" aria-labelledby="general-sound">
         <h3 id="general-sound" className="general-title">
@@ -263,9 +422,49 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           <span>Play a sound with the toasts (the speaker on a toast does the same)</span>
         </label>
       </section>
-      <section className="general-section" aria-labelledby="general-look">
-        <h3 id="general-look" className="general-title">
-          Appearance
+      <section className="general-section" aria-labelledby="general-behaviour">
+        <h3 id="general-behaviour" className="general-title">
+          Behaviour
+        </h3>
+        <SettingsRow
+          lead
+          label="Keep restore points before each message"
+          control={<input type="checkbox" checked={restorePoints} onChange={(e) => setRestorePoints(e.target.checked)} />}
+          hint="Before each message Lantern keeps a copy of your project's files inside its .git folder, so you can put them back. That includes files git doesn't track yet and doesn't ignore, such as a .env that isn't in .gitignore, and new files over 20 MB are skipped. Off, no copy is made and Restore files to here has nothing new to go back to."
+        />
+        {onWarnTeams && (
+          <label className="general-option">
+            <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />
+            <span>Ask before starting a team while another is working</span>
+          </label>
+        )}
+        {onSortByActivity && (
+          <SettingsRow
+            lead
+            label="Move a chat up the sidebar when it does something"
+            control={<input type="checkbox" checked={sortByActivity ?? false} onChange={(e) => onSortByActivity(e.target.checked)} />}
+            hint="Off, chats stay where they are in their project (in the order you opened them) and opening one never moves it. On, the chats working now come first, then the rest with the most recent activity first."
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+/** Appearance: how Lantern looks (theme, text size) and what sits in the Mac's menu bar. */
+function AppearancePage({ theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
+  const menuBar = useMenuBar();
+  return (
+    <>
+      <div className="settings-head">
+        <div>
+          <h2 className="mode-guide-title">Appearance</h2>
+          <p className="mode-guide-summary">How Lantern looks, and what sits in the Mac's menu bar. Saved on this Mac.</p>
+        </div>
+      </div>
+      <section className="general-section" aria-labelledby="appearance-look">
+        <h3 id="appearance-look" className="general-title">
+          Look
         </h3>
         <ThemePicker theme={theme} onTheme={onTheme} custom={customTheme} onCustom={onCustomTheme} />
         <Choices<TextSize>
@@ -280,8 +479,8 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           ]}
         />
       </section>
-      <section className="general-section" aria-labelledby="general-menubar">
-        <h3 id="general-menubar" className="general-title">
+      <section className="general-section" aria-labelledby="appearance-menubar">
+        <h3 id="appearance-menubar" className="general-title">
           Menu bar
         </h3>
         <Choices<MenuBarMode>
@@ -295,9 +494,9 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             ["full", "Lantern and readout"],
           ]}
         />
-        <span className="settings-muted">Click the lantern for memory, disk space, your open chats and a box to start a new chat. It lasts while Lantern is open: closing the window quits Lantern as before.</span>
+        <SettingsHint>Click the lantern for memory, disk space, your open chats and a box to start a new chat. It lasts while Lantern is open: closing the window quits Lantern as before.</SettingsHint>
         <div className="general-indent">
-          <span className="settings-muted">What the readout beside the lantern shows, and what the lantern keeps an eye on:</span>
+          <SettingsHint>What the readout beside the lantern shows, and what the lantern keeps an eye on:</SettingsHint>
           <label className="general-option">
             <input type="checkbox" checked={menuBar.ram} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ ram: e.target.checked })} />
             <span>Memory used</span>
@@ -310,7 +509,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             <input type="checkbox" checked={menuBar.alerts} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ alerts: e.target.checked })} />
             <span>Turn the lantern amber or red when what it shows runs low</span>
           </label>
-          <span className="settings-muted">Amber is under 15 GB free or memory pressure rising; red is under 5 GB or high pressure. It only watches what is ticked above.</span>
+          <SettingsHint>Amber is under 15 GB free or memory pressure rising; red is under 5 GB or high pressure. It only watches what is ticked above.</SettingsHint>
           <fieldset className="general-choices" disabled={menuBar.mode === "off"}>
             <legend>In the panel</legend>
             <div className="general-choice-row">
@@ -330,80 +529,6 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             </div>
           </fieldset>
         </div>
-      </section>
-      <section className="general-section" aria-labelledby="general-agents">
-        <h3 id="general-agents" className="general-title">
-          Teams
-        </h3>
-        <label className="general-option">
-          <span>Agents running at once (all teams)</span>
-          <select aria-label="Agents running at once (all teams)" value={agentLimit} onChange={(e) => setAgentLimit(Number(e.target.value))}>
-            {Array.from({ length: AGENT_LIMIT_MAX - AGENT_LIMIT_MIN + 1 }, (_, i) => AGENT_LIMIT_MIN + i).map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
-        <label className="general-option">
-          <span>Say an agent is quiet after</span>
-          <select aria-label="Say an agent is quiet after" value={quiet} onChange={(e) => setQuietMinutes(Number(e.target.value))}>
-            {QUIET_MINUTES.map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? "1 minute" : `${n} minutes`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card.</span>
-        <label className="general-option">
-          <span>Tidy up an agent after its merge</span>
-          <select aria-label="Tidy up an agent after its merge" value={tidy} onChange={(e) => setTidyMode(e.target.value as (typeof TIDY_MODES)[number]["value"])}>
-            {TIDY_MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Once you approve an agent's merge and it goes through, "Tidy up" on its merge card closes the agent and removes its worktree and branch. Ask me puts the question on the card; Automatically does it by itself when the agent has nothing left to lose.</span>
-        <label className="general-option">
-          <span>Pause agents when their provider's usage reaches</span>
-          <select aria-label="Pause agents when their provider's usage reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
-            {PAUSE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n === 0 ? "Off" : `${n}%`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="settings-muted">Pauses working team agents on the provider that reaches this percentage. Other providers keep working. Resume continues the paused agents; the hold also ends when that provider’s window resets. You get a heads-up 5 points before.</span>
-        <label className="general-option">
-          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
-          <span>Run tests when a merge is proposed</span>
-        </label>
-        <span className="settings-muted">Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests.</span>
-        <label className="general-option">
-          <input type="checkbox" checked={restorePoints} onChange={(e) => setRestorePoints(e.target.checked)} />
-          <span>Keep restore points before each message</span>
-        </label>
-        <span className="settings-muted">Before each message Lantern keeps a copy of your project's files inside its .git folder, so you can put them back. That includes files git doesn't track yet and doesn't ignore, such as a .env that isn't in .gitignore, and new files over 20 MB are skipped. Off, no copy is made and Restore files to here has nothing new to go back to.</span>
-        {onWarnTeams && (
-          <label className="general-option">
-            <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />
-            <span>Ask before starting a team while another is working</span>
-          </label>
-        )}
-        {onSortByActivity && (
-          <>
-            <label className="general-option">
-              <input type="checkbox" checked={sortByActivity ?? false} onChange={(e) => onSortByActivity(e.target.checked)} />
-              <span>Move a chat up the sidebar when it does something</span>
-            </label>
-            <span className="settings-muted">Off, chats stay where they are in their project (in the order you opened them) and opening one never moves it. On, the chats working now come first, then the rest with the most recent activity first.</span>
-          </>
-        )}
       </section>
     </>
   );
@@ -430,6 +555,29 @@ interface AuthReply {
   authUrl?: string;
   requiresUserAction?: boolean;
   callbackExpected?: boolean;
+}
+
+/** Integrations: the services Lantern talks to. Linear today; more arrive here rather than as new pages. */
+function IntegrationsPage({ linear }: { linear: LinearSettingsProps }) {
+  return (
+    <>
+      <div className="settings-head">
+        <div>
+          <h2 className="mode-guide-title">Integrations</h2>
+          <p className="mode-guide-summary">The services Lantern talks to. Each is set up once, on this Mac.</p>
+        </div>
+      </div>
+      <section className="general-section" aria-labelledby="integrations-linear">
+        <h3 id="integrations-linear" className="general-title">
+          Linear
+        </h3>
+        <LinearSettings {...linear} embedded />
+      </section>
+      <p className="settings-muted" style={{ marginTop: 14 }}>
+        More integrations arrive here — GitHub, Slack — without a new Settings page.
+      </p>
+    </>
+  );
 }
 
 function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
@@ -828,7 +976,7 @@ function AddServerForm({ slot, edit, onAdded, onCancel }: { slot: string; edit?:
   };
   return (
     <form className="mcp-add" onSubmit={submit} aria-label={edit ? "Edit an MCP server" : "Add an MCP server"}>
-      {edit && <div className="wide settings-muted">{loaded ? "Secret values show as •••. Leave one as it is to keep what's saved." : "Reading the server's settings…"}</div>}
+      {edit && <div className="wide"><SettingsHint>{loaded ? "Secret values show as •••. Leave one as it is to keep what's saved." : "Reading the server's settings…"}</SettingsHint></div>}
       <label>
         Name
         <input value={spec.name} onChange={(e) => set({ name: e.target.value })} placeholder="sentry" autoFocus required autoCapitalize="off" autoCorrect="off" spellCheck={false} />
