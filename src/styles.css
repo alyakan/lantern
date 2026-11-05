@@ -3897,7 +3897,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
    one row are as tall as the tallest, their Chats button at the bottom; nothing opens inside a tile (its chats drop down over
    the Desk), so a row never grows for one tile. */
 .desk-main { container-type: inline-size; }
-.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; gap: 10px; }
+/* Two columns at most: a column is never narrower than half the pane (less half the gap), nor than 240px, where it is one. */
+.desk-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(240px, calc((100% - 10px) / 2)), 1fr)); align-items: stretch; gap: 10px; }
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
