@@ -26,11 +26,12 @@ import { HomeSearch } from "./HomeSearch";
 
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
-import { JustFinished } from "./DeskScreen";
+import { JustFinished } from "./JustFinished";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT, TopBar } from "../ui/TopBar";
 import { UsageRing } from "../ui/UsageRing";
 import { tabBarRoom } from "../ui/TabBar";
 import { finished } from "../view/desk";
+import { nextSteps } from "../view/work";
 import { SearchBar, type BarSearch } from "./SearchBar";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { Deck } from "./NeedsDeck";
@@ -53,10 +54,10 @@ export interface HomeProps {
   /** On a tablet, whether the chats are pinned beside the chat, and the button that pins or unpins them (none on a phone). */
   pinned?: boolean;
   onTogglePin?: () => void;
-  /** On a tablet, the Desk is in the main area: this opens it there (its button sits at the top of the chats). None on a phone. */
-  onOpenDesk?: () => void;
-  /** On a tablet, the Desk is what the main area shows now. */
-  deskShown?: boolean;
+  /** On a tablet, Your work is in the main area where no chat is open: this opens it there (its button sits at the top of the chats). None on a phone. */
+  onOpenWork?: () => void;
+  /** On a tablet, Your work is what the main area shows now. */
+  workShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
   tabbed?: boolean;
 }
@@ -319,10 +320,10 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenDesk, deskShown = false, tabbed = false }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, tabbed = false }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
@@ -350,9 +351,10 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const [query, setQuery] = useState("");
   // How far the page is scrolled: the headline fades and trails as it goes.
   const scrollY = useRef(new Animated.Value(0)).current;
-  // The Desk, for a Mac that has one: a tablet's is in its main area. A phone has no Desk of its own: what finished on it is
-  // listed here, under what needs you.
-  const canDesk = useMacCan("desk");
+  // Your work, for a Mac that has it: a tablet's is in its main area, where no chat is open (a phone's is a tab). Neither has a
+  // Desk: what finished on the Mac is listed here, under what needs you.
+  const canWork = useMacCan("work");
+  const toDo = work ? nextSteps(work.items).length : 0;
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
@@ -464,7 +466,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     <TopBar>{topRow}</TopBar>
   );
 
-  // A tablet has the Desk in its main area (with the chats here, beside it); a phone has it here, in place of the list.
   const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
   // What finished on the Mac lately (the Desk's answers), across its desks and newest first: under what needs you on a phone.
   const done = tabbed && desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
@@ -482,15 +483,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {canDesk && onOpenDesk && (
-          <PressScale accessibilityRole="button" accessibilityLabel={stack.length > 0 ? `Desk, ${stack.length} waiting` : "Desk"} accessibilityState={{ selected: deskShown }} onPress={onOpenDesk} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: deskShown ? colors.card : "transparent" }}>
+        {canWork && onOpenWork && (
+          <PressScale accessibilityRole="button" accessibilityLabel={toDo > 0 ? `Work, ${toDo} waiting` : "Work"} accessibilityState={{ selected: workShown }} onPress={onOpenWork} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: workShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
-              Desk
+              Work
             </Txt>
-            {stack.length > 0 && (
+            {toDo > 0 && (
               <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
                 <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
-                  {stack.length}
+                  {toDo}
                 </Txt>
               </View>
             )}

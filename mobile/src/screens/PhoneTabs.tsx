@@ -17,7 +17,7 @@ import { HomeScreen, type HomeProps } from "./HomeScreen";
 import { InsightsScreen } from "./InsightsScreen";
 import { WorkScreen } from "./WorkScreen";
 
-export interface PhoneTabsProps extends Omit<HomeProps, "selectedSlot" | "pinned" | "onTogglePin" | "onOpenDesk" | "deskShown"> {
+export interface PhoneTabsProps extends Omit<HomeProps, "selectedSlot" | "pinned" | "onTogglePin" | "onOpenWork" | "workShown"> {
   /** The compose button: typed, or (held down) by talking. */
   onComposeNew: (voice: boolean) => void;
 }
