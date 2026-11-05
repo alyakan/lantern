@@ -30,14 +30,14 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
-import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, HexIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, ServerIcon, ShieldIcon, SparkIcon } from "./icons";
+import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, HexIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "linear";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", linear: "Linear" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "linear";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", linear: "Linear" };
 
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
-  { title: "Lantern", tabs: ["general", "updates"] },
+  { title: "Lantern", tabs: ["general", "appearance", "updates"] },
   { title: "Claude", tabs: ["harness", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
   { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "linear", "remote"] },
@@ -45,7 +45,8 @@ const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
 
 /** What else a page can be found by: the search matches these as well as its name. */
 const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
-  general: ["notifications", "sound", "theme", "appearance", "text size", "menu bar", "memory", "sleep", "awake"],
+  general: ["notifications", "sound", "memory", "sleep", "awake", "restore points", "sidebar"],
+  appearance: ["theme", "text size", "menu bar", "look", "dark", "light"],
   updates: ["version", "update", "release"],
   harness: ["models", "presets", "advisor", "subagents", "effort"],
   permissions: ["allow", "rules", "always allow", "deny"],
@@ -63,6 +64,7 @@ const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
 /** The small line icon each page wears in the nav. */
 const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
   general: GearIcon,
+  appearance: SunIcon,
   updates: DownloadIcon,
   harness: SparkIcon,
   permissions: ShieldIcon,
@@ -139,7 +141,7 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
   const searchRef = useRef<HTMLInputElement>(null);
   // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
   const available = (t: SettingsTab) =>
-    (t !== "linear" || linear) && (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+    (t !== "linear" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
   const q = query.trim().toLowerCase();
   const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
   const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
@@ -214,6 +216,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
           <article className="mode-guide-page settings-page">
             {tab === "general" && general ? (
               <GeneralPage {...general} />
+            ) : tab === "appearance" && general ? (
+              <AppearancePage {...general} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
             ) : tab === "endpoints" && endpoints ? (
@@ -277,8 +281,8 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
   { key: "failed", label: "A turn fails" },
 ];
 
-/** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
+/** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how it behaves while you're away. */
+function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, warnTeams, onWarnTeams, sortByActivity, onSortByActivity }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const quiet = useQuietMinutes();
@@ -287,7 +291,6 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
   const sleepAfter = useSleepMinutes();
-  const menuBar = useMenuBar();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -295,7 +298,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
       <div className="settings-head">
         <div>
           <h2 className="mode-guide-title">General</h2>
-          <p className="mode-guide-summary">When Lantern tells you about a chat, and how it looks. Saved on this Mac.</p>
+          <p className="mode-guide-summary">When Lantern tells you about a chat, and how it behaves while you're away. Saved on this Mac.</p>
         </div>
       </div>
       <section className="general-section" aria-labelledby="general-notify">
@@ -362,74 +365,6 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           <input type="checkbox" checked={sound} onChange={(e) => setChime(e.target.checked)} />
           <span>Play a sound with the toasts (the speaker on a toast does the same)</span>
         </label>
-      </section>
-      <section className="general-section" aria-labelledby="general-look">
-        <h3 id="general-look" className="general-title">
-          Appearance
-        </h3>
-        <ThemePicker theme={theme} onTheme={onTheme} custom={customTheme} onCustom={onCustomTheme} />
-        <Choices<TextSize>
-          legend="Text size"
-          name="text-size"
-          value={textSize}
-          onChange={onTextSize}
-          options={[
-            ["small", "Small"],
-            ["default", "Default"],
-            ["large", "Large"],
-          ]}
-        />
-      </section>
-      <section className="general-section" aria-labelledby="general-menubar">
-        <h3 id="general-menubar" className="general-title">
-          Menu bar
-        </h3>
-        <Choices<MenuBarMode>
-          legend="Show Lantern in the Mac's menu bar"
-          name="menu-bar-mode"
-          value={menuBar.mode}
-          onChange={(mode) => setMenuBar({ mode })}
-          options={[
-            ["off", "Off"],
-            ["icon", "Just the lantern"],
-            ["full", "Lantern and readout"],
-          ]}
-        />
-        <span className="settings-muted">Click the lantern for memory, disk space, your open chats and a box to start a new chat. It lasts while Lantern is open: closing the window quits Lantern as before.</span>
-        <div className="general-indent">
-          <span className="settings-muted">What the readout beside the lantern shows, and what the lantern keeps an eye on:</span>
-          <label className="general-option">
-            <input type="checkbox" checked={menuBar.ram} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ ram: e.target.checked })} />
-            <span>Memory used</span>
-          </label>
-          <label className="general-option">
-            <input type="checkbox" checked={menuBar.disk} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ disk: e.target.checked })} />
-            <span>Free disk space</span>
-          </label>
-          <label className="general-option">
-            <input type="checkbox" checked={menuBar.alerts} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ alerts: e.target.checked })} />
-            <span>Turn the lantern amber or red when what it shows runs low</span>
-          </label>
-          <span className="settings-muted">Amber is under 15 GB free or memory pressure rising; red is under 5 GB or high pressure. It only watches what is ticked above.</span>
-          <fieldset className="general-choices" disabled={menuBar.mode === "off"}>
-            <legend>In the panel</legend>
-            <div className="general-choice-row">
-              {(
-                [
-                  ["memory", "Memory"],
-                  ["disk", "Disk"],
-                  ["chats", "Open chats"],
-                  ["newChat", "New chat box"],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="general-choice">
-                  <input type="checkbox" checked={menuBar.panel[key]} onChange={(e) => setMenuBar({ panel: { [key]: e.target.checked } })} />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        </div>
       </section>
       <section className="general-section" aria-labelledby="general-agents">
         <h3 id="general-agents" className="general-title">
@@ -504,6 +439,89 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             <span className="settings-muted">Off, chats stay where they are in their project (in the order you opened them) and opening one never moves it. On, the chats working now come first, then the rest with the most recent activity first.</span>
           </>
         )}
+      </section>
+    </>
+  );
+}
+
+/** Appearance: how Lantern looks (theme, text size) and what sits in the Mac's menu bar. */
+function AppearancePage({ theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
+  const menuBar = useMenuBar();
+  return (
+    <>
+      <div className="settings-head">
+        <div>
+          <h2 className="mode-guide-title">Appearance</h2>
+          <p className="mode-guide-summary">How Lantern looks, and what sits in the Mac's menu bar. Saved on this Mac.</p>
+        </div>
+      </div>
+      <section className="general-section" aria-labelledby="appearance-look">
+        <h3 id="appearance-look" className="general-title">
+          Look
+        </h3>
+        <ThemePicker theme={theme} onTheme={onTheme} custom={customTheme} onCustom={onCustomTheme} />
+        <Choices<TextSize>
+          legend="Text size"
+          name="text-size"
+          value={textSize}
+          onChange={onTextSize}
+          options={[
+            ["small", "Small"],
+            ["default", "Default"],
+            ["large", "Large"],
+          ]}
+        />
+      </section>
+      <section className="general-section" aria-labelledby="appearance-menubar">
+        <h3 id="appearance-menubar" className="general-title">
+          Menu bar
+        </h3>
+        <Choices<MenuBarMode>
+          legend="Show Lantern in the Mac's menu bar"
+          name="menu-bar-mode"
+          value={menuBar.mode}
+          onChange={(mode) => setMenuBar({ mode })}
+          options={[
+            ["off", "Off"],
+            ["icon", "Just the lantern"],
+            ["full", "Lantern and readout"],
+          ]}
+        />
+        <span className="settings-muted">Click the lantern for memory, disk space, your open chats and a box to start a new chat. It lasts while Lantern is open: closing the window quits Lantern as before.</span>
+        <div className="general-indent">
+          <span className="settings-muted">What the readout beside the lantern shows, and what the lantern keeps an eye on:</span>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.ram} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ ram: e.target.checked })} />
+            <span>Memory used</span>
+          </label>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.disk} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ disk: e.target.checked })} />
+            <span>Free disk space</span>
+          </label>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.alerts} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ alerts: e.target.checked })} />
+            <span>Turn the lantern amber or red when what it shows runs low</span>
+          </label>
+          <span className="settings-muted">Amber is under 15 GB free or memory pressure rising; red is under 5 GB or high pressure. It only watches what is ticked above.</span>
+          <fieldset className="general-choices" disabled={menuBar.mode === "off"}>
+            <legend>In the panel</legend>
+            <div className="general-choice-row">
+              {(
+                [
+                  ["memory", "Memory"],
+                  ["disk", "Disk"],
+                  ["chats", "Open chats"],
+                  ["newChat", "New chat box"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="general-choice">
+                  <input type="checkbox" checked={menuBar.panel[key]} onChange={(e) => setMenuBar({ panel: { [key]: e.target.checked } })} />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
       </section>
     </>
   );

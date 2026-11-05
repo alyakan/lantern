@@ -370,3 +370,11 @@ export const KeyIcon = () => (
     <path d="M6.8 6.8 12 12M10.1 10.1l1.1-1.1M11.4 11.4l1-1" />
   </svg>
 );
+
+// A sun: Appearance.
+export const SunIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="7" cy="7" r="2.6" />
+    <path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.9 2.9l1.1 1.1M10 10l1.1 1.1M11.1 2.9 10 4M4 10l-1.1 1.1" />
+  </svg>
+);

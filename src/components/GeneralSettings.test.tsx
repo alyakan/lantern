@@ -30,7 +30,7 @@ describe("Settings' General page", () => {
       onTextSize: vi.fn(),
     };
   });
-  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
+  const view = (tab: "general" | "appearance" = "general") => render(<SettingsView open={tab} onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
 
   it("is the first tab, and opens on it", () => {
     view();
@@ -128,7 +128,7 @@ describe("Settings' General page", () => {
   });
 
   it("chooses the theme and the text size", () => {
-    view();
+    view("appearance");
     fireEvent.click(screen.getByLabelText("Dark"));
     expect(general.onTheme).toHaveBeenCalledWith("dark");
     fireEvent.click(screen.getByLabelText("Large"));
@@ -136,7 +136,7 @@ describe("Settings' General page", () => {
   });
 
   it("offers every preset theme, Follow macOS and Custom", () => {
-    view();
+    view("appearance");
     const names = within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio").map((r) => r.closest("label")?.textContent);
     expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Fallout", "Solarized Dark", "Nord", "Paper", "PostHog", "Custom"]);
     fireEvent.click(screen.getByLabelText("Terminal"));
@@ -146,6 +146,7 @@ describe("Settings' General page", () => {
   });
 
   describe("Customize…", () => {
+    const view = () => render(<SettingsView open="appearance" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={general} />);
     it("starts from the theme that's on, switching to Custom so the app shows the colours as they're picked", () => {
       general.theme = "paper";
       view();
@@ -236,6 +237,7 @@ describe("Settings' Teams section: quiet agents and the plan's limit", () => {
   });
 
   describe("Menu bar", () => {
+    const view = () => render(<SettingsView open="appearance" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
     const saved = () => JSON.parse(localStorage.getItem("lantern.menuBar") ?? "{}");
     const mode = (name: string) => screen.getByRole("radio", { name });
 
