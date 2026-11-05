@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, SUBAGENTS_OFF, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Harness } from "../lib/harness";
 import { EFFORT_LEVELS, effortLabel } from "../lib/effort";
+import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
+import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
+import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
+import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
+import { SettingsRow } from "./SettingsRow";
 
 export interface HarnessSettingsProps {
   /** Every preset but Default, as saved (built-ins as edited, then your own). */
@@ -20,6 +25,10 @@ const basename = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 /** Settings → Harness: the presets, each with its main model and effort, advisor and subagents' model. */
 export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolderDefault, fallbackModel }: HarnessSettingsProps) {
   const [editing, setEditing] = useState<string | null>(null);
+  const agentLimit = useAgentLimit();
+  const quiet = useQuietMinutes();
+  const tidy = useTidyMode();
+  const pauseAt = usePauseAtPercent();
   const all = [BUILT_IN[0], ...saved];
   const update = (h: Harness) => onSave(saved.map((x) => (x.id === h.id ? h : x)));
   const add = () => {
@@ -77,6 +86,63 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
       <button className="harness-restore" onClick={restore}>
         Restore the built-in presets
       </button>
+      <section className="general-section" aria-labelledby="models-teams">
+        <h3 id="models-teams" className="general-title">
+          Teams
+        </h3>
+        <SettingsRow
+          label="Agents running at once (all teams)"
+          control={
+            <select aria-label="Agents running at once (all teams)" value={agentLimit} onChange={(e) => setAgentLimit(Number(e.target.value))}>
+              {Array.from({ length: AGENT_LIMIT_MAX - AGENT_LIMIT_MIN + 1 }, (_, i) => AGENT_LIMIT_MIN + i).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          }
+          hint="Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish."
+        />
+        <SettingsRow
+          label="Say an agent is quiet after"
+          control={
+            <select aria-label="Say an agent is quiet after" value={quiet} onChange={(e) => setQuietMinutes(Number(e.target.value))}>
+              {QUIET_MINUTES.map((n) => (
+                <option key={n} value={n}>
+                  {n === 1 ? "1 minute" : `${n} minutes`}
+                </option>
+              ))}
+            </select>
+          }
+          hint={'An agent at work that says nothing for this long shows "Quiet" on its card.'}
+        />
+        <SettingsRow
+          label="Tidy up an agent after its merge"
+          control={
+            <select aria-label="Tidy up an agent after its merge" value={tidy} onChange={(e) => setTidyMode(e.target.value as (typeof TIDY_MODES)[number]["value"])}>
+              {TIDY_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          }
+          hint={'Once you approve an agent\'s merge and it goes through, "Tidy up" on its merge card closes the agent and removes its worktree and branch. Ask me puts the question on the card; Automatically does it by itself when the agent has nothing left to lose.'}
+        />
+        <SettingsRow
+          label="Pause agents when their provider's usage reaches"
+          control={
+            <select aria-label="Pause agents when their provider's usage reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
+              {PAUSE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? "Off" : `${n}%`}
+                </option>
+              ))}
+            </select>
+          }
+          hint="Pauses working team agents on the provider that reaches this percentage. Other providers keep working. Resume continues the paused agents; the hold also ends when that provider’s window resets. You get a heads-up 5 points before."
+        />
+      </section>
     </>
   );
 }

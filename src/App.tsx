@@ -2491,7 +2491,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const harnesses = presets
       .filter((h) => ready && caps.supports_advisor && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
-    const tabs = (["general", "harness", "endpoints", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
+    const tabs = (["general", "appearance", "harness", "endpoints", "mcp", "skills", "permissions", "prs", "integrations", "updates"] as SettingsTab[])
       .filter((t) => (t !== "harness" || (!!state.folder && caps.supports_advisor)) && (t !== "skills" || caps.supports_skills))
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
@@ -2735,7 +2735,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   menuBarAct.current = (a) => {
     if (a.kind === "chat") switchTo(a.slot);
     else if (a.kind === "storage") setStorageOpen(true);
-    else if (a.kind === "settings") setSettingsAt("general");
+    else if (a.kind === "settings") setSettingsAt("appearance");
     else if (a.kind === "new_chat" && validChatText(a.text)) {
       const openFolders = Object.values(chats.slots).map((s) => s.folder);
       api.recentFolders().then(
@@ -3556,6 +3556,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           slot={state.folder ? active : null}
           live={state.status === "idle" || state.status === "running"}
           mcpTools={state.mcpTools}
+          mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}

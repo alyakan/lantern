@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { RuleEntry } from "../types";
 import { HAND_TOOLS, handMatches, handRule, newRule, rulePattern, type HandForm, type HandMatch, type HandTool } from "../lib/permissionRules";
+import { SettingsHint } from "./SettingsRow";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -57,9 +58,9 @@ export function PermissionRules({ slot }: { slot: string | null }) {
           <p className="mode-guide-summary">
             Rules that let Claude run a kind of call without asking. Make one with Always allow… on a permission card, or add one below. This chat's rules end with the chat; a folder's apply to every chat in it. A rule only ever allows: Deny still asks.
           </p>
-          <p className="settings-muted">
+          <SettingsHint>
             A rule checks a file's path when the request arrives. A rule can't see a link that's changed while the command is starting, so a folder rule covers the files you expect, not a sandbox. A build or test rule runs project code (test and build scripts). Rules never cover git, editor, Claude or build config and package files (.git, .claude, .vscode, .cargo, package.json, Cargo.toml and the like), in any letter case, or a file that has a second name (a hard link).
-          </p>
+          </SettingsHint>
         </div>
       </div>
       <form

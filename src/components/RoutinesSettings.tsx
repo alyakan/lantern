@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SettingsHint } from "./SettingsRow";
 import { MODEL_CHOICES } from "../lib/models";
 import {
   DAY_NAMES,
@@ -119,7 +120,7 @@ export function RoutinesSettings({ routines, add, edit, remove, enable, pause, r
         <input type="checkbox" checked={keepAwake} onChange={(e) => onKeepAwake(e.target.checked)} />
         <span>Keep my Mac awake while Claude works</span>
       </label>
-      <span className="settings-muted">This only holds while a routine (or any chat) is working. Between runs the Mac can still go to sleep, and a run due then is missed. The sidebar chats and your inbox show what a routine did.</span>
+      <SettingsHint>This only holds while a routine (or any chat) is working. Between runs the Mac can still go to sleep, and a run due then is missed. The sidebar chats and your inbox show what a routine did.</SettingsHint>
       {editing === "new" && (
         <RoutineForm
           key="new"
@@ -323,7 +324,9 @@ function RoutineForm({ initial, projects, onSave, onCancel }: { initial: Routine
               <option value="hours">hours</option>
             </select>
           </label>
-          <p className="settings-muted wide">The shortest gap is {MIN_EVERY_MINUTES} minutes: every run is a whole chat on your plan.</p>
+          <div className="wide">
+            <SettingsHint>The shortest gap is {MIN_EVERY_MINUTES} minutes: every run is a whole chat on your plan.</SettingsHint>
+          </div>
         </>
       )}
       {f.kind === "weekly" && (
@@ -366,7 +369,9 @@ function RoutineForm({ initial, projects, onSave, onCancel }: { initial: Routine
           Auto means Claude will do whatever it decides to, such as change files and run commands, without asking you first, and a routine runs while you may be away. Only choose it for a prompt you trust in a project you have backed up.
         </p>
       ) : (
-        <p className="settings-muted wide">With Ask, Claude stops and asks before each change or command. The question waits in your inbox until you are back.</p>
+        <div className="wide">
+          <SettingsHint>With Ask, Claude stops and asks before each change or command. The question waits in your inbox until you are back.</SettingsHint>
+        </div>
       )}
       {problem && (
         <p className="settings-error wide" role="alert">

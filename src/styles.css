@@ -2295,6 +2295,17 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .mode-guide-tab .mode-icon { margin-top: 0; }
 .mode-guide-tab:hover:not(.active) { background: var(--bg-hover); }
 .mode-guide-tab.active { background: var(--bg-active); color: var(--text); font-weight: 500; }
+/* Settings' sidebar: a search, then the pages in groups, rather than one flat list. */
+.settings-search { width: 100%; height: 27px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--field); color: var(--text); font-size: calc(12px * var(--font-scale)); }
+.settings-search::placeholder { color: var(--muted); }
+.settings-search:focus { outline: none; border-color: var(--text-2); }
+.settings-search-none { margin: 0; padding: 0 8px; font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; color: var(--muted); }
+.settings-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mode-guide-tab .dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.mode-guide-tab .dot.warn { background: var(--attn); }
+.settings-result { justify-content: space-between; }
+.settings-result-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-result-tab { flex: none; font-size: calc(10.5px * var(--font-scale)); color: var(--muted); }
 .mode-guide-now { margin-left: auto; padding: 0 6px; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-text); font-size: calc(10px * var(--font-scale)); font-weight: 600; line-height: 16px; }
 .mode-guide-page { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 26px 18px; overflow-y: auto; }
 .mode-guide-eyebrow { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
@@ -2397,6 +2408,13 @@ body::after { content: var(--crt-on); position: fixed; inset: 0; z-index: 214748
 .general-section:first-of-type { border-top: none; padding-top: 4px; }
 .general-title { margin: 0 0 2px; font-size: calc(13px * var(--font-scale)); font-weight: 600; color: var(--text); }
 .general-option { display: flex; align-items: center; gap: 8px; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+/* A row and its help: the help is drawn one line deep (two at most) until More, but the whole sentence stays in the page. */
+.settings-line { display: flex; flex-direction: column; gap: 3px; }
+.settings-hint { display: flex; align-items: baseline; gap: 6px; }
+.settings-hint-text { flex: 1; min-width: 0; font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--muted); }
+.settings-hint-text.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.settings-hint-more { flex: none; padding: 0; border: none; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); text-decoration: underline; cursor: pointer; }
+.settings-hint-more:hover { color: var(--text); }
 .general-indent { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
 .general-row { display: flex; align-items: center; gap: 10px; padding-left: 22px; font-size: calc(12.5px * var(--font-scale)); }
 .general-choices { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0 0 0 22px; border: none; }
