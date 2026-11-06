@@ -3881,12 +3881,12 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .mb-link:hover { background: var(--bg-active); color: var(--text); }
 
 /* The Desk, a dashboard: what needs you and the projects. Ask is the right pane; what happened is the sidebar's Timeline. */
-.desk { min-height: 0; }
+.desk { position: relative; min-height: 0; }
 .desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
 /* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 88px; box-sizing: border-box; }
 /* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
 :where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
 /* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. Not in
@@ -4299,11 +4299,21 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-source-n { flex: none; color: var(--accent); font-weight: 700; }
 .desk-source-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-/* The Desk's box: as wide as the column, round, where it sends tucked in beside Send. */
-.desk-box { flex: none; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 12px 12px; padding: 6px 6px 6px 16px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--card-shadow); box-sizing: border-box; }
-.desk-box textarea { flex: 1 1 100%; min-height: 30px; max-height: 160px; padding: 6px 0; border: none; background: none; color: var(--text); font: calc(14px * var(--font-scale)) / 1.4 var(--ui); resize: none; field-sizing: content; outline: none; }
-.desk-to { flex: none; margin-right: auto; max-width: 160px; height: 30px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font: calc(12px * var(--font-scale)) var(--ui); }
-.desk-box > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
+/* The Desk's box: a card that floats at the foot of the sheet, its own glass, edge and lift, clear of the feed and the sheet's
+   sides: the message on a line of its own, and under it where it goes, beside Send. */
+.desk-box { flex: none; display: flex; flex-direction: column; gap: 6px; margin: 10px 16px 16px; padding: 10px 10px 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: color-mix(in srgb, var(--field) 92%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--card-shadow); box-sizing: border-box; }
+.desk-box textarea { flex: none; min-height: 32px; max-height: 160px; padding: 2px 2px 0 0; border: none; background: none; color: var(--text); font: calc(14px * var(--font-scale)) / 1.45 var(--ui); resize: none; field-sizing: content; outline: none; }
+.desk-box-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.desk-box-foot > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
+/* Where it sends: a quiet pill that opens the app's own menu upward, not the system's pull-down. */
+.desk-to { position: relative; flex: none; min-width: 0; margin-right: auto; }
+.desk-to-button { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 28px; padding: 0 9px 0 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); background: transparent; color: var(--text-2); font: calc(12px * var(--font-scale)) var(--ui); }
+.desk-to-button:hover:not(:disabled) { border-color: var(--muted); background: var(--bg-hover); color: var(--text); }
+.desk-to-button.picked { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong)); color: var(--text); }
+.desk-to-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-to-menu { bottom: calc(100% + 6px); left: 0; width: max-content; min-width: 260px; max-width: min(380px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; }
+.desk-to-menu .menu-row { align-items: center; }
+.desk-check { flex: none; width: 10px; color: var(--accent); font-weight: 700; }
 .desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }
 
@@ -4335,9 +4345,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .desk-pulse .pulse-bad { color: var(--del); }
 
 /* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
-/* A narrow bar, centred. It sits over the cards, which are the pane's colour too, so it has a border of its own (1px, the strong line) and its own lift: the bar's old hairline vanished against them. */
-.desk-ask-bar { flex: none; display: flex; align-items: center; align-self: center; gap: 10px; width: min(520px, calc(100% - 48px)); margin: 0 0 16px; height: 44px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
-.desk-ask-bar:hover { color: var(--text-2); }
+/* A narrow bar that floats over the foot of the board, the cards passing under it: glass, a pill, and a lift of its own, so it
+   reads as over the board rather than as a band across the bottom of it. The board keeps room for it under its last card. */
+.desk-ask-bar { position: absolute; left: 50%; bottom: 16px; z-index: 3; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: min(560px, calc(100% - 48px)); height: 44px; padding: 0 14px 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--field) 90%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
+.desk-ask-bar:hover { color: var(--text-2); border-color: var(--muted); background: color-mix(in srgb, var(--field) 97%, transparent); }
 .desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
 .desk-ask-sheet { position: relative; width: min(980px, 100%); height: min(72%, 620px); display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--shadow); }
