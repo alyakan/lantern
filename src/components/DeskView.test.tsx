@@ -521,6 +521,9 @@ describe("the Desk", () => {
     expect(heads.indexOf("Where things stand")).toBeLessThan(heads.indexOf("Next"));
     expect(screen.getByRole("region", { name: "Where things stand" })).toHaveTextContent("Retry the fetch");
     expect(screen.getByRole("region", { name: "Where things stand" })).not.toHaveTextContent("Another repository");
+    // Next too: what to do now on this page is this project's alone.
+    expect(screen.getByRole("region", { name: "Next" })).toHaveTextContent("Retry the fetch");
+    expect(screen.getByRole("region", { name: "Next" })).not.toHaveTextContent("Another repository");
   });
 
   it("opens a project's page with nothing on its board on a landing page that starts a chat", () => {
