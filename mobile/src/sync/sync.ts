@@ -52,6 +52,9 @@ export const DESK_WAIT = 170_000;
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
 
+/** How many closed chats keep their messages on the phone. */
+export const KEEP_CLOSED = 4;
+
 export class Sync {
   private suggested: { at: number; value: Suggestions } | null = null;
   private state: State = initialState;
@@ -61,6 +64,8 @@ export class Sync {
   private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
+  /** Chats closed, the latest first (see `unfollow`). */
+  private closed: string[] = [];
   private readonly schedule: (fn: () => void) => void;
   private readonly now: () => number;
   private readonly newId: () => string;
@@ -116,6 +121,7 @@ export class Sync {
     this.queue = [];
     this.session = null;
     this.followed.clear();
+    this.closed = [];
     this.state = initialState;
     for (const l of this.listeners) l();
   }
@@ -255,6 +261,10 @@ export class Sync {
   unfollow(slot: string) {
     this.followed.delete(slot);
     void this.ask({ op: "unsubscribe", slot }).catch(() => {});
+    // The last few chats closed keep their messages, so going back to one is instant; older ones are let go, or a long
+    // session would hold every chat ever opened.
+    this.closed = [slot, ...this.closed.filter((s) => s !== slot)];
+    for (const old of this.closed.splice(KEEP_CLOSED)) if (!this.followed.has(old)) this.apply({ type: "forget", slot: old });
   }
 
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */

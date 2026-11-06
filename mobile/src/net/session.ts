@@ -32,6 +32,9 @@ export class NoAnswer extends Error {}
 /** The Mac hung up on the pairing code: it was used, expired or wrong, which another address of the Mac won't change. */
 export class Refused extends Error {}
 
+/** A request on an open connection got no answer in its time (an answer that is an error is not this). */
+export class NoReply extends Error {}
+
 function sendMessage(link: Link, channel: Channel, msg: ClientMessage) {
   for (const frame of channel.seal(utf8Encode(JSON.stringify(msg)))) link.send(frame);
 }
@@ -115,7 +118,7 @@ export class Session {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.answers.delete(id);
-        reject(new Error("Your Mac didn't answer in time."));
+        reject(new NoReply("Your Mac didn't answer in time."));
       }, wait);
       this.answers.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       try {

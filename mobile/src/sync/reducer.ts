@@ -129,7 +129,9 @@ export type Action =
   | { type: "load_failed"; slot: string; why: string }
   /** What this phone answered a question with, to show beside it afterwards (the Mac's events don't carry it). */
   | { type: "answered_with"; slot: string; requestId: string; text: string }
-  | { type: "earlier"; slot: string; events: RemoteEvent[]; hidden: number };
+  | { type: "earlier"; slot: string; events: RemoteEvent[]; hidden: number }
+  /** A chat closed a while ago: its messages are let go (opening it again asks the Mac for them). */
+  | { type: "forget"; slot: string };
 
 /** The client id a message's `sent_by` ends with ("phone-…:<client id>"). */
 const clientIdOf = (sentBy: string | null) => (sentBy?.includes(":") ? sentBy.slice(sentBy.lastIndexOf(":") + 1) : null);
@@ -305,6 +307,13 @@ export function reducer(state: State, action: Action): State {
       if (!view) return state;
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, failed: action.error })) } } };
     }
+    case "forget": {
+      const view = state.views[action.slot];
+      // A message that is still going, or didn't go, is kept: it is what was typed, and the Mac has no copy of it.
+      if (!view || view.items.some((it) => it.kind === "user" && (it.sending || !!it.failed))) return state;
+      const { [action.slot]: _, ...views } = state.views;
+      return { ...state, views };
+    }
     case "answered_with": {
       const view = state.views[action.slot];
       if (!view) return state;
@@ -345,8 +354,9 @@ export function reducer(state: State, action: Action): State {
         }
         case "reset": {
           const view = state.views[msg.slot] ?? emptyView;
-          // Page 0 starts the chat over, keeping only messages this phone sent that the Mac hasn't echoed yet.
-          const base: ChatView = msg.page === 0 ? { ...emptyView, commands: view.commands, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
+          // Page 0 starts the chat over, keeping only messages this phone sent that the Mac hasn't echoed yet, or that didn't go
+          // (what was typed stays, with why, to be sent again).
+          const base: ChatView = msg.page === 0 ? { ...emptyView, commands: view.commands, items: view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed)) } : view;
           const next = applyAll(base, msg.events);
           // A chat this phone already followed, started over because it was away too long: say how much it missed.
           const caughtUp = msg.page === 0 ? (view.seq > 0 && msg.seq > view.seq ? msg.seq - view.seq : 0) : view.caughtUp;

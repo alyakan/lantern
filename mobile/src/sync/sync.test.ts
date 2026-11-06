@@ -69,6 +69,35 @@ describe("the phone's sync", () => {
     expect(second.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
   });
 
+  it("keeps the last few closed chats' messages and lets older ones go, so a long session doesn't hold every chat", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7).session);
+    const slots = ["a", "b", "c", "d", "e", "f"];
+    for (const s of slots) {
+      sync.follow(s);
+      sync.onPushed({ type: "event", slot: s, seq: 1, event: { kind: "text_delta", block_id: "b", text: s } });
+    }
+    frame();
+    for (const s of slots) sync.unfollow(s);
+    frame();
+    expect(Object.keys(sync.getState().views).sort()).toEqual(["c", "d", "e", "f"]);
+    // One opened again asks from the start.
+    const again = fakeSession(7);
+    sync.onSession(again.session);
+    sync.follow("a");
+    await settle();
+    expect(again.asked).toContainEqual({ op: "subscribe", slot: "a", after: 0, epoch: 7 });
+  });
+
+  it("never lets go of a closed chat's message that didn't go", () => {
+    const { sync, frame } = rig();
+    sync.apply({ type: "sending", slot: "a", clientId: "m-1", text: "hi", at: 1 });
+    sync.apply({ type: "send_failed", slot: "a", clientId: "m-1", error: "No" });
+    sync.apply({ type: "forget", slot: "a" });
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ text: "hi", failed: "No" });
+  });
+
   it("after the Mac restarted (another epoch) it follows from the start", async () => {
     const { sync, frame } = rig();
     sync.onSession(fakeSession(7).session);

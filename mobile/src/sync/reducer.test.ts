@@ -218,6 +218,14 @@ describe("a message sent from this phone", () => {
     expect(items(s)[0]).toMatchObject({ sending: false, failed: "That chat isn't open on your Mac." });
   });
 
+  it("that didn't go keeps saying so when the chat is reloaded, so what was typed isn't lost", () => {
+    let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-4", text: "hi", at: 1 });
+    s = reducer(s, { type: "send_failed", slot: "a", clientId: "m-4", error: "Your Mac didn't answer in time." });
+    s = reducer(s, reset("a", 3, []));
+    expect(items(s)).toHaveLength(1);
+    expect(items(s)[0]).toMatchObject({ text: "hi", failed: "Your Mac didn't answer in time." });
+  });
+
   it("survives a Reset that comes before its echo", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-3", text: "hi", at: 1 });
     s = reducer(s, reset("a", 3, []));
