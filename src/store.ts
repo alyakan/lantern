@@ -1,6 +1,6 @@
 import type { RevertOutcome } from "./api";
 import type { Hunk, ModelCost, ModelOption, Mode, ProviderInfo, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
-import { agentName, providerIdOf, reportsUsd } from "./lib/provider";
+import { agentName, isGateway, providerIdOf, reportsUsd } from "./lib/provider";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
@@ -745,10 +745,11 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     }
     case "permission_requested": {
-      // Which agent asked is the chat's own provider, never a word in the request: only a chat on another provider than Claude
-      // Code gets its kind of card (see PermissionCard).
+      // Which agent asked is the chat's own provider, never a word in the request: only a chat on another agent's CLI than Claude
+      // Code gets its kind of card (see PermissionCard). A chat on an endpoint of the user's is Claude Code underneath, so its
+      // requests are Claude's (an AskUserQuestion has no command to show, which is all that card can read).
       const provider = providerIdOf(state.provider);
-      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null, at: Date.now(), ...(provider === "claude" ? {} : { provider }) }] };
+      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null, at: Date.now(), ...(provider === "claude" || isGateway(provider) ? {} : { provider }) }] };
     }
     case "permission_auto_allowed":
       return {
