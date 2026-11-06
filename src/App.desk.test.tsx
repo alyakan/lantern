@@ -184,9 +184,8 @@ describe("the Desk in the app", () => {
     render(<App startOnDesk />);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     await openAsk();
-    const to = screen.getByRole("combobox", { name: "Send to" });
-    const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
-    fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to: Desk picks" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to" })).getByRole("menuitemradio", { name: /acme-api/ }));
     await type("Add retries to fetchJson");
     const entry = await screen.findByRole("article", { name: "You on the Desk: Add retries to fetchJson" });
     // The demo turn asks to run its tests on the way: allowed from the Desk, as you would.
@@ -219,9 +218,8 @@ describe("the Desk in the app", () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
     await openAsk();
-    const to = screen.getByRole("combobox", { name: "Send to" });
-    const chat = within(to).getAllByRole("option").find((o) => o.textContent?.includes("acme-api"))!;
-    fireEvent.change(to, { target: { value: (chat as HTMLOptionElement).value } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to: Desk picks" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Send to" })).getByRole("menuitemradio", { name: /acme-api/ }));
     await type("Add retries to fetchJson");
     const entry = await screen.findByRole("article", { name: "You on the Desk: Add retries to fetchJson" });
     await waitFor(() => expect(entry).toHaveTextContent(/Sent to/));

@@ -8,6 +8,7 @@ import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
 import { useMenuKeys } from "./useMenuKeys";
+import { initials } from "../lib/sidebar";
 
 export interface YourWorkProps {
   repos: RepoStatus[] | null;
@@ -27,6 +28,10 @@ export interface YourWorkProps {
   nextOnly?: boolean;
   /** Opens a chat on the Desk (an item's details offer the one on its branch). */
   onOpen?: (slot: string) => void;
+  /** A project's page: the feature opened from its head card (null: the cards), and where opening or closing one is reported.
+   *  With it, the cards are the layout, whatever the last one chosen was. */
+  feature?: string | null;
+  onFeature?: (key: string | null) => void;
 }
 
 /** History's search over every past chat, and opening one of them: an item's details find the last chat about it with them. */
@@ -105,7 +110,7 @@ export const stepSentTo = (key: string, sig: string): string | null => {
 export const markStepSent = (key: string, sig: string, to: string) => void sent.set(key, { sig, to });
 
 /** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. With Linear, the path starts
- * at the issue; work with no issue in Linear has that node dashed. */
+ * at the issue; work with no issue in Linear has that node struck through. */
 function Nodes({ item, issues }: { item: WorkItem; issues: boolean }) {
   const stages = issues ? STAGES : STAGES.filter((s) => s.stage !== "issue");
   const at = stages.findIndex((s) => s.stage === item.stage);
@@ -441,29 +446,49 @@ function FeatureRow({ item, issues, heading, dropName, chats, repos, onStep }: {
   );
 }
 
-/** A feature's page: its name, its tabs (Needs you, Moving, To start, Shipped), and the rows under the one chosen. */
+/** A feature's page: a card of its own in the colour of its project — its mark, its name, how much of it is open, a tab per state
+ * with its count, and the rows under the one chosen — so the work under it reads as one feature, not as rows on the page. */
 function FeatureDetail({ group, issues, dropName, tab, onTab, onBack, chats, repos, onStep }: { group: WorkGroup; issues: boolean; dropName: boolean; tab: Bucket | null; onTab: (b: Bucket) => void; onBack: (() => void) | null; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"] }) {
   const on = tab ?? openBucket(group.items);
   const rows = group.items.filter((i) => bucketOf(i) === on);
   const live = group.items.filter((i) => bucketOf(i) !== "shipped").length;
   return (
     <section className="yw-fpage" aria-label={group.label}>
-      {onBack && (
-        <button className="desk-back" onClick={onBack}>
-          ‹ Work
-        </button>
-      )}
-      <h3 className="yw-ftitle">{group.label}</h3>
-      <p className="yw-quiet">
-        {live} open, {group.items.length - live} shipped
-      </p>
+      <header className="yw-fhead">
+        <div className="yw-fhead-top">
+          {onBack ? (
+            <button className="desk-back" onClick={onBack}>
+              ‹ Work
+            </button>
+          ) : (
+            <span />
+          )}
+          <span className="yw-fcounts">
+            <span>
+              <b>{live}</b> open
+            </span>
+            <span>
+              <b>{group.items.length - live}</b> shipped
+            </span>
+          </span>
+        </div>
+        <div className="yw-fhead-body">
+          <span className="yw-fmark" aria-hidden>
+            {initials(group.label, 2)}
+          </span>
+          <div className="yw-fhead-id">
+            <span className="yw-kicker">{issues ? "Feature" : "Project"}</span>
+            <h3 className="yw-ftitle">{group.label}</h3>
+          </div>
+        </div>
+      </header>
       <div className="yw-tabs" role="tablist" aria-label={`${group.label} work`}>
         {BUCKETS.map(({ bucket, label }) => {
           const n = group.items.filter((i) => bucketOf(i) === bucket).length;
           return (
             <button key={bucket} role="tab" aria-selected={bucket === on} className={`yw-tab${bucket === on ? " on" : ""}${n === 0 ? " zero" : ""}`} onClick={() => onTab(bucket)}>
               {label}
-              {bucket === "attn" && n > 0 && <i className="yw-tab-n">{n}</i>}
+              <span className="yw-tab-n">{n}</span>
             </button>
           );
         })}
@@ -586,7 +611,7 @@ function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen, feature, onFeature }: YourWorkProps) {
   const [all, setAll] = useState(false);
   // Items of several projects in one list (the Desk's own Next, or grouped by feature or none): each says its project in a tag.
   const tagged = (repos?.length ?? 0) > 1;
@@ -601,7 +626,11 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const [nextClosed, setNextClosed] = usePersistentState("desk.work.nextClosed", false);
   // Cards (a card per feature that opens into tabs) or the list; the feature whose page is open, by its group key, and its tab.
   const [layout, setLayout] = usePersistentState<Layout>("desk.work.layout", "cards");
-  const [cardPage, setCardPage] = useState<string | null>(null);
+  // A project's head card opens a feature here: that is the cards, and the feature's own page from the start.
+  const shownLayout: Layout = feature != null ? "cards" : layout;
+  const [ownPage, setOwnPage] = useState<string | null>(null);
+  const cardPage = feature !== undefined ? feature : ownPage;
+  const setCardPage = (key: string | null) => (onFeature ? onFeature(key) : setOwnPage(key));
   const [cardTab, setCardTab] = useState<Bucket | null>(null);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
@@ -627,7 +656,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         title="Next"
         count={next.length}
         heading="h2"
-        className={`yw-card yw-next${layout === "cards" ? " yw-calm" : ""}`}
+        className={`yw-card yw-next${shownLayout === "cards" ? " yw-calm" : ""}`}
         action={
           <span className="yw-next-actions">
             <button className="desk-more" aria-expanded={!nextClosed} onClick={() => setNextClosed(!nextClosed)}>
@@ -696,7 +725,15 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         )}
       </Card>
   );
-  const viewToggle = <ViewToggle layout={layout} onLayout={setLayout} />;
+  const viewToggle = (
+    <ViewToggle
+      layout={shownLayout}
+      onLayout={(l) => {
+        setLayout(l);
+        if (l === "list") onFeature?.(null);
+      }}
+    />
+  );
   // The cards ignore the list's state filter (the tabs are the filter) and its grouping: a card is a feature with Linear, a project without.
   const cardGroups = groupWork(items, issues ? "feature" : "project");
   // One feature (or project) needs no card to open it: its page is the list.
@@ -726,7 +763,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
       )}
     </section>
   );
-  const standCard = items.length > 0 && layout === "cards" ? cardsCard : items.length > 0 ? (
+  const standCard = items.length > 0 && shownLayout === "cards" ? cardsCard : items.length > 0 ? (
         <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand" action={viewToggle}>
           <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} grouped={!flat && groups.length > 1} allOpen={allOpen} onAll={toggleAll} />
           {groups.length === 0 ? (

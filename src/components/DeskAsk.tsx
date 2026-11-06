@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { answerShape, type AnswerPart, type DeskEntry, type DeskReply } from "../lib/desk";
 import { elapsed } from "../lib/time";
+import { useMenuInside } from "../lib/useMenuInside";
 import type { ChatHit } from "../types";
 import { Md } from "./Md";
+import { useMenuKeys } from "./useMenuKeys";
 
 /** A chat a message can be sent to from the box, as its "to" menu lists it. */
 export interface DeskTarget {
@@ -248,6 +250,65 @@ function Entry({ entry, now, ...p }: { entry: DeskEntry; now: number } & Pick<De
   );
 }
 
+/** Where the box sends to: the Desk's own pick, or one chat, in the app's menu rather than a system pull-down. */
+function SendTo({ targets, value, onChange }: { targets: DeskTarget[]; value: string; onChange: (slot: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open, [targets.length]);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    // Escape closes this menu only: the sheet it sits in reads a prevented Escape as "mine".
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const picked = targets.find((t) => t.slot === value);
+  const choose = (slot: string) => {
+    setOpen(false);
+    onChange(slot);
+  };
+  return (
+    <div className="desk-to" ref={root}>
+      <button className={`desk-to-button${picked ? " picked" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Send to: ${picked ? picked.title : "Desk picks"}`} title="Where what you type goes: the Desk picks the right chat, or starts one" onClick={() => setOpen(!open)}>
+        <span className="desk-to-label">{picked ? picked.title : "Desk picks"}</span>
+        <span className="chev down" aria-hidden />
+      </button>
+      {open && (
+        <div className="menu desk-to-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Send to" onKeyDown={keys.onKeyDown}>
+          <div className="menu-heading">Send to</div>
+          <button role="menuitemradio" aria-checked={!picked} className={`menu-row${picked ? "" : " current"}`} onClick={() => choose("")}>
+            <span className="desk-check" aria-hidden>
+              {picked ? "" : "✓"}
+            </span>
+            <span className="menu-row-title">Desk picks</span>
+            <span className="menu-row-meta">The chat it fits, or a new one</span>
+          </button>
+          <div className="menu-sep" role="separator" />
+          {targets.map((t) => (
+            <button key={t.slot} role="menuitemradio" aria-checked={picked?.slot === t.slot} className={`menu-row${picked?.slot === t.slot ? " current" : ""}`} onClick={() => choose(t.slot)}>
+              <span className="desk-check" aria-hidden>
+                {picked?.slot === t.slot ? "✓" : ""}
+              </span>
+              <span className="menu-row-title">{t.title}</span>
+              <span className="menu-row-meta">{t.where}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The Desk's box: what you type goes to the chat the Desk picks, or the one picked in its menu. */
 function DeskBox({ targets, canSend, onSend }: Pick<DeskAskProps, "targets" | "canSend" | "onSend">) {
   const [text, setText] = useState("");
@@ -268,17 +329,12 @@ function DeskBox({ targets, canSend, onSend }: Pick<DeskAskProps, "targets" | "c
   return (
     <div className="desk-box">
       <textarea aria-label="Tell Lantern" placeholder={canSend ? "Tell Lantern what to do" : "Waiting for Claude Code…"} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={keys} />
-      <select className="desk-to" aria-label="Send to" value={target} onChange={(e) => setTo(e.target.value)} title="Where what you type goes: the Desk picks the right chat, or starts one">
-        <option value="">Desk picks</option>
-        {targets.map((t) => (
-          <option key={t.slot} value={t.slot}>
-            {t.title} ({t.where})
-          </option>
-        ))}
-      </select>
-      <button className="primary" aria-label="Send" disabled={!text.trim() || !canSend} onClick={send}>
-        Send
-      </button>
+      <div className="desk-box-foot">
+        <SendTo targets={targets} value={target} onChange={setTo} />
+        <button className="primary" aria-label="Send" disabled={!text.trim() || !canSend} onClick={send}>
+          Send
+        </button>
+      </div>
     </div>
   );
 }

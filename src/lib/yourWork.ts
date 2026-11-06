@@ -495,8 +495,10 @@ function linkedPull(issue: LinearIssue, github: string | null): number | null {
 
 /**
  * Your work with Linear's: each item marked with the issue it is the work of, and an item for each of your issues that nothing
- * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). An issue of a
- * team no Desk project is in is listed without a step. The step names the issue by its identifier and link only.
+ * is the work of yet (not started), in the repository its team is the work of (`teamOf`: repository → team key). Several Desk
+ * projects can be in one team; an issue then belongs to the one repository its branch names, and to none when no branch says
+ * (it isn't guessed: guessing put every issue of the team on the first project's page). An issue with no repository is listed
+ * without a step. The step names the issue by its identifier and link only.
  */
 export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: Record<string, string>, repos: RepoStatus[] | null, now: number): WorkItem[] {
   if (!work?.connected || !work.issues.length) return items;
@@ -516,13 +518,30 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
     }
     return [marked];
   });
-  const repoOfTeam = (team: string) => (repos ?? []).find((r) => teamOf[r.repo] === team);
+  const reposOfTeam = (team: string) => (repos ?? []).filter((r) => teamOf[r.repo] === team);
+  /**
+   * The repository an issue is the work of: the one its team is (when only one is), or, when several Desk projects are in the
+   * team, the one its branch is in. Never a guess: picking the first would put every issue of the team on that project's page.
+   */
+  const repoOfIssue = (issue: LinearIssue) => {
+    const own = reposOfTeam(issue.team);
+    if (own.length <= 1) return own[0];
+    const branch = issue.branch;
+    if (!branch) return undefined;
+    const named = own.filter((r) => r.branches.some((b) => b.name === branch) || r.worktrees.some((w) => w.branch === branch) || r.prs.some((p) => p.branch === branch));
+    return named.length === 1 ? named[0] : undefined;
+  };
+  /** Why an issue sits in no repository, said where it is listed: its team has no Desk project, or more than one. */
+  const withoutRepo = (team: string) => {
+    const n = reposOfTeam(team).length;
+    return n === 0 ? `no Desk project is in team ${team}` : n > 1 ? `${n} projects are in team ${team}` : null;
+  };
   // A feature (Linear project) is going while any issue of yours in it isn't finished: only then its finished issues are listed.
   const featureOf = (i: LinearIssue) => (i.project ? (i.project_id ?? i.project) : null);
   const going = new Set(work.issues.filter((i) => !isFinished(i)).map(featureOf));
   for (const issue of work.issues) {
     if (started.has(issue.identifier)) continue;
-    const r = repoOfTeam(issue.team);
+    const r = repoOfIssue(issue);
     if (isFinished(issue)) {
       const feature = featureOf(issue);
       if (feature === null || !going.has(feature)) continue;
@@ -538,7 +557,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
         stage: "release",
         tone: "done",
         word: issue.state,
-        meta: [issue.project, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
+        meta: [issue.project, !r && withoutRepo(issue.team)].filter(Boolean).join(" · "),
         at: null,
         next: null,
         sig: `issue:${issue.state}`,
@@ -587,7 +606,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
         stage: ready ? "release" : "review",
         tone: ready ? "ready" : "wait",
         word: issue.state,
-        meta: [issue.project, ready && "merged, waiting for a release", !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · "),
+        meta: [issue.project, ready && "merged, waiting for a release", !r && withoutRepo(issue.team)].filter(Boolean).join(" · "),
         at: null,
         next: null,
         sig: `issue:${issue.state}`,
@@ -596,7 +615,7 @@ export function withLinear(items: WorkItem[], work: LinearWork | null, teamOf: R
       });
       continue;
     }
-    const facts = [issue.project, PRIORITY[issue.priority], issue.due && `due ${issue.due}`, !r && `no Desk project is in team ${issue.team}`].filter(Boolean).join(" · ");
+    const facts = [issue.project, PRIORITY[issue.priority], issue.due && `due ${issue.due}`, !r && withoutRepo(issue.team)].filter(Boolean).join(" · ");
     out.push({
       key: `linear:${issue.identifier}`,
       repo: r?.repo ?? "",
@@ -684,12 +703,11 @@ export function projectsOf(items: WorkItem[], repo: string): { project: string; 
 }
 
 /**
- * What a repository's own page lists: its work, and the Linear issues of a team no Desk project is in (they belong to no repository)
- * that sit in a feature being worked on there, so the feature's board is whole. A feature nothing there is doing leaves them out.
+ * What a repository's own page lists: its work, and nothing else. An item in no repository (a Linear issue whose team has no
+ * single Desk project) belongs to no page: it is listed on the Desk, where every project is, and kept out of each project's.
  */
 export function workOfRepo(items: WorkItem[], repo: string): WorkItem[] {
-  const going = new Set(items.flatMap((i) => (i.repo === repo && i.tone !== "done" && i.issue?.project ? [i.issue.project] : [])));
-  return items.filter((i) => i.repo === repo || (i.repo === "" && !!i.issue?.project && going.has(i.issue.project)));
+  return items.filter((i) => i.repo === repo);
 }
 
 export interface FeatureGroup {

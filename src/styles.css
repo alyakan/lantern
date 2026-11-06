@@ -76,6 +76,11 @@
   --radius-pill: 999px;    /* capsules and round buttons (circles stay round) */
   --pill-s: 24px;          /* the two heights of a pill button: in a card or a banner, and in a bar or a dialog */
   --pill-m: 28px;
+  /* Motion: how a view gives way to the next and how a control answers the pointer. Short, eased out, the way macOS moves. */
+  --dur-1: 0.14s;
+  --dur-2: 0.22s;
+  --dur-3: 0.3s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --pane-edge: none;       /* a line round the review pane, for themes that draw their panes as boxes */
   /* What a message's markdown looks like, a token each so a theme can restyle it. These are Light's and Dark's own look. */
   --md-strong: currentColor;
@@ -843,6 +848,8 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 button { font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); padding: 3px 10px; cursor: default; }
 button:hover:not(:disabled) { background: var(--bg-hover); }
+/* A control answers the pointer over a moment, never in one frame. A rule of its own may still set its own transition. */
+button { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out), filter var(--dur-1) var(--ease-out); }
 /* A selected item keeps its fill under the pointer: the hover fills, which are as specific, would paint over it. */
 .mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
@@ -1212,6 +1219,8 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .queue-label { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 button.queue-text { flex: 1; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+/* Text on a row, not a control: the pointer never paints it. */
+button.queue-text:hover:not(:disabled) { background: none; }
 button.link-button.queue-now { flex: none; font-size: calc(11px * var(--font-scale)); }
 button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: calc(14px * var(--font-scale)); }
 .composer textarea { resize: none; border: none; outline: none; background: none; color: inherit; caret-color: var(--caret); caret-shape: var(--caret-shape); font: calc(13.5px * var(--font-scale))/1.5 var(--ui); padding: 0 4px 0 0; max-height: 200px; }
@@ -1298,8 +1307,9 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
    title bar's larger capsules. */
 .pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
 .pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
-.pane-tabs-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
+.pane-tabs-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.pane-tabs-track button.active:hover { background: var(--seg-thumb); }
 /* Last turn | Session: a smaller capsule at the row's far end, only on the Changes tab. */
 /* The Changes filter: a pill that opens a menu of what to show, each with what it means. */
 /* Both give way when the row is tight (five tabs and the filter in a narrow pane): the tabs down to their labels, the
@@ -1332,8 +1342,9 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
 .scope-option-about { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); line-height: 1.4; white-space: normal; }
 .scope-track { display: inline-flex; gap: 2px; margin-left: auto; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
 .scope-track button { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
-.scope-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
+.scope-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .scope-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.scope-track button.active:hover { background: var(--seg-thumb); }
 .tab-count { font-size: calc(11px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .review-bar { display: flex; align-items: center; gap: 4px; height: 28px; flex: none; min-width: 0; padding: 0 8px 0 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 /* In a narrow pane only the path gives way; the counts, position and buttons keep their size. */
@@ -2624,6 +2635,7 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .routine-run-row .ghost { margin-left: auto; }
 .routine-status { overflow: hidden; text-overflow: ellipsis; }
 button.preset-restore { align-self: flex-start; border: none; background: none; padding: 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); text-decoration: underline; }
+button.preset-restore:hover:not(:disabled) { background: none; color: var(--text); }
 
 @keyframes agents-pulse { 50% { opacity: 0.35; } }
 
@@ -2689,6 +2701,8 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-row.gap .summary-title { font-weight: 500; color: var(--muted); }
 .summary-row.gap .summary-gist { color: var(--muted); }
 .summary-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px 9px 10px; border: none; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; }
+/* Its row already lights up: the content button inside it draws nothing under the pointer. */
+button.summary-main:hover:not(:disabled) { background: none; }
 /* The glyph inside a step's circle is a grid item, centred by the grid rather than by hand-set offsets, in a box of
    even size so it lands on whole pixels at 1x and 2x alike (an odd size puts it half a pixel off at 1x). The tick is a
    mask whose path is centred on its own weight, not its bounding box: its long arm would otherwise pull it low. */
@@ -3165,6 +3179,7 @@ button.plan-meter svg { width: 10px; height: 10px; opacity: 0.6; }
 .merge-add { color: var(--add); font-variant-numeric: tabular-nums; }
 .merge-del { color: var(--del); font-variant-numeric: tabular-nums; }
 .merge-link { margin-left: auto; border: none; background: none; padding: 0; color: var(--text-2); font-size: calc(12px * var(--font-scale)); text-decoration: underline; text-underline-offset: 2px; }
+.merge-link:hover:not(:disabled) { background: none; color: var(--text); }
 .merge-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font: calc(11.5px * var(--font-scale)) var(--mono); }
 .merge-files li { display: flex; gap: 8px; }
 .merge-files li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3548,10 +3563,12 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-status.running { color: var(--working-text); }
 .sb-status.waiting { color: var(--attn-text); }
 .sb-status.unread { color: var(--unread-text); }
-.sb-chip { position: relative; flex: none; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: none; border-radius: var(--radius-card); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(12px * var(--font-scale)); font-weight: 600; transition: background 0.12s, color 0.12s; }
+.sb-chip { position: relative; flex: none; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: none; border-radius: var(--radius-card); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(12px * var(--font-scale)); font-weight: 600; transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 .sb-row:hover .sb-chip:not(.current) { background: color-mix(in srgb, var(--pc, var(--muted)) calc(var(--pc-tint) + 9%), var(--bg)); color: var(--text); }
 .sb-chip.current { background: var(--pc, var(--accent)); color: var(--on-color); }
-.sb-chip.current::before { content: ""; position: absolute; left: -6px; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 2px 2px 0; background: var(--pc, var(--text)); }
+/* The bar that says which chat is open grows out of the chip rather than appearing beside it. */
+.sb-chip::before { content: ""; position: absolute; left: -6px; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 2px 2px 0; background: var(--pc, var(--text)); opacity: 0; transform: scaleY(0.35); transition: opacity var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out); }
+.sb-chip.current::before { opacity: 1; transform: none; }
 .sb-initials { display: inline-flex; align-items: center; justify-content: center; line-height: 1; letter-spacing: 0.02em; }
 /* The marks sit on the corners, cut out of the square by a ring of the column's background. */
 .sb-team { position: absolute; right: -3px; bottom: -3px; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: var(--bg-subtle); color: var(--text-2); box-shadow: 0 0 0 2px var(--bg); }
@@ -3874,12 +3891,12 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .mb-link:hover { background: var(--bg-active); color: var(--text); }
 
 /* The Desk, a dashboard: what needs you and the projects. Ask is the right pane; what happened is the sidebar's Timeline. */
-.desk { min-height: 0; }
+.desk { position: relative; min-height: 0; }
 .desk-head { flex: none; padding: 12px 20px 10px; border-bottom: 0.5px solid var(--line); }
 .desk-title { margin: 0; font: 650 calc(15px * var(--font-scale)) var(--ui); color: var(--text); }
 .desk-h { margin: 0 0 8px; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
 /* The scroller is the whole pane, so its scrollbar sits at the pane's edge; the content is held to a column by the side padding. */
-.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 24px; box-sizing: border-box; }
+.desk-main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 16px max(24px, calc((100% - 932px) / 2)) 88px; box-sizing: border-box; }
 /* Its scrollbar is its theme's (a theme styles it, and a scrollbar-width of its own here would switch that off); only thinner where the default look is. */
 :where(:root:not([data-theme="posthog"])) .desk-main::-webkit-scrollbar { width: 6px; }
 /* While the pane is being resized (DeskView) no scrollbar is drawn, so the system's flash of one at each reflow isn't seen. Not in
@@ -3906,6 +3923,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .sb-views { display: flex; gap: 2px; margin: 2px 12px 8px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .sb-views button { flex: 1; height: 22px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-weight: 600; }
 .sb-views button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.sb-views button:hover:not([aria-pressed="true"]):not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.sb-views button[aria-pressed="true"]:hover:not(:disabled) { background: var(--seg-thumb); }
 .timeline { display: flex; flex-direction: column; gap: 10px; padding: 0 8px 12px; }
 .tl-day-name { margin: 4px 0 2px 6px; font: 650 calc(11px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
 .tl-event { position: relative; display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 6px 8px 7px 26px; border: none; border-radius: var(--radius-inner); background: none; color: var(--text-2); text-align: left; font-size: calc(12.5px * var(--font-scale)); }
@@ -3937,11 +3956,29 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* A project's own page on the Desk: a card per section (its title, a count, one action), and every row in a card the same
    shape: a title with one short thing on its right, and one quiet line under it. Nothing floats or wraps into a column. */
 .desk-project-page { display: flex; flex-direction: column; gap: 14px; }
-.desk-page-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.desk-back { padding: 0; border: none; background: none; color: var(--accent); font-size: calc(12.5px * var(--font-scale)); }
-.desk-page-title { margin: 4px 0 0; font-size: calc(18px * var(--font-scale)); font-weight: 700; }
+.desk-back { display: inline-flex; align-items: center; height: 24px; padding: 0 9px 0 7px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.desk-back:hover:not(:disabled) { background: var(--bg-active); color: var(--text); }
+/* A project's page opens on the project itself: its mark in the colour its sidebar gives it, where its checkout stands, and the
+   features its work is in, a chip each that opens it below. It is plainly a project's page, not the Desk. */
+.dp-project { --proj: var(--accent); position: relative; border-color: color-mix(in srgb, var(--proj) 26%, var(--line)); }
+.dp-project::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: color-mix(in srgb, var(--proj) 72%, transparent); }
+.dp-project-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 0; }
+.dp-project-facts { display: inline-flex; align-items: baseline; gap: 14px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.dp-project-facts b { color: var(--text); font-weight: 650; }
+.dp-project-body { display: flex; align-items: center; gap: 12px; padding: 8px 14px 12px; }
+.dp-project-mark { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-md); border: 0.5px solid color-mix(in srgb, var(--proj) 38%, transparent); background: color-mix(in srgb, var(--proj) 16%, var(--pane)); color: var(--proj); font: 700 calc(13px * var(--font-scale)) var(--ui); }
+.dp-project-id { min-width: 0; }
+.dp-project-name { margin: 0; font: 700 calc(19px * var(--font-scale)) var(--ui); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-project-meta { margin: 2px 0 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow-wrap: anywhere; }
+.dp-muted { color: var(--muted); }
+.dp-project-features { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 14px 10px; border-top: 0.5px solid color-mix(in srgb, var(--proj) 18%, var(--line)); background: color-mix(in srgb, var(--proj) 4%, var(--pane)); }
+.dp-project-features .yw-kicker { margin-right: 2px; }
+.dp-feature { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border: 0.5px solid color-mix(in srgb, var(--proj) 28%, var(--line)); border-radius: var(--radius-pill); background: var(--pane); font-size: calc(12px * var(--font-scale)); }
+.dp-feature:hover:not(:disabled) { border-color: color-mix(in srgb, var(--proj) 60%, var(--line)); background: color-mix(in srgb, var(--proj) 10%, var(--pane)); }
+.dp-feature-name { color: var(--text); font-weight: 550; }
+.dp-feature-n { color: var(--muted-text); font-size: calc(11px * var(--font-scale)); font-variant-numeric: tabular-nums; }
 .dp-card { border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); overflow: hidden; }
-.dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px; border-bottom: 0.5px solid var(--line); }
+.dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 10px 12px; border-bottom: 0.5px solid var(--line); }
 .dp-card-head :is(h2, h3) { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .dp-count { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .dp-card-act { margin-left: auto; }
@@ -3979,9 +4016,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
-.desk-summary .desk-clear { margin: -2px -4px 2px; }
-.desk-summary .desk-facts { border-top: none; padding-top: 0; }
-.desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); }
+/* A whole tile is the way into its project's page: the name is the button, and a press anywhere in the card is the same press. */
+.desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); cursor: pointer; }
+.desk-tile:hover .desk-project { text-decoration: underline; }
 .desk-tile-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .desk-tile-head .desk-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13.5px * var(--font-scale)); }
 .desk-tile .desk-branch-line { margin-top: -4px; max-width: none; }
@@ -4000,6 +4037,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
 .desk-project:hover { text-decoration: underline; }
+button.desk-project:hover:not(:disabled) { background: none; }
 .desk-attn { color: var(--attn-text); font-weight: 650; }
 .desk-changed { white-space: nowrap; }
 .desk-branch { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--mono); }
@@ -4040,10 +4078,15 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-feature-head + .dp-list { border-top: none; }
 .yw-feature > .desk-more { margin: 0; }
 .yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+/* The row answers the pointer, edge to edge, from its dot to its action. */
+.yw-row:hover { background: var(--bg-hover); }
 /* A row is one button that opens its details: two quiet lines, nothing else to aim at. */
 .yw-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .yw-row > .yw-open { width: 100%; }
 .yw-open:hover .yw-name { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
+/* A button that is only a row's content draws no fill of its own under the pointer: the row it sits in does. */
+button.yw-open:hover:not(:disabled), button.yw-fold:hover:not(:disabled) { background: none; }
+.yw-fold:hover .yw-name, .yw-fold:hover .yw-head-text h3 { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
 .dp-row-top > .yw-open { display: block; flex: 1 1 auto; }
 /* A stack's pull requests, together: a rail on the left joins each to the one under it. */
 .yw-row.yw-stacked { position: relative; padding-left: 26px; }
@@ -4106,7 +4149,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-node + .yw-node::before { content: ""; position: absolute; top: 4.5px; right: 50%; width: 100%; height: 2px; background: var(--line); }
 .yw-node.yw-past > i { border-color: var(--add); background: var(--add); }
 .yw-node.yw-past + .yw-node::before { background: var(--add); }
-.yw-node.yw-skip > i { border-style: dashed; background: var(--pane); }
+/* A step the work never takes: a no-entry mark, where a dashed ring read as a scribble at 11px. */
+.yw-node.yw-skip > i { position: relative; border-color: var(--line-strong); }
+.yw-node.yw-skip > i::after { content: ""; position: absolute; left: -2px; right: -2px; top: 50%; height: 1.5px; background: var(--line-strong); transform: translateY(-50%) rotate(-45deg); }
 .yw-node.yw-skip + .yw-node::before { background: var(--line); }
 .yw-node.yw-now { color: var(--yw); font-weight: 650; }
 .yw-node.yw-now > i { width: 15px; height: 15px; margin-top: -2px; border: 3px solid var(--yw); background: color-mix(in srgb, var(--yw) 25%, var(--pane)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--yw) 18%, transparent); }
@@ -4127,6 +4172,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-view { margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .yw-view button { height: 22px; padding: 0 11px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(11.5px * var(--font-scale)) var(--ui); }
 .yw-view button.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+.yw-view button:hover:not(.on):not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.yw-view button.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .yw-card .yw-view { margin: 0 0 0 4px; }
 .yw-quiet { margin: 0; color: var(--muted-text); font-size: calc(12.5px * var(--font-scale)); }
 .yw-fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
@@ -4142,18 +4190,34 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-pdot.yw-b-start, .yw-frow.yw-b-start > .yw-pdot { background: transparent; border: 1.5px solid var(--muted-text); opacity: 1; }
 .yw-ask { font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); overflow-wrap: anywhere; }
 .yw-ask b { color: var(--yw); font-weight: 650; }
-.yw-fpage { --yw: var(--muted-text); display: flex; flex-direction: column; padding: 4px 2px 0; }
-.yw-fpage .desk-back { align-self: flex-start; }
-.yw-ftitle { margin: 6px 0 2px; font: 700 calc(22px * var(--font-scale)) var(--ui); letter-spacing: -0.015em; color: var(--text); }
-.yw-tabs { display: flex; gap: 22px; margin-top: 14px; border-bottom: 0.5px solid var(--line); }
-.yw-tab { margin-bottom: -0.5px; padding: 0 0 9px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--muted-text); font: 600 calc(13px * var(--font-scale)) var(--ui); cursor: pointer; }
-.yw-tab.on { border-bottom-color: var(--text); color: var(--text); }
-.yw-tab.zero:not(.on) { opacity: 0.5; }
-.yw-tab-n { margin-left: 5px; font-style: normal; font-weight: 700; color: var(--accent); }
-.yw-empty { padding: 18px 0; }
-.yw-flist { margin: 0; padding: 0; list-style: none; }
+/* A feature's page: a card of its own in the colour of its project — its mark, its name, what is open — with a tab per state and
+   the work under the one chosen, so the rows read as this feature's and not as rows loose on the page. */
+.yw-fpage { --yw: var(--muted-text); position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid color-mix(in srgb, var(--proj, var(--accent)) 24%, var(--line)); border-radius: var(--radius-float); background: var(--pane); }
+.yw-fpage::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: color-mix(in srgb, var(--proj, var(--accent)) 72%, transparent); }
+.yw-fhead { padding: 10px 16px 12px; }
+.yw-fhead-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 22px; }
+.yw-fcounts { display: inline-flex; align-items: baseline; gap: 14px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.yw-fcounts b { color: var(--text); font-weight: 650; }
+.yw-fhead-body { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.yw-fmark { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border: 0.5px solid color-mix(in srgb, var(--proj, var(--accent)) 38%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--proj, var(--accent)) 14%, var(--pane)); color: var(--proj, var(--accent)); font: 700 calc(12px * var(--font-scale)) var(--ui); }
+.yw-fhead-id { min-width: 0; }
+.yw-ftitle { margin: 1px 0 0; font: 700 calc(18px * var(--font-scale)) var(--ui); line-height: 1.25; letter-spacing: -0.01em; color: var(--text); overflow-wrap: anywhere; }
+/* The states as a segmented control, with each one's count: the shape of the feature's work at a glance. */
+.yw-tabs { display: inline-flex; align-self: flex-start; gap: 2px; margin: 0 16px 12px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
+.yw-tab { height: 26px; padding: 0 12px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(12.5px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-tab.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+button.yw-tab:hover:not(:disabled):not(.on) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+button.yw-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
+.yw-tab.zero:not(.on) { opacity: 0.45; }
+.yw-tab-n { margin-left: 6px; font-style: normal; font-weight: 650; color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.yw-tab.on .yw-tab-n { color: var(--text); }
+.yw-empty { padding: 16px; border-top: 0.5px solid var(--line); }
+.yw-flist { margin: 0; padding: 0; list-style: none; border-top: 0.5px solid var(--line); }
 /* A piece of work here is taller than a list row: it carries its pipeline. */
-.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 16px 2px 18px; border-top: 0.5px solid var(--line); }
+.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px 16px; border-top: 0.5px solid var(--line); }
+/* The row answers the pointer, from the dot to the action, flush with its own rules. */
+.yw-frow:hover { background: var(--bg-hover); }
 .yw-frow:first-child { border-top: none; }
 .yw-frow > .yw-pdot { margin-top: 6px; }
 .yw-frow.yw-warn { --yw: var(--warn); }
@@ -4193,7 +4257,8 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-request { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
 .desk-request .desk-request-full { max-height: 22em; }
 .desk-request .permission { margin: 0; }
-.desk-clear { padding: 9px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
+/* Nothing needing you is a card like the rest of a page, not a band across it: the tick is what says it. */
+.desk-clear { padding: 10px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
 
 /* Just finished: one quiet line each. */
 .desk-finished { display: flex; flex-direction: column; }
@@ -4211,6 +4276,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-tablist { display: flex; gap: 4px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .desk-tab { position: relative; height: 26px; padding: 0 12px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(13px * var(--font-scale)); font-weight: 600; }
 .desk-tab.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+button.desk-tab:hover:not(:disabled):not(.on) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+button.desk-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .desk-tab-badge { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--attn); color: var(--on-attn); font-size: calc(10px * var(--font-scale)); font-weight: 700; }
 .desk-edit { margin-left: auto; height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
 .desk-editor { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-chip); background: var(--field); font-size: calc(12.5px * var(--font-scale)); }
@@ -4274,11 +4342,21 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-source-n { flex: none; color: var(--accent); font-weight: 700; }
 .desk-source-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-/* The Desk's box: as wide as the column, round, where it sends tucked in beside Send. */
-.desk-box { flex: none; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin: 0 12px 12px; padding: 6px 6px 6px 16px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--card-shadow); box-sizing: border-box; }
-.desk-box textarea { flex: 1 1 100%; min-height: 30px; max-height: 160px; padding: 6px 0; border: none; background: none; color: var(--text); font: calc(14px * var(--font-scale)) / 1.4 var(--ui); resize: none; field-sizing: content; outline: none; }
-.desk-to { flex: none; margin-right: auto; max-width: 160px; height: 30px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font: calc(12px * var(--font-scale)) var(--ui); }
-.desk-box > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
+/* The Desk's box: a card that floats at the foot of the sheet, its own glass, edge and lift, clear of the feed and the sheet's
+   sides: the message on a line of its own, and under it where it goes, beside Send. */
+.desk-box { flex: none; display: flex; flex-direction: column; gap: 6px; margin: 10px 16px 16px; padding: 10px 10px 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: color-mix(in srgb, var(--field) 92%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--card-shadow); box-sizing: border-box; }
+.desk-box textarea { flex: none; min-height: 32px; max-height: 160px; padding: 2px 2px 0 0; border: none; background: none; color: var(--text); font: calc(14px * var(--font-scale)) / 1.45 var(--ui); resize: none; field-sizing: content; outline: none; }
+.desk-box-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.desk-box-foot > button { flex: none; height: 30px; padding: 0 14px; border-radius: var(--radius-pill); }
+/* Where it sends: a quiet pill that opens the app's own menu upward, not the system's pull-down. */
+.desk-to { position: relative; flex: none; min-width: 0; margin-right: auto; }
+.desk-to-button { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 28px; padding: 0 9px 0 10px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); background: transparent; color: var(--text-2); font: calc(12px * var(--font-scale)) var(--ui); }
+.desk-to-button:hover:not(:disabled) { border-color: var(--muted); background: var(--bg-hover); color: var(--text); }
+.desk-to-button.picked { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong)); color: var(--text); }
+.desk-to-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-to-menu { bottom: calc(100% + 6px); left: 0; width: max-content; min-width: 260px; max-width: min(380px, calc(100vw - 32px)); max-height: 320px; overflow-y: auto; }
+.desk-to-menu .menu-row { align-items: center; }
+.desk-check { flex: none; width: 10px; color: var(--accent); font-weight: 700; }
 .desk-editor input, .desk-editor select { height: 26px; padding: 0 8px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; }
 .desk-editor select { height: 24px; }
 
@@ -4310,9 +4388,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .desk-pulse .pulse-bad { color: var(--del); }
 
 /* The Desk's Ask: a bar at the bottom of the board, opening a sheet over it (⌘J), instead of a third of the window. */
-/* A narrow bar, centred. It sits over the cards, which are the pane's colour too, so it has a border of its own (1px, the strong line) and its own lift: the bar's old hairline vanished against them. */
-.desk-ask-bar { flex: none; display: flex; align-items: center; align-self: center; gap: 10px; width: min(520px, calc(100% - 48px)); margin: 0 0 16px; height: 44px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
-.desk-ask-bar:hover { color: var(--text-2); }
+/* A narrow bar that floats over the foot of the board, the cards passing under it: glass, a pill, and a lift of its own, so it
+   reads as over the board rather than as a band across the bottom of it. The board keeps room for it under its last card. */
+.desk-ask-bar { position: absolute; left: 50%; bottom: 16px; z-index: 3; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: min(560px, calc(100% - 48px)); height: 44px; padding: 0 14px 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--field) 90%, transparent); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); color: var(--muted); font-size: calc(13px * var(--font-scale)); text-align: left; box-shadow: var(--shadow); }
+.desk-ask-bar:hover { color: var(--text-2); border-color: var(--muted); background: color-mix(in srgb, var(--field) 97%, transparent); }
 .desk-ask-bar .desk-ask-key { margin-left: auto; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .desk-ask-overlay { position: absolute; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; padding: 24px; background: var(--overlay); }
 .desk-ask-sheet { position: relative; width: min(980px, 100%); height: min(72%, 620px); display: flex; flex-direction: column; overflow: hidden; border: 0.5px solid var(--line-strong); border-radius: var(--radius-float); background: var(--pane); box-shadow: var(--shadow); }
@@ -4342,3 +4421,32 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* The session recap above the box, quiet like the terminal's (see RecapLine). */
 .recap-line { flex: none; margin: 0 auto; width: 100%; max-width: calc(var(--col) + 80px); padding: 6px 24px 0; box-sizing: border-box; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); font-style: italic; line-height: 1.45; }
 .recap-label { font-style: normal; font-weight: 600; color: var(--text-2); }
+
+/* Motion: one view gives way to the next with a short rise, a menu opens from where it was asked for, a dialog comes up over a
+   faded scrim, and a card lifts a hair under the pointer. Everything here is off when the system asks for less motion. */
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes view-in-sm { from { opacity: 0; transform: translateY(3px); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(12px) scale(0.995); } }
+@keyframes fade-in { from { opacity: 0; } }
+/* The Desk's home, a project's page, and the chat card: each mounts on its own, so each rises in once as it appears. */
+.desk-main > .desk-bento, .desk-project-page { animation: view-in var(--dur-3) var(--ease-out) backwards; }
+.chat-pane { animation: view-in var(--dur-2) var(--ease-out) backwards; }
+/* The work board's cards, and one feature's page in their place; a review tab's body as it comes up; a chat as it is opened. */
+.yw-fgrid, .yw-fpage, .tab-body { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
+.chat-wrap { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
+/* A file opened in Files fades in, its editor with it (each file has one of its own, so it is a fresh mount). */
+.editable-editor { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
+/* Menus and popovers open out of the control that asked for them; dialogs come up over a scrim that fades in first. */
+.menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) backwards; }
+.canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
+.confirm-dialog, .desk-ask-sheet { animation: sheet-in var(--dur-2) var(--ease-out) backwards; }
+/* What can be opened lifts a hair, and the ones safe to press answer the pointer; a tile lifts under the keyboard's focus too. */
+.yw-fcard, .desk-tile { transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
+.yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: translateY(-1px); box-shadow: var(--shadow); }
+.dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
+  button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
+  .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
+}

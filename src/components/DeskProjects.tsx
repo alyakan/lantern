@@ -99,7 +99,8 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
     };
   }, [open]);
   return (
-    <div className="desk-tile-chats" ref={root}>
+    // The whole tile opens its project's page: the chats' own presses stop here.
+    <div className="desk-tile-chats" ref={root} onClick={(e) => e.stopPropagation()}>
       <button className="desk-more" aria-haspopup="menu" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the chats of ${label}`} disabled={!chats.length} onClick={() => setOpen(!open)}>
         {chats.length ? (
           <>
@@ -148,7 +149,8 @@ function ChatsMenu({ label, chats, now, onOpen }: { label: string; chats: InboxR
 /**
  * Every project on the Desk, a tile each, with only what Lantern knows for sure: its chats and what they are doing (what waits on
  * you among them), its branch, your work in it and its release (from git and gh), its to-dos, and when something last happened, one
- * under the other. A tile's Chats button drops its chats down over the Desk, each with its last message; its name opens its own page.
+ * under the other. A tile opens its project's page wherever it is pressed (its name is the button that says so, and the way there
+ * from the keyboard); its Chats button drops its chats down over the Desk, each with its last message.
  */
 export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }: DeskProjectsProps) {
   if (!rows.length) return null;
@@ -158,9 +160,17 @@ export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }:
           const s = statusFor(r.folder, repos);
           const repo = repos?.find((x) => x.folders.some((f) => f.folder === r.folder))?.repo ?? null;
           return (
-            <article key={r.folder} className="desk-tile" aria-label={r.label}>
+            <article key={r.folder} className="desk-tile" aria-label={r.label} onClick={() => onPage(r.folder)}>
               <header className="desk-tile-head">
-                <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
+                <button
+                  className="desk-project"
+                  title={`Open ${r.folder}`}
+                  onClick={(e) => {
+                    // The tile opens the page too; one press is one opening.
+                    e.stopPropagation();
+                    onPage(r.folder);
+                  }}
+                >
                   {r.label}
                 </button>
                 {r.unread > 0 && <span className="desk-unread-count">{r.unread} unread</span>}
@@ -194,11 +204,8 @@ export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }:
                 <dd className={r.todos?.overdue ? "desk-bad" : r.todos?.open ? undefined : "muted"}>{r.todos ? (r.todos.open ? `${r.todos.open}${r.todos.overdue ? ` · ${r.todos.overdue} overdue` : ""}` : "—") : "…"}</dd>
               </dl>
               <footer className="desk-tile-foot">
+                {/* Its own button, so opening a chat from the tile doesn't also open its page. */}
                 <ChatsMenu label={r.label} chats={r.chats ? chats.filter((c) => c.folder === r.folder) : []} now={now} onOpen={onOpen} />
-                {/* Its page is where the full work board lives: where each pull request, branch and issue of this project stands. */}
-                <button className="desk-more" onClick={() => onPage(r.folder)} aria-label={`Open ${r.label}'s page: work, pull requests, worktrees and to-dos`}>
-                  Open page →
-                </button>
               </footer>
             </article>
           );

@@ -213,15 +213,27 @@ describe("Your work with Linear", () => {
     expect(projectsOf(items, "/p/lantern")).toEqual([{ project: "Offline mode", doing: 1, todo: 3 }]);
   });
 
-  it("lists on a repository's page the issues of a team no project is in, only for a feature being worked on there", () => {
+  it("a project's page lists its own repository's work and nothing else", () => {
     const other = repo({ repo: "/p/web", github: "aly/web", folders: [{ folder: "/p/web", branch: "main", changed: 0 }] });
     const issues = [issue("ENG-1"), issue("WEB-9"), issue("WEB-10", { project: "Unrelated" }), issue("WEB-11", { project: null }), issue("WEB-12", { state: "Done", state_type: "completed", project: "Offline mode" })];
-    const items = withLinear(yourWork([r], NOW), work(issues), { "/p/lantern": "ENG" }, [r], NOW);
+    const items = withLinear(yourWork([r, other], NOW), work(issues), { "/p/lantern": "ENG", "/p/web": "WEB" }, [r, other], NOW);
     const ids = (rows: WorkItem[]) => rows.flatMap((i) => (i.issue ? [i.issue.identifier] : [])).sort();
-    // WEB-9 and the Done WEB-12 share the feature the pull request on ENG-1 is in; WEB-10 and WEB-11 are in no feature of this page.
-    expect(ids(workOfRepo(items, "/p/lantern"))).toEqual(["ENG-1", "WEB-12", "WEB-9"]);
-    // A repository with nothing in that feature gets none of them.
-    expect(workOfRepo(items, other.repo)).toEqual([]);
+    // WEB-9 shares the feature the pull request on ENG-1 is in, but it is team WEB's: another project's, and no business of this page.
+    expect(ids(workOfRepo(items, "/p/lantern"))).toEqual(["ENG-1"]);
+    expect(ids(workOfRepo(items, other.repo))).toEqual(["WEB-10", "WEB-11", "WEB-12", "WEB-9"]);
+  });
+
+  it("puts the issues of a team several projects are in on none of them, unless a branch says which", () => {
+    const a = repo({ repo: "/p/a", github: "aly/a", folders: [{ folder: "/p/a", branch: "main", changed: 0 }] });
+    const b = repo({ repo: "/p/b", github: "aly/b", folders: [{ folder: "/p/b", branch: "main", changed: 0 }], worktrees: [{ path: "/wt/e2", branch: "aly/eng-2-sync", locked: false, agent: false }] });
+    const issues = [issue("ENG-1"), issue("ENG-2", { branch: "aly/eng-2-sync" }), issue("ENG-3", { branch: "aly/eng-3-sync" })];
+    const items = withLinear(yourWork([a, b], NOW), work(issues), { "/p/a": "ENG", "/p/b": "ENG" }, [a, b], NOW);
+    const of = (repo: string) => items.filter((i) => i.repo === repo && i.issue).map((i) => i.issue!.identifier).sort();
+    // ENG-2's branch is a worktree of /p/b, so it is its. ENG-1 and ENG-3 name no branch: they sit on neither page, and say why.
+    expect(of("/p/b")).toEqual(["ENG-2"]);
+    expect(of("/p/a")).toEqual([]);
+    expect(items.find((i) => i.issue?.identifier === "ENG-1")?.meta).toMatch(/2 projects are in team ENG/);
+    expect(workOfRepo(items, "/p/a")).toEqual([]);
   });
 
   // Linear files In Review, Testing and Ready under "completed", though they aren't done (Ready: merged, waiting for a release).
