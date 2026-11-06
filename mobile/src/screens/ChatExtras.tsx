@@ -53,10 +53,10 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
               <Txt variant="heading" accessibilityRole="header">
                 Select text
               </Txt>
+              {/* iOS's selectable text takes all of it or nothing: a field that can't be edited has the handles that pick just a part
+                  (and its own Copy), without a keyboard. */}
               <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
-                <Text selectable accessibilityLabel="The message's text" style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink }}>
-                  {text}
-                </Text>
+                <TextInput testID="select-text" value={text} editable={false} multiline scrollEnabled={false} style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, padding: 0 }} />
               </ScrollView>
               <Button label="Done" kind="ghost" onPress={close} />
             </>

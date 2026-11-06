@@ -1,6 +1,6 @@
 import { Keyboard, Platform, StyleSheet, Text } from "react-native";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react-native";
-import { AboveKeyboard, barRoom, KEYBOARD_GAP, useKeyboardUp } from "./keyboard";
+import { AboveKeyboard, barRoom, KEYBOARD_GAP, useKeyboardUp, useTapAway } from "./keyboard";
 
 /** Stands in for the keyboard: keeps what was listened for, so a test can say the keyboard came or went. */
 function fakeKeyboard() {
@@ -122,5 +122,42 @@ describe("keyboard", () => {
       </AboveKeyboard>,
     );
     expect(screen.queryByTestId("dismiss-keyboard")).toBeNull();
+  });
+
+  describe("a tap on the chat", () => {
+    const touch = (x: number, y: number, at: number) => ({ nativeEvent: { pageX: x, pageY: y, timestamp: at, touches: [{}] } });
+    function Area() {
+      return (
+        <Text testID="area" {...useTapAway()}>
+          A message
+        </Text>
+      );
+    }
+    let dismiss: jest.SpyInstance;
+    beforeEach(() => {
+      dismiss = jest.spyOn(Keyboard, "dismiss").mockImplementation(() => {});
+      jest.spyOn(Keyboard, "isVisible").mockReturnValue(true);
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    it("on a message, not only between them, puts the keyboard away", async () => {
+      await render(<Area />);
+      await fireEvent(screen.getByTestId("area"), "touchStart", touch(100, 200, 1000));
+      await fireEvent(screen.getByTestId("area"), "touchEnd", touch(102, 201, 1120));
+      expect(dismiss).toHaveBeenCalledTimes(1);
+    });
+
+    it("that is a scroll, or a hold for a message's actions, leaves it up", async () => {
+      await render(<Area />);
+      await fireEvent(screen.getByTestId("area"), "touchStart", touch(100, 200, 1000));
+      await fireEvent(screen.getByTestId("area"), "touchEnd", touch(100, 260, 1100));
+      await fireEvent(screen.getByTestId("area"), "touchStart", touch(100, 200, 2000));
+      await fireEvent(screen.getByTestId("area"), "touchEnd", touch(100, 200, 2500));
+      // A scroll the list took over ends in a cancel.
+      await fireEvent(screen.getByTestId("area"), "touchStart", touch(100, 200, 3000));
+      await fireEvent(screen.getByTestId("area"), "touchCancel", {});
+      await fireEvent(screen.getByTestId("area"), "touchEnd", touch(100, 200, 3050));
+      expect(dismiss).not.toHaveBeenCalled();
+    });
   });
 });

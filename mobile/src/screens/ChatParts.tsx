@@ -143,7 +143,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
           </View>
           <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} />
+              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {clipped && (
@@ -281,7 +281,7 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
         <FadeSlideIn>
           <View accessibilityLabel="Messages" style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 10 }}>
             {notes.map((n, i) => (
-              <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} />
+              <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} surface={colors.card} />
             ))}
           </View>
         </FadeSlideIn>
@@ -328,7 +328,7 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
         <Txt variant="heading">
           <Marked text={page.title} mark={mark} />
         </Txt>
-        {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} />}
+        {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />}
         {page.body.length >= 260 && !paged && (
           <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">

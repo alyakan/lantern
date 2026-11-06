@@ -126,6 +126,16 @@ describe("a chat", () => {
       await waitFor(() => expect(screen.getByRole("button", { name: "Edit and send again" })).toBeTruthy());
     });
 
+    it("shows a message to select part of in a field that can't be edited (iOS's selectable text takes all of it or nothing)", async () => {
+      await withSession(talk);
+      await hold("First question here");
+      await waitFor(() => screen.getByRole("button", { name: "Select text" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Select text" }));
+      const field = await screen.findByTestId("select-text");
+      expect(field.props.value).toBe("First question here");
+      expect(field.props.editable).toBe(false);
+    });
+
     it("quotes a message into the box, under what is already typed", async () => {
       await withSession(talk);
       await fireEvent.changeText(screen.getByLabelText("Message"), "About this:");

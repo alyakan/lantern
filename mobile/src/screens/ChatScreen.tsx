@@ -10,7 +10,7 @@ import { useConnectionState, useController, useDeviceId, useSyncState } from "..
 import { emptyView } from "../sync/reducer";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
-import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
+import { barRoom, KEYBOARD_GAP, useTapAway } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
@@ -759,6 +759,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         scrollEnabled={!swiping}
         // With the keyboard up, a touch reaches what it lands on (a card's swipe to allow, a button) instead of only putting the keyboard away.
         keyboardShouldPersistTaps="handled"
+        // Scrolling the chat puts the keyboard away (a tap does too: see tapAway).
+        keyboardDismissMode="on-drag"
         // An answer that becomes the turn's summary when the turn ends keeps its cell (another type would swap the cell and play its
         // entrance again: a blink as the turn ended).
         getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind === "summary" ? "assistant" : r.kind)}
@@ -819,6 +821,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
   const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  // A tap on the chat (a message too) puts the keyboard away.
+  const tapAway = useTapAway();
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (
@@ -832,7 +836,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
+          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
             {body}
           </View>
           {riding(jump)}
@@ -855,7 +859,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         <>
           {head}
-          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
+          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
             {body}
             {riding(jump)}
             {riding(pageBar)}
