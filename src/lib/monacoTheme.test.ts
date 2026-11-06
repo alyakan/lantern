@@ -36,17 +36,19 @@ describe("monacoTheme", () => {
   });
 
   it("keeps every source colour readable on the editor's background, whatever the theme's palette", () => {
-    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#b5c3c3" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false], ["posthog", { ...light, pane: "#eeefe9", text: "#151515" }, false]] as const) {
+    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#b5c3c3" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["gruvbox", { ...dark, pane: "#282828", text: "#ebdbb2" }, true], ["mocha", { ...dark, pane: "#1e1e2e", text: "#cdd6f4" }, true], ["tokyo", { ...dark, pane: "#1a1b26", text: "#c0caf5" }, true], ["rose", { ...dark, pane: "#191724", text: "#e0def4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false], ["latte", { ...light, pane: "#eff1f5", text: "#3f4259" }, false], ["posthog", { ...light, pane: "#eeefe9", text: "#151515" }, false]] as const) {
       const t = monacoTheme(tokens, isDark, syntaxFor(name, isDark));
       for (const rule of t.rules) expect(contrast(`#${rule.foreground}`, tokens.pane), `${name}: ${rule.token || "plain"}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it("has its own source colours for Terminal, Fallout, Solarized, Nord and Paper, and Xcode's for the rest", () => {
+  it("has its own source colours for Terminal, Fallout, Solarized, Nord, the new themes and Paper, and Xcode's for the rest", () => {
     expect(syntaxFor("terminal", true)).not.toBe(syntaxFor("dark", true));
     expect(syntaxFor("fallout", true)).not.toBe(syntaxFor("terminal", true));
     expect(syntaxFor("fallout", true).string).not.toBe(syntaxFor("fallout", true).keyword);
     expect(syntaxFor("nord", true)).not.toBe(syntaxFor("solarized", true));
+    for (const theme of ["gruvbox", "mocha", "tokyo", "rose"] as const) expect(syntaxFor(theme, true), theme).not.toBe(syntaxFor("nord", true));
+    expect(syntaxFor("latte", false)).not.toBe(syntaxFor("paper", false));
     expect(syntaxFor("paper", false)).not.toBe(syntaxFor("light", false));
     expect(syntaxFor("posthog", false)).toBe(syntaxFor("light", false));
     expect(syntaxFor("custom", true)).toBe(syntaxFor("dark", true));

@@ -175,7 +175,7 @@ describe("themes", () => {
   const names = (b: string) => [...b.matchAll(/--([\w-]+):/g)].map((m) => m[1]);
   // Dark's tokens are the full list of colours a theme has to give; Light's block is `:root`, with the shared ones too.
   const colourTokens = names(block("dark")).filter((n) => !/^(shadow|card-shadow)$/.test(n));
-  const own = THEMES.filter((t) => ["terminal", "fallout", "solarized", "nord", "paper", "posthog"].includes(t.id));
+  const own = THEMES.filter((t) => ["terminal", "fallout", "solarized", "nord", "gruvbox", "mocha", "tokyo", "rose", "paper", "latte", "posthog"].includes(t.id));
 
   it("has a block for each preset, with every colour token Dark has", () => {
     for (const { id } of own) {

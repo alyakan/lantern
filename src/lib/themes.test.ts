@@ -7,13 +7,13 @@ const dark: CustomTheme = { ...DARK_PICKS, mono: false, square: false };
 
 describe("the themes", () => {
   it("lists Follow macOS, Light and Dark, then the presets, then Custom", () => {
-    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "fallout", "solarized", "nord", "paper", "posthog", "custom"]);
+    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "fallout", "solarized", "nord", "gruvbox", "mocha", "tokyo", "rose", "paper", "latte", "posthog", "custom"]);
     expect(THEMES.every((t) => t.label)).toBe(true);
   });
 
   it("says which are dark and which light", () => {
     const scheme = Object.fromEntries(THEMES.map((t) => [t.id, t.scheme]));
-    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", fallout: "dark", solarized: "dark", nord: "dark", paper: "light", posthog: "light", system: null });
+    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", fallout: "dark", solarized: "dark", nord: "dark", gruvbox: "dark", mocha: "dark", tokyo: "dark", rose: "dark", paper: "light", latte: "light", posthog: "light", system: null });
   });
 
   it("knows a theme id from anything else", () => {
