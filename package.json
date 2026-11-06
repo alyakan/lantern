@@ -1,7 +1,7 @@
 {
   "name": "lantern",
   "private": true,
-  "version": "0.1.110",
+  "version": "0.1.111",
   "license": "MIT",
   "type": "module",
   "engines": {
