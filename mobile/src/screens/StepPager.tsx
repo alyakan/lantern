@@ -31,11 +31,14 @@ function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, foot
   // Put back where it was once there is something to scroll; until then a scroll (the page being laid out) isn't a place to keep.
   const placed = useRef(false);
   const seen = useRef(0);
+  const tall = useWindowDimensions().height;
   const place = (height: number) => {
     if (placed.current || height <= 0) return;
     placed.current = true;
     const y = places?.offset(page.key);
-    if (y !== undefined) scroll.current?.scrollTo({ y: Math.max(0, Math.min(y, height - seen.current)), animated: false });
+    // Its own height may not be measured yet (the content can be first): the window's is what it can be at most, and iOS would
+    // otherwise scroll it past its end, to a blank.
+    if (y !== undefined) scroll.current?.scrollTo({ y: Math.max(0, Math.min(y, height - (seen.current || tall))), animated: false });
     else if (newest && talkedAbout(page)) scroll.current?.scrollToEnd({ animated: false });
   };
   return (

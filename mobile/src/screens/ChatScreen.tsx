@@ -297,13 +297,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return () => sub.remove();
   }, [controller, slot, busy]);
 
-  // A catch-up that covered a stretch away says so for a moment.
+  // A catch-up that covered a stretch away says so for a moment: once for each catch-up, not again with every event after it.
+  const announced = useRef(0);
   useEffect(() => {
-    if (view.caughtUp < BANNER_AT) return;
+    if (view.caughtUp < BANNER_AT || view.caughtUp === announced.current) return;
+    announced.current = view.caughtUp;
     setBanner(true);
+  }, [view.caughtUp]);
+  useEffect(() => {
+    if (!banner) return;
     const t = setTimeout(() => setBanner(false), BANNER_MS);
     return () => clearTimeout(t);
-  }, [view.caughtUp, view.seq]);
+  }, [banner]);
 
   const online = connection.kind === "connected";
   const asleep = chat?.status === "asleep";
@@ -492,7 +497,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })} onRetry={online && !row.item.thumbs?.length ? () => void sync.retry(slot, row.item.id) : undefined} />;
         case "assistant":
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
@@ -534,7 +539,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
-              <ShellCard item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
+              <ShellCard key={row.item.id} item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
             </View>
           );
       }

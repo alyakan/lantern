@@ -451,6 +451,17 @@ describe("a chat", () => {
     await waitFor(() => expect(screen.getByText("Not sent. That chat isn't open on your Mac.")).toBeTruthy());
   });
 
+  it("offers to send a message that didn't go again, as the same message", async () => {
+    const { lastOf } = await withSession(turn, {}, { send: new Error("Your Mac didn't answer in time.") });
+    await fireEvent.changeText(screen.getByLabelText("Message"), "hi");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy());
+    const first = lastOf("send") as { client_id: string };
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect((lastOf("send") as { client_id: string }) !== first).toBe(true));
+    expect(lastOf("send")).toMatchObject({ text: "hi", client_id: first.client_id });
+  });
+
   it("stops Claude while it works, and only then offers to", async () => {
     const quiet = await withSession(turn);
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
@@ -686,6 +697,9 @@ describe("a chat", () => {
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 24, page: 0, done: true, hidden: 0, events: turn } }));
       expect(screen.getByText("Caught up on 15 events from while you were away")).toBeTruthy();
       await act(async () => void jest.advanceTimersByTime(4500));
+      expect(screen.queryByText(/Caught up on/)).toBeNull();
+      // What streams in after it doesn't bring it back.
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 25, event: { kind: "text_delta", block_id: "late", text: "more" } } }));
       expect(screen.queryByText(/Caught up on/)).toBeNull();
     } finally {
       jest.useRealTimers();

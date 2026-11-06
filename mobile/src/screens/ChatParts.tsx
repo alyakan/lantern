@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useRecyclingState } from "@shopify/flash-list";
 import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
@@ -47,8 +48,9 @@ type UserItem = Extract<Item, { kind: "user" }>;
 /** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
 const TURN_GAP = 22;
 
-export const UserRow = memo(function UserRow({ item, onActions, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
+export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
+  const failed = !!item.failed;
   // Yours are on the right, Claude's words across the page from the left: who said what reads down the side.
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: TURN_GAP, alignItems: "flex-end" }}>
@@ -57,7 +59,7 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : 1 }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
@@ -75,9 +77,18 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
         {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
       </Pressable>
       {item.failed && (
-        <Txt variant="small" tone="stop" style={{ marginTop: 4, marginRight: 2, textAlign: "right" }}>
-          Not sent. {item.failed}
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>
+          <Txt variant="small" tone="stop" style={{ textAlign: "right", flexShrink: 1, paddingVertical: 4 }}>
+            Not sent. {item.failed}
+          </Txt>
+          {onRetry && (
+            <PressScale accessibilityRole="button" accessibilityLabel="Try again" accessibilityHint="Sends this message again" onPress={onRetry} haptic="select" scaleTo={0.94} style={{ minHeight: MIN_TARGET, justifyContent: "center" }}>
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                Try again
+              </Txt>
+            </PressScale>
+          )}
+        </View>
       )}
       {queued && !item.failed && (
         <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
@@ -97,9 +108,10 @@ const SUMMARY_COLLAPSED = 230;
  */
 export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark, onFile }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
   const colors = useColors();
-  const [full, setFull] = useState(false);
-  const [height, setHeight] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
+  // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
+  const [full, setFull] = useRecyclingState(false, [row.key]);
+  const [height, setHeight] = useRecyclingState<number | null>(null, [row.key]);
+  const [copied, setCopied] = useRecyclingState(false, [row.key]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
   const long = height !== null && height > SUMMARY_COLLAPSED + 50;
@@ -201,7 +213,7 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
  */
 export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: Extract<Row, { kind: "hook" }>; onFiles: (files: string[]) => void; onOutput?: (step: { id: string; text: string }) => void }) {
   const colors = useColors();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useRecyclingState(false, [row.key]);
   const line = row.going ? "Running…" : lastLine(row.said) || "Done";
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
@@ -235,7 +247,7 @@ const NO_NOTES: string[] = [];
 export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useRecyclingState<string | null>(null, [rowKey]);
   const opened = chips.find((c) => c.key === open && c.items);
   const notesOpen = notes.length > 0 && (open === "notes" || (!!mark && notes.some((n) => markRanges(n, mark).length > 0)));
   // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in. A cell the list reuses
@@ -302,7 +314,7 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
 export const PageRow = memo(function PageRow({ row, answered, onAction, mark, paged = false, onFile }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** A file its turn edited was tapped (named in its words, or in the list under it). */ onFile?: (path: string) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string; /** On a page of its own (Step by step's pages): shown whole, and its buttons are at the end of the page, not here. */ paged?: boolean }) {
   const colors = useColors();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useRecyclingState(false, [row.key]);
   const { page } = row;
   // A page is cut short unless it was opened or a search is marking it (the words looked for may be in the part cut).
   const cut = page.body.length >= 260 && !open && !mark && !paged;
@@ -573,7 +585,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
   );
 
   const status = item.state === "withdrawn" ? "No longer pending" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
-  const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} details={hasDetails(item) ? <DecisionDetails item={item} /> : undefined} />;
+  const doneCard = <DecisionCard key={item.id} title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} details={hasDetails(item) ? <DecisionDetails item={item} /> : undefined} />;
 
   if (item.state === "open" || settling) {
     const going = !!settling && item.state !== "open";

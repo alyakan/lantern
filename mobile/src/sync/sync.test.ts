@@ -89,6 +89,22 @@ describe("the phone's sync", () => {
     expect(again.asked).toContainEqual({ op: "subscribe", slot: "a", after: 0, epoch: 7 });
   });
 
+  it("sends a message that didn't go again under its own id, in its own place", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7, {}, { send: "Your Mac didn't answer in time." });
+    sync.onSession(s.session);
+    await sync.send("a", "ship it");
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ failed: "Your Mac didn't answer in time." });
+    const ok = fakeSession(7);
+    sync.onSession(ok.session);
+    await sync.retry("a", "local-m-1");
+    frame();
+    expect(ok.asked).toContainEqual({ op: "send", slot: "a", text: "ship it", client_id: "m-1" });
+    expect(sync.getState().views.a.items).toHaveLength(1);
+    expect(sync.getState().views.a.items[0]).not.toHaveProperty("failed");
+  });
+
   it("never lets go of a closed chat's message that didn't go", () => {
     const { sync, frame } = rig();
     sync.apply({ type: "sending", slot: "a", clientId: "m-1", text: "hi", at: 1 });

@@ -267,9 +267,18 @@ export class Sync {
     for (const old of this.closed.splice(KEEP_CLOSED)) if (!this.followed.has(old)) this.apply({ type: "forget", slot: old });
   }
 
+  /**
+   * Sends again a message that didn't go, in its own place and under its own id: when the Mac did get it after all, its copy
+   * still takes the one place in the chat.
+   */
+  retry(slot: string, itemId: string) {
+    const item = this.state.views[slot]?.items.find((it) => it.kind === "user" && it.id === itemId);
+    if (item?.kind !== "user" || !item.failed || !item.id.startsWith("local-")) return Promise.resolve();
+    return this.send(slot, item.text, [], item.id.slice("local-".length));
+  }
+
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */
-  async send(slot: string, text: string, images: PickedImage[] = []) {
-    const clientId = this.newId();
+  async send(slot: string, text: string, images: PickedImage[] = [], clientId: string = this.newId()) {
     this.apply({ type: "sending", slot, clientId, text, at: this.now(), ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
     let carded = false;
     try {

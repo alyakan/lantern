@@ -8,6 +8,7 @@ import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
+import { Dots } from "../ui/skeleton";
 import { radius, space, useBody, useColors } from "../ui/theme";
 import { diffPreviewOf } from "../view/diffPreview";
 import { approvalOf, fieldsOf, promptView, type PromptView, type Question } from "../view/prompts";
@@ -141,7 +142,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const colors = useColors();
   const body = useBody();
   const controller = useController();
-  const { waiting, chats } = useSyncState();
+  const { waiting, waitingLoaded, chats } = useSyncState();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
@@ -172,6 +173,15 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     return () => clearTimeout(t);
   }, [outcome, onClose]);
 
+  // Opened from a notification as the app starts, what waits isn't known yet: that isn't "answered already".
+  if (!asked && !waitingLoaded) {
+    return (
+      <View accessibilityLabel="Loading the decision" style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
+        <StatusBar style="light" />
+        <Dots color={colors.nightText} />
+      </View>
+    );
+  }
   if (!asked) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
@@ -213,6 +223,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
     } catch (e) {
+      buzz("warning");
       setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "failed", why: (e as Error).message }));
     }
   };

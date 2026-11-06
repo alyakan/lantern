@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, PanResponder, Pressable, StyleSheet, View, type AccessibilityActionEvent } from "react-native";
 import * as Haptics from "expo-haptics";
 import { allows } from "../view/swipe";
@@ -35,6 +35,19 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
   maxRef.current = max;
   const dragRef = useRef(onDrag);
   dragRef.current = onDrag;
+  // A swipe taken away mid-drag (answered on the Mac meanwhile) never hears the release: it lets go of the screen itself, or
+  // the chat it sat in would stay held still.
+  const dragging = useRef(false);
+  const drag = (on: boolean) => {
+    dragging.current = on;
+    dragRef.current?.(on);
+  };
+  useEffect(
+    () => () => {
+      if (dragging.current) dragRef.current?.(false);
+    },
+    [],
+  );
 
   const allow = () => {
     if (done.current) return;
@@ -62,18 +75,18 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
       onMoveShouldSetPanResponder: (_, g) => !done.current && Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
       onPanResponderGrant: () => {
         buzz("select");
-        dragRef.current?.(true);
+        drag(true);
       },
       // Once it has the drag, a list it sits in (a chat) doesn't take it away.
       onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_, g) => x.setValue(Math.min(maxRef.current, Math.max(0, g.dx))),
       onPanResponderRelease: (_, g) => {
-        dragRef.current?.(false);
+        drag(false);
         if (allows(g.dx, maxRef.current)) allow();
         else Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
       },
       onPanResponderTerminate: () => {
-        dragRef.current?.(false);
+        drag(false);
         if (!done.current) Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
       },
     }),

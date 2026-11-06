@@ -29,6 +29,16 @@ describe("what a chat search looks for, in a page and a summary", () => {
     expect(screen.getByText("Show less")).toBeTruthy();
   });
 
+  it("a page opened whole is cut short again when the list draws its cell for another page", async () => {
+    const other = timeline([said("a2", `# Plan step 2 — Billing\n\n${filler}\n\nThe last line says yak.`)]).find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page")!;
+    await render(<PageRow row={page} answered={false} onAction={() => {}} />);
+    await fireEvent.press(screen.getByText("Show the whole page"));
+    expect(screen.getByText(/zebra/)).toBeTruthy();
+    await screen.rerender(<PageRow row={other} answered={false} onAction={() => {}} />);
+    expect(screen.queryByText(/yak/)).toBeNull();
+    expect(screen.getByText("Show the whole page")).toBeTruthy();
+  });
+
   it("marks a summary's words", async () => {
     const item = { kind: "assistant", id: "a1", text: "Fixed the login bug in auth.ts.", streaming: false } as const;
     const summary: Extract<Row, { kind: "summary" }> = { key: "a-a1", kind: "summary", item, chips: [], durationMs: null, files: [] };
@@ -51,6 +61,14 @@ describe("what the agent said between its steps, on their row", () => {
   it("is shown open, with what a chat search looks for marked", async () => {
     await render(<StepsRow chips={[]} notes={notes} onFiles={() => {}} mark="stale" />);
     expect(washed("stale")).toHaveLength(1);
+  });
+
+  it("starts closed again when the list draws its cell for another row (it was open for the one before)", async () => {
+    await render(<StepsRow rowKey="s-1" chips={[]} notes={notes} onFiles={() => {}} />);
+    await fireEvent.press(screen.getByText("2 messages"));
+    expect(screen.getByText("Now the tests.")).toBeTruthy();
+    await screen.rerender(<StepsRow rowKey="s-2" chips={[]} notes={notes} onFiles={() => {}} />);
+    expect(screen.queryByText("Now the tests.")).toBeNull();
   });
 
   it("has no chip when nothing was said", async () => {
