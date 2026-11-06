@@ -8,7 +8,7 @@ import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, space, useBody, useColors } from "../ui/theme";
 import { diffPreviewOf } from "../view/diffPreview";
 import { approvalOf, fieldsOf, promptView, type PromptView, type Question } from "../view/prompts";
 import { ago, projectColorOf, projectTint } from "../view/home";
@@ -92,6 +92,7 @@ function OptionCard({ on, multi, label, description, onPress }: { on: boolean; m
 
 function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: string[]; typed: string; onPick: (label: string) => void; onType: (text: string) => void }) {
   const colors = useColors();
+  const body = useBody();
   return (
     <View style={{ gap: 8 }}>
       {q.header ? (
@@ -113,7 +114,7 @@ function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: stri
         onChangeText={onType}
         placeholder="Something else: write your own answer"
         placeholderTextColor={colors.nightText}
-        style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: typed.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, fontSize: 15 }}
+        style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: typed.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, fontSize: body.fontSize }}
       />
     </View>
   );
@@ -138,6 +139,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 /** The decision on its own, full screen: what is asked, where it runs, and a swipe to allow or a tap to deny. */
 export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const colors = useColors();
+  const body = useBody();
   const controller = useController();
   const { waiting, chats } = useSyncState();
   const insets = useSafeAreaInsets();
@@ -310,7 +312,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
               multiline
               placeholder="Add a note for Claude (optional)"
               placeholderTextColor={colors.nightText}
-              style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: note.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, maxHeight: 120, fontSize: 15 }}
+              style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: note.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, maxHeight: 120, fontSize: body.fontSize }}
             />
           </FadeSlideIn>
         )}

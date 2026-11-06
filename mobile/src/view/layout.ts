@@ -23,6 +23,14 @@ export function layoutFor(width: number, height: number): Layout {
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
 }
 
+/**
+ * The margin a page keeps from the window's sides: Apple lays a compact width out with 16 points and a wider one with 20.
+ * Cards sit at their own 16 either way, so on a wide screen the list's text lines up inside them.
+ */
+export function gutterFor(layout: Layout): number {
+  return layout === "phone" ? 16 : 20;
+}
+
 /** The narrowest the Changes pane gets beside the chat. */
 export const CHANGES_WIDTH = 320;
 

@@ -86,7 +86,7 @@ function Bars({ bars, every }: { bars: InsightsBar[]; /** Label only every nth b
       </View>
       <View style={{ flexDirection: "row", gap: bars.length > 12 ? 2 : 6, marginTop: 4 }}>
         {bars.map((b, i) => (
-          <Txt key={i} variant="tiny" tone="ink3" numberOfLines={1} style={{ flex: 1, textAlign: "center", fontSize: 10 }}>
+          <Txt key={i} variant="tiny" tone="ink3" numberOfLines={1} maxFontSizeMultiplier={1.2} style={{ flex: 1, textAlign: "center", fontSize: 10 }}>
             {i % every === 0 || i === bars.length - 1 ? b.label : ""}
           </Txt>
         ))}
@@ -166,7 +166,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
       >
         <View accessibilityRole="tablist" style={{ flexDirection: "row", padding: 2, borderRadius: radius.pill, backgroundColor: colors.wash }}>
           {RANGES.map((r) => (
-            <PressScale key={r.id} accessibilityRole="tab" accessibilityLabel={r.label} accessibilityState={{ selected: r.id === range }} onPress={() => pick(r.id)} haptic="select" scaleTo={0.95} style={[{ flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: radius.pill }, r.id === range ? [{ backgroundColor: colors.card }, shadow.card, { shadowOpacity: 0.06 }] : null]}>
+            <PressScale key={r.id} accessibilityRole="tab" accessibilityLabel={r.label} accessibilityState={{ selected: r.id === range }} onPress={() => pick(r.id)} haptic="select" scaleTo={0.95} hitSlop={{ top: 7, bottom: 7 }} style={[{ flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: radius.pill }, r.id === range ? [{ backgroundColor: colors.card }, shadow.card, { shadowOpacity: 0.06 }] : null]}>
               <Txt variant="small" tone={r.id === range ? "ink" : "ink2"} style={{ fontWeight: "700" }}>
                 {r.label}
               </Txt>

@@ -13,7 +13,7 @@ import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, space, useBody, useColors } from "../ui/theme";
 import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 import { loadLastProject, loadNewChatPermissions, saveLastProject, saveNewChatPermissions } from "../prefs";
@@ -59,6 +59,8 @@ export interface NewChatProps {
  */
 export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, listen = false, onClose, onStarted }: NewChatProps) {
   const colors = useColors();
+  // The box takes the chat's type: 16 on a phone, 17 on a tablet.
+  const body = useBody();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
@@ -255,7 +257,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               placeholderTextColor={colors.ink3}
               multiline
               editable={!busy}
-              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 96, maxHeight: 200, color: colors.ink, fontSize: 16, textAlignVertical: "top" }}
+              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: body.fontSize, textAlignVertical: "top" }}
             />
 
             {/* One row: where it goes (a guess until picked), photos, the options, the microphone, and send. */}

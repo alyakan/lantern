@@ -6,7 +6,8 @@
  * The phone's appearance picks the palette: Daylight, or Night (the same names turned over: ink is light, paper is
  * near-black). Components read theirs with `useColors()`.
  */
-import { Platform, useColorScheme, type TextStyle } from "react-native";
+import { Platform, useColorScheme, useWindowDimensions, type TextStyle } from "react-native";
+import { WIDE_MIN } from "../view/layout";
 
 export interface Palette {
   /** Which of the two this is. */
@@ -151,11 +152,26 @@ export const type: Record<Variant, TextStyle> = {
   headline: { fontFamily: fonts.displayBold, fontSize: 40, lineHeight: 42, letterSpacing: -1.2 },
   title: { fontFamily: fonts.display, fontSize: 28, lineHeight: 31, letterSpacing: -0.8 },
   heading: { fontFamily: fonts.display, fontSize: 19, lineHeight: 23, letterSpacing: -0.3 },
-  body: { fontSize: 15, lineHeight: 21 },
+  body: { fontSize: 17, lineHeight: 22 },
   small: { fontSize: 13, lineHeight: 18 },
   tiny: { fontSize: 11, lineHeight: 14 },
   mono: { fontFamily: fonts.mono, fontSize: 13, lineHeight: 19 },
 };
+
+/**
+ * The body on a phone: Apple's 17 is set for a tablet held further away, and at a phone's arm's length 16 with its own line
+ * height is the size that reads right. The rest of the scale is the same on both.
+ */
+export const phoneBody: TextStyle = { fontSize: 16, lineHeight: 21 };
+
+/**
+ * The body for the window the app is in: 16 on a phone, 17 on a tablet. The shorter side decides, so a phone turned sideways
+ * is still a phone and an iPad in a narrow Split View pane (laid out as one) gets the phone's size.
+ */
+export function useBody(): TextStyle {
+  const { width, height } = useWindowDimensions();
+  return Math.min(width, height) < WIDE_MIN ? phoneBody : type.body;
+}
 
 // Black shadows: they read on Daylight's page and are simply not seen on Night's (its cards are lighter than its page instead).
 export const shadow = {

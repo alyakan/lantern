@@ -123,7 +123,7 @@ function Item({ item, meta, lead, onOpen, children }: { item: RemoteWorkItem; me
 const Action = ({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) => {
   const colors = useColors();
   return (
-    <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.95} style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.rule, alignItems: "center", justifyContent: "center" }}>
+    <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.95} style={{ minHeight: MIN_TARGET, paddingHorizontal: 16, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.rule, alignItems: "center", justifyContent: "center" }}>
       <Txt variant="small" style={{ fontWeight: "600" }}>
         {label}
       </Txt>
@@ -132,7 +132,8 @@ const Action = ({ label, hint, onPress }: { label: string; hint: string; onPress
 };
 
 const Link = ({ label, onPress, hint }: { label: string; onPress: () => void; hint?: string }) => (
-  <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} hitSlop={8} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+  // Small words, but a finger's worth of a target: the slop takes it to 44 points without moving the row it sits in.
+  <PressScale accessibilityRole="button" accessibilityHint={hint} onPress={onPress} hitSlop={{ top: 13, bottom: 13, left: 8, right: 8 }} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
     <Txt variant="small" tone="cobalt" style={{ fontWeight: "600" }}>
       {label}
     </Txt>

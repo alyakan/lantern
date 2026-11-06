@@ -22,7 +22,7 @@ import { Chevron } from "../ui/Chevron";
 import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
 import { easeLayout, PressScale, skips, springLayout } from "../ui/motion";
-import { control, radius, useColors } from "../ui/theme";
+import { control, radius, useBody, useColors } from "../ui/theme";
 import { ToolIcon, type ToolIconName } from "../ui/ToolIcon";
 
 /** One of the bar's tools, beside Search in the row the tools circle grows into. */
@@ -111,6 +111,8 @@ export function RoundButton({ label, onPress, disabled, children }: { label: str
 /** What the grown circle holds beside its magnifier: the field, "2 of 5", the arrows, and the way out. */
 export function SearchContents({ search, input, onFocused, onCancel }: { search: BarSearch; input: RefObject<ComponentRef<typeof TextInput> | null>; onFocused: () => void; onCancel: () => void }) {
   const colors = useColors();
+  // What is typed is the chat's own type: 16 on a phone, 17 on a tablet.
+  const body = useBody();
   const typed = search.query.trim().length >= 2;
   const none = typed && search.count === 0;
   return (
@@ -132,7 +134,7 @@ export function SearchContents({ search, input, onFocused, onCancel }: { search:
         autoCapitalize="none"
         returnKeyType="search"
         clearButtonMode="while-editing"
-        style={{ flex: 1, fontSize: 15, color: colors.ink, paddingVertical: 8 }}
+        style={{ flex: 1, fontSize: body.fontSize, color: colors.ink, paddingVertical: 8 }}
       />
       <Txt accessibilityLiveRegion="polite" variant="tiny" tone="ink2" style={{ minWidth: 44, textAlign: "right" }}>
         {typed ? (none ? "No match" : search.list ? (search.count === 1 ? "1 chat" : `${search.count} chats`) : `${search.position} of ${search.count}`) : ""}
