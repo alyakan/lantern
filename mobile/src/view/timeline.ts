@@ -336,8 +336,8 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
         return void rows.push({ key: `d-${item.id}`, kind: "desktop", item });
       case "turn": {
         // A turn that ended well says how long it took where its work already is: the summary card has it, or the last row of steps
-        // ends with it. Only a turn with neither (a quick answer) keeps a line of its own, and an error always does.
-        if (!item.isError) {
+        // ends with it. Only a turn with neither (a quick answer) keeps a line of its own; an error's does, and so does a stop's.
+        if (!item.isError && !item.stopped) {
           const own = rows.slice(turnStart).filter((r) => r.kind !== "hook");
           if (own.some((r) => r.kind === "summary")) return;
           const lastSteps = [...own].reverse().find((r) => r.kind === "steps");
@@ -359,6 +359,8 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
 
 /** A turn's end in a few words: "3 s", "1 min 12 s", or what went wrong. */
 export function turnLine(t: Extract<Item, { kind: "turn" }>): { text: string; bad: boolean } {
+  // The person's own Stop: what the interrupt left (an "interrupted" error result) says the stop, not a failure.
+  if (t.stopped) return { text: "Stopped", bad: false };
   if (t.isError) return { text: t.result ? `Stopped with an error: ${clip(t.result, 80)}` : "Stopped with an error", bad: true };
   const s = Math.round((t.durationMs ?? 0) / 1000);
   if (!t.durationMs) return { text: "Finished", bad: false };

@@ -132,6 +132,33 @@ describe("turns", () => {
     expect(items(s).filter((it) => it.kind === "turn")).toHaveLength(2);
     expect(items(s).filter((it) => it.kind === "user")).toHaveLength(2);
   });
+
+  // A stop asked for anywhere: the interrupt leaves error results behind, and none of them is the work failing.
+  it("a stopped turn and the step it cut short are stopped, not failed", () => {
+    const events: RemoteEvent[] = [
+      { kind: "user_text", text: "long job", at: 1, sent_by: null },
+      { kind: "tool_started", tool_use_id: "t1", name: "Bash", summary: "npm test" },
+      { kind: "turn_stopping" },
+      { kind: "tool_finished", tool_use_id: "t1", is_error: true },
+      { kind: "turn_done", is_error: true, result: "interrupted", duration_ms: 1, context_window: null },
+    ];
+    const s = run(events.map((e, i) => event("a", i + 1, e)));
+    expect(items(s).find((it) => it.kind === "step")).toMatchObject({ done: true, isError: false });
+    expect(items(s).find((it) => it.kind === "turn")).toMatchObject({ isError: false, stopped: true });
+    expect(s.views.a.stopping).toBe(false);
+  });
+
+  it("a failure after the stop is over, in the next turn, is a failure again", () => {
+    const events: RemoteEvent[] = [
+      { kind: "turn_stopping" },
+      { kind: "turn_done", is_error: true, result: "interrupted", duration_ms: 1, context_window: null },
+      { kind: "user_text", text: "again", at: 2, sent_by: null },
+      { kind: "tool_started", tool_use_id: "t2", name: "Bash", summary: "npm test" },
+      { kind: "tool_finished", tool_use_id: "t2", is_error: true },
+    ];
+    const s = run(events.map((e, i) => event("a", i + 1, e)));
+    expect(items(s).find((it) => it.kind === "step")).toMatchObject({ isError: true });
+  });
 });
 
 describe("the post-hook", () => {

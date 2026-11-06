@@ -170,6 +170,9 @@ pub enum RemoteEvent {
     /// A file the step changed, as counts: its diff is a request of its own.
     FileEdited { tool_use_id: String, path: String, created: bool, added: u32, removed: u32 },
     TestsRan { tool_use_id: String, command: String, passed: u32, failed: u32, skipped: u32 },
+    /// The person stopped this chat's turn (here, on the Mac, or wherever it was asked for): the step that ends after it and
+    /// the turn's own end are the stop's, not failures.
+    TurnStopping,
     TurnDone {
         is_error: bool,
         result: Option<String>,
@@ -263,6 +266,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         }
         U::TestRun { parent: None, tool_use_id, command, run } => R::TestsRan { tool_use_id: tool_use_id.clone(), command: command.clone(), passed: run.passed, failed: run.failed, skipped: run.skipped },
         U::TurnDone { is_error, result, duration_ms, context_window, .. } => R::TurnDone { is_error: *is_error, result: result.clone(), duration_ms: *duration_ms, context_window: *context_window },
+        U::TurnStopping => R::TurnStopping,
         U::PermissionRequested { request_id, tool_name, input } => R::PermissionRequested { request_id: request_id.clone(), tool_name: tool_name.clone(), input: trimmed(input) },
         U::PermissionWithdrawn { request_id } => R::PermissionWithdrawn { request_id: request_id.clone() },
         U::PermissionResolved { request_id, allow, by } => R::PermissionResolved { request_id: request_id.clone(), allow: *allow, by: by.clone() },
@@ -1602,6 +1606,13 @@ mod tests {
         assert_eq!(to_remote(&edit), Some(RemoteEvent::FileEdited { tool_use_id: "t1".into(), path: "/p/a.rs".into(), created: false, added: 2, removed: 1 }));
         let done = UiEvent::ToolFinished { parent: None, tool_use_id: "t1".into(), is_error: false, output: "a lot of output".into() };
         assert!(!serde_json::to_string(&to_remote(&done).unwrap()).unwrap().contains("output"));
+    }
+
+    #[test]
+    fn a_stop_reaches_the_phone_before_what_it_leaves_behind() {
+        assert_eq!(to_remote(&UiEvent::TurnStopping), Some(RemoteEvent::TurnStopping));
+        // A phone that can't read extras still reads it: it changes what it does with the error result that follows.
+        assert_eq!(to_remote_for(&UiEvent::TurnStopping, false), Some(RemoteEvent::TurnStopping));
     }
 
     #[test]

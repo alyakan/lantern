@@ -844,6 +844,8 @@ pub struct LiveActivities {
     /// When each phone was last tried (ms): a start Apple couldn't be reached for is tried again a while later, and one
     /// that went through is the last for a while (each comes with an alert that lights the screen).
     tried: Mutex<HashMap<String, (u64, bool)>>,
+    /// The chats whose turn the person stopped: the card ends as done, not as failed.
+    stopping: Mutex<std::collections::HashSet<String>>,
 }
 
 /// What an event does to a chat's card: the push to send, and the state it leaves the card in.
@@ -866,7 +868,7 @@ impl LiveActivities {
     }
 
     fn with_clock(store: Arc<RemoteStore>, hub: Arc<SessionHub>, apns: Arc<dyn Apns>, now_ms: fn() -> u64) -> Arc<Self> {
-        Arc::new(Self { store, hub, apns, now_ms, busy_since: Mutex::new(None), started_for: Mutex::new(HashMap::new()), tried: Mutex::new(HashMap::new()) })
+        Arc::new(Self { store, hub, apns, now_ms, busy_since: Mutex::new(None), started_for: Mutex::new(HashMap::new()), tried: Mutex::new(HashMap::new()), stopping: Mutex::default() })
     }
 
     /// Follows the bus until it closes (the task `start_remote` runs and `stop` aborts), and looks again at the cards
@@ -1078,10 +1080,21 @@ impl LiveActivities {
             }
             // A Stop hook keeping Claude going is the same turn, still on its clock.
             UiEvent::UserText { text, .. } if text.starts_with(crate::hooks::STOP_PREFIX) => None,
-            UiEvent::UserText { .. } => Some(Next::Restart),
+            UiEvent::UserText { .. } => {
+                self.stopping.lock().unwrap().remove(slot);
+                Some(Next::Restart)
+            }
             UiEvent::Todos { parent: None, .. } | UiEvent::PlanUsage { .. } | UiEvent::ProviderUsage { .. } => Some(Next::Detail),
-            UiEvent::TurnDone { is_error: false, .. } => Some(Next::End(Status::Done)),
-            UiEvent::TurnDone { is_error: true, .. } => Some(Next::End(Status::Failed)),
+            UiEvent::TurnDone { is_error: false, .. } => {
+                self.stopping.lock().unwrap().remove(slot);
+                Some(Next::End(Status::Done))
+            }
+            // A turn the person stopped ends with an error too (the interrupt's): the card says done, not failed.
+            UiEvent::TurnDone { is_error: true, .. } => Some(Next::End(if self.stopping.lock().unwrap().remove(slot) { Status::Done } else { Status::Failed })),
+            UiEvent::TurnStopping => {
+                self.stopping.lock().unwrap().insert(slot.to_string());
+                None
+            }
             UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => Some(Next::End(Status::Failed)),
             _ => None,
         }
@@ -1628,6 +1641,25 @@ pub(crate) mod tests {
         r.card("phone-1", "a");
         r.event("a", UiEvent::SessionEnded { code: Some(0), stderr_tail: String::new() }).await;
         assert!(r.sent().is_empty(), "a session that closed cleanly isn't a failure");
+    }
+
+    // A turn the person stopped ends with the interrupt's error: the card says done, not failed.
+    #[tokio::test]
+    async fn a_turn_the_person_stopped_ends_the_card_as_done() {
+        let r = rig();
+        r.card("phone-1", "a");
+        r.event("a", go()).await;
+        r.event("a", UiEvent::TurnStopping).await;
+        r.event("a", done(true)).await;
+        let sent = r.sent();
+        assert_eq!(sent.last().unwrap().1.event, "end");
+        assert_eq!(props(&sent.last().unwrap().1)["status"], "done");
+        // That stop is over with that card: a new card's turn ending in an error is a failure again.
+        let again = rig();
+        again.card("phone-1", "a");
+        again.event("a", go()).await;
+        again.event("a", done(true)).await;
+        assert_eq!(props(&again.sent().last().unwrap().1)["status"], "failed");
     }
 
     #[tokio::test]

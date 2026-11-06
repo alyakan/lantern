@@ -36,7 +36,8 @@ export interface ToolItem {
   id: string;
   name: string;
   summary: string;
-  status: "running" | "done" | "error";
+  /** "stopped": the person ended the turn before it finished (the interrupt gives it an error result, which isn't a failure). */
+  status: "running" | "done" | "error" | "stopped";
   output: string | null;
   edit: EditInfo | null;
   children: ChatItem[];
@@ -526,9 +527,10 @@ function upsertText(items: ChatItem[], parent: string | null, blockId: string, f
   return insert(items, parent, { type: "assistant", id: blockId, text: fn("") });
 }
 
-function failRunning(items: ChatItem[]): ChatItem[] {
+// `stopped`: the person ended the turn, so a step it never finished is stopped, not failed.
+function failRunning(items: ChatItem[], stopped = false): ChatItem[] {
   return items.map((it): ChatItem =>
-    it.type === "tool" ? { ...it, status: it.status === "running" ? "error" : it.status, children: failRunning(it.children) } : it,
+    it.type === "tool" ? { ...it, status: it.status === "running" ? (stopped ? "stopped" : "error") : it.status, children: failRunning(it.children, stopped) } : it,
   );
 }
 
@@ -594,7 +596,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       const seq = state.seq + 1;
       // A post-hook is Lantern's own message, sent once Claude has answered (see lib/chatHooks.ts): a note, not a prompt.
       const hook = postText(ev.text);
-      if (hook !== null) return { ...state, ...(ev.sent_by ? { status: "running" as const, thinking: true } : {}), seq, items: [...state.items, { type: "hook", id: `h${seq}`, text: hook, at: ev.at }] };
+      if (hook !== null) return { ...state, ...(ev.sent_by ? { status: "running" as const, thinking: true } : {}), stopRequested: false, seq, items: [...state.items, { type: "hook", id: `h${seq}`, text: hook, at: ev.at }] };
       const sent = readShellContext(readSettingsNote(ev.text));
       const read = readFlavourNote(readPageNote(sent.text));
       const { flavour, explain } = read;
@@ -604,8 +606,9 @@ function applyEvent(state: State, ev: UiEvent): State {
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
       if (shells.length > 0 && !text.trim() && !ev.images) return { ...state, seq, items: [...state.items, ...shells] };
       // Sent live from a paired phone (the window's own messages never come back as events): Claude is working on it now.
+      // A new message is a new turn, whoever sent it: a stop asked for earlier no longer ends this one.
       const live = ev.sent_by ? { status: "running" as const, thinking: true } : {};
-      return { ...state, ...live, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(ev.images ? { images: ev.images } : {}), ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
+      return { ...state, ...live, stopRequested: false, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(ev.images ? { images: ev.images } : {}), ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
     case "shell_started":
       // A command started from a paired phone: this window didn't start it, so its block is added here. One it already has
@@ -660,8 +663,10 @@ function applyEvent(state: State, ev: UiEvent): State {
         selectedFile: state.follow ? ev.path : state.selectedFile,
         items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, edit: { path: ev.path, created: ev.created, hunks: ev.hunks } })),
       };
+    // A step claude was in the middle of when the person stopped the turn ends with an error result: that is the stop's doing,
+    // not the work failing, so it reads as stopped.
     case "tool_finished":
-      return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, status: ev.is_error ? "error" : "done", output: ev.output, endedAt: Date.now() })) };
+      return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, status: ev.is_error ? (state.stopRequested ? "stopped" : "error") : "done", output: ev.output, endedAt: Date.now() })) };
     case "agent_started":
       return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, agent: { ...t.agent, type: ev.subagent_type, description: ev.description, requested: ev.model } })) };
     case "agent_model":
@@ -768,6 +773,10 @@ function applyEvent(state: State, ev: UiEvent): State {
         ...state,
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: ev.allow ? "allowed" : "denied" } : it)),
       };
+    // The person stopped this turn (here, on a phone, or wherever it was asked for), before the interrupt landed. What
+    // follows is the stop's: the step claude was in the middle of ends with an error result, and so does the turn.
+    case "turn_stopping":
+      return { ...state, stopRequested: true, items: denyPending(state.items) };
     case "session_ended": {
       const detail = lastLine(ev.stderr_tail);
       const text = `${agentName(state.provider)} stopped unexpectedly${ev.code === null ? "" : ` (exit code ${ev.code})`}.${detail ? ` ${detail}` : ""}`;
@@ -776,7 +785,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         status: "ended",
         thinking: false,
         backgroundTasks: [],
-        items: denyPending(failRunning(state.items)),
+        items: denyPending(failRunning(state.items, state.stopRequested)),
         banner: state.stopRequested ? state.banner : { kind: "error", text, action: "restart" },
       };
     }
@@ -806,7 +815,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         thinking: false,
         stopRequested: false,
         leadStopped: true,
-        items: denyPending(failRunning(state.items)),
+        items: denyPending(failRunning(state.items, true)),
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The Lead stopped this agent. Restart it to carry on.", action: "restart" },
       };
     // Lantern closed it after it reported on a builder's work: nothing to restart, and it isn't brought back with the team.
@@ -817,7 +826,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         thinking: false,
         stopRequested: false,
         leadStopped: true,
-        items: denyPending(failRunning(state.items)),
+        items: denyPending(failRunning(state.items, true)),
         banner: { kind: "info", text: "Lantern closed this agent after it reported, and removed its copy of the code. What it said is above.", action: null },
       };
     case "review_update": {

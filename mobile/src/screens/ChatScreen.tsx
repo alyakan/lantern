@@ -406,7 +406,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
   // again would do it all over.
   const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
-  const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
+  // Offered after a failure, and after a stop the person made: either way they may want the same asked again.
+  const retry = lastTurn?.kind === "turn" && (lastTurn.item.isError || lastTurn.item.stopped) && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
   // A file link goes to the Changes pane when there is one that can show it, else to a sheet over the chat.
   const pane = useRef(changesPane);
   pane.current = changesPane;

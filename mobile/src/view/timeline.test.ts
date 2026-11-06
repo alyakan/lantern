@@ -151,6 +151,8 @@ describe("a turn's end", () => {
     expect(turnLine({ kind: "turn", id: "t", isError: false, result: null, durationMs: 72_000 }).text).toBe("Finished in 1 min 12 s");
     expect(turnLine({ kind: "turn", id: "t", isError: false, result: null, durationMs: null }).text).toBe("Finished");
     expect(turnLine({ kind: "turn", id: "t", isError: true, result: "rate limited", durationMs: 1 })).toEqual({ text: "Stopped with an error: rate limited", bad: true });
+    // The person's own Stop: an "interrupted" error result from the Mac says the stop, not a failure.
+    expect(turnLine({ kind: "turn", id: "t", isError: true, stopped: true, result: "interrupted", durationMs: 1 })).toEqual({ text: "Stopped", bad: false });
   });
 });
 
@@ -202,6 +204,11 @@ describe("a turn's end, where it is said", () => {
   it("keeps a line of its own for a quick answer with no steps, and always for an error", () => {
     expect(timeline([you("u1", "hi"), said("a1", "Hello."), end()]).map((r) => r.kind)).toEqual(["user", "assistant", "turn"]);
     expect(timeline([you("u1", "go"), step("1", "Read"), end({ isError: true, result: "rate limited" })]).map((r) => r.kind)).toEqual(["user", "steps", "turn"]);
+  });
+  it("keeps one for a stop too, so a turn that was stopped says so", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), end({ isError: true, stopped: true, result: "interrupted" })]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "turn"]);
+    expect(rows[2].kind === "turn" && turnLine(rows[2].item)).toEqual({ text: "Stopped", bad: false });
   });
   it("only counts its own turn's steps", () => {
     const rows = timeline([you("u1", "go"), step("1", "Read"), end({ id: "t1" }), you("u2", "hi"), said("a2", "Hello."), end({ id: "t2" })]);

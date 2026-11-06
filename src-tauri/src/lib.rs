@@ -960,10 +960,12 @@ impl remote::gateway::Host for RemoteHost {
 }
 
 /// Stops what chat `slot`'s claude is doing (Stop in the window, or a phone's): the prompts it was waiting on can't be
-/// answered any more, and every client is told so.
+/// answered any more, and every client is told so. The stop itself is told first, so what the interrupt leaves behind (the
+/// step it was in the middle of, and the turn's end) reads as stopped rather than as the work failing.
 async fn stop_turn(app: &AppHandle, slot: &str) {
     let state = app.state::<AppState>();
     let Ok(s) = state.slots.get(slot) else { return };
+    publish_state(&state, slot, ui_event::UiEvent::TurnStopping);
     if let Some(x) = s.session.lock().await.as_mut() {
         x.interrupt().await;
     }
