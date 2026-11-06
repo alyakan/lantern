@@ -13,6 +13,13 @@ afterEach(() => {
   mockScheme = "light";
 });
 
+// The window the app is in, which a test sets: a phone's size unless it says otherwise.
+let mockWindow = { width: 390, height: 844 };
+jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => ({ __esModule: true, default: () => ({ ...mockWindow, scale: 3, fontScale: 1 }) }));
+beforeEach(() => {
+  mockWindow = { width: 390, height: 844 };
+});
+
 /** WCAG's contrast ratio between two #rrggbb colours. */
 function contrast(a: string, b: string) {
   const lum = (hex: string) => {
@@ -71,6 +78,34 @@ describe("a screen in Night", () => {
     await render(<Button label="Start" onPress={() => {}} />);
     expect(style(screen.getByRole("button", { name: "Start" })).backgroundColor).toBe(lightColors.ink);
     expect(style(screen.getByText("Start")).color).toBe(lightColors.onInk);
+  });
+});
+
+describe("the body text", () => {
+  const body = () => StyleSheet.flatten(screen.getByText("Words").props.style as never) as { fontSize?: number; lineHeight?: number };
+
+  it("is 16 points on a phone", async () => {
+    await render(<Txt>Words</Txt>);
+    expect(body()).toMatchObject({ fontSize: 16, lineHeight: 21 });
+  });
+
+  it("is 17 on a tablet, upright or sideways", async () => {
+    mockWindow = { width: 820, height: 1180 };
+    await render(<Txt>Words</Txt>);
+    expect(body()).toMatchObject({ fontSize: 17, lineHeight: 22 });
+  });
+
+  // The page's margins and the body's size ask the same question: a window wide enough for a tablet's layout is one, however short.
+  it("is the tablet's in a wide window that is short, as the layout is", async () => {
+    mockWindow = { width: 800, height: 600 };
+    await render(<Txt>Words</Txt>);
+    expect(body().fontSize).toBe(17);
+  });
+
+  it("is the phone's in a narrow Split View pane, which is laid out as a phone", async () => {
+    mockWindow = { width: 400, height: 1000 };
+    await render(<Txt>Words</Txt>);
+    expect(body().fontSize).toBe(16);
   });
 });
 

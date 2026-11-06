@@ -2,7 +2,7 @@ import "@shopify/flash-list/jestSetup";
 import { BackHandler } from "react-native";
 import { StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import { saveChangesShare, saveSidebarPinned } from "../prefs";
+import { loadSidebarPinned, saveChangesShare, saveSidebarPinned } from "../prefs";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, seed, waiting } from "../test/render";
 import { Root } from "./Root";
@@ -386,6 +386,15 @@ describe("a tablet that was never told whether the chats are pinned", () => {
     expect(saveSidebarPinned).toHaveBeenCalledWith(false);
     expect(column().props.pointerEvents).toBe("none");
     expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+  });
+
+  // A tablet that took the chats away sideways would open on them and slide them off, were the window to decide before the read.
+  it("keeps them away until it has read what this tablet chose", async () => {
+    mockLayout = "split";
+    (loadSidebarPinned as jest.Mock).mockImplementationOnce(() => new Promise(() => {}));
+    await open({ chats: two });
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.queryByRole("button", { name: "Unpin the chats" })).toBeNull();
   });
 
   it("shows the chat with the whole width upright, the chats slid in when asked for", async () => {

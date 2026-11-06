@@ -4,7 +4,9 @@ import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, NOW, renderWith } from "../test/render";
+import { BAR_TEXT_SCALE, Txt } from "../ui/components";
 import { PhoneTabs } from "./PhoneTabs";
+import { WorkScreen } from "./WorkScreen";
 
 let mockTab: "chats" | "work" | "insights" = "work";
 jest.mock("../prefs", () => ({
@@ -54,6 +56,21 @@ async function openCard(name: string) {
   await fireEvent.press(screen.getByRole("button", { name: new RegExp(`^${name}, `) }));
   return within(screen.getByLabelText(name));
 }
+
+describe("Your work on a tablet", () => {
+  it("keeps the tablet's own header on a feature's page, beside the way back, and the list's copy of it is out of reach", async () => {
+    const { controller } = makeController();
+    attachSession(controller, { work }, ["desk", "work"]);
+    await renderWith(<WorkScreen top={<Txt>Chats header</Txt>} wide onOpenChat={jest.fn()} />, { connection: connectedWith(["desk", "work"]), chats: [chat({ slot: "a" })] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
+    const bar = within(screen.getByTestId("work-page-bar"));
+    expect(bar.getByRole("button", { name: "Back to Work" })).toBeTruthy();
+    expect(bar.getByText("Chats header")).toBeTruthy();
+    // The list stays mounted under the page, with its own bar: only the page's is there for a reader to find.
+    expect(screen.getAllByText("Chats header")).toHaveLength(1);
+  });
+});
 
 describe("Your work on the phone", () => {
   it("is a tab beside the chats for a Mac that has it, with how many steps wait", async () => {
@@ -131,6 +148,23 @@ describe("Your work on the phone", () => {
     expect(StyleSheet.flatten(back.props.style).minHeight).toBe(44);
     // It is the bar's, not the page's: the page's own heading no longer carries it, so it can't scroll away.
     expect(page.queryByRole("button", { name: "Back to Work" })).toBeNull();
+  });
+
+  it("lets the page's name grow its capsule at the larger text sizes, to 1.8 times and no further", async () => {
+    await open();
+    await openCard("Reliability");
+    const bar = within(screen.getByTestId("work-page-bar"));
+    const name = bar.getByRole("header", { name: "Reliability" });
+    expect(name.props.maxFontSizeMultiplier).toBe(BAR_TEXT_SCALE);
+    // The capsule is at least a button tall, and has no height of its own to clip the words at.
+    const capsule = StyleSheet.flatten(name.parent!.props.style);
+    expect(capsule.minHeight).toBe(44);
+    expect(capsule.height).toBeUndefined();
+  });
+
+  it("can still be pulled to refresh when everything is in one feature, and while it loads", async () => {
+    await open({ work: { ...work, items: work.items.filter((i) => i.feature === "Reliability") } });
+    expect(screen.getByLabelText("Your work").props.refreshControl).toBeTruthy();
   });
 
   it("has four tabs, each with the rows of its state, and dims one with nothing in it", async () => {

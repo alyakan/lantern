@@ -102,7 +102,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   const [pinned, setPinned] = useState<boolean | null>(null);
   // Whether the tablet was asked yet (a null pin is "never chosen", which is a decision too).
   const [pinRead, setPinRead] = useState(false);
-  const shellLayout: "overlay" | "split" = tablet && (pinned ?? layout === "split") ? "split" : "overlay";
+  // Until the pin is read the chats are away: a tablet that took them away would otherwise open on them and slide them off.
+  const shellLayout: "overlay" | "split" = tablet && pinRead && (pinned ?? layout === "split") ? "split" : "overlay";
   const listedOnce = useRef(false);
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.

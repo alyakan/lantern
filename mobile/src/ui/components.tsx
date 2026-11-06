@@ -14,6 +14,12 @@ import { MIN_TARGET, radius, space, type as scale, useBody, useColors, type Vari
  */
 export const MAX_TEXT_SCALE = 2.5;
 
+/**
+ * The cap for words in a capsule of glass (a title bar, a page's name): the bar grows to hold them (`minHeight`, not `height`), but
+ * a bar that took the whole 2.5 would cover the page it is the head of.
+ */
+export const BAR_TEXT_SCALE = 1.8;
+
 export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();

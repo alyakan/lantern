@@ -858,7 +858,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               accessibilityState={{ disabled: !command.trim() || running || !!disabled }}
               disabled={!command.trim() || running || !!disabled}
               onPress={() => void run()}
-              style={{ height: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
+              style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
             >
               <Text style={{ color: command.trim() && !running && !disabled ? term.bg : term.dim, fontFamily: fonts.mono, fontSize: 13, fontWeight: "700" }}>{running ? "…" : "Run"}</Text>
             </Pressable>

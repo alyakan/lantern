@@ -110,7 +110,7 @@ export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onIn
 
 function HeaderButton({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} hitSlop={6} style={{ height: 24, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: term.line, justifyContent: "center" }}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} hitSlop={6} style={{ minHeight: 24, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: term.line, justifyContent: "center" }}>
       <Text style={{ color: term.text, fontFamily: fonts.mono, fontSize: 11 }}>{label}</Text>
     </Pressable>
   );
@@ -146,7 +146,7 @@ function ShellAsk({ prompt, secret, onSend, onDismiss }: { prompt: string; secre
           placeholderTextColor={term.dim}
           style={{ flex: 1, minHeight: 34, color: term.hi, fontFamily: fonts.mono, fontSize: 14, paddingVertical: 4 }}
         />
-        <Pressable accessibilityRole="button" accessibilityLabel="Send reply" onPress={send} style={{ height: 30, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: term.bright, justifyContent: "center" }}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Send reply" onPress={send} style={{ minHeight: 30, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: term.bright, justifyContent: "center" }}>
           <Text style={{ color: term.bg, fontFamily: fonts.mono, fontSize: 12, fontWeight: "700" }}>Send</Text>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Not now" onPress={onDismiss} hitSlop={8}>

@@ -7,7 +7,7 @@
  * near-black). Components read theirs with `useColors()`.
  */
 import { Platform, useColorScheme, useWindowDimensions, type TextStyle } from "react-native";
-import { WIDE_MIN } from "../view/layout";
+import { layoutFor } from "../view/layout";
 
 export interface Palette {
   /** Which of the two this is. */
@@ -165,12 +165,13 @@ export const type: Record<Variant, TextStyle> = {
 export const phoneBody: TextStyle = { fontSize: 16, lineHeight: 21 };
 
 /**
- * The body for the window the app is in: 16 on a phone, 17 on a tablet. The shorter side decides, so a phone turned sideways
- * is still a phone and an iPad in a narrow Split View pane (laid out as one) gets the phone's size.
+ * The body for the window the app is in: 16 on a phone, 17 on a tablet. The layout decides (the same call that gives the page its
+ * margins), so an iPad in a narrow Split View pane, laid out as a phone, gets the phone's size, and a window wide enough to be a
+ * tablet's never gets it for being short.
  */
 export function useBody(): TextStyle {
   const { width, height } = useWindowDimensions();
-  return Math.min(width, height) < WIDE_MIN ? phoneBody : type.body;
+  return layoutFor(width, height) === "phone" ? phoneBody : type.body;
 }
 
 // Black shadows: they read on Daylight's page and are simply not seen on Night's (its cards are lighter than its page instead).

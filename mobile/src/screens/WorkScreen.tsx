@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
-import { ProjectTag, Txt } from "../ui/components";
+import { BAR_TEXT_SCALE, ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet } from "../ui/Sheet";
@@ -490,8 +490,8 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         <View style={top ? { marginLeft: space.lg } : undefined}>{backCircle}</View>
         <View style={{ flex: 1 }}>
           {top ?? (
-            <Glass style={{ height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
-              <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
+            <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
+              <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
                 {g.label}
               </Txt>
             </Glass>
@@ -515,7 +515,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           accessibilityLabel="Your work"
           style={{ flex: 1 }}
           contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}
-          refreshControl={work !== null && !alone ? <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" /> : undefined}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
         >
           {work === null ? (
             <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
