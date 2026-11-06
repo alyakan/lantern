@@ -28,9 +28,9 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["spawnWorker (another provider)", () => api.spawnWorker("s1", { task: "Read it", name: null, isolation: "shared", model: "o3", provider: "codex" }), ["orchestra_spawn", { main: "s1", task: "Read it", name: null, isolation: "shared", model: "o3", role: null, provider: "codex" }]],
   ["startSession", () => api.startSession("s1", "/bin/claude", "/repo", settings), ["start_session", { slot: "s1", claudePath: "/bin/claude", folder: "/repo", settings }]],
   [
-    "applyHarness",
-    () => api.applyHarness("s1", { model: "opus", effort: "high", advisor: null, subagent_model: "haiku", plugins_off: true }),
-    ["apply_harness", { slot: "s1", model: "opus", effort: "high", advisor: null, subagentModel: "haiku", pluginsOff: true }],
+    "applyPreset",
+    () => api.applyPreset("s1", { model: "opus", effort: "high", advisor: null, subagent_model: "haiku", plugins_off: true }),
+    ["apply_preset", { slot: "s1", model: "opus", effort: "high", advisor: null, subagentModel: "haiku", pluginsOff: true }],
   ],
   ["closeSession", () => api.closeSession("s1"), ["close_session", { slot: "s1" }]],
   ["setModel", () => api.setModel("s1", null), ["set_model", { slot: "s1", model: null }]],

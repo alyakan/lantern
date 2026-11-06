@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(env, vec![set("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"), set("ENABLE_COMMIT_REVIEW", "0"), set("ENABLE_STOP_REVIEW", "0"), set("PATH", "/custom/bin:/usr/bin")]);
         assert_eq!(cmd.get_current_dir(), Some(dir.path()));
 
-        // A worker: no advisor whatever the harness says, so the plugin (which it doesn't load) isn't told anything.
+        // A worker: no advisor whatever the preset says, so the plugin (which it doesn't load) isn't told anything.
         let mut worker = cfg.clone();
         worker.helper.role = crate::args::Role::Worker { name: "w".into(), read_only: false };
         let args: Vec<String> = command(&worker).as_std().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
@@ -761,7 +761,7 @@ done"#,
     }
 
     #[tokio::test]
-    async fn the_harness_reaches_claude_as_its_advisor_flag_and_subagent_model() {
+    async fn the_preset_reaches_claude_as_its_advisor_flag_and_subagent_model() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().display();
         let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.tmp\nmv {d}/seen.tmp {d}/seen.txt\ncat > /dev/null"));

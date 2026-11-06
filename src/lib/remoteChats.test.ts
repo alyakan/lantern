@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
-import { BUILT_IN } from "./harness";
+import { BUILT_IN } from "./preset";
 import { PROJECT_COLORS } from "./projectColors";
 import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type SwitchTarget } from "./remoteChats";
 import { CLAUDE_CAPABILITIES } from "./provider";

@@ -128,7 +128,7 @@ describe("a chat a paired phone starts", () => {
 const settingsSaying = (allow: boolean) => ({ remote_settings: { enabled: true, show_titles: false, rich_notifications: false, allow_phone_auto: allow, allow_phone_shell: false, devices: [], connected: [], listening: true, pairing: false } });
 const fromPhoneEvent = (event: string, payload: Record<string, unknown>) => (globalThis as unknown as { mockEmit: (e: string, p?: unknown) => Promise<void> }).mockEmit(event, payload);
 const restarts = (calls: Call[]) => calls.filter(([c]) => c === "restart_session");
-const harnessApplied = (calls: Call[]) => calls.filter(([c]) => c === "apply_harness");
+const presetApplied = (calls: Call[]) => calls.filter(([c]) => c === "apply_preset");
 
 describe("a chat a paired phone starts on Auto or on a preset", () => {
   it("starts on Auto when Settings let phones use it", async () => {
@@ -242,7 +242,7 @@ describe("a chat a paired phone starts on an endpoint", () => {
     await fromPhoneEvent("remote-set-preset", { slot, preset: "max" });
     await quiet();
     expect(restarts(calls)).toHaveLength(0);
-    expect(harnessApplied(calls)).toHaveLength(0);
+    expect(presetApplied(calls)).toHaveLength(0);
   });
 
   /** A Codex chat started from a phone would stop at its first question with nobody able to answer: it starts on Claude instead. */
@@ -283,10 +283,10 @@ describe("a chat a paired phone switches", () => {
     await quiet();
     await fromPhoneEvent("remote-set-preset", { slot: firstSlot(calls), preset: "made-up" });
     await quiet();
-    expect(harnessApplied(calls)).toHaveLength(0);
+    expect(presetApplied(calls)).toHaveLength(0);
     await fromPhoneEvent("remote-set-preset", { slot: firstSlot(calls), preset: "max" });
-    await waitFor(() => expect(harnessApplied(calls)).toHaveLength(1));
-    expect(harnessApplied(calls)[0][1]).toMatchObject({ slot: firstSlot(calls), model: "opus" });
+    await waitFor(() => expect(presetApplied(calls)).toHaveLength(1));
+    expect(presetApplied(calls)[0][1]).toMatchObject({ slot: firstSlot(calls), model: "opus" });
     await quiet();
     expect(JSON.parse(localStorage.getItem("settings.harnessByFolder") ?? "{}")[FOLDER]).toBeUndefined();
   });
@@ -298,7 +298,7 @@ describe("a chat a paired phone switches", () => {
     await fromPhoneEvent("remote-set-preset", { slot: "nope", preset: "max" });
     await quiet();
     expect(restarts(calls)).toHaveLength(0);
-    expect(harnessApplied(calls)).toHaveLength(0);
+    expect(presetApplied(calls)).toHaveLength(0);
   });
 });
 

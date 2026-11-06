@@ -55,7 +55,7 @@ const move = (editor: Fake, line: number, type = 6) => act(() => editor.handlers
 
 // What the app does: keeps the chat's comments and hands the pane a way to change them.
 let latest: DiffComment[] = [];
-function Harness({ surface, original, modified, start = [] }: { surface: Surface; original: string; modified: string; start?: DiffComment[] }) {
+function Preset({ surface, original, modified, start = [] }: { surface: Surface; original: string; modified: string; start?: DiffComment[] }) {
   const [items, setItems] = useState<DiffComment[]>(start);
   latest = items;
   return (
@@ -85,7 +85,7 @@ describe("comments on a file that was created", () => {
 
   it("shows a button for the line the pointer is on, and a comment added there is an added line's", () => {
     const editor = fakeEditor();
-    render(<Harness surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
+    render(<Preset surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
     expect(screen.queryByRole("button", { name: /^Comment on line/ })).toBeNull();
     move(editor, 2);
     addComment("Comment on line 2 of a.ts", "Why two?");
@@ -99,7 +99,7 @@ describe("comments on a file that was created", () => {
   it("the button goes when the pointer leaves, and Escape cancels a box", () => {
     vi.useFakeTimers();
     const editor = fakeEditor();
-    render(<Harness surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
+    render(<Preset surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
     move(editor, 1);
     expect(screen.getByRole("button", { name: "Comment on line 1 of a.ts" })).toBeInTheDocument();
     act(() => editor.handlers.leave({}));
@@ -117,7 +117,7 @@ describe("comments on a file that was created", () => {
 
   it("C on the cursor's line starts a comment from the keyboard", () => {
     const editor = fakeEditor();
-    render(<Harness surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
+    render(<Preset surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} />);
     // Registered for the editor's text only, so typing in a comment box isn't taken.
     expect(editor.addCommand).toHaveBeenCalledWith(33, expect.any(Function), "editorTextFocus");
     editor.setCursor(3);
@@ -128,7 +128,7 @@ describe("comments on a file that was created", () => {
   it("a created file's comments that are outdated aren't drawn under a line", () => {
     const editor = fakeEditor();
     const old: DiffComment = { id: "x", path: "/p/src/a.ts", side: "new", line: 2, lineText: "gone", kind: "added", text: "Old", outdated: true };
-    render(<Harness surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} start={[old]} />);
+    render(<Preset surface={{ kind: "whole", editor: editor as never, side: "new" }} original="" modified={text} start={[old]} />);
     expect(screen.queryByRole("group")).toBeNull();
     expect(editor.zones).toEqual([]);
   });
@@ -137,7 +137,7 @@ describe("comments on a file that was created", () => {
 describe("comments on a file that was deleted", () => {
   it("are on the old file's lines", () => {
     const editor = fakeEditor();
-    render(<Harness surface={{ kind: "whole", editor: editor as never, side: "old" }} original={"a\nb\n"} modified="" />);
+    render(<Preset surface={{ kind: "whole", editor: editor as never, side: "old" }} original={"a\nb\n"} modified="" />);
     move(editor, 2);
     addComment("Comment on line 2 before of a.ts", "Was b needed?");
     expect(latest).toEqual([expect.objectContaining({ side: "old", line: 2, lineText: "b", kind: "removed" })]);
@@ -162,7 +162,7 @@ function fakeDiff() {
 describe("comments on a diff, side by side", () => {
   it("added and unchanged lines are the new side's, and each kind is told apart", () => {
     const { diff, mod } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
     move(mod, 3);
     addComment("Comment on line 3 of a.ts", "On an added line");
     move(mod, 4);
@@ -172,7 +172,7 @@ describe("comments on a diff, side by side", () => {
 
   it("removed lines are the old side's, drawn in the old editor; its unchanged lines offer nothing", () => {
     const { diff, orig } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
     move(orig, 3);
     expect(screen.queryByRole("button", { name: /^Comment on line/ })).toBeNull();
     move(orig, 4);
@@ -183,7 +183,7 @@ describe("comments on a diff, side by side", () => {
 
   it("C in the old editor on an unchanged line comments on the line it became", () => {
     const { diff, orig } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: true }} original={original} modified={modified} />);
     orig.setCursor(5);
     act(() => orig.addCommand.mock.calls[0][1]());
     // Old line 5 ("e") is new line 5 here: one line more from the first change, one fewer from the second.
@@ -203,7 +203,7 @@ describe("comments on a diff, unified", () => {
 
   it("a removed line is found by its place in the block, and its note goes under the block", () => {
     const { diff, mod } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
     // The change that removed line 4 has its block after new line 4 ("c").
     overRemoved(mod, 4, 0);
     addComment("Comment on line 4 before of a.ts", "Why drop d?");
@@ -218,7 +218,7 @@ describe("comments on a diff, unified", () => {
 
   it("a comment on a new line goes before the block of removed lines that follows it", () => {
     const { diff, mod } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
     move(mod, 4);
     addComment("Comment on line 4 of a.ts", "On c");
     expect(mod.zones[mod.zones.length - 1].ordinal).toBeLessThan(10000);
@@ -226,7 +226,7 @@ describe("comments on a diff, unified", () => {
 
   it("the pointer over a block row past its lines offers nothing", () => {
     const { diff, mod } = fakeDiff();
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} />);
     overRemoved(mod, 4, 3);
     expect(screen.queryByRole("button", { name: /^Comment on line/ })).toBeNull();
   });
@@ -236,7 +236,7 @@ describe("comments that follow their lines", () => {
   it("one on a removed line shows under its copy in a view where the line isn't removed (unified)", () => {
     const { diff, mod } = fakeDiff();
     const c: DiffComment = { id: "x", path: "/p/src/a.ts", side: "old", line: 3, lineText: "c", kind: "removed", text: "From another view" };
-    render(<Harness surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} start={[c]} />);
+    render(<Preset surface={{ kind: "diff", diff: diff as never, split: false }} original={original} modified={modified} start={[c]} />);
     // Old line 3 ("c") is new line 4.
     expect(mod.zones.map((z) => z.afterLineNumber)).toEqual([4]);
     expect(screen.getByRole("group", { name: "Comment on line 3 before of a.ts" })).toBeInTheDocument();

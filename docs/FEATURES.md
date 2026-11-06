@@ -443,13 +443,13 @@ The **disk button** in the title bar, just before the Settings gear, opens **Sto
 
 ## Settings
 
-**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Appearance, Updates), **Claude** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Integrations, Remote control) — with a search at the top that finds a page by name or by what it sets, or a setting inside one ("awake" offers Keep my Mac awake). Enter opens the first match, and ⌘F focuses the search. Each setting's help is a line or two; **More** opens the rest.
+**⌘,** opens Settings, whose pages are grouped in four sections — **Lantern** (General, Appearance, Updates), **Agent** (Models, Allow rules, Skills), **Automation** (Routines, Hooks, Pull requests) and **Connected** (MCP servers, Endpoints, API keys, Integrations, Remote control) — with a search at the top that finds a page by name or by what it sets, or a setting inside one ("awake" offers Keep my Mac awake). Enter opens the first match, and ⌘F focuses the search. Each setting's help is a line or two; **More** opens the rest.
 
 ![Settings, on the General tab](images/settings.png)
 
 - **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, restore points before each message, whether the sidebar moves a chat up when it does something, and whether starting a team asks first.
 - **Appearance**: the theme (see below), the text size and the menu bar.
-- **Models**: the model presets (who does the work, the advisor and the subagents) that the Models chip offers, and, for teams, **Agents running at once**, **Say an agent is quiet after**, **Tidy up an agent after its merge** and **Pause agents when their provider's usage reaches**.
+- **Models**: the model presets (who does the work, the advisor and the subagents) that the Models chip offers, and, for teams, **Agents running at once**, **Say an agent is quiet after**, **Tidy up an agent after its merge** and **Pause agents when their provider's usage reaches**. Under it, each other installed provider (Codex, an endpoint) gets its own **Model** and **Thinking effort** — the default its new chats start on, the same whichever chat is open.
 - **Routines**: prompts that Lantern sends by itself at set times (see [Away](#away)).
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on its row and on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.

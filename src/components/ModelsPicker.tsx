@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ModelOption } from "../types";
 import { choiceName, MODEL_CHOICES, modelLabel } from "../lib/models";
 import { EFFORT_HINT, EFFORT_LEVELS, effortLabel } from "../lib/effort";
-import { CUSTOM_HARNESS, DEFAULT_HARNESS, summary, type Harness } from "../lib/harness";
+import { CUSTOM_HARNESS, DEFAULT_HARNESS, summary, type Preset } from "../lib/preset";
 import { useMenuInside } from "../lib/useMenuInside";
 import { SparkIcon } from "./icons";
 import { useMenuKeys } from "./useMenuKeys";
@@ -43,18 +43,18 @@ interface Props {
   options?: ModelOption[];
   /** Thinking effort: the chosen level (null = default), what the model takes (none hides it) and how to change it. */
   effort?: { chosen: string | null; levels: string[]; onChoose: (level: string | null) => void };
-  /** The harness presets (which models do what) and the chat's: without them the menu is just the model and effort choices. */
-  presets?: Harness[];
+  /** The presets (which models do what) and the chat's: without them the menu is just the model and effort choices. */
+  presets?: Preset[];
   preset?: string;
   onPreset?: (id: string) => void;
-  /** Opens Settings → Harness, to edit presets or make one. */
+  /** Opens Settings → Preset, to edit presets or make one. */
   onEdit?: () => void;
   disabled?: boolean;
   /** What the chat's agent is called: whose setting "Default" is. Claude's unless said. */
   agent?: string;
 }
 
-// The one chip under the box for who does the work: the harness preset and the main model ("Balanced · Sonnet 5.5").
+// The one chip under the box for who does the work: the preset and the main model ("Balanced · Sonnet 5.5").
 // Its menu lists the presets; Customize… opens the model and effort choices. A change applies from the next message
 // (effort and presets restart the chat's claude on the same session). On a preset, picking a model or effort makes the
 // chat Custom, which the chip and the note in that view say.
@@ -137,13 +137,13 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
 
   return (
     <div className="model-picker" ref={root} onClick={(e) => e.stopPropagation()}>
-      <button className={`composer-item model-button${onPresetOn ? " harness-on" : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={title} onClick={toggle}>
+      <button className={`composer-item model-button${onPresetOn ? " preset-on" : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={title} onClick={toggle}>
         <SparkIcon />
         {label}
         <span className="chev down" aria-hidden />
       </button>
       {open && shownView === "presets" && withPresets && (
-        <div className="menu model-menu harness-menu" ref={menu} style={menuStyle} role="menu" aria-label="Models" onKeyDown={keys.onKeyDown}>
+        <div className="menu model-menu preset-menu" ref={menu} style={menuStyle} role="menu" aria-label="Models" onKeyDown={keys.onKeyDown}>
           <div className="menu-heading">Models: who does what</div>
           {presets.map((h) => (
             <button
@@ -160,7 +160,7 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
               <span className="menu-row-meta">{h.id === CUSTOM_HARNESS && h.from ? `${h.from}, changed · ${summary(h)}` : summary(h)}</span>
             </button>
           ))}
-          <button role="menuitem" className="menu-row harness-edit" onClick={() => setView("customize")}>
+          <button role="menuitem" className="menu-row preset-edit" onClick={() => setView("customize")}>
             <span className="menu-row-title">Customize…</span>
             <span className="menu-row-meta">Pick the model and thinking effort</span>
           </button>

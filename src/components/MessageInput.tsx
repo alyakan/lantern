@@ -19,7 +19,7 @@ import { ProviderPicker, type ProviderOption } from "./ProviderPicker";
 import type { Flavour } from "../lib/flavour";
 import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelsPicker } from "./ModelsPicker";
-import type { Harness } from "../lib/harness";
+import type { Preset } from "../lib/preset";
 import { SessionPill } from "./SessionPill";
 import { SideChat } from "./SideChat";
 import { UpdateButton } from "./UpdateButton";
@@ -71,8 +71,8 @@ interface Props {
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
   /** Thinking effort, under the chip's Customize…: the chosen level (null = default) and how to change it. */
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
-  /** The chat's harness (which models do what) and the presets the Models chip lists. */
-  harness?: { presets: Harness[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
+  /** The chat's preset (which models do what) and the presets the Models chip lists. */
+  preset?: { presets: Preset[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];
   /** The skills and commands on disk, which tell claude's list apart into skills and commands. */
@@ -89,7 +89,7 @@ interface Props {
   /** The folder's sent prompts, oldest first, as encoded drafts: ↑ and ↓ recall them. `remember` adds one when sent. */
   history?: { entries: string[]; remember: (entry: string) => void };
   /**
-   * The agent CLI the chat runs on, and so what its box offers: no Auto mode, effort level, harness or "/" menu where that
+   * The agent CLI the chat runs on, and so what its box offers: no Auto mode, effort level, preset or "/" menu where that
    * provider has none, and its name in the copy. Absent or unknown: Claude Code's, which has all of it.
    */
   provider?: ProviderInfo | null;
@@ -97,12 +97,12 @@ interface Props {
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, harness: allHarness, update, history, provider, providers, pendingSwitch }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
-  // What the provider hasn't got isn't offered: its box has no effort, harness or "/" menu to show.
+  // What the provider hasn't got isn't offered: its box has no effort, preset or "/" menu to show.
   const effort = caps.supports_effort ? allEffort : undefined;
-  const harness = caps.supports_advisor ? allHarness : undefined;
+  const preset = caps.supports_advisor ? allPreset : undefined;
   const commands = caps.supports_skills ? allCommands : NO_COMMANDS;
   const skillIndex = caps.supports_skills ? allSkills : undefined;
   const mcpIssues = caps.supports_skills ? allIssues : undefined;
@@ -602,10 +602,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               ids={models.ids}
               options={models.options}
               effort={effort && effortLevels.length > 0 ? { ...effort, levels: effortLevels } : undefined}
-              presets={harness?.presets}
-              preset={harness?.chosen}
-              onPreset={harness?.onChoose}
-              onEdit={harness?.onEdit}
+              presets={preset?.presets}
+              preset={preset?.chosen}
+              onPreset={preset?.onChoose}
+              onEdit={preset?.onEdit}
               disabled={busy}
               agent={agent}
             />

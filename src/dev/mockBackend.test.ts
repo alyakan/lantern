@@ -8,8 +8,8 @@ import { version } from "../../package.json";
 beforeEach(() => installMockBackend());
 
 describe("mock backend", () => {
-  it("answers apply_harness and close_session", async () => {
-    await expect(invoke("apply_harness", { slot: "s1", model: null, effort: null, advisor: null, subagentModel: null })).resolves.toBeNull();
+  it("answers apply_preset and close_session", async () => {
+    await expect(invoke("apply_preset", { slot: "s1", model: null, effort: null, advisor: null, subagentModel: null })).resolves.toBeNull();
     await expect(invoke("close_session", { slot: "s1" })).resolves.toBeNull();
   });
 

@@ -34,7 +34,7 @@ fn lantern_prompt(mode: Mode, auto_approve: bool, role: &Role, publish: bool) ->
     };
     let artifacts = if publish { PUBLISH_PROMPT } else { "" };
     format!(
-        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Activity (you, your advisor and your subagents as a graph), Tests, Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries) and Artifacts. They pick the settings and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change any of them. Every chat has two settings that work independently:
+        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Activity (you, your advisor and your subagents as a graph), Tests, Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries) and Artifacts. They pick the settings and the models (a preset sets which model you, your advisor and your subagents run on); you can't change any of them. Every chat has two settings that work independently:
 Permissions, which means the same in every workflow:
 - Ask: edits apply as you make them; anything else that needs permission shows the user an Allow/Deny card.
 - Auto: Claude Code's auto-mode classifier decides what runs.
@@ -414,9 +414,9 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     a
 }
 
-/// The harness's flags beyond model and effort: the advisor Claude consults (`--advisor`, which `claude --help` doesn't
+/// The preset's flags beyond model and effort: the advisor Claude consults (`--advisor`, which `claude --help` doesn't
 /// list). The subagents' model goes in the environment instead (see ClaudeSession::spawn).
-pub fn harness_args(advisor: Option<&str>) -> Vec<String> {
+pub fn preset_args(advisor: Option<&str>) -> Vec<String> {
     advisor.map(|a| vec!["--advisor".to_string(), a.to_string()]).unwrap_or_default()
 }
 
@@ -481,7 +481,7 @@ pub fn enabled_plugins(home: &std::path::Path, folder: &std::path::Path) -> Vec<
     on
 }
 
-/// Claude Code's whole command line for a chat: `build_args`, the harness, and what its role adds.
+/// Claude Code's whole command line for a chat: `build_args`, the preset, and what its role adds.
 /// A worker starts lean, since a team's agents run at once on the user's plan: no advisor (each call sends its whole
 /// conversation to another model), only the core built-in tools (`WORKER_TOOLS`), no MCP servers but Lantern's, and none of the
 /// user's plugins (`plugins`, see `enabled_plugins`: their skills, agents and hooks are most of a session's starting
@@ -518,7 +518,7 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
                     }
                 }
             }
-            a.extend(harness_args(advisor));
+            a.extend(preset_args(advisor));
         }
     }
     a
@@ -535,7 +535,7 @@ pub fn without_plugins(a: &mut Vec<String>, plugins: &[String]) {
 /// The tools that start other agents: a subagent inline, or a workflow's.
 pub const SUBAGENT_TOOLS: [&str; 3] = ["Agent", "Task", "Workflow"];
 
-/// `a` with subagents off (a harness preset can say so): their tools added to `--disallowedTools`, the one already there
+/// `a` with subagents off (a preset can say so): their tools added to `--disallowedTools`, the one already there
 /// (a worker's) or a new one.
 pub fn without_subagents(a: &mut Vec<String>) {
     match a.iter().position(|x| x == "--disallowedTools").map(|i| i + 1).filter(|i| *i < a.len()) {
@@ -586,8 +586,8 @@ mod tests {
 
     #[test]
     fn the_advisor_is_a_flag_only_when_chosen() {
-        assert_eq!(harness_args(Some("opus")), vec!["--advisor", "opus"]);
-        assert!(harness_args(None).is_empty());
+        assert_eq!(preset_args(Some("opus")), vec!["--advisor", "opus"]);
+        assert!(preset_args(None).is_empty());
     }
 
     fn helper() -> HelperConfig {
@@ -745,7 +745,7 @@ mod tests {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
     }
 
-    /// The whole command line claude is started with, flag by flag and in order (the harness's flags come last, as
+    /// The whole command line claude is started with, flag by flag and in order (the preset's flags come last, as
     /// ClaudeSession::spawn appends them): moving where it is built must not change a byte of it.
     #[test]
     fn the_command_line_claude_is_started_with_is_pinned() {
@@ -761,7 +761,7 @@ mod tests {
         expected.push(lantern_prompt(Mode::Ask, false, &Role::Normal, false));
         expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
         let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
-        got.extend(harness_args(None));
+        got.extend(preset_args(None));
         assert_eq!(got, expected);
 
         // Step by step with auto-approve, as the main agent, with everything chosen. Claude is the one provider it is told of,
@@ -779,7 +779,7 @@ mod tests {
         expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
-        got.extend(harness_args(Some("fable")));
+        got.extend(preset_args(Some("fable")));
         assert_eq!(got, expected);
 
         // Auto, as a worker.

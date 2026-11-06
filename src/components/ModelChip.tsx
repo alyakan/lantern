@@ -1,4 +1,4 @@
-import { familyOf, modelName } from "../lib/harness";
+import { familyOf, modelName } from "../lib/preset";
 
 /** The model family an agent runs on, small: amber for Opus (the dear one), so one that drifts there shows at a glance. The tooltip is the full id. */
 export function ModelChip({ model }: { model: string | null }) {

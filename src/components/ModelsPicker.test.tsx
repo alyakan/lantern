@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ModelsPicker } from "./ModelsPicker";
 import { MessageInput } from "./MessageInput";
-import { BUILT_IN, customOf } from "../lib/harness";
+import { BUILT_IN, customOf } from "../lib/preset";
 
 const customize = () => fireEvent.click(screen.getByRole("menuitem", { name: /Customize/ }));
 const titles = () => screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent);
@@ -193,14 +193,14 @@ describe("MessageInput models chip", () => {
   const option = (value: string, effort_levels: string[]) => ({ value, resolved_model: value, display_name: value, description: "", effort_levels });
   const options = [option("default", ["low", "high"]), option("haiku", [])];
 
-  it("replaces the model, effort and harness chips with one", () => {
+  it("replaces the model, effort and preset chips with one", () => {
     const models = { chosen: null as string | null, onChoose: () => {}, options };
     const effort = { chosen: null, onChoose: () => {} };
-    const harness = { presets: BUILT_IN, chosen: "balanced", onChoose: () => {} };
-    render(<MessageInput status="idle" model="claude-sonnet-5-5" onSend={() => {}} onStop={() => {}} models={models} effort={effort} harness={harness} />);
+    const preset = { presets: BUILT_IN, chosen: "balanced", onChoose: () => {} };
+    render(<MessageInput status="idle" model="claude-sonnet-5-5" onSend={() => {}} onStop={() => {}} models={models} effort={effort} preset={preset} />);
     expect(screen.getAllByRole("button", { name: /Balanced/ })).toHaveLength(1);
     expect(screen.queryByTitle(/Thinking effort/)).toBeNull();
-    expect(screen.queryByTitle(/^Harness/)).toBeNull();
+    expect(screen.queryByTitle(/^Preset/)).toBeNull();
   });
 
   it("shows the chosen model's levels under Customize…, and none for a model with no effort setting", () => {

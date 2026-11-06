@@ -39,7 +39,7 @@ const chip = (title: RegExp | string) => screen.queryByTitle(title);
 const rows = () => screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent);
 /** The Permissions menu's rows that can be picked. */
 const pickable = () => screen.getAllByRole("menuitemradio").filter((r) => !(r as HTMLButtonElement).disabled).map((r) => r.querySelector(".menu-row-title")?.textContent);
-/** The chip for who does the work: "Models: …" with the harness presets, "Model: …" without (a provider with no advisor). */
+/** The chip for who does the work: "Models: …" with the presets, "Model: …" without (a provider with no advisor). */
 const modelChip = () => document.querySelector<HTMLElement>(".model-picker:not(.provider-picker) .model-button")!;
 const openMode = () => fireEvent.click(document.querySelector<HTMLElement>(".mode-chip")!);
 const openProvider = () => fireEvent.click(within(document.querySelector<HTMLElement>(".provider-picker")!).getByRole("button"));
@@ -74,7 +74,7 @@ describe("with one provider", () => {
     expect(started()[0].claudePath).toBe("/Users/you/.local/bin/claude");
   });
 
-  it("loads state saved before there was a choice of provider as Claude's, and has the harness, effort and slash commands", async () => {
+  it("loads state saved before there was a choice of provider as Claude's, and has the preset, effort and slash commands", async () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     localStorage.setItem("settings.model", JSON.stringify("sonnet"));
     localStorage.setItem("settings.effort", JSON.stringify("high"));
@@ -122,7 +122,7 @@ describe("with two providers", () => {
     expect(started()[1].settings).toMatchObject({ provider: "codex", mode: "ask", model: null, advisor: null, subagent_model: null, auto_approve: false });
     expect(chip("Runs on Codex")).toBeInTheDocument();
     // Its models, as it lists them.
-    // No harness presets (Codex has no advisor), but effort, and its own models.
+    // No presets (Codex has no advisor), but effort, and its own models.
     await waitFor(() => expect(modelChip().title).toMatch(/^Model: .* · Effort /));
     fireEvent.click(modelChip());
     // Its models, then the effort levels it takes.
