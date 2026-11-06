@@ -2,78 +2,71 @@ import { EFFORT_HINT, effortLabel } from "../lib/effort";
 import type { ModelOption } from "../types";
 import { SettingsHint, SettingsRow } from "./SettingsRow";
 
-export interface ProviderModelsProps {
-  /** What the chat's agent is called: "Codex", an endpoint's own name. */
+export interface ProviderDefault {
+  /** The provider's id, for the section's anchor. */
+  id: string;
+  /** What it is called: "Codex", an endpoint's own name. */
   agent: string;
   /** The models it takes (its own list: Claude's built-in one would be wrong for it). */
   options: ModelOption[];
-  /** The model chosen for the chat (null: the provider's own default). */
+  /** The model its new chats start on (null: the provider's own default). */
   chosen: string | null;
   onChoose: (model: string | null) => void;
-  /** Thinking effort, when the provider takes one. */
+  /** Thinking effort, when it takes one. */
   effort?: { chosen: string | null; levels: string[]; onChoose: (level: string | null) => void };
-  /** No chat open: the choices are drawn, but not applied. */
-  disabled?: boolean;
 }
 
 /**
- * Settings → Models for a chat that isn't Claude Code: the provider's own model, and its thinking effort when it has one.
- * Claude Code's presets (main model, advisor, subagents) are Claude's; a chat on Codex or an endpoint picks from what that
- * provider takes instead.
+ * Every provider but Claude Code, for Settings → Models: what that provider's new chats start on. This is the app's default for
+ * the provider, not a chat's own choice — the Models chip under the box changes one chat; this changes where the next one starts.
+ * The list doesn't change with the chat that happens to be open.
  */
-export function ProviderModels({ agent, options, chosen, onChoose, effort, disabled = false }: ProviderModelsProps) {
-  // A model may take only some levels (or none): its own list wins, and the provider's is the stand-in until it says.
-  const model = options.find((o) => o.value === chosen);
-  const levels = model && model.effort_levels.length > 0 ? model.effort_levels : (effort?.levels ?? []);
+export function ProviderDefaults({ providers }: { providers: ProviderDefault[] }) {
   return (
     <>
-      <div className="settings-head">
-        <div>
-          <h2 className="mode-guide-title">Models</h2>
-          <p className="mode-guide-summary">Which model {agent} runs on, and how hard it thinks. Claude Code's presets are Claude's; this chat runs on {agent}.</p>
-        </div>
-      </div>
-      <section className="general-section" aria-labelledby="provider-model">
-        <h3 id="provider-model" className="general-title">
-          Model
-        </h3>
-        <SettingsRow
-          label="Model"
-          control={
-            <select aria-label="Model" value={chosen ?? ""} disabled={disabled} onChange={(e) => onChoose(e.target.value || null)}>
-              <option value="">{agent}'s default</option>
-              {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.display_name}
-                </option>
-              ))}
-            </select>
-          }
-          hint={disabled ? "Open a chat to change its model." : undefined}
-        />
-        {options.length === 0 && <SettingsHint>{agent} hasn't said which models it takes. It lists them when a chat starts.</SettingsHint>}
-      </section>
-      {effort && (
-        <section className="general-section" aria-labelledby="provider-effort">
-          <h3 id="provider-effort" className="general-title">
-            Effort
-          </h3>
-          <SettingsRow
-            label="Thinking effort"
-            control={
-              <select aria-label="Thinking effort" value={effort.chosen ?? ""} disabled={disabled} onChange={(e) => effort.onChoose(e.target.value || null)}>
-                <option value="">{agent}'s default</option>
-                {levels.map((level) => (
-                  <option key={level} value={level}>
-                    {effortLabel(level)}
-                  </option>
-                ))}
-              </select>
-            }
-            hint={disabled ? "Open a chat to change how hard it thinks." : (EFFORT_HINT[effort.chosen ?? ""] ?? undefined)}
-          />
-        </section>
-      )}
+      {providers.map((p) => {
+        // A model may take only some levels (or none): its own list wins, and the provider's is the stand-in until it says.
+        const model = p.options.find((o) => o.value === p.chosen);
+        const levels = model && model.effort_levels.length > 0 ? model.effort_levels : (p.effort?.levels ?? []);
+        return (
+          <section key={p.id} className="general-section" aria-labelledby={`provider-${p.id}`}>
+            <h3 id={`provider-${p.id}`} className="general-title">
+              {p.agent}
+            </h3>
+            <SettingsRow
+              label="Model"
+              control={
+                <select aria-label={`${p.agent} model`} value={p.chosen ?? ""} onChange={(e) => p.onChoose(e.target.value || null)}>
+                  <option value="">{p.agent}'s default</option>
+                  {p.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.display_name}
+                    </option>
+                  ))}
+                </select>
+              }
+              hint={`New chats on ${p.agent} start on this model.`}
+            />
+            {p.effort && (
+              <SettingsRow
+                label="Thinking effort"
+                control={
+                  <select aria-label={`${p.agent} thinking effort`} value={p.effort.chosen ?? ""} onChange={(e) => p.effort!.onChoose(e.target.value || null)}>
+                    <option value="">{p.agent}'s default</option>
+                    {levels.map((level) => (
+                      <option key={level} value={level}>
+                        {effortLabel(level)}
+                      </option>
+                    ))}
+                  </select>
+                }
+                hint={EFFORT_HINT[p.effort.chosen ?? ""] ?? undefined}
+              />
+            )}
+            {p.options.length === 0 && <SettingsHint>{p.agent} hasn't said which models it takes. It lists them when it starts.</SettingsHint>}
+          </section>
+        );
+      })}
     </>
   );
 }

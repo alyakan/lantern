@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { McpServer, SkillEntry } from "../types";
 import { NOTIFY_DEFAULTS } from "../lib/notifyPrefs";
-import { CLAUDE_CAPABILITIES } from "../lib/provider";
 import { CUSTOM_DEFAULT } from "../lib/themes";
 
 const claudeRequest = vi.fn();
@@ -420,12 +419,11 @@ describe("Settings' nav", () => {
     expect(screen.getByRole("button", { name: "Appearance" })).toHaveFocus();
   });
 
-  it("offers a provider's own models when the chat isn't on Claude Code", () => {
-    const codex = { id: "codex", capabilities: { ...CLAUDE_CAPABILITIES, supports_advisor: false, supports_skills: false } };
+  it("lists every other provider's default model on Models, whichever chat is open", () => {
     const models = [{ value: "gpt-5", display_name: "GPT-5", description: "", resolved_model: "gpt-5", effort_levels: [] }];
-    render(<SettingsView open="harness" {...props} provider={codex} providerModels={{ agent: "Codex", options: models, chosen: null, onChoose: () => {} }} />);
-    expect(screen.getByRole("combobox", { name: "Model" })).toBeInTheDocument();
-    // The provider can switch models, so the page is offered — under Agent, not a provider's name.
+    render(<SettingsView open="harness" {...props} harness={{ saved: [], onSave: () => {}, folder: null, folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null }} providers={[{ id: "codex", agent: "Codex", options: models, chosen: null, onChoose: () => {} }]} />);
+    expect(screen.getByRole("combobox", { name: "Codex model" })).toBeInTheDocument();
+    // Models is in the nav whatever the chat's provider.
     expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("button", { name: "Models" })).toBeInTheDocument();
   });
 });

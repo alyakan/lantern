@@ -151,13 +151,16 @@ describe("settings, per provider", () => {
     return names;
   };
 
-  it("has Skills and the harness page for Claude, and neither for a provider with no skills and no advisor", () => {
+  it("has Skills for a provider with skills, but not for one without; Models stays whichever chat is open", () => {
     const claude = tabs(CLAUDE_INFO);
     expect(tabs(null)).toEqual(claude);
     expect(claude).toContain("Skills");
+    expect(claude).toContain("Models");
     const plain = tabs(PLAIN);
     expect(plain).not.toContain("Skills");
-    expect(plain).toEqual(claude.filter((t) => t !== "Skills" && t !== claude[0]));
+    // Models is the app's page — every provider's default — so it doesn't come and go with the chat.
+    expect(plain).toContain("Models");
+    expect(plain).toEqual(claude.filter((t) => t !== "Skills"));
   });
 
   it("opens another page when asked for one its provider has none of", () => {

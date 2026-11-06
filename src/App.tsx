@@ -3606,15 +3606,22 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         <SettingsView
           open={settingsAt}
           provider={state.provider}
-          providerModels={{
-            agent: agentName(state.provider),
-            // The same list the chat's Models chip offers: an endpoint's own, another provider's, or Claude's session list.
-            options: isGateway(activeProvider) ? modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider), true) : activeProvider === CLAUDE || state.models.length > 0 ? state.models : modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider)),
-            chosen: settingsFor(active).model,
-            onChoose: chooseModel,
-            effort: caps.supports_effort ? { chosen: settingsFor(active).effort, levels: [...EFFORT_LEVELS], onChoose: changeEffort } : undefined,
-            disabled: !state.folder,
-          }}
+          providers={providers.list
+            .filter((p) => p.id !== CLAUDE)
+            .map((p) => ({
+              id: p.id,
+              agent: providerName(p.id),
+              options: modelOptionsFor(p.models, providerName(p.id), isGateway(p.id)),
+              chosen: prefsOf(p.id).model,
+              onChoose: (model: string | null) => setProviderPrefs({ ...providerPrefs, [p.id]: { ...prefsOf(p.id), model } }),
+              effort: p.capabilities.supports_effort
+                ? {
+                    chosen: prefsOf(p.id).effort,
+                    levels: [...EFFORT_LEVELS],
+                    onChoose: (effort: string | null) => setProviderPrefs({ ...providerPrefs, [p.id]: { ...prefsOf(p.id), effort } }),
+                  }
+                : undefined,
+            }))}
           onClose={() => setSettingsAt(null)}
           slot={state.folder ? active : null}
           live={state.status === "idle" || state.status === "running"}
