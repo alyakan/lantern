@@ -41,6 +41,8 @@ export function SwipeRow({ children, background, pin, tray, open, onOpenChange }
   // The tray follows `open`: another row opening (or a tap on this one) closes it.
   useEffect(() => {
     go(open ? -width : 0);
+    // Its buttons went while it was open (the chat can't be closed any more): it is closed, not open over nothing.
+    if (open && width === 0) onOpenChange(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, width]);
 
@@ -127,7 +129,7 @@ export function SwipeRow({ children, background, pin, tray, open, onOpenChange }
       <Animated.View {...pan.panHandlers} style={{ backgroundColor: background, transform: [{ translateX: x }] }}>
         {children}
         {/* Open, the row is a way to close the tray, not to open the chat. */}
-        {open && <Pressable accessibilityElementsHidden importantForAccessibility="no" testID="swipe-close" onPress={() => onOpenChange(false)} style={StyleSheet.absoluteFill} />}
+        {open && width > 0 && <Pressable accessibilityElementsHidden importantForAccessibility="no" testID="swipe-close" onPress={() => onOpenChange(false)} style={StyleSheet.absoluteFill} />}
       </Animated.View>
     </View>
   );

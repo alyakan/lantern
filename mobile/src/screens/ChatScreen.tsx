@@ -404,9 +404,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
 
   // What was in the chat when it finished loading just is; what comes after (a message sent, Claude's words, a prompt)
   // comes in with a fade and a rise.
+  // A row is new once: what comes in is known from its first drawing, so a cell drawn for it again later (scrolled back to) doesn't
+  // play it again. What "Show earlier messages" brings, above the first row known, was there all along and just is.
   const known = useRef<Set<string> | null>(null);
   if (known.current === null && !view.resetting && rows.length > 0) known.current = new Set(rows.map((r) => r.key));
-  const arrives = (key: string) => known.current !== null && !known.current.has(key);
+  const position = useMemo(() => new Map(rows.map((r, i) => [r.key, i])), [rows]);
+  const firstKnown = useMemo(() => (known.current ? rows.findIndex((r) => known.current!.has(r.key)) : -1), [rows]);
+  const arrives = (key: string) => {
+    const k = known.current;
+    if (k === null || k.has(key)) return false;
+    k.add(key);
+    return !(firstKnown > 0 && (position.get(key) ?? 0) < firstKnown);
+  };
 
   // Your last message can be edited and sent again; what Claude's last message asks, if it is a yes or no, can be answered at once.
   const lastUser = [...rows].reverse().find((r) => r.kind === "user")?.key;
@@ -750,7 +759,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         scrollEnabled={!swiping}
         // With the keyboard up, a touch reaches what it lands on (a card's swipe to allow, a button) instead of only putting the keyboard away.
         keyboardShouldPersistTaps="handled"
-        getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind)}
+        // An answer that becomes the turn's summary when the turn ends keeps its cell (another type would swap the cell and play its
+        // entrance again: a blink as the turn ended).
+        getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind === "summary" ? "assistant" : r.kind)}
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
         ListHeaderComponent={
           loadingEarlier ? (

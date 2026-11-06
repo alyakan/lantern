@@ -63,6 +63,19 @@ describe("Insights on the phone", () => {
     expect(session.lastOf("insights")).toEqual({ op: "insights", range: "today" });
   });
 
+  it("is kept as it was left while another tab is shown: coming back neither asks again nor starts over", async () => {
+    const session = await open(["insights"]);
+    await fireEvent.press(screen.getByRole("tab", { name: "Insights" }));
+    await fireEvent.press(screen.getByRole("tab", { name: "Today" }));
+    await waitFor(() => expect(screen.getByText("lantern takes 71% today.")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
+    // Out of sight, and out of a screen reader's reach.
+    expect(screen.queryByText("lantern takes 71% today.")).toBeNull();
+    await fireEvent.press(screen.getByRole("tab", { name: "Insights" }));
+    expect(screen.getByText("lantern takes 71% today.")).toBeTruthy();
+    expect(session.asked.filter((r) => r.op === "insights")).toHaveLength(2);
+  });
+
   it("has no tab on a Mac that can't work them out", async () => {
     await open([]);
     expect(screen.queryByRole("tab", { name: "Insights" })).toBeNull();

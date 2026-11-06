@@ -3,17 +3,20 @@ import * as SecureStore from "expo-secure-store";
 import type { RemotePermissions } from "./protocol/generated/RemotePermissions";
 import type { Grouping } from "./view/home";
 import { NOTES_UNREADABLE } from "./whatsNew";
+import { known } from "./prefsKnown";
 
 const KEY = "lantern.home-grouping";
 const OPTIONS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
 
 /** How Home lists the chats; the recent-first list when nothing was chosen or it can't be read. */
 export async function loadGrouping(): Promise<Grouping> {
+  let g: Grouping;
   try {
-    return (await SecureStore.getItemAsync(KEY, OPTIONS)) === "project" ? "project" : "recent";
+    g = (await SecureStore.getItemAsync(KEY, OPTIONS)) === "project" ? "project" : "recent";
   } catch {
-    return "recent";
+    g = "recent";
   }
+  return (known.grouping = g);
 }
 
 
@@ -24,15 +27,18 @@ export type Tab = "chats" | "work" | "insights";
 
 /** The tab the phone was last on; the chats when nothing was chosen or it can't be read. */
 export async function loadTab(): Promise<Tab> {
+  let t: Tab;
   try {
     const tab = await SecureStore.getItemAsync(TAB_KEY, OPTIONS);
-    return tab === "work" || tab === "insights" ? tab : "chats";
+    t = tab === "work" || tab === "insights" ? tab : "chats";
   } catch {
-    return "chats";
+    t = "chats";
   }
+  return (known.tab = t);
 }
 
 export async function saveTab(tab: Tab): Promise<void> {
+  known.tab = tab;
   try {
     await SecureStore.setItemAsync(TAB_KEY, tab, OPTIONS);
   } catch {
@@ -41,6 +47,7 @@ export async function saveTab(tab: Tab): Promise<void> {
 }
 
 export async function saveGrouping(g: Grouping): Promise<void> {
+  known.grouping = g;
   try {
     await SecureStore.setItemAsync(KEY, g, OPTIONS);
   } catch {
@@ -74,15 +81,18 @@ export const FOLDED_KEPT = 40;
 
 /** The projects folded away in Home's project cards, by name; none when nothing was folded or it can't be read. */
 export async function loadFolded(): Promise<string[]> {
+  let f: string[];
   try {
     const raw: unknown = JSON.parse((await SecureStore.getItemAsync(FOLDED_KEY, OPTIONS)) ?? "[]");
-    return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string").slice(-FOLDED_KEPT) : [];
+    f = Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string").slice(-FOLDED_KEPT) : [];
   } catch {
-    return [];
+    f = [];
   }
+  return (known.folded = f);
 }
 
 export async function saveFolded(projects: string[]): Promise<void> {
+  known.folded = projects.slice(-FOLDED_KEPT);
   try {
     await SecureStore.setItemAsync(FOLDED_KEY, JSON.stringify(projects.slice(-FOLDED_KEPT)), OPTIONS);
   } catch {

@@ -27,9 +27,14 @@ import { AppLock } from "./src/lock";
 import { lockPlatform, secureLockMemory } from "./src/platformLock";
 import { LockContext } from "./src/shell/lockContext";
 import { LockGate } from "./src/shell/LockGate";
+import { loadFolded, loadGrouping, loadTab } from "./src/prefs";
 
 // The splash stays up until the headings' font is in (see below), instead of a blank screen.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+// How Home was left (its tab, grouping and folded cards) is read while the app starts, so the first Home is drawn that way at once.
+void loadTab();
+void loadGrouping();
+void loadFolded();
 
 /** The EAS project id Expo's push service needs (app.json, extra.eas.projectId; `eas init` writes it). */
 const projectId: string | undefined = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;

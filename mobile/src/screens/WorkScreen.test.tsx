@@ -141,6 +141,19 @@ describe("Your work on the phone", () => {
     expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
   });
 
+  it("lets go of a feature's page once the feature is gone, and doesn't open it again by itself when it comes back", async () => {
+    const { controller } = await open();
+    await openCard("Reliability");
+    const without = { ...work, items: work.items.filter((i) => i.feature !== "Reliability") };
+    await act(async () => controller.sync.apply({ type: "work", work: without }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
+    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
+    await act(async () => controller.sync.apply({ type: "work", work }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
+    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Reliability, / })).toBeTruthy();
+  });
+
   it("puts the way back beside the bar, as a chat's is: a glass circle with a finger's worth of a target", async () => {
     await open();
     const page = await openCard("Reliability");

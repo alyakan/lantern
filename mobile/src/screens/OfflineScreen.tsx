@@ -12,6 +12,7 @@ import { DarkLantern } from "../ui/lanterns";
 import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { DangerButton, LOOKS, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
 import { radius, space, useColors } from "../ui/theme";
 import { loadVoiceEngine, type VoiceEngine } from "../prefs";
@@ -219,7 +220,9 @@ export function ReconnectPill({ state }: { state: ConnectionState }) {
   // A run that gave up for good (the Mac is too new or too old for this phone) says why; the rest are still trying.
   const text = state.kind === "offline" && state.retryInMs === null ? state.reason : "Reconnecting to your Mac…";
   return (
-    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 6, left: 0, right: 0, alignItems: "center" }}>
+    // Under the screens' top bars (Home's, a chat's back button and title), not over them: it can't be touched, and what it
+    // covered could be touched without being seen.
+    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT + 8, left: 0, right: 0, alignItems: "center" }}>
       <FadeSlideIn from={-8} ms={200}>
         <View accessibilityRole="alert" accessibilityLabel={text} accessible style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 320, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
           <Animated.View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: regular ? EMBER : colors.hi, opacity: blink }} />

@@ -1,5 +1,5 @@
 import { tabBarRoom } from "../ui/TabBar";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -177,7 +177,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const now = Date.now();
+  // "5 min ago" moves on by itself, a minute at a time, while the tab is open.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const items = work?.items ?? [];
   const issues = work?.issues === true;
   const looked = work?.looked === true;
@@ -191,6 +196,11 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   // One group needs no card to open: its page is the screen.
   const alone = groups.length === 1;
   const open: WorkGroup | undefined = alone ? groups[0] : page !== null ? groups.find((g) => g.key === page) : undefined;
+  // A feature whose page was open and is gone (all of it shipped) is let go: the list shows, and the page doesn't come back by
+  // itself if the feature does.
+  useEffect(() => {
+    if (page !== null && !groups.some((g) => g.key === page)) setPage(null);
+  }, [page, groups.map((g) => g.key).join("\n")]);
 
   const refresh = () => {
     setRefreshing(true);

@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
+import { known } from "../prefsKnown";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
 import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
@@ -339,8 +340,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
   // How the chats are listed, and which project cards are folded away, are remembered on this phone.
-  const [grouping, setGrouping] = useState<Grouping>("recent");
-  const [folded, setFolded] = useState<string[]>([]);
+  // Read already (this app run): Home is drawn as it was left at once, not on the defaults and then again.
+  const [grouping, setGrouping] = useState<Grouping>(known.grouping ?? "recent");
+  const [folded, setFolded] = useState<string[]>(known.folded ?? []);
   // Holding a chat down offers to close it (on the Mac too), for a Mac that can.
   const canClose = useMacCan("close");
   const [closing, setClosing] = useState<Row | null>(null);
@@ -360,6 +362,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const canWork = useMacCan("work");
   const toDo = work ? nextSteps(work.items).length : 0;
   useEffect(() => {
+    if (known.grouping !== undefined && known.folded !== undefined) return;
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
     // A card folded before this was read stays folded with the rest.
@@ -434,18 +437,24 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected${usage ? `. ${tightestText(usage)}` : ""}` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, flexShrink: 1 }}>
           {/* The ring says enough while it is there: the dot stops pulsing inside it. */}
           <UsageRing fill={ringed ? ringed.window.used : null} tone={ringed?.view.tone ?? "ok"}>
-            {!macName ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} /> : ringed ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} /> : <PulseDot color={colors.go} size={8} ms={2600} />}
+            {/* A refresh going is said in the dot's place: nothing beside the name comes and goes, so the name keeps its room. */}
+            {refreshing ? (
+              <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+                <Dots size={3} color={colors.go} />
+              </View>
+            ) : !macName ? (
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />
+            ) : ringed ? (
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} />
+            ) : (
+              <PulseDot color={colors.go} size={8} ms={2600} />
+            )}
           </UsageRing>
           <Txt variant="small" tone="ink2" numberOfLines={1}>
             {macName ?? "Your Mac"}
           </Txt>
         </PressScale>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-          {refreshing && (
-            <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
-              <Dots />
-            </View>
-          )}
           {canSingle && !single && (
             <PressScale accessibilityRole="button" accessibilityLabel="One project" onPress={() => setPicking(true)} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
               <FocusGlyph color={colors.ink2} />
