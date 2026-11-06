@@ -13,7 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
 import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
-import { forgetWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
+import { forgetWorktree, isGoneWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
@@ -1875,14 +1875,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     if (shownWorktree?.pinned && worktreeBySession[sid] !== shownWorktree.path) setWorktreeBySession({ ...worktreeBySession, [sid]: shownWorktree.path });
     else if (!shownWorktree?.pinned && leftWorktree && sid in worktreeBySession) setWorktreeBySession(forgetWorktree(worktreeBySession, sid));
   }, [state.sessionId, shownWorktree, leftWorktree]);
-  // A chat that wakes or reopens goes back into its worktree, once per session: the one saved for it, else the one its
-  // transcript says. Not an agent's, whose own folder is its worktree. The backend checks it is still one of the
-  // project's worktrees; one removed since (merged and cleaned up) is forgotten.
+  // A chat that wakes or reopens goes back into its worktree, once each time its claude starts: the one saved for its
+  // session, else the one its transcript says. A wake keeps the slot and the session, so the start's generation is what
+  // tells it apart. Not an agent's, whose own folder is its worktree. The backend checks it is still one of the project's
+  // worktrees; one removed since (merged and cleaned up) is forgotten.
   const restoredWorktree = useRef(new Set<string>());
   useEffect(() => {
     const sid = state.sessionId;
     if (!sid || !state.folder || chats.agents[active] || (state.status !== "idle" && state.status !== "running")) return;
-    const key = `${active}:${sid}`;
+    const key = `${active}:${sid}:${startGen.current[active] ?? 0}`;
     if (restoredWorktree.current.has(key)) return;
     restoredWorktree.current.add(key);
     const path = worktreeToRestore(worktreeBySession[sid], state.items);
@@ -1890,7 +1891,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const slot = active;
     api.pinWorktree(slot, path).then(
       () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
-      () => sid in savedWorktrees.current && setWorktreeBySession(forgetWorktree(savedWorktrees.current, sid)),
+      // Only a worktree that is gone is forgotten, not one refused because the chat closed meanwhile.
+      (e) => isGoneWorktree(errText(e)) && sid in savedWorktrees.current && setWorktreeBySession(forgetWorktree(savedWorktrees.current, sid)),
     );
   }, [active, state.sessionId, state.status, state.folder]);
   const chooseWorktreeView = (main: boolean) => {

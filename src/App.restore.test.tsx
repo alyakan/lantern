@@ -109,6 +109,33 @@ describe("restoring chats at launch", () => {
     }
   });
 
+  it("puts a chat back in the worktree it was in when it reopens, and again each time it wakes from sleep", async () => {
+    localStorage.setItem("settings.worktreeBySession", JSON.stringify({ "3f1c2a": "/Users/you/projects/web-dashboard-wt/login" }));
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], shouldAdvanceTime: true });
+    try {
+      const calls = await launch();
+      const sent = (cmd: string) => calls.filter(([c]) => c === cmd).map(([, a]) => a);
+      const pins = () => sent("pin_worktree").map((a) => a?.path);
+      fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+      await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+      await waitFor(() => expect(pins()).toEqual(["/Users/you/projects/web-dashboard-wt/login"]));
+      // The other chat, which has no worktree, isn't put in one.
+      fireEvent.click(await screen.findByTitle("Retry transient fetch errors"));
+      await waitFor(() => expect(sent("open_session")).toHaveLength(2));
+      await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+      // The first chat sleeps (its slot, and the worktree in it, are gone), then is opened again: it goes back in.
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      await vi.advanceTimersByTimeAsync(31_000);
+      await waitFor(() => expect(sent("close_session")).toHaveLength(1));
+      const row = screen.getAllByTitle(JSON.parse(localStorage.getItem("session.openChats") ?? "[]").find((c: SavedChat) => c.sessionId === "3f1c2a").title).find((el) => el.getAttribute("aria-current") !== "true");
+      fireEvent.click(row!);
+      await waitFor(() => expect(sent("open_session")).toHaveLength(3));
+      await waitFor(() => expect(pins()).toEqual(["/Users/you/projects/web-dashboard-wt/login", "/Users/you/projects/web-dashboard-wt/login"]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("wakes a chat on the mode it was saved in, not the mode of the chat that was open when it was put to sleep", async () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ "9b7e01": "auto", "3f1c2a": "ask" }));
     const calls = await launch();

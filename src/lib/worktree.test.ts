@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem, ToolItem } from "../store";
-import { forgetWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./worktree";
+import { forgetWorktree, isGoneWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./worktree";
 
 const tool = (name: string, status: ToolItem["status"], summary = ""): ChatItem => ({ type: "tool", id: `${name}-${status}-${summary}`, name, summary, status, output: null, edit: null, children: [] });
 
@@ -39,5 +39,14 @@ describe("forgetWorktree", () => {
   it("drops one session's worktree and keeps the others", () => {
     expect(forgetWorktree({ a: "/wt/a", b: "/wt/b" }, "a")).toEqual({ b: "/wt/b" });
     expect(forgetWorktree({ b: "/wt/b" }, "a")).toEqual({ b: "/wt/b" });
+  });
+});
+
+describe("isGoneWorktree", () => {
+  it("is the backend's refusal of a worktree that isn't the project's, not any other error", () => {
+    expect(isGoneWorktree("/wt/old is not a linked worktree of this project. Its worktrees: a, b.")).toBe(true);
+    expect(isGoneWorktree("This project has no linked worktrees (git worktree list shows only its own folder). Create one first, such as with git worktree add.")).toBe(true);
+    expect(isGoneWorktree("That chat is no longer open.")).toBe(false);
+    expect(isGoneWorktree("No folder is open")).toBe(false);
   });
 });

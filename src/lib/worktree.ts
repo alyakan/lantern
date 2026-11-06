@@ -34,3 +34,6 @@ export function forgetWorktree(saved: Record<string, string>, sid: string): Reco
   const { [sid]: _gone, ...rest } = saved;
   return rest;
 }
+
+/** Whether the backend refused a worktree because it isn't one of the project's any more (see workdir.rs `resolve`). */
+export const isGoneWorktree = (error: string) => /is not a linked worktree|has no linked worktrees/.test(error);
