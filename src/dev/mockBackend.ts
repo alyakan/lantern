@@ -22,7 +22,7 @@ const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "u
 // Without it the app has Claude Code alone, as the real one does until another CLI is installed.
 let SECOND_PROVIDER = new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("providers");
 const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true, phone_approvals: true } };
-const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false } };
+const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false } };
 /** An endpoint the user set up: Claude Code sent elsewhere, with its skills and tools but not Anthropic's auto mode, advisor, effort or price. */
 const GATEWAY_INFO = { id: "gateway", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true } };
 const CODEX_MODELS = ["gpt-5-codex", "gpt-5", "o3"];
