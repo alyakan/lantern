@@ -1051,7 +1051,7 @@ exports[`single provider: the menus > models, with Claude's list and with the bu
     </button>
     <div
       aria-label="Models"
-      class="menu model-menu harness-menu"
+      class="menu model-menu preset-menu"
       role="menu"
       style="max-width: 0; transform: translateX(8px); top: calc(100% + 6px); bottom: auto; max-height: 750px;"
     >
@@ -1125,7 +1125,7 @@ exports[`single provider: the menus > models, with Claude's list and with the bu
         </span>
       </button>
       <button
-        class="menu-row harness-edit"
+        class="menu-row preset-edit"
         role="menuitem"
       >
         <span

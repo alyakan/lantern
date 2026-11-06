@@ -421,7 +421,7 @@ describe("Settings' nav", () => {
 
   it("lists every other provider's default model on Models, whichever chat is open", () => {
     const models = [{ value: "gpt-5", display_name: "GPT-5", description: "", resolved_model: "gpt-5", effort_levels: [] }];
-    render(<SettingsView open="harness" {...props} harness={{ saved: [], onSave: () => {}, folder: null, folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null }} providers={[{ id: "codex", agent: "Codex", options: models, chosen: null, onChoose: () => {} }]} />);
+    render(<SettingsView open="preset" {...props} preset={{ saved: [], onSave: () => {}, folder: null, folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null }} providers={[{ id: "codex", agent: "Codex", options: models, chosen: null, onChoose: () => {} }]} />);
     expect(screen.getByRole("combobox", { name: "Codex model" })).toBeInTheDocument();
     // Models is in the nav whatever the chat's provider.
     expect(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("button", { name: "Models" })).toBeInTheDocument();

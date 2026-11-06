@@ -1664,12 +1664,12 @@ struct Settings {
     /// In Step by step: auto-approve actions (Claude Code's auto mode) instead of asking in the app.
     #[serde(default)]
     auto_approve: bool,
-    /// The harness: the advisor model and the subagents' model (None = Claude Code's own settings).
+    /// The preset: the advisor model and the subagents' model (None = Claude Code's own settings).
     #[serde(default)]
     advisor: Option<String>,
     #[serde(default)]
     subagent_model: Option<String>,
-    /// The harness's Plugins off: claude starts without the user's plugins.
+    /// The preset's Plugins off: claude starts without the user's plugins.
     #[serde(default)]
     plugins_off: bool,
     /// Start the chat as the main agent of an orchestra: it can spawn workers (see orchestra.rs).
@@ -1771,7 +1771,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
     if settings.orchestrator {
         lead_provider(settings.provider)?;
     }
-    // A gateway chat's model is one of its endpoint's, and it has none of Claude's harness (no effort, advisor or subagent model).
+    // A gateway chat's model is one of its endpoint's, and it has none of Claude's preset (no effort, advisor or subagent model).
     let gateway = settings.provider == ProviderId::Gateway;
     let (endpoint, model) = if gateway {
         let (launch, model) = gateway_for(state, settings.endpoint.as_deref(), settings.model.clone(), std::path::Path::new(&folder)).await?;
@@ -2354,15 +2354,15 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     Ok(())
 }
 
-/// Restarts a chat's claude on the same session with another harness: main model and effort, advisor, subagents' model.
+/// Restarts a chat's claude on the same session with another preset: main model and effort, advisor, subagents' model.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String, model: Option<String>, effort: Option<String>, advisor: Option<String>, subagent_model: Option<String>, plugins_off: Option<bool>) -> Result<(), String> {
+async fn apply_preset(app: AppHandle, state: State<'_, AppState>, slot: String, model: Option<String>, effort: Option<String>, advisor: Option<String>, subagent_model: Option<String>, plugins_off: Option<bool>) -> Result<(), String> {
     let s = state.slots.get(&slot)?;
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
     if cfg.provider == ProviderId::Gateway {
-        return Err("A chat on an endpoint has no harness presets: it runs on the model it was started with.".into());
+        return Err("A chat on an endpoint has no presets: it runs on the model it was started with.".into());
     }
     cfg.model = checked_model(model)?;
     cfg.effort = checked_effort(effort)?;
@@ -4439,7 +4439,7 @@ pub fn run() {
             conversation_metadata,
             conversation_action,
             restart_session,
-            apply_harness,
+            apply_preset,
             close_session,
             orchestra_sleep_agent,
             earlier_events,
@@ -4916,7 +4916,7 @@ mod tests {
         }
     }
 
-    /// Restarting a worker, changing its harness or starting it from the window: whatever mode is asked for, it runs no
+    /// Restarting a worker, changing its preset or starting it from the window: whatever mode is asked for, it runs no
     /// freer than its main agent allows, and a chat that is no worker is left as asked.
     #[test]
     fn a_worker_restarted_with_more_freedom_than_its_main_agent_allows_is_capped() {

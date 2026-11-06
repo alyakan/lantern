@@ -1,7 +1,7 @@
 import type { Chats } from "../sessions";
 import { PROJECT_COLORS } from "./projectColors";
 import { permissionsOf, workflowOf } from "./workflow";
-import { summary, type Harness } from "./harness";
+import { summary, type Preset } from "./preset";
 import type { ProjectOpen } from "./sidebar";
 import { CLAUDE, CLAUDE_CAPABILITIES, capabilitiesOf } from "./provider";
 import type { ProviderInfo } from "../types";
@@ -88,7 +88,7 @@ export interface WindowPreset {
   summary: string;
 }
 
-export function windowPresets(presets: Harness[]): WindowPreset[] {
+export function windowPresets(presets: Preset[]): WindowPreset[] {
   return presets.map((h) => ({ id: h.id, name: h.name, summary: summary(h) }));
 }
 

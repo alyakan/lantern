@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, SUBAGENTS_OFF, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Harness } from "../lib/harness";
+import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, SUBAGENTS_OFF, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Preset } from "../lib/preset";
 import { EFFORT_LEVELS, effortLabel } from "../lib/effort";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
 import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
@@ -7,10 +7,10 @@ import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSet
 import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
 import { SettingsRow } from "./SettingsRow";
 
-export interface HarnessSettingsProps {
+export interface PresetSettingsProps {
   /** Every preset but Default, as saved (built-ins as edited, then your own). */
-  saved: Harness[];
-  onSave: (presets: Harness[]) => void;
+  saved: Preset[];
+  onSave: (presets: Preset[]) => void;
   /** The folder on screen, and the preset its chats start with. */
   folder: string | null;
   folderDefault: string;
@@ -22,15 +22,15 @@ export interface HarnessSettingsProps {
 const BUILT_IN_IDS = new Set(BUILT_IN.map((h) => h.id));
 const basename = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
-/** Settings → Harness: the presets, each with its main model and effort, advisor and subagents' model. */
-export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolderDefault, fallbackModel }: HarnessSettingsProps) {
+/** Settings → Preset: the presets, each with its main model and effort, advisor and subagents' model. */
+export function PresetSettings({ saved, onSave, folder, folderDefault, onFolderDefault, fallbackModel }: PresetSettingsProps) {
   const [editing, setEditing] = useState<string | null>(null);
   const agentLimit = useAgentLimit();
   const quiet = useQuietMinutes();
   const tidy = useTidyMode();
   const pauseAt = usePauseAtPercent();
   const all = [BUILT_IN[0], ...saved];
-  const update = (h: Harness) => onSave(saved.map((x) => (x.id === h.id ? h : x)));
+  const update = (h: Preset) => onSave(saved.map((x) => (x.id === h.id ? h : x)));
   const add = () => {
     const id = `h${Date.now().toString(36)}`;
     onSave([...saved, { id, name: "My preset", model: "sonnet", effort: "high", advisor: "opus", subagent: "haiku" }]);
@@ -54,7 +54,7 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
         </button>
       </div>
       {folder && (
-        <label className="harness-folder">
+        <label className="preset-folder">
           New chats in <strong>{basename(folder)}</strong> start with
           <select value={folderDefault} onChange={(e) => onFolderDefault(e.target.value)}>
             {all.map((h) => (
@@ -70,7 +70,7 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
           const open = editing === h.id && h.id !== DEFAULT_HARNESS;
           const pairing = validAdvisor(h, fallbackModel);
           return (
-            <li key={h.id} className="settings-row harness-row">
+            <li key={h.id} className="settings-row preset-row">
               <button className="settings-row-main" aria-expanded={open} disabled={h.id === DEFAULT_HARNESS} onClick={() => setEditing(open ? null : h.id)}>
                 <span className="settings-row-text">
                   <span className="settings-row-name">{h.name}</span>
@@ -78,12 +78,12 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
                 </span>
                 {!pairing && <span className="mcp-status bad">Advisor too weak for this model</span>}
               </button>
-              {open && <HarnessEditor h={h} fallbackModel={fallbackModel} onChange={update} onRemove={BUILT_IN_IDS.has(h.id) ? undefined : () => remove(h.id)} />}
+              {open && <PresetEditor h={h} fallbackModel={fallbackModel} onChange={update} onRemove={BUILT_IN_IDS.has(h.id) ? undefined : () => remove(h.id)} />}
             </li>
           );
         })}
       </ul>
-      <button className="harness-restore" onClick={restore}>
+      <button className="preset-restore" onClick={restore}>
         Restore the built-in presets
       </button>
       <section className="general-section" aria-labelledby="models-teams">
@@ -165,8 +165,8 @@ function ModelSelect({ label, value, options, none, labels = {}, onChange }: { l
   );
 }
 
-function HarnessEditor({ h, fallbackModel, onChange, onRemove }: { h: Harness; fallbackModel: string | null; onChange: (h: Harness) => void; onRemove?: () => void }) {
-  const set = (patch: Partial<Harness>) => {
+function PresetEditor({ h, fallbackModel, onChange, onRemove }: { h: Preset; fallbackModel: string | null; onChange: (h: Preset) => void; onRemove?: () => void }) {
+  const set = (patch: Partial<Preset>) => {
     const next = { ...h, ...patch };
     // A new main model may not take the advisor any more: drop it rather than start a chat Claude Code refuses.
     if (patch.model !== undefined && next.advisor && !validAdvisor(next, fallbackModel)) next.advisor = null;
@@ -174,7 +174,7 @@ function HarnessEditor({ h, fallbackModel, onChange, onRemove }: { h: Harness; f
   };
   const advisors = advisorsFor(familyOf(h.model ?? fallbackModel));
   return (
-    <div className="harness-editor">
+    <div className="preset-editor">
       <label className="wide">
         Name
         <input value={h.name} onChange={(e) => set({ name: e.target.value })} />

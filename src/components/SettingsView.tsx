@@ -14,7 +14,7 @@ import type { CustomTheme, ThemeId } from "../lib/themes";
 import { ThemePicker } from "./ThemePicker";
 import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
-import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
+import { PresetSettings, type PresetSettingsProps } from "./PresetSettings";
 import { ApiKeysSettings } from "./ApiKeysSettings";
 import { EndpointsSettings, type EndpointsSettingsProps } from "./EndpointsSettings";
 import { LinearSettings, type LinearSettingsProps } from "./LinearSettings";
@@ -29,13 +29,13 @@ import { ProviderDefaults, type ProviderDefault } from "./ProviderModels";
 import { SettingsHint, SettingsRow } from "./SettingsRow";
 import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "integrations";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "preset" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "integrations";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", preset: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
 
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
   { title: "Lantern", tabs: ["general", "appearance", "updates"] },
-  { title: "Agent", tabs: ["harness", "permissions", "skills"] },
+  { title: "Agent", tabs: ["preset", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
   { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "integrations", "remote"] },
 ];
@@ -45,7 +45,7 @@ const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
   general: ["notifications", "sound", "memory", "sleep", "awake", "restore points", "sidebar"],
   appearance: ["theme", "text size", "menu bar", "look", "dark", "light"],
   updates: ["version", "update", "release"],
-  harness: ["models", "presets", "advisor", "subagents", "effort"],
+  preset: ["models", "presets", "advisor", "subagents", "effort"],
   permissions: ["allow", "rules", "always allow", "deny"],
   skills: ["plugins", "agents"],
   routines: ["schedule", "prompts", "cron"],
@@ -72,10 +72,10 @@ const SETTING_INDEX: { tab: SettingsTab; label: string; anchor?: string }[] = [
   { tab: "appearance", label: "Text size", anchor: "appearance-look" },
   { tab: "appearance", label: "Menu bar readout", anchor: "appearance-menubar" },
   { tab: "appearance", label: "Show Lantern in the menu bar", anchor: "appearance-menubar" },
-  { tab: "harness", label: "Agents running at once", anchor: "models-teams" },
-  { tab: "harness", label: "Say an agent is quiet after", anchor: "models-teams" },
-  { tab: "harness", label: "Tidy up an agent after its merge", anchor: "models-teams" },
-  { tab: "harness", label: "Pause agents at a usage limit", anchor: "models-teams" },
+  { tab: "preset", label: "Agents running at once", anchor: "models-teams" },
+  { tab: "preset", label: "Say an agent is quiet after", anchor: "models-teams" },
+  { tab: "preset", label: "Tidy up an agent after its merge", anchor: "models-teams" },
+  { tab: "preset", label: "Pause agents at a usage limit", anchor: "models-teams" },
   { tab: "prs", label: "Run tests when a merge is proposed", anchor: "prs-merge-tests" },
   { tab: "integrations", label: "Linear", anchor: "integrations-linear" },
   { tab: "remote", label: "Pair a phone" },
@@ -88,7 +88,7 @@ const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
   general: GearIcon,
   appearance: SunIcon,
   updates: DownloadIcon,
-  harness: SparkIcon,
+  preset: SparkIcon,
   permissions: ShieldIcon,
   skills: LearnIcon,
   routines: ClockIcon,
@@ -128,8 +128,8 @@ interface Props {
   onCommands?: (commands: SlashCommand[]) => void;
   /** Restarts the chat's claude, which reads MCP settings when it starts. */
   onRestartChat?: () => void;
-  /** The harness presets, for the Harness page. */
-  harness?: HarnessSettingsProps;
+  /** The presets, for the Preset page. */
+  preset?: PresetSettingsProps;
   /** Every other provider's default model, for the Models page (Codex, an endpoint): what its new chats start on. */
   providers?: ProviderDefault[];
   /** The running version and how updating is going, for the Updates page. */
@@ -146,18 +146,18 @@ interface Props {
   endpoints?: EndpointsSettingsProps;
   /** Linear: the key, and the team of each project, for the Linear page. */
   linear?: LinearSettingsProps;
-  /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
+  /** The agent CLI the chat runs on: with no skills, or no advisor to set up a preset for, those pages aren't offered. Absent: Claude Code's. */
   provider?: ProviderInfo | null;
   /** MCP servers that are down or need a login ("sentry needs you to log in"): the MCP row wears a warning dot. */
   mcpIssues?: string[];
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, providers, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
+export function SettingsView({ open, onClose, preset, providers, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
-  // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
+  // A page the chat's provider has nothing for (skills, the preset) isn't offered; one asked for anyway opens on General.
   const offered = (t: SettingsTab) => t !== "skills" || caps.supports_skills;
   const tab = offered(picked) ? picked : "general";
   // The search narrows the nav; ⌘F focuses it and Enter opens the first match.
@@ -165,7 +165,7 @@ export function SettingsView({ open, onClose, harness, providers, updates, gener
   const searchRef = useRef<HTMLInputElement>(null);
   // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
   const available = (t: SettingsTab) =>
-    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "preset" || preset) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
   const q = query.trim().toLowerCase();
   const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
   const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
@@ -279,9 +279,9 @@ export function SettingsView({ open, onClose, harness, providers, updates, gener
               <GeneralPage {...general} />
             ) : tab === "appearance" && general ? (
               <AppearancePage {...general} />
-            ) : tab === "harness" && harness ? (
+            ) : tab === "preset" && preset ? (
               <>
-                <HarnessSettings {...harness} />
+                <PresetSettings {...preset} />
                 {providers && providers.length > 0 && <ProviderDefaults providers={providers} />}
               </>
             ) : tab === "endpoints" && endpoints ? (

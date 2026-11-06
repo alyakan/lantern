@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// Called for every successful edit with (path, content before the edit).
 pub type EditHook = Arc<dyn Fn(&str, Option<String>) + Send + Sync>;
 
-/// A harness's subagent model that turns subagents off: only the main model and its advisor work (harness.ts SUBAGENTS_OFF).
+/// A preset's subagent model that turns subagents off: only the main model and its advisor work (preset.ts SUBAGENTS_OFF).
 pub const SUBAGENTS_OFF: &str = "off";
 
 #[derive(Debug, Clone)]
@@ -36,7 +36,7 @@ pub struct SessionConfig {
     /// The model subagents run on (CLAUDE_CODE_SUBAGENT_MODEL); None leaves it to each subagent, SUBAGENTS_OFF starts claude
     /// without the tool that starts them.
     pub subagent_model: Option<String>,
-    /// A harness preset's Plugins off: claude starts with none of the user's plugins, as a worker does (see launch_args).
+    /// A preset's Plugins off: claude starts with none of the user's plugins, as a worker does (see launch_args).
     pub plugins_off: bool,
     pub helper: HelperConfig,
     /// PATH for the child (the user's login-shell PATH); None inherits ours.

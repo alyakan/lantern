@@ -412,10 +412,10 @@ export interface Settings {
   effort: string | null;
   /** In Step by step: Claude Code's auto mode approves actions instead of asking in the app. */
   auto_approve?: boolean;
-  /** The harness: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
+  /** The preset: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
   advisor?: string | null;
   subagent_model?: string | null;
-  /** Start claude without the user's plugins (a harness preset's Plugins: Off). */
+  /** Start claude without the user's plugins (a preset's Plugins: Off). */
   plugins_off?: boolean;
   /** Start the chat as the main agent of an orchestra: it can spawn workers. */
   orchestrator?: boolean;

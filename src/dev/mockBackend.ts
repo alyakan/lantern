@@ -1783,7 +1783,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           }
           return null;
         }
-        case "apply_harness":
+        case "apply_preset":
         case "continue_fresh":
           return null;
         case "close_session":

@@ -275,7 +275,7 @@ function RoutineForm({ initial, projects, onSave, onCancel }: { initial: Routine
   const timed = f.kind !== "every";
   return (
     <form
-      className="harness-editor routine-editor"
+      className="preset-editor routine-editor"
       aria-label={initial ? `Edit ${initial.name}` : "New routine"}
       onSubmit={(e) => {
         e.preventDefault();

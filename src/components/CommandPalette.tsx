@@ -3,7 +3,7 @@ import { filterEntries, type PaletteEntry } from "../lib/palette";
 import { scrollWithin } from "../lib/scrollWithin";
 
 interface Props {
-  /** Everything that can run now: enabled actions, modes, harnesses and Settings pages. */
+  /** Everything that can run now: enabled actions, modes, presetes and Settings pages. */
   entries: PaletteEntry[];
   onClose: () => void;
 }

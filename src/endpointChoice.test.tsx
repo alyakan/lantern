@@ -69,7 +69,7 @@ describe("with an endpoint set up", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Ollama/ }));
     await screen.findByPlaceholderText("Ask Ollama…");
     await waitFor(() => expect(started()).toHaveLength(2));
-    // The program is Claude Code's, which the window found; the endpoint and its model are named; the harness is none.
+    // The program is Claude Code's, which the window found; the endpoint and its model are named; the preset is none.
     expect(started()[1].claudePath).toBe(CLAUDE);
     expect(started()[1].settings).toMatchObject({ provider: "gateway", endpoint: "ollama", mode: "ask", model: "qwen3:8b", effort: null, auto_approve: false });
     expect(started()[1].settings.advisor ?? null).toBeNull();

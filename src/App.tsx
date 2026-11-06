@@ -42,7 +42,7 @@ import { prependDraft } from "./lib/paste";
 import { withPrompt } from "./lib/promptHistory";
 import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
-import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
+import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findPreset, presetsOf, settingsOf, type Preset } from "./lib/preset";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { CloseAgreed, CloseCheck, McpServer, MenuBarAction, MovedFolder, NewRule, NewWorker, OpenPr, RecentFolder, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
@@ -221,13 +221,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [modelIds, setModelIds] = usePersistentState<Record<string, string>>("settings.modelIds", {});
   // Each model's context window as last reported, so the meter can show a percentage before a turn reports one.
   const [windows, setWindows] = usePersistentState<Record<string, number>>("settings.contextWindows", {});
-  // Harness presets (which models do what), the one each folder starts with, and each session's, like modes.
-  const [savedPresets, setSavedPresets] = usePersistentState<Harness[]>("settings.harnessPresets", BUILT_IN.slice(1));
+  // Preset presets (which models do what), the one each folder starts with, and each session's, like modes.
+  const [savedPresets, setSavedPresets] = usePersistentState<Preset[]>("settings.harnessPresets", BUILT_IN.slice(1));
   const presets = presetsOf(savedPresets);
-  const [harnessByFolder, setHarnessByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
+  const [presetByFolder, setPresetByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
   // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
   const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
-  const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  const [presetBySession, setPresetBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // The worktree each session was put in (enter_worktree, or the Changes pane's picker), which it goes back to when it wakes.
   const [worktreeBySession, setWorktreeBySession] = usePersistentState<Record<string, string>>("settings.worktreeBySession", {});
   // Which agent CLI each project's new chats start on (absent: Claude Code, as before there was a choice), and each session's
@@ -259,7 +259,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [warnTeams, setWarnTeams] = usePersistentState<boolean>("settings.warnSecondTeam", true);
   const [teamAsk, setTeamAsk] = useState<{ teams: WorkingTeam[]; go: () => void; cancel?: () => void } | null>(null);
   // Each open chat's preset.
-  const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
+  const [presetBySlot, setPresetBySlot] = useState<Record<string, string>>({});
   // The Permissions a paired phone last put each chat on, so that they aren't taken for the project's own choice.
   const phoneMode = useRef<Record<string, Permissions>>({});
   // And the Workflow a phone last put each chat on, likewise.
@@ -525,9 +525,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const recap = useRecap(active, { canRecap: caps.supports_recap !== false, idle: state.status === "idle", sessionId: state.sessionId ?? null, items: state.items.length }, state.folder, state.claudePath ?? null);
   const activeProvider = providerIdOf(state.provider);
 
-  // The harness (which models do what) is Claude Code's: a provider with no advisor runs Standard, its own model and effort.
-  const harnessFor = (c: { supports_advisor: boolean }, id: string | undefined | null) => (c.supports_advisor ? findHarness(presets, id) : BUILT_IN[0]);
-  const harnessOf = (slot: string) => harnessFor(capsOf(slot), harnessBySlot[slot]);
+  // The preset (which models do what) is Claude Code's: a provider with no advisor runs Standard, its own model and effort.
+  const presetFor = (c: { supports_advisor: boolean }, id: string | undefined | null) => (c.supports_advisor ? findPreset(presets, id) : BUILT_IN[0]);
+  const presetOf = (slot: string) => presetFor(capsOf(slot), presetBySlot[slot]);
   /** A launch on a provider with no Auto: Ask, whatever the Permissions asked for (what the backend caps to as well). */
   const onProvider = (l: { mode: Mode; autoApprove: boolean }, can: Capabilities) => (can.supports_auto_mode ? l : { mode: modeOn(l.mode, can), autoApprove: false });
   /**
@@ -535,7 +535,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * Claude runs on the model its routine names. `provider`: the chat's, when it isn't in `chats` yet (it is being started). A
    * provider with no effort level is given none.
    */
-  const settingsFor = (slot: string, h: Harness = harnessOf(slot), provider: ProviderInfo | null = chats.slots[slot]?.provider ?? null) => {
+  const settingsFor = (slot: string, h: Preset = presetOf(slot), provider: ProviderInfo | null = chats.slots[slot]?.provider ?? null) => {
     const id = providerIdOf(provider);
     const prefs = id === CLAUDE && h.id === DEFAULT_HARNESS && slot in routineSlots.current ? { model: routineSlots.current[slot].model, effort } : prefsOf(id);
     const s = settingsOf(h, prefs);
@@ -719,8 +719,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // A provider with no Auto runs on Ask.
     const { mode, autoApprove } = onProvider(remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team), can);
     const orchestrator = team;
-    const h = routine ? BUILT_IN[0] : harnessFor(can, remote && remote.preset ? remote.preset : harnessByFolder[folder]);
-    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
+    const h = routine ? BUILT_IN[0] : presetFor(can, remote && remote.preset ? remote.preset : presetByFolder[folder]);
+    setPresetBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     // Known before the start answers, so what the provider lacks is never shown, even for a moment.
     if (info) to(slot)({ type: "provider_set", provider: info });
@@ -806,9 +806,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     if (next) setSessionModes(next);
   }, [modesKey]);
   useEffect(() => {
-    const id = harnessBySlot[active];
-    if (state.sessionId && id && harnessBySession[state.sessionId] !== id) setHarnessBySession({ ...harnessBySession, [state.sessionId]: id });
-  }, [harnessBySlot[active], state.sessionId]);
+    const id = presetBySlot[active];
+    if (state.sessionId && id && presetBySession[state.sessionId] !== id) setPresetBySession({ ...presetBySession, [state.sessionId]: id });
+  }, [presetBySlot[active], state.sessionId]);
 
   // With no model chosen, whatever claude runs is Claude Code's default: remember it so the menu can name it.
   // And for an alias, the version it currently resolves to.
@@ -897,8 +897,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // reopens it on Ask.
     const { mode, autoApprove } = onProvider({ mode: saved.mode, autoApprove: saved.mode === "steps" && (saved.autoApprove ?? permissionsFor(folder) === "auto") }, can);
     // The preset it last ran with, else the folder's.
-    const h = harnessFor(can, harnessBySession[sessionId] ?? harnessByFolder[folder]);
-    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
+    const h = presetFor(can, presetBySession[sessionId] ?? presetByFolder[folder]);
+    setPresetBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder, ...(title ? { title } : {}) });
     if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
@@ -1067,7 +1067,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         phoneFlow.current[slot] = workflow;
         setSettings(slot, permissionsOf(s), workflow);
       } else {
-        applyHarness(findHarness(presets, change.preset), slot, false);
+        applyPreset(findPreset(presets, change.preset), slot, false);
       }
     });
   };
@@ -1613,15 +1613,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     to(slot)({ type: "restarting", fresh: true });
     api.continueFresh(slot).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
-  const switchHarness = (h: Harness, slot = active) => changeOrAsk(slot, { preset: h.id }, () => unlessBackground(slot, () => applyHarness(h, slot)));
+  const switchPreset = (h: Preset, slot = active) => changeOrAsk(slot, { preset: h.id }, () => unlessBackground(slot, () => applyPreset(h, slot)));
   // `remember`: it also becomes the folder's preset, for the project's next chats; a phone's switch doesn't (nobody chose it at the Mac).
-  const applyHarness = (h: Harness, slot: string, remember = true) => {
-    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
+  const applyPreset = (h: Preset, slot: string, remember = true) => {
+    setPresetBySlot((all) => ({ ...all, [slot]: h.id }));
     const folder = chats.slots[slot]?.folder;
     if (!folder) return;
-    if (remember) setHarnessByFolder({ ...harnessByFolder, [folder]: h.id });
+    if (remember) setPresetByFolder({ ...presetByFolder, [folder]: h.id });
     to(slot)({ type: "restarting" });
-    api.applyHarness(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.applyPreset(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
   const putSwitch = (slot: string, p: (Pending & { phone?: boolean }) | null) =>
     setSwitches((all) => {
@@ -1631,7 +1631,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // What the window knows the chat runs on: the provider's model and effort it may not (a phone changed them on the backend).
   const currentOf = (slot: string): Current => {
     const s = chats.slots[slot];
-    return { permissions: s ? permissionsOf(s) : "ask", workflow: s ? workflowOf(s) : "chat", preset: harnessOf(slot).id, conversation: {} };
+    return { permissions: s ? permissionsOf(s) : "ask", workflow: s ? workflowOf(s) : "chat", preset: presetOf(slot).id, conversation: {} };
   };
   const queueSwitch = (slot: string, change: Change, when: When, phone = false) => {
     const s = chats.slots[slot];
@@ -1672,7 +1672,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       // Only a preset the window still has (one deleted while it waited isn't swapped for the default).
       const h = presets.find((x) => x.id === c.preset);
       if (!h) return touchSwitch(slot, { note: "That preset is gone, so this chat stays on its own." });
-      return applyHarness(h, slot, !p.phone);
+      return applyPreset(h, slot, !p.phone);
     }
     if (step === "conversation" && c.conversation) return applyConversation(slot, c.conversation);
     const workflow = c.workflow ?? workflowOf(s);
@@ -1771,12 +1771,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, []);
 
   // Changing model or effort on a chat with a preset makes it Custom: that preset with the change.
-  const customize = (patch: Partial<Harness>) => {
-    const custom = customOf(harnessOf(active), patch);
+  const customize = (patch: Partial<Preset>) => {
+    const custom = customOf(presetOf(active), patch);
     setSavedPresets([...savedPresets.filter((h) => h.id !== CUSTOM_HARNESS), custom]);
-    switchHarness(custom);
+    switchPreset(custom);
   };
-  const presetOn = harnessOf(active).id !== DEFAULT_HARNESS;
+  const presetOn = presetOf(active).id !== DEFAULT_HARNESS;
 
   // Effort is a launch flag, so the chat's claude restarts on the same session to pick it up (like the mode).
   // The effort and model are each provider's own: Claude's are the app-wide ones, another provider's are kept beside them.
@@ -1796,7 +1796,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     if (activeProvider === CLAUDE) setModel(next);
     else setProviderPrefs({ ...providerPrefs, [activeProvider]: { ...prefsOf(activeProvider), model: next } });
     for (const slot of Object.keys(chats.slots)) {
-      if (providerIdOf(chats.slots[slot].provider) === activeProvider && harnessOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+      if (providerIdOf(chats.slots[slot].provider) === activeProvider && presetOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
     }
   };
 
@@ -2539,11 +2539,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const workflows = (["chat", "steps", "team"] as const)
       .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && (chats.agents[active] || !caps.can_lead_team)))
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
-    const harnesses = presets
-      .filter((h) => ready && caps.supports_advisor && h.id !== harnessOf(active).id)
-      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
-    const tabs = (["general", "appearance", "harness", "endpoints", "mcp", "skills", "permissions", "prs", "integrations", "updates"] as SettingsTab[])
-      .filter((t) => (t !== "harness" || (!!state.folder && caps.supports_advisor)) && (t !== "skills" || caps.supports_skills))
+    const presetes = presets
+      .filter((h) => ready && caps.supports_advisor && h.id !== presetOf(active).id)
+      .map((h): PaletteEntry => ({ id: `preset:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchPreset(h) }));
+    const tabs = (["general", "appearance", "preset", "endpoints", "mcp", "skills", "permissions", "prs", "integrations", "updates"] as SettingsTab[])
+      .filter((t) => (t !== "preset" || (!!state.folder && caps.supports_advisor)) && (t !== "skills" || caps.supports_skills))
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
@@ -2552,7 +2552,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const insightsEntry: PaletteEntry = { id: "insights", title: "Insights", group: "View", shortcut: null, run: () => setInsightsOpen(true) };
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
-    return [...availableActions(), searchChats, storageEntry, insightsEntry, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
+    return [...availableActions(), searchChats, storageEntry, insightsEntry, ...project, ...permissions, ...workflows, ...presetes, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -2645,8 +2645,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     if (subagents) setSubagentsBy(subagents);
     const prompts = take<Record<string, string[]>>("settings.promptHistory");
     if (prompts) setPromptsBy(prompts);
-    const harness = take<Record<string, string>>("settings.harnessByFolder");
-    if (harness) setHarnessByFolder(harness);
+    const preset = take<Record<string, string>>("settings.harnessByFolder");
+    if (preset) setPresetByFolder(preset);
     const provider = take<Record<string, string>>("settings.providerByFolder");
     if (provider) setProviderByFolder(provider);
     const collapsed = take<Record<string, boolean>>("review.collapsedByFolder");
@@ -2770,7 +2770,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const { permissions, workflow, preset } = p.change;
     return { when: p.when, text: describeChange(p.change, presetLabel), ...(permissions ? { permissions } : {}), ...(workflow ? { workflow } : {}), ...(preset ? { preset } : {}) };
   };
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel, pendingOf);
+  const hubList = windowChats(chats, openByProject, presetBySlot, projectColors, providerLabel, pendingOf);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});
@@ -3287,7 +3287,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         options: isGateway(activeProvider) ? modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider), true) : activeProvider === CLAUDE || state.models.length > 0 ? state.models : modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider)),
       }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
-      harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
+      preset={state.folder ? { presets, chosen: presetOf(active).id, onChoose: (id) => switchPreset(findPreset(presets, id)), onEdit: () => setSettingsAt("preset") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => void api.conversationAction(active, "compact").catch((e) => dispatch({ type: "failed", text: errText(e) })), onClear: () => clearChat(active), ...(state.orchestrator ? {} : { onFresh: () => continueFresh(active) }) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       pendingSwitch={
@@ -3669,17 +3669,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             whatsNew: versionsWithNotes(localStorage, [updates.version, update?.version]),
             onWhatsNew: showWhatsNew,
           }}
-          harness={{
+          preset={{
             saved: presets.slice(1),
             onSave: (next) => {
               setSavedPresets(next);
               // The chat on screen runs its preset as edited (when it's not in the middle of a turn).
-              const mine = next.find((h) => h.id === harnessOf(active).id);
-              if (mine && state.folder && state.status === "idle" && JSON.stringify(settingsFor(active, mine)) !== JSON.stringify(settingsFor(active))) switchHarness(mine);
+              const mine = next.find((h) => h.id === presetOf(active).id);
+              if (mine && state.folder && state.status === "idle" && JSON.stringify(settingsFor(active, mine)) !== JSON.stringify(settingsFor(active))) switchPreset(mine);
             },
             folder: state.folder,
-            folderDefault: state.folder ? (harnessByFolder[state.folder] ?? DEFAULT_HARNESS) : DEFAULT_HARNESS,
-            onFolderDefault: (id) => state.folder && setHarnessByFolder({ ...harnessByFolder, [state.folder]: id }),
+            folderDefault: state.folder ? (presetByFolder[state.folder] ?? DEFAULT_HARNESS) : DEFAULT_HARNESS,
+            onFolderDefault: (id) => state.folder && setPresetByFolder({ ...presetByFolder, [state.folder]: id }),
             fallbackModel: defaultModel,
           }}
         />

@@ -1,6 +1,6 @@
 import { formatTokens } from "./cost";
 import { basename } from "./diff";
-import { modelName } from "./harness";
+import { modelName } from "./preset";
 import { nodeStatus } from "./orchestraView";
 import { chatTitle, type Chats } from "../sessions";
 import { totalCost, totalTokens, type State } from "../store";

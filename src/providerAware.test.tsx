@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatsReducer, initialChats } from "./sessions";
 import { initialState, reducer, type ChatItem, type State } from "./store";
 import type { ModelOption, UiEvent } from "./types";
-import { BUILT_IN } from "./lib/harness";
+import { BUILT_IN } from "./lib/preset";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
 import { orchestraNodes } from "./lib/orchestraView";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -44,7 +44,7 @@ const box = (provider: typeof PLAIN | null) => (
     onPermissionsChange={() => {}}
     models={{ chosen: null, onChoose: () => {}, options: MODELS }}
     effort={{ chosen: null, onChoose: () => {} }}
-    harness={{ presets: BUILT_IN, chosen: "default", onChoose: () => {} }}
+    preset={{ presets: BUILT_IN, chosen: "default", onChoose: () => {} }}
     usage={{ used: 1000, window: 200_000, lastTurnMs: null, actions: { onCompact: () => {}, onClear: () => {} }, session: { cost: null, tokens: 5000 } }}
     commands={COMMANDS}
     findFiles={() => Promise.resolve([{ path: "/p/src/net/fetchJson.ts", rel: "src/net/fetchJson.ts", hits: [] }])}
@@ -52,7 +52,7 @@ const box = (provider: typeof PLAIN | null) => (
   />
 );
 
-/** The chip for who does the work: "Models: …" with the harness presets, "Model: …" without. */
+/** The chip for who does the work: "Models: …" with the presets, "Model: …" without. */
 const modelChip = () => document.querySelector<HTMLElement>(".model-picker:not(.provider-picker) .model-button")!;
 
 describe("the Permissions choices", () => {
@@ -80,7 +80,7 @@ describe("the Permissions choices", () => {
 });
 
 describe("the chat box, per provider", () => {
-  it("offers a Claude chat effort, the harness presets, the slash menu and its context actions", () => {
+  it("offers a Claude chat effort, the presets, the slash menu and its context actions", () => {
     render(box(CLAUDE_INFO));
     expect(modelChip().title).toMatch(/^Models: .* · Effort /);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/" } });
@@ -97,7 +97,7 @@ describe("the chat box, per provider", () => {
 
   it("gives a chat on the other provider no presets, no Auto, and no slash menu, but keeps effort, the model and file mentions", async () => {
     render(box(PLAIN));
-    // No harness presets (they need an advisor), but effort, which the provider takes.
+    // No presets (they need an advisor), but effort, which the provider takes.
     expect(modelChip().title).toMatch(/^Model: .* · Effort /);
     // Auto is off in the Permissions menu.
     fireEvent.click(screen.getByRole("button", { name: /^Permissions/ }));
@@ -145,7 +145,7 @@ describe("the chat box, per provider", () => {
 
 describe("settings, per provider", () => {
   const tabs = (provider: typeof PLAIN | null) => {
-    render(<SettingsView open="mcp" provider={provider} onClose={() => {}} slot="s1" live mcpTools={[]} commands={[]} harness={{ saved: BUILT_IN.slice(1), onSave: () => {}, folder: "/p", folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null }} />);
+    render(<SettingsView open="mcp" provider={provider} onClose={() => {}} slot="s1" live mcpTools={[]} commands={[]} preset={{ saved: BUILT_IN.slice(1), onSave: () => {}, folder: "/p", folderDefault: "default", onFolderDefault: () => {}, fallbackModel: null }} />);
     const names = [...document.querySelectorAll(".mode-guide-tab")].map((t) => t.textContent);
     cleanup();
     return names;

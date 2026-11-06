@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatsReducer, initialChats } from "./sessions";
 import { initialState, type State } from "./store";
 import type { ModelOption } from "./types";
-import { BUILT_IN } from "./lib/harness";
+import { BUILT_IN } from "./lib/preset";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
 import { orchestraNodes } from "./lib/orchestraView";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -71,7 +71,7 @@ describe("single provider: the chat box", () => {
     branch: "main",
     models: { chosen: null, onChoose: () => {}, options: MODELS },
     effort: { chosen: "high", onChoose: () => {} },
-    harness: { presets: BUILT_IN, chosen: "default", onChoose: () => {} },
+    preset: { presets: BUILT_IN, chosen: "default", onChoose: () => {} },
     usage: { used: 61_480, window: 200_000, lastTurnMs: 8_200, session: { cost: 0.9, tokens: 400_000 }, actions: { onCompact: () => {}, onClear: () => {} } },
     commands: [{ name: "compact", description: "Clear conversation history but keep a summary", argument_hint: "" }],
   };

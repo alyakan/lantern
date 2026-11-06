@@ -288,7 +288,7 @@ describe("restoring a team at launch", () => {
   });
 
   it("brings an agent back on the model it had, or Sonnet when none was saved, never on the project's own model", async () => {
-    // The project's harness runs its chats on Opus; the agents didn't.
+    // The project's preset runs its chats on Opus; the agents didn't.
     localStorage.setItem("settings.model", JSON.stringify("opus"));
     const withModel = team.map((c) => (c.orchestra?.role === "worker" ? { ...c, orchestra: { ...c.orchestra, model: "claude-haiku-5-5" } } : c));
     localStorage.setItem("session.openChats", JSON.stringify(withModel));

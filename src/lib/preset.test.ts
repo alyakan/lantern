@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BUILT_IN, SUBAGENTS_OFF, advisorsFor, familyOf, presetsOf, settingsOf, summary, usesFable, validAdvisor } from "./harness";
+import { BUILT_IN, SUBAGENTS_OFF, advisorsFor, familyOf, presetsOf, settingsOf, summary, usesFable, validAdvisor } from "./preset";
 
 const [def, balanced, thrifty, max] = BUILT_IN;
 
-describe("harness", () => {
+describe("preset", () => {
   it("tells model families from aliases and ids", () => {
     expect(familyOf("sonnet")).toBe("sonnet");
     expect(familyOf("claude-opus-5-5")).toBe("opus");

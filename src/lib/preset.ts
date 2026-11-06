@@ -1,8 +1,8 @@
 /**
- * A harness: which model does what in a chat. The main model and its effort, the advisor Claude consults at decision
+ * A preset: which model does what in a chat. The main model and its effort, the advisor Claude consults at decision
  * points (--advisor), and the model subagents run on (CLAUDE_CODE_SUBAGENT_MODEL). Null = Claude Code's own setting.
  */
-export interface Harness {
+export interface Preset {
   id: string;
   name: string;
   model: string | null;
@@ -16,12 +16,12 @@ export interface Harness {
 }
 
 export const DEFAULT_HARNESS = "default";
-/** A harness's subagent model that turns subagents off: claude starts without the tool that starts them (session.rs SUBAGENTS_OFF). */
+/** A preset's subagent model that turns subagents off: claude starts without the tool that starts them (session.rs SUBAGENTS_OFF). */
 export const SUBAGENTS_OFF = "off";
 export const CUSTOM_HARNESS = "custom";
 
 /** Standard runs as before (the app's model and effort, Claude Code's own advisor setting); the rest are presets. */
-export const BUILT_IN: Harness[] = [
+export const BUILT_IN: Preset[] = [
   { id: DEFAULT_HARNESS, name: "Standard", model: null, effort: null, advisor: null, subagent: null },
   { id: "balanced", name: "Balanced", model: "sonnet", effort: "high", advisor: "opus", subagent: "haiku" },
   { id: "thrifty", name: "Thrifty", model: "haiku", effort: "medium", advisor: "opus", subagent: "haiku", plugins: false },
@@ -58,14 +58,14 @@ export function advisorsFor(main: Family | null): Family[] {
   }
 }
 
-/** Whether the harness's advisor suits its main model (`fallback`: what claude runs when the harness names none). */
-export function validAdvisor(h: Harness, fallback: string | null): boolean {
+/** Whether the preset's advisor suits its main model (`fallback`: what claude runs when the preset names none). */
+export function validAdvisor(h: Preset, fallback: string | null): boolean {
   const a = familyOf(h.advisor);
   return h.advisor === null || (a !== null && advisorsFor(familyOf(h.model ?? fallback)).includes(a));
 }
 
-/** What a chat starts claude with: Default follows the app's model and effort and passes no harness flags. */
-export function settingsOf(h: Harness, app: { model: string | null; effort: string | null }) {
+/** What a chat starts claude with: Default follows the app's model and effort and passes no preset flags. */
+export function settingsOf(h: Preset, app: { model: string | null; effort: string | null }) {
   if (h.id === DEFAULT_HARNESS) return { model: app.model, effort: app.effort, advisor: null, subagent_model: null, plugins_off: false };
   return { model: h.model, effort: h.effort, advisor: h.advisor, subagent_model: h.subagent, plugins_off: h.plugins === false };
 }
@@ -78,7 +78,7 @@ export function modelName(m: string | null): string | null {
 const name = modelName;
 
 /** One line about what it does: "Sonnet · Opus advisor · Haiku subagents". */
-export function summary(h: Harness): string {
+export function summary(h: Preset): string {
   if (h.id === DEFAULT_HARNESS) return "Your model and effort, Claude Code's own settings";
   const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent === SUBAGENTS_OFF ? "no subagents" : h.subagent ? `${name(h.subagent)} subagents` : null, h.plugins === false ? "no plugins" : null];
   return parts.filter(Boolean).join(" · ");
@@ -88,7 +88,7 @@ export function summary(h: Harness): string {
  * What picking a model or effort in a chat on `h` makes it: Custom, that preset with the change (a Custom one stays
  * Custom and keeps what it was made from).
  */
-export function customOf(h: Harness, patch: Partial<Harness>): Harness {
+export function customOf(h: Preset, patch: Partial<Preset>): Preset {
   return { ...h, ...patch, id: CUSTOM_HARNESS, name: "Custom", from: h.id === CUSTOM_HARNESS ? h.from : h.name };
 }
 
@@ -96,11 +96,11 @@ export function customOf(h: Harness, patch: Partial<Harness>): Harness {
  * The presets to offer: Default first, then the saved ones (built-ins as edited, then your own). A built-in saved before a
  * setting existed takes that setting from the built-in (Thrifty saved before Plugins gets Plugins off).
  */
-export function presetsOf(saved: Harness[]): Harness[] {
+export function presetsOf(saved: Preset[]): Preset[] {
   return [BUILT_IN[0], ...saved.filter((h) => h.id !== DEFAULT_HARNESS).map((h) => ({ ...BUILT_IN.find((b) => b.id === h.id), ...h }))];
 }
 
-export const findHarness = (presets: Harness[], id: string | undefined | null) => presets.find((h) => h.id === id) ?? BUILT_IN[0];
+export const findPreset = (presets: Preset[], id: string | undefined | null) => presets.find((h) => h.id === id) ?? BUILT_IN[0];
 
 /** Whether it uses Fable anywhere: on some plans that needs a one-time consent in Claude Code first. */
-export const usesFable = (h: Harness) => [h.model, h.advisor, h.subagent].some((m) => familyOf(m) === "fable");
+export const usesFable = (h: Preset) => [h.model, h.advisor, h.subagent].some((m) => familyOf(m) === "fable");
