@@ -68,6 +68,19 @@ describe("a chat that finishes or needs you", () => {
     jest.useRealTimers();
   });
 
+  it("can be put away at once, without opening the chat (a swipe up, or a screen reader's dismiss)", async () => {
+    mockLayout = "phone";
+    const { mac } = await open();
+    await fireEvent.press(screen.getByRole("button", { name: /Release 0.1.53/ }));
+    await settle();
+    await mac(finished);
+    expect(toast()).toBeTruthy();
+    await fireEvent(toast()!, "accessibilityAction", { nativeEvent: { actionName: "escape" } });
+    await settle();
+    expect(toast()).toBeNull();
+    expect(screen.queryByText("Fix the footer")).toBeNull();
+  });
+
   it("shows on a tablet while the chats are slid away, and not while they are beside the chat (pinned)", async () => {
     mockLayout = "split";
     mockPinned = false;
