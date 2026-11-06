@@ -22,7 +22,7 @@ import type { ImageSource } from "../platformImages";
 import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
@@ -1211,7 +1211,6 @@ function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source
               close();
             }}
           />
-          <Button label="Cancel" kind="ghost" onPress={close} />
         </View>
       )}
     </Sheet>
@@ -1240,8 +1239,8 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
     <Sheet onClose={onClose} wide>
       {(close, scroll) => (
         <View style={{ flexShrink: 1, paddingBottom: insets.bottom + 8 }}>
-          <View style={{ padding: space.lg, gap: 8 }}>
-            <Txt variant="heading">What changed</Txt>
+          <SheetBar title="What changed" close={{ label: "Close", onPress: close }} />
+          <View style={{ paddingHorizontal: space.lg, paddingTop: 4, paddingBottom: space.lg, gap: 8 }}>
             {files.length > 1 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 {files.map((f) => (
@@ -1268,9 +1267,6 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
             )}
             {text !== null && <DiffView path={path} text={text} />}
           </ScrollView>
-          <View style={{ padding: space.lg }}>
-            <Button label="Close" kind="ghost" onPress={close} />
-          </View>
         </View>
       )}
     </Sheet>

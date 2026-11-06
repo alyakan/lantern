@@ -8,7 +8,7 @@ import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { BAR_TEXT_SCALE, ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetPill } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
@@ -595,7 +595,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                     {shown.number !== null ? `#${shown.number} ` : ""}
                     {shown.title}
                   </Txt>
-                  <Link label="Done" onPress={close} />
+                  <SheetPill label="Close" onPress={close} />
                 </View>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: `${hueOf(shown, colors)}22` }}>
@@ -659,7 +659,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                   {next.length}
                 </Txt>
                 <View style={{ marginLeft: "auto" }}>
-                  <Link label="Done" onPress={close} />
+                  <SheetPill label="Close" onPress={close} />
                 </View>
               </View>
               <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: colors.rule, overflow: "hidden" }}>{next.map(nextRow)}</View>

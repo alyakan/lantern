@@ -6,6 +6,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { useMacCan } from "../shell/useControls";
 import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
+import { SheetPill } from "../ui/Sheet";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
@@ -103,7 +104,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
             <FloatIcon floating={float.floating} color={colors.ink} />
           </PressScale>
         )}
-        <Button label={hideLabel} kind="ghost" onPress={onHide} />
+        <SheetPill label={hideLabel} onPress={onHide} />
       </View>
       {canScopes && <ScopeSwitch value={scope} onChange={pickScope} />}
       {files.length === 0 ? (

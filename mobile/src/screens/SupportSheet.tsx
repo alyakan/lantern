@@ -5,9 +5,9 @@ import { useTipJar, useTips } from "../shell/tipsContext";
 import { EMBER, EMBER_NIGHT } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
-import { Sheet, type SheetScroll } from "../ui/Sheet";
+import { SheetBar, Sheet, type SheetScroll } from "../ui/Sheet";
 import { Bar, Dots, Pulse } from "../ui/skeleton";
-import { radius, space, useColors } from "../ui/theme";
+import { MIN_TARGET, radius, space, useColors } from "../ui/theme";
 
 /** How long the thank-you stays before the sheet goes. */
 export const THANKS_MS = 2400;
@@ -115,10 +115,9 @@ function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () =
           </FadeSlideIn>
         </View>
       ) : (
-        <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ padding: space.xl, paddingBottom: bottom, gap: 14 }}>
-          <Txt variant="title" accessibilityRole="header">
-            Support development
-          </Txt>
+        <>
+        <SheetBar title="Support development" close={{ label: "Close", onPress: close, disabled: busy }} />
+        <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.xl, paddingTop: 8, paddingBottom: bottom, gap: 14 }}>
           <Txt variant="small" tone="ink2">
             {tipped ? "You've supported Lantern before: thank you. Everything below is only ever a tip, and everything stays free either way." : "Lantern is made by one person. If it helps you, you can leave a small thanks. Everything stays free either way."}
           </Txt>
@@ -166,7 +165,7 @@ function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () =
                       <Txt variant="small" style={{ flex: 1, fontWeight: "600" }}>
                         You're a regular here: Ember glows for you. Thank you.
                       </Txt>
-                      <PressScale accessibilityRole="button" accessibilityLabel="Manage pledge" onPress={() => void jar.manage()} hitSlop={10} haptic="select" scaleTo={0.92}>
+                      <PressScale accessibilityRole="button" accessibilityLabel="Manage pledge" onPress={() => void jar.manage()} hitSlop={10} haptic="select" scaleTo={0.92} style={{ minHeight: MIN_TARGET, justifyContent: "center" }}>
                         <Txt variant="small" style={{ fontWeight: "700", color: ember }}>
                           Manage
                         </Txt>
@@ -205,7 +204,7 @@ function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () =
                           Privacy Policy
                         </Txt>
                       </Txt>
-                      <PressScale accessibilityRole="button" accessibilityLabel="Restore purchases" accessibilityHint="Brings back a pledge you made on this account" disabled={busy} onPress={() => void jar.restore()} hitSlop={10} haptic="select" scaleTo={0.94} style={{ alignSelf: "flex-start" }}>
+                      <PressScale accessibilityRole="button" accessibilityLabel="Restore purchases" accessibilityHint="Brings back a pledge you made on this account" disabled={busy} onPress={() => void jar.restore()} hitSlop={10} haptic="select" scaleTo={0.94} style={{ alignSelf: "flex-start", minHeight: MIN_TARGET, justifyContent: "center" }}>
                         <Txt variant="small" style={{ fontWeight: "700", color: ember }}>
                           Restore purchases
                         </Txt>
@@ -236,8 +235,8 @@ function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () =
             </View>
           )}
 
-          <Button label="Close" kind="ghost" disabled={busy} onPress={close} />
         </ScrollView>
+        </>
       )}
     </View>
   );

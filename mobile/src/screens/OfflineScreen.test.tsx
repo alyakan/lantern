@@ -154,7 +154,7 @@ describe("the Mac's sheet", () => {
     expect(screen.getByText(/also remove this phone in Lantern's Settings/)).toBeTruthy();
     answerAlert("Unpair");
     await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Done" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     expect(onUnpair).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });

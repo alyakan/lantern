@@ -6,6 +6,7 @@ import { NewChatSheet } from "./NewChatSheet";
 // A sheet that goes only when this test says it has: what it was asked (close) and what it says once gone (onClose) are kept.
 const mockSheet: { close: jest.Mock; gone: (() => void) | null } = { close: jest.fn(), gone: null };
 jest.mock("../ui/Sheet", () => ({
+  ...jest.requireActual("../ui/Sheet"),
   Sheet: ({ onClose, children }: { onClose: () => void; children: (close: () => void, scroll: unknown) => unknown }) => {
     mockSheet.gone = onClose;
     return children(mockSheet.close, { current: null });

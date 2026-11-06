@@ -133,7 +133,7 @@ describe("what's new, after an update", () => {
     await settle();
     expect(heading()).toBeNull();
     expect(saved).not.toHaveBeenCalled();
-    await press("Done");
+    await press("Close");
     await settle();
     expect(heading()).toBeTruthy();
     expect(saved).toHaveBeenCalledWith("0.1.0-15");

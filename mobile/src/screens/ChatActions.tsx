@@ -17,7 +17,8 @@ export interface ChatActionsProps {
   onDismiss: () => void;
 }
 
-/** What can be done with a chat held down on Home: pin it to the top, mark it read or unread, close it. */
+/** What can be done with a chat held down on Home: pin it to the top, mark it read or unread, close it. A swipe down, or a tap
+ * outside, puts it away (a menu has no Cancel button of its own). */
 export function ChatActionsSheet({ title, project, pinned, unread, onClose, onTogglePin, onToggleUnread, onDismiss }: ChatActionsProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -63,7 +64,6 @@ export function ChatActionsSheet({ title, project, pinned, unread, onClose, onTo
               }}
             />
           )}
-          <Button label="Cancel" onPress={close} />
         </View>
       )}
     </Sheet>

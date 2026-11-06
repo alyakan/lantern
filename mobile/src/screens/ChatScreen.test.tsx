@@ -121,7 +121,6 @@ describe("a chat", () => {
       await hold("First question here");
       await waitFor(() => expect(screen.getByRole("button", { name: "Quote in a reply" })).toBeTruthy());
       expect(screen.queryByRole("button", { name: "Edit and send again" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
       await hold("Second one about the login");
       await waitFor(() => expect(screen.getByRole("button", { name: "Edit and send again" })).toBeTruthy());
     });

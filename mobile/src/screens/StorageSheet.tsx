@@ -5,7 +5,7 @@ import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
 import { useController } from "../shell/hooks";
 import { useAppLock } from "../shell/lockContext";
 import { Button, Txt } from "../ui/components";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { bytesText, clearTotals, diskTone, kindText, scanState, usedShare } from "../view/storage";
 
@@ -110,11 +110,11 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10, flexShrink: 1 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            Your Mac's storage
-          </Txt>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1 }}>
+          <SheetBar title="Storage" close={{ label: "Close", onPress: close }} />
+          {/* The sheet scrolls, so at large text what is under the list (Clear) can still be reached. */}
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.xl, paddingTop: 8, paddingBottom: insets.bottom + space.xl, gap: 10 }}>
           {!data && !loadProblem && (
             <Txt variant="body" tone="ink2">
               Asking your Mac…
@@ -159,7 +159,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
                     Safe to clear: {bytesText(totals?.bytes ?? 0)}
                     {data.more > 0 ? `, and ${data.more} more on your Mac` : ""}
                   </Txt>
-                  <ScrollView style={{ maxHeight: 240 }} contentContainerStyle={{ gap: 8 }} testID="storage-items">
+                  <View style={{ gap: 8 }} testID="storage-items">
                     {data.items.map((i) => (
                       <View key={i.id} accessible accessibilityLabel={`${i.name}, ${kindText(i.kind)}, ${bytesText(i.bytes)}`} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
                         <View style={{ flex: 1 }}>
@@ -175,7 +175,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
                         </Txt>
                       </View>
                     ))}
-                  </ScrollView>
+                  </View>
                 </>
               )}
             </>
@@ -211,8 +211,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
               The scan is more than an hour old, so scan again before clearing.
             </Txt>
           )}
-          {/* While a clear is being confirmed, Cancel is the way out: a second one would sit as loud as Clear. */}
-          {!(confirming && totals) && <Button label="Close" kind="ghost" onPress={close} />}
+          </ScrollView>
         </View>
       )}
     </Sheet>

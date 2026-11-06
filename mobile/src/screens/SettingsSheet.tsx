@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LanternSpeech } from "../../modules/lantern-speech";
 import { loadVoiceEngine, saveVoiceEngine, type VoiceEngine } from "../prefs";
@@ -51,10 +51,11 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   };
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1 }}>
           <SheetHeader title="Voice typing" onDone={close} />
-          <View style={{ paddingHorizontal: space.lg, gap: 6 }}>
+          {/* It scrolls, so at the larger text sizes the choices are all still reached. */}
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6 }}>
             <SettingsSection label="Turns your words into text" footer="For this phone only.">
               {ENGINES.map((o) => {
                 const on = engine === o.value;
@@ -76,7 +77,7 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
                 );
               })}
             </SettingsSection>
-          </View>
+          </ScrollView>
         </View>
       )}
     </Sheet>

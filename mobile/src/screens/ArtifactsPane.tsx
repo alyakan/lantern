@@ -5,6 +5,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { ArtifactPage } from "../ui/ArtifactPage";
 import { Button, Txt } from "../ui/components";
+import { SheetPill } from "../ui/Sheet";
 import { Markdown } from "../ui/Markdown";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
@@ -93,7 +94,7 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
             <FloatIcon floating={float.floating} color={colors.ink} />
           </PressScale>
         )}
-        <Button label={hideLabel} kind="ghost" onPress={onHide} />
+        <SheetPill label={hideLabel} onPress={onHide} />
       </View>
       {listError && (
         <View style={{ paddingHorizontal: space.lg, paddingBottom: 8, gap: 4, alignItems: "flex-start" }}>

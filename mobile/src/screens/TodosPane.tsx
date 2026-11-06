@@ -9,6 +9,7 @@ import type { RemoteUserTodos } from "../protocol/generated/RemoteUserTodos";
 import { useConnectionState, useController } from "../shell/hooks";
 import { useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
+import { SheetPill } from "../ui/Sheet";
 import { PressScale, run } from "../ui/motion";
 import { SwipeRow, type TrayButton } from "../ui/SwipeRow";
 import { radius, space, useBody, useColors } from "../ui/theme";
@@ -166,7 +167,7 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
             <FloatIcon floating={float.floating} color={colors.ink} />
           </PressScale>
         )}
-        <Button label={hideLabel} kind="ghost" onPress={onHide} />
+        <SheetPill label={hideLabel} onPress={onHide} />
       </View>
       {problem && (
         <Txt variant="small" tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg, paddingTop: 6 }}>

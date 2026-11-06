@@ -223,6 +223,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const places = useMemo<PagePlaces>(() => ({ offset: (page) => placeOf(slot)?.offsets[page], keep: (page, y) => keepOffset(slot, page, y) }), [slot]);
   // How tall the newest page's floating buttons are: the page makes that much more room under its last line.
   const [floatHeight, setFloatHeight] = useState(0);
+  // How tall the suggestions floating over the end of the chat are (0 while there are none): the end keeps that much room.
+  const [replyHeight, setReplyHeight] = useState(0);
   // Opening the search (nothing typed yet) changes none of these, so the list isn't drawn again then, while the keyboard comes.
   const query = find?.query ?? null;
   const matches = useMemo(() => (query === null ? NO_MATCHES : findRows(rows, query)), [rows, query]);
@@ -668,7 +670,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const foot = (
     <>
       <PlanCard todos={view.todos} />
-      {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
       {confirming && (
         <RunCommandCard
@@ -748,7 +749,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         // A tap on the status bar would jump to the oldest message loaded, which in a chat is never where the reader wants to be,
         // and on a tablet the header's buttons are right under it.
         scrollsToTop={false}
-        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom } : undefined}
+        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : undefined}
         ref={list}
         onScroll={onScroll}
         scrollEventThrottle={64}
@@ -820,7 +821,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
   // A tap on the chat (a message too) puts the keyboard away.
   const tapAway = useTapAway();
   // What floats over the list rides the keyboard with the bar.
@@ -830,6 +831,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         {el}
       </KeyboardStickyView>
     ) : null;
+  // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
+  // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
+  const replyBar = replies.length > 0 && !pageBar && !away ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
@@ -841,6 +845,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </View>
           {riding(jump)}
           {riding(pageBar)}
+          {riding(replyBar)}
           {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
               the top, where the clock is, to nothing below) so the words under them never run into them. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
@@ -863,6 +868,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             {body}
             {riding(jump)}
             {riding(pageBar)}
+            {riding(replyBar)}
           </View>
           <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>
         </>

@@ -323,7 +323,7 @@ describe("Your work on the phone", () => {
     const details = within(screen.getByLabelText("Details"));
     await fireEvent.press(details.getByRole("button", { name: "GitHub" }));
     expect(open_).toHaveBeenCalledWith("https://github.com/aly/lantern/pull/7");
-    await fireEvent.press(details.getByRole("button", { name: "Done" }));
+    await fireEvent.press(details.getByRole("button", { name: "Close" }));
     await fireEvent.press(page.getByRole("button", { name: /^Sneaky/ }));
     const sneaky = within(screen.getByLabelText("Details"));
     expect(sneaky.queryByRole("button", { name: "GitHub" })).toBeNull();

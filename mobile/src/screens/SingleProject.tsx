@@ -7,7 +7,7 @@ import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
 import { projectColorOf } from "../view/home";
 
@@ -67,36 +67,34 @@ export function SingleSheet({ chats, onDismiss }: { chats: RemoteChat[]; onDismi
   const colorOf = (name: string) => projectColorOf(chats.find((c) => c.project === name)?.project_color) ?? colors.ink3;
   return (
     <Sheet onClose={onDismiss}>
-      {(close) => (
-        <View style={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6, maxHeight: 560 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            One project
-          </Txt>
-          <Txt variant="small" tone="ink2" style={{ marginBottom: 8 }}>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6, maxHeight: 560 }}>
+          <SheetBar title="One project" close={{ label: "Close", onPress: close }} />
+          <Txt variant="small" tone="ink2" style={{ marginBottom: 8, paddingHorizontal: space.xl }}>
             Your Mac and this phone show only its chats, until you show every project again.
           </Txt>
           {problem && (
-            <Txt variant="small" tone="stop" accessibilityLiveRegion="polite">
+            <Txt variant="small" tone="stop" accessibilityLiveRegion="polite" style={{ paddingHorizontal: space.xl }}>
               {problem}
             </Txt>
           )}
           {projects === null && loadProblem ? (
-            <View style={{ gap: 8, alignItems: "flex-start" }}>
+            <View style={{ gap: 8, alignItems: "flex-start", paddingHorizontal: space.xl }}>
               <Txt variant="small" tone="stop" accessibilityRole="alert">
                 {loadProblem}
               </Txt>
               <Button label="Try again" kind="ghost" onPress={() => setAsks((n) => n + 1)} />
             </View>
           ) : projects === null ? (
-            <Txt variant="small" tone="ink3">
+            <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.xl }}>
               Asking your Mac…
             </Txt>
           ) : projects.length === 0 ? (
-            <Txt variant="small" tone="ink3">
+            <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.xl }}>
               Your Mac has no projects to pick from yet.
             </Txt>
           ) : (
-            <ScrollView style={{ flexGrow: 0 }}>
+            <ScrollView ref={scroll} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.xl }}>
               {projects.map((p) => (
                 <PressScale
                   key={p.id}
