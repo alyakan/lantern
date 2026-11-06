@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, Editor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import { DARK_THEME, LIGHT_THEME } from "../monaco";
 import { api, type ChangeScope } from "../api";
@@ -49,6 +49,16 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
   // folded is shown again, for good. So each file, and each new version of one, gets an editor of its own. (Reading the
   // same text again is the same version: nothing is redrawn.)
   const version = useMemo(() => (diff ? `${diff.path}\n${hashOf(diff.original)}:${hashOf(diff.current)}` : ""), [diff]);
+  // Another file (or another version of this one) fades in where the last was, rather than cutting to it. The class is taken off
+  // and put back around a reflow, which is what runs a CSS animation again; the editor under it is not redrawn for it.
+  const body = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    el.classList.remove("diff-in");
+    void el.offsetWidth;
+    el.classList.add("diff-in");
+  }, [version]);
 
   if (error) return <div className="empty">{error}</div>;
   if (!diff) return <div className="empty">Loading…</div>;
@@ -65,7 +75,7 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
   return (
     <>
       {note && <OutdatedNotes path={path} comments={note} />}
-      <div className="diff-body">
+      <div className="diff-body" ref={body}>
         {diff.deleted && <div className="diff-note">This file was deleted.</div>}
         {whole ? (
           <WholeFile path={path} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} comments={note} />

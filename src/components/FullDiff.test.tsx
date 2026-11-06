@@ -102,6 +102,22 @@ describe("FullDiff of a file that was changed", () => {
     expect(editorOf()).not.toBe(second);
   });
 
+  it("fades another file's diff in where the last was, without touching the editor under it", async () => {
+    vi.mocked(api.getFileDiff).mockResolvedValueOnce(changed("/p/a.ts", "a\nB\nc\n"));
+    const { container, rerender } = render(<FullDiff path="/p/a.ts" refreshKey={0} layout="inline" />);
+    await screen.findByTestId("diff");
+    const body = container.querySelector(".diff-body");
+    expect(body).toHaveClass("diff-in");
+    const first = editorOf();
+    // The class is put back on the same node (around a reflow) so the animation runs for the next file, not only on arrival.
+    vi.mocked(api.getFileDiff).mockResolvedValueOnce(changed("/p/b.ts", "a\nb\nz\n"));
+    rerender(<FullDiff path="/p/b.ts" refreshKey={1} layout="inline" />);
+    await waitFor(() => expect(screen.getByTestId("diff")).toHaveAttribute("data-modified", "a\nb\nz\n"));
+    expect(container.querySelector(".diff-body")).toBe(body);
+    expect(body).toHaveClass("diff-in");
+    expect(editorOf()).not.toBe(first);
+  });
+
   it("keeps the editor when the same text is read again, or only the layout changes", async () => {
     vi.mocked(api.getFileDiff).mockResolvedValue(changed("/p/a.ts", "a\nB\nc\n"));
     const { rerender } = render(<FullDiff path="/p/a.ts" refreshKey={0} layout="inline" />);
