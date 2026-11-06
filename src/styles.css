@@ -3978,7 +3978,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .dp-feature-name { color: var(--text); font-weight: 550; }
 .dp-feature-n { color: var(--muted-text); font-size: calc(11px * var(--font-scale)); font-variant-numeric: tabular-nums; }
 .dp-card { border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); overflow: hidden; }
-.dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px; border-bottom: 0.5px solid var(--line); }
+.dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 10px 12px; border-bottom: 0.5px solid var(--line); }
 .dp-card-head :is(h2, h3) { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
 .dp-count { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .dp-card-act { margin-left: auto; }
@@ -4016,9 +4016,9 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-projects { display: contents; }
 .desk-bento > .desk-needs, .desk-bento > .yw-card { grid-column: 1 / -1; }
 @container (min-width: 500px) { .desk-bento > .desk-wide { grid-column: span 2; } }
-.desk-summary .desk-clear { margin: -2px -4px 2px; }
-.desk-summary .desk-facts { border-top: none; padding-top: 0; }
-.desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); }
+/* A whole tile is the way into its project's page: the name is the button, and a press anywhere in the card is the same press. */
+.desk-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); font-size: calc(12.5px * var(--font-scale)); cursor: pointer; }
+.desk-tile:hover .desk-project { text-decoration: underline; }
 .desk-tile-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .desk-tile-head .desk-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13.5px * var(--font-scale)); }
 .desk-tile .desk-branch-line { margin-top: -4px; max-width: none; }
@@ -4037,6 +4037,7 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .desk-branch-line { display: block; margin-top: 2px; max-width: 200px; white-space: normal; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .desk-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0; border: none; background: none; color: var(--text); font-weight: 650; font-size: inherit; text-align: left; }
 .desk-project:hover { text-decoration: underline; }
+button.desk-project:hover:not(:disabled) { background: none; }
 .desk-attn { color: var(--attn-text); font-weight: 650; }
 .desk-changed { white-space: nowrap; }
 .desk-branch { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; font-family: var(--mono); }
@@ -4256,7 +4257,8 @@ button.yw-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .desk-request { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 8px; }
 .desk-request .desk-request-full { max-height: 22em; }
 .desk-request .permission { margin: 0; }
-.desk-clear { padding: 9px 14px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--add) 9%, transparent); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
+/* Nothing needing you is a card like the rest of a page, not a band across it: the tick is what says it. */
+.desk-clear { padding: 10px 14px; border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); color: var(--add); font-weight: 600; font-size: calc(13px * var(--font-scale)); }
 
 /* Just finished: one quiet line each. */
 .desk-finished { display: flex; flex-direction: column; }
@@ -4439,12 +4441,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .menu, .canvas-menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) both; }
 .canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) both; }
 .confirm-dialog, .desk-ask-sheet { animation: sheet-in var(--dur-2) var(--ease-out) both; }
-/* What can be opened lifts a hair, and the ones safe to press answer the pointer. */
+/* What can be opened lifts a hair, and the ones safe to press answer the pointer; a tile lifts under the keyboard's focus too. */
 .yw-fcard, .desk-tile { transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
-.yw-fcard:hover, .desk-tile:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: translateY(-1px); box-shadow: var(--shadow); }
 .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
   .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .canvas-menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
-  .yw-fcard:hover, .desk-tile:hover { transform: none; }
+  .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }
