@@ -1219,6 +1219,8 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .queue-label { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 button.queue-text { flex: 1; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+/* Text on a row, not a control: the pointer never paints it. */
+button.queue-text:hover:not(:disabled) { background: none; }
 button.link-button.queue-now { flex: none; font-size: calc(11px * var(--font-scale)); }
 button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: calc(14px * var(--font-scale)); }
 .composer textarea { resize: none; border: none; outline: none; background: none; color: inherit; caret-color: var(--caret); caret-shape: var(--caret-shape); font: calc(13.5px * var(--font-scale))/1.5 var(--ui); padding: 0 4px 0 0; max-height: 200px; }
@@ -1305,8 +1307,9 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
    title bar's larger capsules. */
 .pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
 .pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
-.pane-tabs-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
+.pane-tabs-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.pane-tabs-track button.active:hover { background: var(--seg-thumb); }
 /* Last turn | Session: a smaller capsule at the row's far end, only on the Changes tab. */
 /* The Changes filter: a pill that opens a menu of what to show, each with what it means. */
 /* Both give way when the row is tight (five tabs and the filter in a narrow pane): the tabs down to their labels, the
@@ -1339,8 +1342,9 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
 .scope-option-about { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); line-height: 1.4; white-space: normal; }
 .scope-track { display: inline-flex; gap: 2px; margin-left: auto; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
 .scope-track button { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
-.scope-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
+.scope-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .scope-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.scope-track button.active:hover { background: var(--seg-thumb); }
 .tab-count { font-size: calc(11px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
 .review-bar { display: flex; align-items: center; gap: 4px; height: 28px; flex: none; min-width: 0; padding: 0 8px 0 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 /* In a narrow pane only the path gives way; the counts, position and buttons keep their size. */
@@ -2631,6 +2635,7 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .routine-run-row .ghost { margin-left: auto; }
 .routine-status { overflow: hidden; text-overflow: ellipsis; }
 button.preset-restore { align-self: flex-start; border: none; background: none; padding: 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); text-decoration: underline; }
+button.preset-restore:hover:not(:disabled) { background: none; color: var(--text); }
 
 @keyframes agents-pulse { 50% { opacity: 0.35; } }
 
@@ -2696,6 +2701,8 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-row.gap .summary-title { font-weight: 500; color: var(--muted); }
 .summary-row.gap .summary-gist { color: var(--muted); }
 .summary-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px 9px 10px; border: none; border-radius: var(--radius-md); background: none; color: inherit; font: inherit; text-align: left; }
+/* Its row already lights up: the content button inside it draws nothing under the pointer. */
+button.summary-main:hover:not(:disabled) { background: none; }
 /* The glyph inside a step's circle is a grid item, centred by the grid rather than by hand-set offsets, in a box of
    even size so it lands on whole pixels at 1x and 2x alike (an odd size puts it half a pixel off at 1x). The tick is a
    mask whose path is centred on its own weight, not its bounding box: its long arm would otherwise pull it low. */
@@ -3172,6 +3179,7 @@ button.plan-meter svg { width: 10px; height: 10px; opacity: 0.6; }
 .merge-add { color: var(--add); font-variant-numeric: tabular-nums; }
 .merge-del { color: var(--del); font-variant-numeric: tabular-nums; }
 .merge-link { margin-left: auto; border: none; background: none; padding: 0; color: var(--text-2); font-size: calc(12px * var(--font-scale)); text-decoration: underline; text-underline-offset: 2px; }
+.merge-link:hover:not(:disabled) { background: none; color: var(--text); }
 .merge-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font: calc(11.5px * var(--font-scale)) var(--mono); }
 .merge-files li { display: flex; gap: 8px; }
 .merge-files li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3915,6 +3923,8 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .sb-views { display: flex; gap: 2px; margin: 2px 12px 8px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .sb-views button { flex: 1; height: 22px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-weight: 600; }
 .sb-views button[aria-pressed="true"] { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.sb-views button:hover:not([aria-pressed="true"]):not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.sb-views button[aria-pressed="true"]:hover:not(:disabled) { background: var(--seg-thumb); }
 .timeline { display: flex; flex-direction: column; gap: 10px; padding: 0 8px 12px; }
 .tl-day-name { margin: 4px 0 2px 6px; font: 650 calc(11px * var(--font-scale)) var(--ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
 .tl-event { position: relative; display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 6px 8px 7px 26px; border: none; border-radius: var(--radius-inner); background: none; color: var(--text-2); text-align: left; font-size: calc(12.5px * var(--font-scale)); }
@@ -4067,10 +4077,15 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 .yw-feature-head + .dp-list { border-top: none; }
 .yw-feature > .desk-more { margin: 0; }
 .yw-row { gap: 5px; padding: 10px 12px 8px 12px; border-left: 3px solid var(--yw); }
+/* The row answers the pointer, edge to edge, from its dot to its action. */
+.yw-row:hover { background: var(--bg-hover); }
 /* A row is one button that opens its details: two quiet lines, nothing else to aim at. */
 .yw-open { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .yw-row > .yw-open { width: 100%; }
 .yw-open:hover .yw-name { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
+/* A button that is only a row's content draws no fill of its own under the pointer: the row it sits in does. */
+button.yw-open:hover:not(:disabled), button.yw-fold:hover:not(:disabled) { background: none; }
+.yw-fold:hover .yw-name, .yw-fold:hover .yw-head-text h3 { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent); }
 .dp-row-top > .yw-open { display: block; flex: 1 1 auto; }
 /* A stack's pull requests, together: a rail on the left joins each to the one under it. */
 .yw-row.yw-stacked { position: relative; padding-left: 26px; }
@@ -4156,6 +4171,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-view { margin-left: auto; display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .yw-view button { height: 22px; padding: 0 11px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(11.5px * var(--font-scale)) var(--ui); }
 .yw-view button.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+.yw-view button:hover:not(.on):not(:disabled) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.yw-view button.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .yw-card .yw-view { margin: 0 0 0 4px; }
 .yw-quiet { margin: 0; color: var(--muted-text); font-size: calc(12.5px * var(--font-scale)); }
 .yw-fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 8px; }
@@ -4187,6 +4205,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-tabs { display: inline-flex; align-self: flex-start; gap: 2px; margin: 0 16px 12px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .yw-tab { height: 26px; padding: 0 12px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(12.5px * var(--font-scale)) var(--ui); cursor: pointer; }
 .yw-tab.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+button.yw-tab:hover:not(:disabled):not(.on) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+button.yw-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .yw-tab.zero:not(.on) { opacity: 0.45; }
 .yw-tab-n { margin-left: 6px; font-style: normal; font-weight: 650; color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .yw-tab.on .yw-tab-n { color: var(--text); }
@@ -4194,6 +4215,8 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-flist { margin: 0; padding: 0 16px; list-style: none; border-top: 0.5px solid var(--line); }
 /* A piece of work here is taller than a list row: it carries its pipeline. */
 .yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0 16px; border-top: 0.5px solid var(--line); }
+/* The row answers the pointer, from the dot to the action, flush with its own rules. */
+.yw-frow:hover { background: var(--bg-hover); }
 .yw-frow:first-child { border-top: none; }
 .yw-frow > .yw-pdot { margin-top: 6px; }
 .yw-frow.yw-warn { --yw: var(--warn); }
@@ -4251,6 +4274,9 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .desk-tablist { display: flex; gap: 4px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
 .desk-tab { position: relative; height: 26px; padding: 0 12px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(13px * var(--font-scale)); font-weight: 600; }
 .desk-tab.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+/* A segment under the pointer hints at the thumb and never wears it: only the chosen one does. */
+button.desk-tab:hover:not(:disabled):not(.on) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+button.desk-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .desk-tab-badge { margin-left: 6px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--attn); color: var(--on-attn); font-size: calc(10px * var(--font-scale)); font-weight: 700; }
 .desk-edit { margin-left: auto; height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
 .desk-editor { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 0.5px solid var(--line); border-radius: var(--radius-chip); background: var(--field); font-size: calc(12.5px * var(--font-scale)); }
