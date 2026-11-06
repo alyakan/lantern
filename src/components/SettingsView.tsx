@@ -34,7 +34,7 @@ export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appe
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
   { title: "Lantern", tabs: ["general", "appearance", "updates"] },
-  { title: "Claude", tabs: ["harness", "permissions", "skills"] },
+  { title: "Agent", tabs: ["harness", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
   { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "integrations", "remote"] },
 ];

@@ -360,7 +360,7 @@ describe("Settings' nav", () => {
     view();
     const nav = screen.getByRole("navigation", { name: "Settings" });
     expect(within(nav).getByRole("group", { name: "Lantern" })).toHaveTextContent("General");
-    expect(within(nav).getByRole("group", { name: "Claude" })).toHaveTextContent("Allow rules");
+    expect(within(nav).getByRole("group", { name: "Agent" })).toHaveTextContent("Allow rules");
     expect(within(nav).getByRole("group", { name: "Connected" })).toHaveTextContent("MCP servers");
     // No routines, hooks or pull-request settings were given, so Automation has nothing to offer.
     expect(within(nav).queryByRole("group", { name: "Automation" })).toBeNull();
