@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
+import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
@@ -28,7 +28,7 @@ import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
-import { approvalOf, promptView } from "../view/prompts";
+import { approvalOf, fieldsOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
@@ -388,24 +388,85 @@ export function answeredBy(by: string | null, me: string | null): string {
 }
 
 /** The small card a decision leaves behind: a mark in its colour, what was asked, and how it went. */
-function DecisionCard({ title, status, mark }: { title: string; status: string; mark: "check" | "cross" | "dash" }) {
+function DecisionCard({ title, status, mark, details }: { title: string; status: string; mark: "check" | "cross" | "dash"; /** What was asked, shown when the card is tapped open. */ details?: ReactNode }) {
   const colors = useColors();
+  const [open, setOpen] = useState(false);
   const color = mark === "check" ? colors.go : mark === "cross" ? colors.stop : colors.ink3;
-  return (
-    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
+  const head = (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: color, alignItems: "center", justifyContent: "center" }}>
         {mark === "check" ? <View style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.white, transform: [{ rotate: "-45deg" }] }} /> : mark === "cross" ? <Txt variant="small" tone="white" style={{ fontWeight: "800", lineHeight: 16 }}>×</Txt> : <View style={{ width: 10, height: 2, backgroundColor: colors.white }} />}
       </View>
       <View style={{ flex: 1 }}>
-        <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700" }}>
+        <Txt variant="small" numberOfLines={open ? undefined : 1} style={{ fontWeight: "700" }}>
           {title}
         </Txt>
         <Txt variant="tiny" tone="ink2">
           {status}
         </Txt>
       </View>
+      {!!details && <Chevron open={open} size={6} />}
     </View>
   );
+  return (
+    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
+      {details ? (
+        <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
+          {head}
+        </Pressable>
+      ) : (
+        head
+      )}
+      {open && !!details && <FadeSlideIn>{details}</FadeSlideIn>}
+    </View>
+  );
+}
+
+/** How many lines of a field of what was asked show on a decided card. */
+const DECIDED_FIELD_LINES = 12;
+
+/** What a decided prompt asked, for its card opened: the plan or the reason in words, the change, the questions, or each field it was given. */
+function DecisionDetails({ item }: { item: Extract<Item, { kind: "prompt" }> }) {
+  const approval = approvalOf(item.toolName, item.input);
+  const view = promptView(item.toolName, item.input);
+  if (approval || item.toolName === "ExitPlanMode") return view.detail ? <Markdown text={view.detail} /> : null;
+  if (view.kind === "question")
+    return (
+      <View style={{ gap: 4 }}>
+        {view.questions.map((q, i) => (
+          <Txt key={i} variant="small" tone="ink2">
+            {q.question}
+          </Txt>
+        ))}
+      </View>
+    );
+  const preview = diffPreviewOf(item.toolName, item.input);
+  if (preview) return <DiffPreviewCard preview={preview} file={null} tone="paper" />;
+  const fields = fieldsOf(item.input);
+  if (!fields.length) return null;
+  return (
+    <View style={{ gap: 8 }}>
+      {fields.map((f) => (
+        <View key={f.label} style={{ gap: 2 }}>
+          <Txt variant="tiny" tone="ink3">
+            {f.label}
+          </Txt>
+          <Txt variant="mono" tone="ink2" selectable numberOfLines={DECIDED_FIELD_LINES} style={{ fontSize: 12, lineHeight: 17 }}>
+            {f.value}
+          </Txt>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** Whether a decided prompt has anything to show when opened. */
+function hasDetails(item: Extract<Item, { kind: "prompt" }>): boolean {
+  const approval = approvalOf(item.toolName, item.input);
+  const view = promptView(item.toolName, item.input);
+  if (approval || item.toolName === "ExitPlanMode") return !!view.detail;
+  if (view.kind === "question") return view.questions.length > 0;
+  return !!diffPreviewOf(item.toolName, item.input) || fieldsOf(item.input).length > 0;
 }
 
 /** How long the open card takes to close in to the card a decision leaves, and how long to wait for that card to be measured. */
@@ -512,7 +573,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
   );
 
   const status = item.state === "withdrawn" ? "No longer pending" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
-  const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} />;
+  const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} details={hasDetails(item) ? <DecisionDetails item={item} /> : undefined} />;
 
   if (item.state === "open" || settling) {
     const going = !!settling && item.state !== "open";
