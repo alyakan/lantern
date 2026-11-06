@@ -76,6 +76,11 @@
   --radius-pill: 999px;    /* capsules and round buttons (circles stay round) */
   --pill-s: 24px;          /* the two heights of a pill button: in a card or a banner, and in a bar or a dialog */
   --pill-m: 28px;
+  /* Motion: how a view gives way to the next and how a control answers the pointer. Short, eased out, the way macOS moves. */
+  --dur-1: 0.14s;
+  --dur-2: 0.22s;
+  --dur-3: 0.3s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --pane-edge: none;       /* a line round the review pane, for themes that draw their panes as boxes */
   /* What a message's markdown looks like, a token each so a theme can restyle it. These are Light's and Dark's own look. */
   --md-strong: currentColor;
@@ -843,6 +848,8 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 button { font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); padding: 3px 10px; cursor: default; }
 button:hover:not(:disabled) { background: var(--bg-hover); }
+/* A control answers the pointer over a moment, never in one frame. A rule of its own may still set its own transition. */
+button { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out), filter var(--dur-1) var(--ease-out); }
 /* A selected item keeps its fill under the pointer: the hover fills, which are as specific, would paint over it. */
 .mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
@@ -4361,3 +4368,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .recap-line { flex: none; margin: 0 auto; width: 100%; max-width: calc(var(--col) + 80px); padding: 6px 24px 0; box-sizing: border-box; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); font-style: italic; line-height: 1.45; }
 .recap-label { font-style: normal; font-weight: 600; color: var(--text-2); }
 
+/* Motion: one view gives way to the next with a short rise, a menu opens from where it was asked for, a dialog comes up over a
+   faded scrim, and a card lifts a hair under the pointer. Everything here is off when the system asks for less motion. */
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes view-in-sm { from { opacity: 0; transform: translateY(3px); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(12px) scale(0.995); } }
+@keyframes fade-in { from { opacity: 0; } }
+/* The Desk's home, a project's page, and the chat card: each mounts on its own, so each rises in once as it appears. */
+.desk-main > .desk-bento, .desk-project-page { animation: view-in var(--dur-3) var(--ease-out) both; }
+.chat-pane { animation: view-in var(--dur-2) var(--ease-out) both; }
+/* The work board's cards, and one feature's page in their place; a review tab's body as it comes up; a chat as it is opened. */
+.yw-fgrid, .yw-fpage, .tab-body { animation: view-in-sm var(--dur-2) var(--ease-out) both; }
+.chat-wrap { animation: fade-in var(--dur-2) var(--ease-out) both; }
+/* Menus and popovers open out of the control that asked for them; dialogs come up over a scrim that fades in first. */
+.menu, .canvas-menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) both; }
+.canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) both; }
+.confirm-dialog, .desk-ask-sheet { animation: sheet-in var(--dur-2) var(--ease-out) both; }
+/* What can be opened lifts a hair, and the ones safe to press answer the pointer. */
+.yw-fcard, .desk-tile { transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
+.yw-fcard:hover, .desk-tile:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .menu, .canvas-menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
+  button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: none; }
+  .yw-fcard:hover, .desk-tile:hover { transform: none; }
+}
