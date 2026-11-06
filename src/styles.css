@@ -4212,9 +4212,9 @@ button.yw-tab.on:hover:not(:disabled) { background: var(--seg-thumb); }
 .yw-tab-n { margin-left: 6px; font-style: normal; font-weight: 650; color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .yw-tab.on .yw-tab-n { color: var(--text); }
 .yw-empty { padding: 16px; border-top: 0.5px solid var(--line); }
-.yw-flist { margin: 0; padding: 0 16px; list-style: none; border-top: 0.5px solid var(--line); }
+.yw-flist { margin: 0; padding: 0; list-style: none; border-top: 0.5px solid var(--line); }
 /* A piece of work here is taller than a list row: it carries its pipeline. */
-.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0 16px; border-top: 0.5px solid var(--line); }
+.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px 16px; border-top: 0.5px solid var(--line); }
 /* The row answers the pointer, from the dot to the action, flush with its own rules. */
 .yw-frow:hover { background: var(--bg-hover); }
 .yw-frow:first-child { border-top: none; }
