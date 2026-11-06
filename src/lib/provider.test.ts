@@ -138,6 +138,15 @@ describe("an endpoint the user set up", () => {
     expect(isGateway("gateway:x") && !isGateway("codex") && !isGateway("claude")).toBe(true);
   });
 
+  it("asks for approval on Claude Code's own cards, since it is Claude Code underneath (a question is not 'Codex didn't say')", () => {
+    const onEndpoint = reducer(initialState, { type: "provider_set", provider: { id: "gateway:ollama", capabilities: gateway.capabilities } });
+    const asked = run(onEndpoint, { kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: { questions: [] } });
+    expect(lastItem(asked)).not.toHaveProperty("provider");
+    // Another agent's CLI is still told apart, so Codex keeps its own card.
+    const onCodex = reducer(initialState, { type: "provider_set", provider: PLAIN });
+    expect(lastItem(run(onCodex, { kind: "permission_requested", request_id: "c1", tool_name: "Bash", input: {} }))).toMatchObject({ provider: "codex" });
+  });
+
   it("is left to Claude alone when no endpoint is set up, so a window with none looks as before", () => {
     expect(choicesOf([CLAUDE_LISTING])).toEqual({ list: [CLAUDE_LISTING], multi: false });
     expect(choicesOf(null)).toEqual({ list: [], multi: false });
