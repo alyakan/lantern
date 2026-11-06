@@ -21,6 +21,12 @@ describe("what a chat says in words", () => {
     expect(found.map((m) => rows[m.index].key)).toEqual(["u-u1", "a-a1"]);
   });
 
+  it("finds what the agent said between its steps, on the row of steps it is folded into", () => {
+    const step = (id: string): Item => ({ kind: "step", id, name: "Read", summary: "", done: true, isError: false, edits: [], tests: null });
+    const folded = timeline([you("u1", "go"), step("s1"), said("a1", "The cache is stale."), step("s2"), said("a2", "Done.")]);
+    expect(findRows(folded, "stale").map((m) => m.key)).toEqual(["steps-s1"]);
+  });
+
   it("counts a message once, however many times it says it", () => {
     expect(findRows(timeline([said("a1", "ab ab ab")]), "ab")).toHaveLength(1);
   });

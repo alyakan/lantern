@@ -33,6 +33,7 @@ import { DiffPreviewCard } from "./DiffPreviewCard";
 import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
+import { markRanges } from "../view/mark";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -228,11 +229,15 @@ export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: 
   );
 });
 
-export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
+/** No notes: the same list every time, so a row without any is not drawn again. */
+const NO_NOTES: string[] = [];
+
+export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useState<string | null>(null);
   const opened = chips.find((c) => c.key === open && c.items);
+  const notesOpen = notes.length > 0 && (open === "notes" || (!!mark && notes.some((n) => markRanges(n, mark).length > 0)));
   // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in. A cell the list reuses
   // for another row is that row's first drawing.
   const seen = useRef<{ row: string | undefined; keys: Set<string> }>({ row: rowKey, keys: new Set(chips.map((c) => c.key)) });
@@ -249,12 +254,26 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutpu
           );
           return first.has(c.key) ? chip : <PopIn key={c.key}>{chip}</PopIn>;
         })}
+        {notes.length > 0 && (
+          <Chip key="notes" tone="plain" chevron={notesOpen ? "open" : "closed"} onPress={() => setOpen(open === "notes" ? null : "notes")}>
+            {notes.length === 1 ? "1 message" : `${notes.length} messages`}
+          </Chip>
+        )}
         {!!took && (
           <Txt variant="tiny" tone="ink3" accessibilityLabel={`Finished in ${took}`} style={{ marginLeft: 2 }}>
             · {took}
           </Txt>
         )}
       </View>
+      {notesOpen && (
+        <FadeSlideIn>
+          <View accessibilityLabel="Messages" style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 10 }}>
+            {notes.map((n, i) => (
+              <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} />
+            ))}
+          </View>
+        </FadeSlideIn>
+      )}
       {opened?.items && (
         <FadeSlideIn>
           <View accessibilityLabel={opened.label} style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 6 }}>

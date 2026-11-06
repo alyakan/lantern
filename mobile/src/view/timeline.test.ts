@@ -58,8 +58,8 @@ describe("a run of steps as chips", () => {
 
 describe("the timeline", () => {
   it("folds each run of steps into one row, between the messages around it", () => {
-    const rows = timeline([you("u1", "go"), step("1", "Read"), step("2", "Edit"), said("a1", "Done."), step("3", "Bash")]);
-    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant", "steps"]);
+    const rows = timeline([you("u1", "go"), said("a0", "Looking."), step("1", "Read"), step("2", "Edit"), said("a1", "- found it"), step("3", "Bash"), said("a2", "Done.")]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "assistant", "steps", "assistant", "steps", "assistant"]);
   });
 
   it("shows a finished page as a page, and only the last one is live", () => {
@@ -83,6 +83,65 @@ describe("the timeline", () => {
   it("gives every row a key of its own", () => {
     const rows = timeline([you("u1", "a"), you("u2", "b"), said("x", "c"), step("s1", "Read"), step("s2", "Read")]);
     expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+  });
+});
+
+describe("what the agent says between its steps", () => {
+  const end: Item = { kind: "turn", id: "t", isError: false, result: null, durationMs: 42_000 };
+  const notesOf = (rows: ReturnType<typeof timeline>) => rows.flatMap((r) => (r.kind === "steps" ? [r.notes] : []));
+
+  it("goes into the steps around it, as on the Mac, so they stay one row", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "Now the tests."), step("2", "Bash"), said("a2", "Then the build."), step("3", "Bash"), said("a3", "Done."), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant"]);
+    expect(notesOf(rows)).toEqual([["Now the tests.", "Then the build."]]);
+    expect(rows[1].kind === "steps" && [rows[1].chips.map((c) => c.label), rows[1].took]).toEqual([["Read 1 file", "Ran 2 commands"], "42 s"]);
+  });
+
+  it("keeps the opening words and the closing reply, which is still the summary", () => {
+    const edit = step("3", "Edit", { edits: [{ path: "/a.ts", created: false, added: 1, removed: 0 }] });
+    const reply = "Done. Here is what changed:\n\n- the gateway\n- the window";
+    const rows = timeline([you("u1", "go"), said("a0", "I'll look."), step("1", "Read"), said("a1", "Found it."), step("2", "Read"), edit, said("a2", reply), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "assistant", "steps", "summary"]);
+    expect(notesOf(rows)).toEqual([["Found it."]]);
+    // A path in a note still opens its change.
+    expect(rows[2].kind === "steps" && rows[2].files).toEqual(["/a.ts"]);
+  });
+
+  it("keeps the last message where it was said when steps come after it", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "Done."), step("2", "Bash", { summary: "brain log" }), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant", "steps"]);
+  });
+
+  it("keeps an important message (a long one, a list or a heading) where it was said, between two rows of steps", () => {
+    for (const text of ["x".repeat(280), "Found two:\n- one\n- two", "## Findings\nthe cache"]) {
+      const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", text), step("2", "Bash"), said("a2", "Done."), end]);
+      expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant", "steps", "assistant"]);
+    }
+  });
+
+  it("keeps a Step-by-step page where it was said", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "# Step 1 of 2 — one"), step("2", "Bash"), said("a2", "Done."), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "page", "steps", "assistant"]);
+  });
+
+  it("leaves a post-hook's words in its own row", () => {
+    const hook: Item = { kind: "hook", id: "hook-u1", text: "Update the brain" };
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "Done."), hook, step("h1", "Bash"), said("h2", "Saved."), step("h3", "Bash"), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant", "hook"]);
+    expect(rows[3].kind === "hook" && rows[3].said).toBe("Saved.");
+  });
+
+  it("is folded per prompt in a chat replayed with no turn ends", () => {
+    const rows = timeline([you("u1", "go"), step("1", "Read"), said("a1", "Done."), you("u2", "again"), step("2", "Read"), said("a2", "Hm."), step("3", "Read"), said("a3", "Done.")]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "assistant", "user", "steps", "assistant"]);
+    expect(notesOf(rows)).toEqual([[], ["Hm."]]);
+  });
+
+  it("waits for the steps after a prompt that came between", () => {
+    const prompt: Item = { kind: "prompt", id: "p", toolName: "Bash", input: {}, state: "allowed", by: null };
+    const rows = timeline([you("u1", "go"), step("1", "Read"), prompt, said("a1", "Allowed, going on."), step("2", "Bash"), said("a2", "Done."), end]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "steps", "prompt", "steps", "assistant"]);
+    expect(notesOf(rows)).toEqual([[], ["Allowed, going on."]]);
   });
 });
 

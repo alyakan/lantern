@@ -1,9 +1,9 @@
 import { StyleSheet } from "react-native";
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { Item } from "../sync/reducer";
 import { lightColors } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
-import { PageRow, SummaryRow, withCaret } from "./ChatParts";
+import { PageRow, StepsRow, SummaryRow, withCaret } from "./ChatParts";
 import { fileNamed } from "../ui/Markdown";
 
 const said = (id: string, text: string): Item => ({ kind: "assistant", id, text, streaming: false });
@@ -34,6 +34,28 @@ describe("what a chat search looks for, in a page and a summary", () => {
     const summary: Extract<Row, { kind: "summary" }> = { key: "a-a1", kind: "summary", item, chips: [], durationMs: null, files: [] };
     await render(<SummaryRow row={summary} onFiles={() => {}} mark="login" />);
     expect(washed("login")).toHaveLength(1);
+  });
+});
+
+describe("what the agent said between its steps, on their row", () => {
+  const notes = ["Now the tests.", "The cache is stale."];
+
+  it("is one chip that opens to each message", async () => {
+    await render(<StepsRow chips={[]} notes={notes} onFiles={() => {}} />);
+    expect(screen.queryByText("Now the tests.")).toBeNull();
+    await fireEvent.press(screen.getByText("2 messages"));
+    expect(screen.getByText("Now the tests.")).toBeTruthy();
+    expect(screen.getByText("The cache is stale.")).toBeTruthy();
+  });
+
+  it("is shown open, with what a chat search looks for marked", async () => {
+    await render(<StepsRow chips={[]} notes={notes} onFiles={() => {}} mark="stale" />);
+    expect(washed("stale")).toHaveLength(1);
+  });
+
+  it("has no chip when nothing was said", async () => {
+    await render(<StepsRow chips={[]} notes={[]} onFiles={() => {}} />);
+    expect(screen.queryByText(/message/)).toBeNull();
   });
 });
 

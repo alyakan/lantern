@@ -1,7 +1,7 @@
 /** What a chat's rows say in words, for searching them, quoting them and answering what they ask. */
 import type { Row } from "./timeline";
 
-/** The words of a row someone might look for or copy: a message, a page, a summary; null for steps, prompts and turn lines. */
+/** The words of a row someone might look for or copy: a message, a page, a summary, the notes folded into steps; null for prompts and turn lines. */
 export function rowText(row: Row): string | null {
   switch (row.kind) {
     case "user":
@@ -10,6 +10,8 @@ export function rowText(row: Row): string | null {
       return row.item.text;
     case "page":
       return `${row.page.kicker}: ${row.page.title}\n${row.page.body}`.trim();
+    case "steps":
+      return row.notes.length ? row.notes.join("\n\n") : null;
     default:
       return null;
   }
