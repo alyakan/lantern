@@ -9,7 +9,7 @@
  * Reads a Review-mode file page (the incremental-pr-review skill's format) into parts the app can lay out:
  *
  *   ### What changed   <plain language>
- *   ### Findings       ⚠ line 42 (blocker|should-fix|nit): <defect and consequence>   — or exactly "None."
+ *   ### Findings       ⚠ src/a.ts:42 (blocker|should-fix|nit): <defect and consequence>   — or exactly "None."
  *   ### Notes          <what was checked, context>
  */
 
@@ -22,7 +22,7 @@ export interface Finding {
   lineEnd: number | null;
   severity: Severity | null;
   text: string;
-  /** The file it is in, when the finding names it (`⚠ src/a.ts:42 (nit): …`, as a group's findings do). */
+  /** The file it is in, when the finding names it (`⚠ src/a.ts:42 (nit): …`, as the skill and the Review prompt ask; an older page says `⚠ line 42`). */
   path?: string;
 }
 
@@ -129,7 +129,7 @@ const where = (f: Finding) => {
   return f.path ? `${f.path}:${span}` : `line ${span}`;
 };
 
-/** The Next message carrying a page's verdicts: "Next. Agreed: line 42. Rejected: line 17." */
+/** The Next message carrying a page's verdicts: "Next. Agreed: src/a.ts:42. Rejected: src/a.ts:17." ("line 42" for a finding that names no file). */
 export function verdictMessage(findings: Finding[], verdicts: Record<number, Verdict> | undefined): string {
   const pick = (v: Verdict) => findings.filter((f) => verdicts?.[f.index] === v).map(where);
   const agreed = pick("agree");
