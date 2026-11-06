@@ -15,7 +15,7 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { fonts, radius, space, useColors } from "../ui/theme";
+import { fonts, radius, space, useBody, useColors } from "../ui/theme";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
@@ -40,6 +40,8 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  */
 export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, sentAt = null, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; /** When it was sent (your messages): said at the top, since the chat shows a time only now and then. */ sentAt?: number | null; onClose: () => void }) {
   const colors = useColors();
+  // The message reads in the chat's own type, which is the device's body size.
+  const body = useBody();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
   return (
@@ -52,7 +54,7 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                 Select text
               </Txt>
               <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
-                <Text selectable accessibilityLabel="The message's text" style={{ fontSize: 15, lineHeight: 21, color: colors.ink }}>
+                <Text selectable accessibilityLabel="The message's text" style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink }}>
                   {text}
                 </Text>
               </ScrollView>

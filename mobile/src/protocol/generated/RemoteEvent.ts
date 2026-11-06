@@ -9,7 +9,7 @@ export type RemoteEvent = { "kind": "user_text", text: string, at: number | null
 /**
  * How many pictures went with it, when any did: only the count is ever sent, never the pictures.
  */
-images?: number, } | { "kind": "thinking" } | { "kind": "text_delta", block_id: string, text: string, } | { "kind": "assistant_text", block_id: string, text: string, } | { "kind": "tool_started", tool_use_id: string, name: string, summary: string, } | { "kind": "tool_finished", tool_use_id: string, is_error: boolean, } | { "kind": "file_edited", tool_use_id: string, path: string, created: boolean, added: number, removed: number, } | { "kind": "tests_ran", tool_use_id: string, command: string, passed: number, failed: number, skipped: number, } | { "kind": "turn_done", is_error: boolean, result: string | null, duration_ms: number | null, 
+images?: number, } | { "kind": "thinking" } | { "kind": "text_delta", block_id: string, text: string, } | { "kind": "assistant_text", block_id: string, text: string, } | { "kind": "tool_started", tool_use_id: string, name: string, summary: string, } | { "kind": "tool_finished", tool_use_id: string, is_error: boolean, } | { "kind": "file_edited", tool_use_id: string, path: string, created: boolean, added: number, removed: number, } | { "kind": "tests_ran", tool_use_id: string, command: string, passed: number, failed: number, skipped: number, } | { "kind": "turn_stopping" } | { "kind": "turn_done", is_error: boolean, result: string | null, duration_ms: number | null, 
 /**
  * The model's context size in tokens, when this turn's result said (what "context used" is a share of).
  */

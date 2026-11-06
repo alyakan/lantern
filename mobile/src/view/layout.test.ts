@@ -1,4 +1,4 @@
-import { CHANGES_MIN, CHANGES_SHARE, CHANGES_WIDTH, CHAT_MIN, changesWidth, floatFrame, hasRoomForChanges, layoutFor, shareOf } from "./layout";
+import { CHANGES_MIN, CHANGES_SHARE, CHANGES_WIDTH, CHAT_MIN, changesWidth, floatFrame, gutterFor, hasRoomForChanges, layoutFor, shareOf } from "./layout";
 
 describe("layoutFor", () => {
   it("keeps the phone's layout on a phone, and in a narrow Split View or Slide Over pane", () => {
@@ -26,6 +26,14 @@ describe("layoutFor", () => {
     expect(layoutFor(700, 700)).toBe("overlay");
     expect(layoutFor(800, 500)).toBe("overlay");
     expect(layoutFor(900, 600)).toBe("split");
+  });
+});
+
+describe("gutterFor", () => {
+  it("keeps Apple's 16 points on a phone and gives a wider window 20", () => {
+    expect(gutterFor("phone")).toBe(16);
+    expect(gutterFor("overlay")).toBe(20);
+    expect(gutterFor("split")).toBe(20);
   });
 });
 

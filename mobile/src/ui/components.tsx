@@ -4,19 +4,31 @@ import { EMBER, useAccent, useRegular } from "./accent";
 import { Chevron } from "./Chevron";
 import { PressScale, skips } from "./motion";
 import { projectTint } from "../view/home";
-import { MIN_TARGET, radius, space, type as scale, useColors, type Variant } from "./theme";
+import { MIN_TARGET, radius, space, type as scale, useBody, useColors, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. "white" is always white (on night, go and stop); "on-ink" is what is written on an ink fill. */
-/** How far larger than normal the phone's text size may make Lantern's text (a person who needs more can still read it: 1.8 is large). */
-export const MAX_TEXT_SCALE = 1.8;
+/**
+ * How far larger than normal the phone's text size may make Lantern's text. Apple's largest accessibility size is 3.1 times;
+ * 2.5 is short of that but well past the everyday sizes, and the few things that can't grow with it (a tile's letter, a swipe
+ * button, a badge) say their own smaller cap where they are drawn.
+ */
+export const MAX_TEXT_SCALE = 2.5;
+
+/**
+ * The cap for words in a capsule of glass (a title bar, a page's name): the bar grows to hold them (`minHeight`, not `height`), but
+ * a bar that took the whole 2.5 would cover the page it is the head of.
+ */
+export const BAR_TEXT_SCALE = 1.8;
 
 export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();
   const colors = useColors();
+  // The body is the one size the device decides: 16 on a phone, 17 on a tablet.
+  const body = useBody();
   const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
   // The phone's text size is followed (Dynamic Type), up to a limit past which fixed-size things (a swipe bar, a tile) would break.
-  return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} {...rest} style={[scale[variant], { color }, style]} />;
+  return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} {...rest} style={[variant === "body" ? body : scale[variant], { color }, style]} />;
 }
 
 type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
@@ -83,7 +95,8 @@ export function Chip({ children, tone = "plain", onPress, chevron, busy = false 
   );
   if (!onPress) return content;
   return (
-    <PressScale accessibilityRole="button" accessibilityState={chevron ? { expanded: chevron === "open" } : undefined} onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
+    // A chip is small to look at; its target is Apple's 44 points, reached with the slop around it rather than by making the pill taller.
+    <PressScale accessibilityRole="button" accessibilityState={chevron ? { expanded: chevron === "open" } : undefined} onPress={onPress} hitSlop={{ top: 11, bottom: 11, left: 8, right: 8 }} haptic="select" scaleTo={0.93}>
       {content}
     </PressScale>
   );
@@ -162,7 +175,8 @@ export function BackgroundDot({ tasks }: { tasks: string[] }) {
 export function Tile({ letter, bg, fg }: { letter: string; bg: string; fg: string }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: bg, alignItems: "center", justifyContent: "center" }}>
-      <Txt variant="heading" style={{ color: fg }}>
+      {/* A 40-point tile holds a letter whatever the text size: it is decoration, and its chat says its name beside it. */}
+      <Txt variant="heading" maxFontSizeMultiplier={1.2} style={{ color: fg }}>
         {letter}
       </Txt>
     </View>

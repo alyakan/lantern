@@ -83,7 +83,7 @@ describe("a worker the main agent starts", () => {
     expect(stopped.status).toBe("ended");
     expect(stopped.stopRequested).toBe(false); // App restarts an ended chat that has stopRequested
     expect(stopped.banner).toEqual({ kind: "info", text: expect.stringContaining("stopped this agent"), action: "restart" });
-    expect(stopped.items[0]).toMatchObject({ status: "error" });
+    expect(stopped.items[0]).toMatchObject({ status: "stopped" }); // Stopped by the Lead, not failed
     const failed = ev(main, { kind: "agent_stopped", reason: "It didn't start: claude is not installed" });
     expect(failed.banner).toEqual({ kind: "error", text: "It didn't start: claude is not installed", action: null });
   });

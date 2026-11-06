@@ -1,5 +1,5 @@
 import "@shopify/flash-list/jestSetup";
-import { Keyboard, StyleSheet, TextInput, type ViewProps } from "react-native";
+import { Keyboard, StyleSheet, TextInput, type ViewProps, type ViewStyle } from "react-native";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
@@ -10,6 +10,7 @@ import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
 import { forgetPanels } from "../view/panelChoice";
+import { BAR_TEXT_SCALE } from "../ui/components";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { control } from "../ui/theme";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
@@ -324,14 +325,21 @@ describe("a chat", () => {
     it("gives the back button, the title bar and the message field one height", async () => {
       await withSession(talk);
       expect(heightWithin(screen.getByRole("button", { name: "Back" }))).toBe(control);
-      // The title bar: the nearest box above the title that has a height.
+      // The title bar: the nearest box above the title that has a height. It is a minimum, so the bar grows to hold larger text
+      // rather than clip it, and the title's own size stops at 1.8 times.
       type Up = { props?: ViewProps; parent?: Up | null };
       let titleHeight: number | undefined;
+      let titleBox: ViewStyle | undefined;
       for (let n: Up | null = screen.getByRole("header") as unknown as Up; n && titleHeight === undefined; n = n.parent ?? null) {
-        const h = StyleSheet.flatten(n.props?.style)?.height;
-        if (typeof h === "number") titleHeight = h;
+        const box = StyleSheet.flatten(n.props?.style) as ViewStyle | undefined;
+        if (typeof box?.minHeight === "number") {
+          titleHeight = box.minHeight;
+          titleBox = box;
+        }
       }
       expect(titleHeight).toBe(control);
+      expect(titleBox?.height).toBeUndefined();
+      expect(screen.getByRole("header").props.maxFontSizeMultiplier).toBe(BAR_TEXT_SCALE);
       // The message field's minimum is the shared height less the box's own padding.
       expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 12);
     });

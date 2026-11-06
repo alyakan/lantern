@@ -11,11 +11,11 @@ beforeEach(() => {
 });
 
 describe("whether a tablet keeps the chats pinned beside the chat", () => {
-  it("is not pinned until it is chosen, and when it can't be read", async () => {
+  it("was not chosen yet when nothing was saved, or it can't be read: the window decides", async () => {
     get.mockResolvedValue(null);
-    expect(await loadSidebarPinned()).toBe(false);
+    expect(await loadSidebarPinned()).toBeNull();
     get.mockRejectedValue(new Error("locked"));
-    expect(await loadSidebarPinned()).toBe(false);
+    expect(await loadSidebarPinned()).toBeNull();
   });
 
   it("is what was chosen, on this tablet only", async () => {

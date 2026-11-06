@@ -1,7 +1,7 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
+import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
 import { markSeen, markUnread, settleSeen, useSeen } from "../seen";
@@ -20,6 +20,7 @@ import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { SwipeRow } from "../ui/SwipeRow";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { countsOf, diffPreviewOf } from "../view/diffPreview";
+import { gutterFor, layoutFor } from "../view/layout";
 import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { HomeSearch } from "./HomeSearch";
@@ -226,9 +227,9 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
 }
 
 /** A quiet label over a stretch of the list ("Waiting on you", "Earlier"). */
-function SectionLabel({ label, count }: { label: string; count: number }) {
+function SectionLabel({ label, count, gutter }: { label: string; count: number; gutter: number }) {
   return (
-    <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "baseline", gap: 6, paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 2 }}>
+    <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "baseline", gap: 6, paddingHorizontal: gutter, paddingTop: 14, paddingBottom: 2 }}>
       <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" }}>
         {label}
       </Txt>
@@ -332,6 +333,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const loading = !chatsLoaded || !waitingLoaded;
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
+  // Apple's page margin: 16 on a phone, 20 on a wider window.
+  const { width, height } = useWindowDimensions();
+  const gutter = gutterFor(layoutFor(width, height));
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
   // How the chats are listed, and which project cards are folded away, are remembered on this phone.
@@ -505,7 +509,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {!asked && (
           <>
             {/* The headline fades and trails behind as the page scrolls up over it. */}
-            <Animated.View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16, opacity: scrollY.interpolate({ inputRange: [0, 110], outputRange: [1, 0.2], extrapolate: "clamp" }), transform: [{ translateY: scrollY.interpolate({ inputRange: [0, 130], outputRange: [0, 40], extrapolate: "clamp" }) }] }}>
+            <Animated.View accessibilityRole="header" style={{ paddingHorizontal: gutter, paddingTop: 14, paddingBottom: 16, opacity: scrollY.interpolate({ inputRange: [0, 110], outputRange: [1, 0.2], extrapolate: "clamp" }), transform: [{ translateY: scrollY.interpolate({ inputRange: [0, 130], outputRange: [0, 40], extrapolate: "clamp" }) }] }}>
               <Txt variant="headline">{head.big}</Txt>
               <Txt variant="headline" tone="ink3">
                 {head.small}
@@ -514,7 +518,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
             {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
             {stack.length > 1 && (
-              <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
+              <Txt variant="small" tone="ink2" style={{ paddingHorizontal: gutter, paddingTop: 2 }}>
                 {stack.length - 1} more after this one
               </Txt>
             )}
@@ -526,7 +530,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </>
         )}
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, paddingTop: asked ? 14 : 22, paddingBottom: 6 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: gutter, paddingTop: asked ? 14 : 22, paddingBottom: 6 }}>
           <Txt variant="small" style={{ fontWeight: "700" }}>
             {asked ? "Results" : "All chats"}
           </Txt>
@@ -567,9 +571,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             let n = 0;
             return parts.map((s) => (
               <Fragment key={s.key}>
-                {parts.length > 1 && <SectionLabel label={s.label} count={s.rows.length} />}
+                {parts.length > 1 && <SectionLabel label={s.label} count={s.rows.length} gutter={gutter} />}
                 {s.rows.map((r) => (
-                  <ChatRow key={r.slot} row={r} index={n++} background={colors.paper} swipe={swipeFor(r)} selected={r.slot === selectedSlot} place={placeOf(r.slot)} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />
+                  <ChatRow key={r.slot} row={r} index={n++} inset={gutter} background={colors.paper} swipe={swipeFor(r)} selected={r.slot === selectedSlot} place={placeOf(r.slot)} onPress={() => onOpenChat(r.slot)} onLongPress={() => setActing(r)} />
                 ))}
               </Fragment>
             ));

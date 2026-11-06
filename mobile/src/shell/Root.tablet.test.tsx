@@ -2,7 +2,7 @@ import "@shopify/flash-list/jestSetup";
 import { BackHandler } from "react-native";
 import { StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import { saveChangesShare, saveSidebarPinned } from "../prefs";
+import { loadSidebarPinned, saveChangesShare, saveSidebarPinned } from "../prefs";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, seed, waiting } from "../test/render";
 import { Root } from "./Root";
@@ -13,7 +13,8 @@ jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "") }))
 
 // The layout is what the window's size says; a test says it directly. Whether the chats are pinned is what this tablet remembers.
 let mockLayout: Layout = "split";
-let mockPinned = false;
+// null: never chosen on this tablet, so the window decides.
+let mockPinned: boolean | null = false;
 // The share of the width the Changes were last dragged to: none until they were.
 let mockShare: number | null = null;
 jest.mock("./useLayout", () => ({ useLayout: () => mockLayout }));
@@ -363,6 +364,51 @@ describe("the changed files, beside the chat or over it", () => {
     await press("Unpin the chats");
     await settle();
     expect(paneUp()).toBeTruthy();
+  });
+});
+
+describe("a tablet that was never told whether the chats are pinned", () => {
+  beforeEach(() => {
+    mockPinned = null;
+  });
+
+  // iPadOS decides by the window: beside the content sideways, away upright until asked for. The first time it is asked to
+  // change, that is what the tablet keeps.
+  it("keeps them beside the chat in a window with the room, flat, and offers to take them away", async () => {
+    mockLayout = "split";
+    await open({ chats: two });
+    expect(column().props.pointerEvents).toBe("auto");
+    expect(screen.queryByRole("button", { name: "Close chats" })).toBeNull();
+    expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unpin the chats" })).toBeTruthy();
+    await press("Unpin the chats");
+    await settle();
+    expect(saveSidebarPinned).toHaveBeenCalledWith(false);
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+  });
+
+  // A tablet that took the chats away sideways would open on them and slide them off, were the window to decide before the read.
+  it("keeps them away until it has read what this tablet chose", async () => {
+    mockLayout = "split";
+    (loadSidebarPinned as jest.Mock).mockImplementationOnce(() => new Promise(() => {}));
+    await open({ chats: two });
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.queryByRole("button", { name: "Unpin the chats" })).toBeNull();
+  });
+
+  it("shows the chat with the whole width upright, the chats slid in when asked for", async () => {
+    mockLayout = "overlay";
+    await openInAChat();
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    await press("Show chats");
+    expect(column().props.pointerEvents).toBe("auto");
+    // Slid in, they can be pinned beside the chat even upright: that is the person's choice now.
+    await press("Pin the chats beside the chat");
+    await settle();
+    expect(saveSidebarPinned).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole("button", { name: "Close chats" })).toBeNull();
   });
 });
 

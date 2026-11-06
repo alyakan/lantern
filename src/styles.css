@@ -1090,6 +1090,8 @@ button.msg-action:disabled { opacity: 0.5; cursor: default; }
 .step-name { font-weight: 500; flex: none; }
 .step-target { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step-error .step-name, .step-error .step-target { color: var(--del); }
+/* A step the person's Stop cut short: quiet, not red. */
+.step-stopped .step-name, .step-stopped .step-target { color: var(--muted); }
 .step-output { margin: 2px 0 6px 6px; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-inner); max-height: 280px; overflow: auto; white-space: pre-wrap; color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); }
 .step-children { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 6px; padding: 8px 0 8px 12px; border-left: 1px solid var(--line-strong); }
 .edit-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); background: var(--bg-subtle); padding: 3px 8px; font-size: calc(12px * var(--font-scale)); font-family: var(--mono); color: var(--text-2); border-radius: var(--radius-inner); }

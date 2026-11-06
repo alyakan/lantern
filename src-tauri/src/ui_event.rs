@@ -136,6 +136,11 @@ pub enum UiEvent {
     ToolFinished { parent: Option<String>, tool_use_id: String, is_error: bool, output: String },
     /// A Bash step that ran tests, read from its full output (sent right after its ToolFinished).
     TestRun { parent: Option<String>, tool_use_id: String, command: String, run: crate::test_runs::TestRun },
+    /// The person stopped this chat's turn (Stop here, on a phone, or wherever it was asked for), before the interrupt has
+    /// landed. What follows is what a stop leaves behind: a step claude was in the middle of, which ends with an error result,
+    /// and the turn's own end. Neither is a failure of the work: it is the person's own doing, and everyone is told so they
+    /// can say "Stopped" rather than "Failed".
+    TurnStopping,
     Retrying { attempt: u64, max_retries: u64, error: String },
     /// `context_window`: the model's context size in tokens, from the result's per-model usage.
     /// `cost_usd` and `tokens` are this turn's (None when they can't be told apart from the session's totals, see

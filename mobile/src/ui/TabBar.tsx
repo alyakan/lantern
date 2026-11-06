@@ -6,6 +6,7 @@
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Tab } from "../prefs";
+import { useAccent } from "./accent";
 import { Txt } from "./components";
 import { Glass } from "./Glass";
 import { PressScale } from "./motion";
@@ -72,22 +73,26 @@ function Compose({ color }: { color: string }) {
 
 export function TabBar({ tabs, value, onChange, onCompose, onComposeVoice }: { tabs: TabChoice[]; value: Tab; onChange: (tab: Tab) => void; /** Starts a chat, typed. */ onCompose: () => void; /** Held down: starts a chat by talking. */ onComposeVoice: () => void }) {
   const colors = useColors();
+  // The chosen tab is tinted the way the app tints what is chosen and what is a way on: cobalt, or a regular's Ember.
+  const accent = useAccent();
   const insets = useSafeAreaInsets();
   return (
     <View testID="tab-bar" pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom - 8, 0) + TAB_BAR_GAP, flexDirection: "row", alignItems: "center", gap: 10 }}>
       <Glass accessibilityRole="tablist" lift={0.12} style={{ flex: 1, height: TAB_BAR_HEIGHT, borderRadius: TAB_BAR_HEIGHT / 2, flexDirection: "row", padding: 4 }}>
         {tabs.map((t) => {
           const on = t.id === value;
-          const tone = on ? colors.cobalt : colors.ink2;
+          const tone = on ? accent : colors.ink2;
           return (
             <PressScale key={t.id} accessibilityRole="tab" accessibilityLabel={t.badge ? `${t.label}, ${t.badge} waiting` : t.label} accessibilityState={{ selected: on }} onPress={() => onChange(t.id)} haptic="select" scaleTo={0.92} style={{ flex: 1, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", gap: 2, backgroundColor: on ? colors.wash : "transparent" }}>
               <Glyph id={t.id} color={tone} />
-              <Txt variant="tiny" style={{ color: tone, fontWeight: "600" }}>
+              {/* Its label keeps its size: the bar is one fixed height, so a label that grew with the phone's text size would
+                  push its picture out of it. Apple's tab bars leave their labels small too; the tab says its name to a reader. */}
+              <Txt variant="tiny" numberOfLines={1} maxFontSizeMultiplier={1.2} style={{ color: tone, fontWeight: "600" }}>
                 {t.label}
               </Txt>
               {!!t.badge && (
                 <View accessibilityElementsHidden style={{ position: "absolute", top: 4, right: "24%", minWidth: 17, height: 17, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
-                  <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "800", fontSize: 10 }}>
+                  <Txt variant="tiny" tone="on-hi" maxFontSizeMultiplier={1.2} style={{ fontWeight: "800", fontSize: 10 }}>
                     {t.badge > 99 ? "99+" : t.badge}
                   </Txt>
                 </View>

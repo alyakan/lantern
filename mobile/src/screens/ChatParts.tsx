@@ -26,7 +26,7 @@ import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
-import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useColors } from "../ui/theme";
+import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
 import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, fieldsOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
@@ -683,6 +683,8 @@ const HANDOFF_MS = 300;
  */
 export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
+  // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
+  const body = useBody();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
@@ -856,7 +858,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               accessibilityState={{ disabled: !command.trim() || running || !!disabled }}
               disabled={!command.trim() || running || !!disabled}
               onPress={() => void run()}
-              style={{ height: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
+              style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
             >
               <Text style={{ color: command.trim() && !running && !disabled ? term.bg : term.dim, fontFamily: fonts.mono, fontSize: 13, fontWeight: "700" }}>{running ? "…" : "Run"}</Text>
             </Pressable>
@@ -919,7 +921,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           importantForAccessibility="no-hide-descendants"
           pointerEvents="none"
           onLayout={(e) => setWordsHeight(e.nativeEvent.layout.height)}
-          style={{ position: "absolute", left: 0, right: 0, opacity: 0, fontSize: 15, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+          style={{ position: "absolute", left: 0, right: 0, opacity: 0, fontSize: body.fontSize, lineHeight: body.lineHeight, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         >
           {/* A last empty line counts, as it does in the box. */}
           {text.endsWith("\n") || !text ? `${text} ` : text}
@@ -943,7 +945,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: 15, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+          style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
         <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>

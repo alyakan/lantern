@@ -90,15 +90,20 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   const connection = useConnectionState();
   const { chats, chatsLoaded, plan, providerUsage } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
-  // A tablet shows the chats beside the chat ("split", when they are pinned) or slides them in over it when asked and away once
-  // a chat is chosen ("overlay"); a phone has the stack alone.
+  // A tablet shows the chats beside the chat ("split") or slides them in over it when asked and away once a chat is chosen
+  // ("overlay"); a phone has the stack alone. Which of the two the chats get is the person's pin, or the window's, unpinned.
   const colors = useColors();
   const layout = useLayout();
   const tablet = layout !== "phone";
   const [chatsOpen, setChatsOpen] = useState(false);
-  // Whether the chats are pinned beside the chat: not known (null) until it is read from this tablet's memory.
+  // Whether the chats are pinned beside the chat: not known (null) until it is read from this tablet's memory, and never chosen
+  // is not the same as taken away. A tablet that never chose follows the window, as iPadOS does: the sidebar sits beside the
+  // content in a window with the room (held sideways), and is away upright until it is asked for.
   const [pinned, setPinned] = useState<boolean | null>(null);
-  const shellLayout = tablet && pinned ? "split" : "overlay";
+  // Whether the tablet was asked yet (a null pin is "never chosen", which is a decision too).
+  const [pinRead, setPinRead] = useState(false);
+  // Until the pin is read the chats are away: a tablet that took them away would otherwise open on them and slide them off.
+  const shellLayout: "overlay" | "split" = tablet && pinRead && (pinned ?? layout === "split") ? "split" : "overlay";
   const listedOnce = useRef(false);
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
@@ -141,7 +146,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Whether they are pinned is remembered on this tablet.
   useEffect(() => {
     let live = true;
-    void loadSidebarPinned().then((p) => live && setPinned(p));
+    void loadSidebarPinned().then((p) => {
+      if (!live) return;
+      setPinned(p);
+      setPinRead(true);
+    });
     return () => {
       live = false;
     };
@@ -149,7 +158,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Pinning puts the chats beside the chat; unpinning takes them away entirely, so the chat has the whole width (and its Changes
   // are beside it). From there the chat's own button, or a pull from the edge, slides them in again.
   const togglePin = () => {
-    const next = !pinned;
+    // What the button says is what the person sees, which a window that was never told decides for itself.
+    const next = shellLayout !== "split";
     // The chat's room changes as the column moves: it is laid out again on the column's curve, so the two move as one.
     movePanes();
     setPinned(next);
@@ -165,12 +175,12 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // With chats in hand a lost connection is a pill over them; with none there is nothing to show but the connecting screen.
   const noMac = chats.length === 0 && (connection.kind === "connecting" || connection.kind === "offline");
   const homeUp = !pendingLink && connection.kind !== "unpaired" && !noMac;
-  // A tablet that opens on no chat, with the chats not pinned, shows them slid in once, rather than an empty screen to tap.
+  // A tablet that opens on no chat, with the chats away, shows them slid in once, rather than an empty screen to tap.
   useEffect(() => {
-    if (listedOnce.current || !tablet || pinned === null || !homeUp) return;
+    if (listedOnce.current || !tablet || !pinRead || !homeUp) return;
     listedOnce.current = true;
-    if (!pinned && !shownSlot(stack)) setChatsOpen(true);
-  }, [tablet, pinned, homeUp, stack]);
+    if (shellLayout === "overlay" && !shownSlot(stack)) setChatsOpen(true);
+  }, [tablet, pinRead, shellLayout, homeUp, stack]);
   useEffect(() => {
     if (notesChecked.current || !homeUp) return;
     notesChecked.current = true;
@@ -288,7 +298,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={pinned === true} onTogglePin={tablet ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {

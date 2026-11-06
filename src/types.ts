@@ -137,6 +137,8 @@ export type UiEvent =
   | { kind: "edit_applied"; parent: string | null; tool_use_id: string; path: string; created: boolean; hunks: Hunk[] }
   | { kind: "tool_finished"; parent: string | null; tool_use_id: string; is_error: boolean; output: string }
   | { kind: "test_run"; parent: string | null; tool_use_id: string; command: string; run: TestRun }
+  /** The person stopped this chat's turn (here, on a phone, or wherever): what follows is the stop's, not a failure. */
+  | { kind: "turn_stopping" }
   | { kind: "retrying"; attempt: number; max_retries: number; error: string }
   | { kind: "turn_done"; is_error: boolean; result: string | null; cost_usd: number | null; tokens?: number | null; session_cost_usd?: number | null; session_tokens?: number; duration_ms: number | null; auth_hint: boolean; denied: number; context_window: number | null }
   | { kind: "context_used"; tokens: number }

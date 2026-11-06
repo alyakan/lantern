@@ -96,7 +96,7 @@ export function SwipeRow({ children, background, pin, tray, open, onOpenChange }
         <Animated.View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[StyleSheet.absoluteFill, { backgroundColor: accent, justifyContent: "center", paddingLeft: 24, opacity: x.interpolate({ inputRange: [0, 24], outputRange: [0, 1], extrapolate: "clamp" }) }]}>
           <Animated.View style={{ alignItems: "center", width: 56, gap: 4, transform: [{ scale: x.interpolate({ inputRange: [0, PIN_AT - 1, PIN_AT], outputRange: [0.8, 0.95, 1.12], extrapolate: "clamp" }) }] }}>
             <PinIcon color={colors.white} size={16} />
-            <Txt variant="tiny" tone="white" style={{ fontWeight: "700" }}>
+            <Txt variant="tiny" tone="white" maxFontSizeMultiplier={1.4} style={{ fontWeight: "700" }}>
               {pin.label}
             </Txt>
           </Animated.View>
@@ -116,7 +116,8 @@ export function SwipeRow({ children, background, pin, tray, open, onOpenChange }
               }}
               style={{ width: BUTTON, alignItems: "center", justifyContent: "center", backgroundColor: b.tone === "danger" ? colors.stop : accent }}
             >
-              <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+              {/* A button in the tray is as wide as the tray's buttons are: the word grows a little, no more. */}
+              <Txt variant="small" tone="white" maxFontSizeMultiplier={1.6} style={{ fontWeight: "700" }}>
                 {b.label}
               </Txt>
             </Pressable>

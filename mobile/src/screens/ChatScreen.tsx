@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
+import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
@@ -406,7 +406,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
   // again would do it all over.
   const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
-  const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
+  // Offered after a failure, and after a stop the person made: either way they may want the same asked again.
+  const retry = lastTurn?.kind === "turn" && (lastTurn.item.isError || lastTurn.item.stopped) && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
   // A file link goes to the Changes pane when there is one that can show it, else to a sheet over the chat.
   const pane = useRef(changesPane);
   pane.current = changesPane;
@@ -597,8 +598,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass). While the chat
             // works, or runs something in the background, its edge glows in the project's colour (the accent with no project).
             <View style={{ flex: 1 }}>
-              <Glass style={{ flex: 1, height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
-                <Txt variant="heading" numberOfLines={1} accessibilityRole="header" style={{ lineHeight: 21 }}>
+              {/* At the phone's larger text sizes it grows to hold its words (to 1.8 times, no further) rather than clip them. */}
+              <Glass style={{ flex: 1, minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
+                <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header" style={{ lineHeight: 21 }}>
                   {chat?.title?.trim() || "Chat"}
                 </Txt>
                 {/* The project in its colour (the desktop sidebar's; "working" in words when there is no project), then whether it
@@ -606,7 +608,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} background={asleep ? [] : view.background} />}
                   {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
-                    <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1, lineHeight: 16 }}>
+                    <Txt variant="small" tone="ink2" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ flexShrink: 1, lineHeight: 16 }}>
                       {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
                     </Txt>
                   )}

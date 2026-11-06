@@ -448,6 +448,43 @@ describe("reducer", () => {
     expect(s.stopRequested).toBe(false);
   });
 
+  // A stop asked for on a paired phone: this window never pressed Stop, so the agent's own "interrupted" error results
+  // must read as the stop they are, not as the work failing.
+  describe("a turn stopped from a phone", () => {
+    const step = (id: string, status: "running" | "done" | "error" | "stopped"): ToolItem => ({ type: "tool", id, name: "Bash", summary: "npm test", status, output: null, edit: null, children: [] });
+    const stopping = (state: State) => ev(state, { kind: "turn_stopping" });
+    const turnDone = (state: State) => ev(state, { kind: "turn_done", is_error: true, result: "interrupted", cost_usd: null, duration_ms: 1, auth_hint: false, denied: 0, context_window: null });
+
+    it("turn_stopping marks the stop and denies undecided permission cards", () => {
+      let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: {} });
+      s = stopping(s);
+      expect(s.stopRequested).toBe(true);
+      expect(s.items[0]).toMatchObject({ type: "permission", decision: "denied" });
+    });
+
+    it("the step claude was in ends stopped, not failed, and so does the turn", () => {
+      let s: State = { ...running, items: [step("t1", "running")] };
+      s = stopping(s);
+      s = ev(s, { kind: "tool_finished", parent: null, tool_use_id: "t1", output: "interrupted", is_error: true });
+      expect(s.items[0]).toMatchObject({ type: "tool", status: "stopped" });
+      s = turnDone(s);
+      expect(s.items.find((it) => it.type === "turn")).toMatchObject({ stopped: true, isError: false });
+    });
+
+    it("an agent that ends right after the stop keeps its steps stopped", () => {
+      let s: State = { ...running, items: [step("t1", "running")] };
+      s = stopping(s);
+      s = ev(s, { kind: "session_ended", code: null, stderr_tail: "" });
+      expect(s.items[0]).toMatchObject({ status: "stopped" });
+    });
+
+    it("the next message, from either side, is a new turn", () => {
+      const stopped = stopping(running);
+      expect(ev(stopped, { kind: "user_text", text: "carry on", sent_by: "phone", at: 1 }).stopRequested).toBe(false);
+      expect(ev(stopped, { kind: "user_text", text: "go on", at: 1 }).stopRequested).toBe(false);
+    });
+  });
+
   it("session_ready moves starting to idle", () => {
     const s = reducer({ ...running, status: "starting" }, { type: "session_ready" });
     expect(s.status).toBe("idle");

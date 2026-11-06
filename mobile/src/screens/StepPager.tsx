@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { FlatList, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
 import { KeyboardChatScrollView } from "react-native-keyboard-controller";
-import { Txt } from "../ui/components";
+import { BAR_TEXT_SCALE, Txt } from "../ui/components";
 import { Glass } from "../ui/Glass";
 import { PressScale } from "../ui/motion";
 import { control, useColors } from "../ui/theme";
@@ -116,7 +116,7 @@ function Arrow({ label, flip, on, onPress, children }: { label: string; flip?: b
   const colors = useColors();
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !on }} disabled={!on} onPress={onPress} hitSlop={6} scaleTo={0.9} opacity={on ? 1 : 0.35}>
-      <View style={{ height: control - 8, minWidth: control - 8, paddingHorizontal: children ? 12 : 0, borderRadius: (control - 8) / 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: children ? colors.cobalt : "transparent" }}>
+      <View style={{ minHeight: control - 8, minWidth: control - 8, paddingHorizontal: children ? 12 : 0, borderRadius: (control - 8) / 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: children ? colors.cobalt : "transparent" }}>
         {children}
         <View accessibilityElementsHidden style={{ width: 10, height: 10, borderLeftWidth: 2.5, borderBottomWidth: 2.5, borderColor: children ? colors.white : colors.ink, borderRadius: 1.5, transform: [{ rotate: flip ? "-135deg" : "45deg" }], marginLeft: flip ? -3 : 3 }} />
       </View>
@@ -130,17 +130,17 @@ export function StepNav({ pages, index, onIndex, fresh }: { pages: StepPage[]; i
   const last = pages.length - 1;
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 8 }}>
-      <Glass style={{ flex: 1, height: control - 4, borderRadius: (control - 4) / 2, flexDirection: "row", alignItems: "center", paddingHorizontal: 4 }}>
+      <Glass style={{ flex: 1, minHeight: control - 4, borderRadius: (control - 4) / 2, flexDirection: "row", alignItems: "center", paddingHorizontal: 4 }}>
         <Arrow label="Previous page" on={index > 0} onPress={() => onIndex(index - 1)} />
         {/* Claude's own label for the step ("Step 13 of 15"): the pages the phone holds are fewer when earlier steps aren't loaded, so their count would only disagree with it. It goes in what is read aloud. */}
         <View accessible style={{ flex: 1, alignItems: "center" }} accessibilityRole="header" accessibilityLabel={page ? `${page.kicker}, page ${index + 1} of ${pages.length}` : undefined}>
-          <Txt variant="small" tone="cobalt" numberOfLines={1} style={{ fontWeight: "700" }}>
+          <Txt variant="small" tone="cobalt" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ fontWeight: "700" }}>
             {page ? page.kicker : ""}
           </Txt>
         </View>
         {fresh ? (
           <Arrow label="New page" flip on onPress={() => onIndex(last)}>
-            <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+            <Txt variant="small" tone="white" maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ fontWeight: "700" }}>
               New page
             </Txt>
           </Arrow>

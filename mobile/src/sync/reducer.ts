@@ -31,7 +31,8 @@ export type Item =
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
   | { kind: "desktop"; id: string; what: string }
-  | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null }
+  /** `stopped`: the person ended the turn (here, on the Mac, or wherever); it is not a failure, whatever errors it left behind. */
+  | { kind: "turn"; id: string; isError: boolean; stopped?: boolean; result: string | null; durationMs: number | null }
   /** The user's post-hook was sent after Claude's answer: what Claude says and does after this, to the turn's end, is the hook's. */
   | { kind: "hook"; id: string; text: string }
   /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
@@ -72,6 +73,8 @@ export interface ChatView {
   loaded: boolean;
   /** Why asking for the chat's history failed, while it has not come (null: nothing wrong, or not asked). */
   loadError: string | null;
+  /** The person stopped this turn: what the interrupt leaves behind (an error result on a step, and on the turn) is the stop's. */
+  stopping: boolean;
 }
 
 export interface State {
@@ -109,7 +112,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
 
 export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, single: null };
 
-export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
+export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null, stopping: false };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -167,9 +170,10 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
         // The pictures this phone sent are still where it kept them.
         const kept = items[mine];
         next[mine] = kept.kind === "user" && kept.thumbs?.length ? { ...item, thumbs: kept.thumbs } : item;
-        return { ...view, items: next, thinking: true };
+        return { ...view, items: next, thinking: true, stopping: false };
       }
-      return { ...view, items: upsert(items, item), thinking: !!event.sent_by };
+      // A new message is a new turn, whoever sent it: a stop asked for earlier no longer ends this one.
+      return { ...view, items: upsert(items, item), thinking: !!event.sent_by, stopping: false };
     }
     case "thinking":
       return { ...view, thinking: true };
@@ -183,8 +187,9 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, thinking: false, items: upsert(items, { kind: "assistant", id: event.block_id, text: event.text, streaming: false }) };
     case "tool_started":
       return { ...view, items: upsert(items, { kind: "step", id: event.tool_use_id, name: event.name, summary: event.summary, done: false, isError: false, edits: [], tests: null }, (old) => ({ ...(old as Extract<Item, { kind: "step" }>), name: event.name, summary: event.summary })) };
+    // A step the person's Stop cut short ends with an error result: that is the stop's doing, not the work failing.
     case "tool_finished":
-      return { ...view, items: onStep(items, event.tool_use_id, (s) => ({ ...s, done: true, isError: event.is_error })) };
+      return { ...view, items: onStep(items, event.tool_use_id, (s) => ({ ...s, done: true, isError: event.is_error && !view.stopping })) };
     case "file_edited":
       return {
         ...view,
@@ -192,13 +197,17 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       };
     case "tests_ran":
       return { ...view, items: onStep(items, event.tool_use_id, (s) => ({ ...s, tests: { passed: event.passed, failed: event.failed, skipped: event.skipped } })) };
+    // The person stopped this turn (on this phone, the Mac, or wherever it was asked for), before the interrupt landed.
+    case "turn_stopping":
+      return { ...view, stopping: true };
     case "turn_done": {
       // A turn is named for the message that began it, so the same end applied twice is one end.
       const began = [...items].reverse().find((it) => it.kind === "user");
-      const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error, result: event.result, durationMs: event.duration_ms };
+      const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error && !view.stopping, ...(view.stopping ? { stopped: true } : {}), result: event.result, durationMs: event.duration_ms };
       return {
         ...view,
         thinking: false,
+        stopping: false,
         context: view.context && event.context_window ? { ...view.context, window: event.context_window } : view.context,
         items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done),
       };

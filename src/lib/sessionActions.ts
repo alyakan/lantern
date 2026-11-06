@@ -73,7 +73,7 @@ export function sessionMarkdown(title: string, items: ChatItem[], folder: string
 }
 
 function stepLine(step: Extract<ChatItem, { type: "tool" }>, folder: string | null): string {
-  const failed = step.status === "error" ? " (failed)" : "";
+  const failed = step.status === "error" ? " (failed)" : step.status === "stopped" ? " (stopped)" : "";
   if (step.edit) {
     const { added, removed } = countChanges(step.edit.hunks);
     return `${step.edit.created ? "Created" : "Edited"} ${relativeTo(step.edit.path, folder)} (+${added} −${removed})${failed}`;

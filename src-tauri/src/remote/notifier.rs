@@ -129,6 +129,8 @@ pub struct Notifier {
     watched: Watched,
     /// What was pushed and hasn't been looked at since: one entry per chat and kind, and per prompt for the ones a button answers.
     sent: Mutex<HashSet<(String, Kind, Option<String>)>>,
+    /// The chats whose turn the person stopped: the end that follows is not a failure to tell anyone of.
+    stopping: Mutex<HashSet<String>>,
 }
 
 /// What a prompt that needs the user asks for, and its id.
@@ -169,7 +171,7 @@ fn words(kind: Kind, title: Option<&str>) -> (String, String) {
 
 impl Notifier {
     pub fn new(store: Arc<RemoteStore>, hub: Arc<SessionHub>, sender: Arc<dyn PushSender>, apns: Arc<dyn Apns>, watched: Watched) -> Arc<Self> {
-        Arc::new(Self { store, hub, sender, apns, watched, sent: Mutex::default() })
+        Arc::new(Self { store, hub, sender, apns, watched, sent: Mutex::default(), stopping: Mutex::default() })
     }
 
     /// Follows the bus until it closes (the task `start_remote` runs and `stop` aborts).
@@ -212,11 +214,30 @@ impl Notifier {
                 }
             }
             // A chat that finished is not news worth a notification: the lock-screen card shows it.
-            UiEvent::TurnDone { is_error: true, .. } => self.push(slot, Kind::Failed, None).await,
-            UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => self.push(slot, Kind::Failed, None).await,
+            UiEvent::TurnDone { is_error: true, .. } => {
+                // A turn the person stopped ends with an error too (the interrupt's): that is their own doing, and it isn't
+                // news to tell them of.
+                if !self.stopping.lock().unwrap().remove(slot) {
+                    self.push(slot, Kind::Failed, None).await;
+                }
+            }
+            UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => {
+                if !self.stopping.lock().unwrap().remove(slot) {
+                    self.push(slot, Kind::Failed, None).await;
+                }
+            }
+            UiEvent::TurnStopping => {
+                self.stopping.lock().unwrap().insert(slot.to_string());
+            }
             // A new message starts a new turn, and a new claude starts over.
-            UiEvent::UserText { .. } => self.forget(slot, &[Kind::Failed]),
-            UiEvent::SessionStarted { .. } => self.forget(slot, &[Kind::Failed]),
+            UiEvent::UserText { .. } => {
+                self.stopping.lock().unwrap().remove(slot);
+                self.forget(slot, &[Kind::Failed]);
+            }
+            UiEvent::SessionStarted { .. } => {
+                self.stopping.lock().unwrap().remove(slot);
+                self.forget(slot, &[Kind::Failed]);
+            }
             _ => {}
         }
     }
@@ -713,6 +734,21 @@ pub(crate) mod tests {
         r.event("a", UiEvent::UserText { text: "next".into(), at: None, sent_by: None, images: 0 }).await;
         r.event("a", done(true)).await;
         assert_eq!(r.pushed().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), vec!["A chat stopped with an error.", "A chat stopped with an error."]);
+    }
+
+    // The person's own Stop ends the turn with an error, and a session as a crash: neither is news to tell them of.
+    #[tokio::test]
+    async fn a_turn_the_person_stopped_is_never_pushed_as_a_failure() {
+        let r = rig(1);
+        r.event("a", UiEvent::TurnStopping).await;
+        r.event("a", done(true)).await;
+        r.event("b", UiEvent::TurnStopping).await;
+        r.event("b", UiEvent::SessionEnded { code: Some(1), stderr_tail: String::new() }).await;
+        assert!(r.pushed().is_empty());
+        // The next turn's own error is news again.
+        r.event("a", UiEvent::UserText { text: "next".into(), at: None, sent_by: None, images: 0 }).await;
+        r.event("a", done(true)).await;
+        assert_eq!(r.pushed().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), vec!["A chat stopped with an error."]);
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@ import { useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { PressScale, run } from "../ui/motion";
 import { SwipeRow, type TrayButton } from "../ui/SwipeRow";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, space, useBody, useColors } from "../ui/theme";
 import { dayOf, dueText, isProjectToken, monthWeeks, quickDays, todoSections, tomorrowMorning } from "../view/todos";
 import { FloatIcon } from "./ChangesPane";
 
@@ -291,6 +291,7 @@ function TodoRow({ todo: t, now, today = false, busy, edit, open, onOpenChange }
  */
 function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /** Room kept under it for the home indicator. */ bottom: number; onAdd: (title: string, date: string | null, time: string | null) => Promise<boolean> }) {
   const colors = useColors();
+  const body = useBody();
   const accent = useAccent();
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -337,7 +338,7 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
     <View style={[frame, { paddingTop: 12, gap: 10 }]}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
         <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.ink3 }} />
-        <TextInput accessibilityLabel="New to-do" autoFocus value={title} onChangeText={setTitle} placeholder="New To-Do" placeholderTextColor={colors.ink3} maxLength={200} returnKeyType="done" submitBehavior="submit" onSubmitEditing={() => void add()} style={{ flex: 1, fontSize: 17, color: colors.ink, paddingVertical: 4 }} />
+        <TextInput accessibilityLabel="New to-do" autoFocus value={title} onChangeText={setTitle} placeholder="New To-Do" placeholderTextColor={colors.ink3} maxLength={200} returnKeyType="done" submitBehavior="submit" onSubmitEditing={() => void add()} style={{ flex: 1, fontSize: body.fontSize, color: colors.ink, paddingVertical: 4 }} />
         <Pressable accessibilityRole="button" accessibilityLabel="Add" disabled={!title.trim() || busy} onPress={() => void add()} hitSlop={8}>
           <Txt variant="body" style={{ color: title.trim() && !busy ? accent : colors.ink3, fontWeight: "700" }}>
             Add
