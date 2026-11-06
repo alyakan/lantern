@@ -4,6 +4,8 @@ import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
+import { finished } from "../view/desk";
+import { JustFinished } from "./JustFinished";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { BAR_TEXT_SCALE, ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -164,7 +166,11 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
-  const { work, chats } = useSyncState();
+  const { work, chats, desk, single } = useSyncState();
+  // What finished on the Mac lately (the Desk's answers, across its desks, newest first): here, beside where things stand,
+  // not on the chats.
+  const done = desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
+  const justFinished = done.length > 0 && onOpenChat ? <JustFinished list={done} onOpen={onOpenChat} /> : null;
   const colorOf = projectColors(chats);
   // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
   const [page, setPage] = useState<string | null>(null);
@@ -468,6 +474,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           </Txt>
         )}
       </View>
+      {justFinished}
       {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map(featureCard)}</View>}
     </View>
   );
@@ -542,6 +549,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           ) : alone && open ? (
             <>
               <View style={{ marginBottom: 4 }}>{overviewNote()}</View>
+              {justFinished && <View style={{ marginVertical: 12 }}>{justFinished}</View>}
               {featurePage(open)}
             </>
           ) : (

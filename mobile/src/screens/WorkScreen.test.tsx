@@ -159,6 +159,18 @@ describe("Your work on the phone", () => {
     expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
   });
 
+  it("lists what just finished on the Mac above the cards, and a line opens its chat; the chats tab doesn't", async () => {
+    const onOpenChat = jest.fn();
+    const { controller } = await open({}, ["desk", "work"], onOpenChat);
+    const deskNow = { desks: [{ id: "home", name: "Desk", slots: ["a"], projects: [] }], cards: [{ key: "a:t1", desk: "home", slot: "a", title: "Release 0.1.53", project: "lantern", at: NOW - 60_000, asked: "Ship it", auto: false, said: "Shipped. All green.", outcome: "done" as const }] };
+    await act(async () => controller.sync.apply({ type: "desk", desk: deskNow as never }));
+    expect(screen.getByRole("header", { name: "Just finished" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: /^Release 0.1.53: Shipped/ }));
+    expect(onOpenChat).toHaveBeenCalledWith("a");
+    await fireEvent.press(screen.getByRole("tab", { name: /^Chats/ }));
+    expect(screen.queryByRole("header", { name: "Just finished" })).toBeNull();
+  });
+
   it("lets go of a feature's page once the feature is gone, and doesn't open it again by itself when it comes back", async () => {
     const { controller } = await open();
     await openCard("Reliability");

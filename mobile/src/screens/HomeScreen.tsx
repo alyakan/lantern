@@ -28,11 +28,9 @@ import { HomeSearch } from "./HomeSearch";
 
 import { ChatActionsSheet } from "./ChatActions";
 import { CloseChatSheet } from "./CloseChat";
-import { JustFinished } from "./JustFinished";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT, TopBar } from "../ui/TopBar";
 import { UsageRing } from "../ui/UsageRing";
 import { tabBarRoom } from "../ui/TabBar";
-import { finished } from "../view/desk";
 import { nextSteps } from "../view/work";
 import { SearchBar, type BarSearch } from "./SearchBar";
 import { COMPOSER_FILL } from "../ui/Glass";
@@ -480,8 +478,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   );
 
   const banner = single && <SingleBanner single={single} onShowAll={() => void controller.sync.setSingle(null).catch(() => {})} />;
-  // What finished on the Mac lately (the Desk's answers), across its desks and newest first: under what needs you on a phone.
-  const done = tabbed && desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
@@ -530,11 +526,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
               <Txt variant="small" tone="ink2" style={{ paddingHorizontal: gutter, paddingTop: 2 }}>
                 {stack.length - 1} more after this one
               </Txt>
-            )}
-            {done.length > 0 && (
-              <View style={{ paddingHorizontal: space.xl, paddingTop: 16 }}>
-                <JustFinished list={done} onOpen={onOpenChat} />
-              </View>
             )}
           </>
         )}
