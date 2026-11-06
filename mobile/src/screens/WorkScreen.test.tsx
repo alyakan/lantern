@@ -69,6 +69,9 @@ describe("Your work on a tablet", () => {
     // And the bar is on the list's column, not the window's: the cards' width, centered, not a second wider edge.
     const column = screen.getByTestId("work-bar").children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };
     expect(StyleSheet.flatten(column.props.style)).toMatchObject({ maxWidth: 640, alignSelf: "center" });
+    // The bar carries the page's one action, and the line under it no longer repeats it.
+    expect(within(screen.getByTestId("work-bar")).getByText("Refresh")).toBeTruthy();
+    expect(screen.getAllByText("Refresh")).toHaveLength(1);
     // A feature's page bar rides the same column.
     await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
     const row = screen.getByTestId("work-page-bar").children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };

@@ -10,12 +10,12 @@ import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
+import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
-  /** The bar over the list, for a tablet (the page's own header, held to the page's column); a phone has none, its headline says where it is. */
+  /** What a tablet's bar says where you are ("Work"); the bar's glass and its Refresh are the screen's own. A phone has no bar: its headline says where it is. */
   top?: ReactNode;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
@@ -442,9 +442,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                   : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
           </Txt>
           {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-          <View style={{ marginLeft: "auto" }}>
-            <Link label="Refresh" onPress={refresh} />
-          </View>
+          {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
+          {!top && (
+            <View style={{ marginLeft: "auto" }}>
+              <Link label="Refresh" onPress={refresh} />
+            </View>
+          )}
         </View>
         {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
         {blind.length > 0 && (
@@ -464,9 +467,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {needing === 0 ? "Nothing needs you right now." : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
       </Txt>
       {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-      <View style={{ marginLeft: "auto" }}>
-        <Link label="Refresh" onPress={refresh} />
-      </View>
+      {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
+      {!top && (
+        <View style={{ marginLeft: "auto" }}>
+          <Link label="Refresh" onPress={refresh} />
+        </View>
+      )}
     </View>
   );
 
@@ -483,22 +489,37 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   );
 
   /**
-   * The column a bar keeps on a tablet: the page's own, so the bar's edges are the content's. A bar as wide as the window over
+   * The column a bar keeps on a tablet: the page's own, so the bar starts where the content does. A bar as wide as the window over
    * content held to 640 points reads as a second, wider screen.
    */
   const barColumn: ViewStyle = wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", paddingHorizontal: space.xl } : {};
 
   /**
+   * A tablet's bar: where you are, and the one thing the page does — Refresh. The glass is as wide as the two words in it, not the
+   * column, so it reads as a pill rather than an empty band.
+   */
+  const tabletBar = (
+    <TopBar style={{ alignSelf: "flex-start", marginHorizontal: 0 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+        {top}
+        <Link label="Refresh" onPress={refresh} />
+      </View>
+    </TopBar>
+  );
+
+  /**
    * A feature's page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
-   * bar does. The way back leads, and the page's name sits where a chat's title does — the tablet brings its own header
-   * (`top`) instead.
+   * bar does. The way back leads, and the page's name sits where a chat's title does — a tablet's bar (`top`) says "Work" there
+   * instead.
    */
   const pageBar = (g: WorkGroup) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, ...(top ? barColumn : { paddingHorizontal: space.lg }) }}>
         {backCircle}
         <View style={{ flex: 1 }}>
-          {top ?? (
+          {top ? (
+            tabletBar
+          ) : (
             <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
               <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
                 {g.label}
@@ -543,8 +564,10 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {!top && <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />}
         {top && (
           <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
-            {/* The bar rides the list's column: its edges are the cards', not the window's. */}
-            <View pointerEvents="box-none" style={barColumn}>{top}</View>
+            {/* The bar starts where the list's column does, and is as wide as what it says. */}
+            <View pointerEvents="box-none" style={barColumn}>
+              {tabletBar}
+            </View>
           </View>
         )}
       </View>
