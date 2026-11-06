@@ -315,4 +315,5 @@ export const LOOKS = {
   voice: { symbol: "waveform", glyph: "♪", tint: "#7c4fd0" },
   whatsNew: { symbol: "sparkles", glyph: "✦", tint: "#d4693f" },
   support: { symbol: "heart.fill", glyph: "♥", tint: "#d14d7a" },
+  badge: { symbol: "app.badge", glyph: "●", tint: "#d93b3b" },
 } satisfies Record<string, Look>;

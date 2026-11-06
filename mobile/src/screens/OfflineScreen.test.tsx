@@ -1,7 +1,8 @@
 import { Alert, Keyboard } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import type { ConnectionState } from "../net/connection";
-import { connected } from "../test/render";
+import { connected, connectedWith } from "../test/render";
+import { resetWorkBadge } from "../workBadge";
 import { MacSheet, OfflineScreen, PILL_DELAY_MS, ReconnectPill } from "./OfflineScreen";
 
 /** Answers the next alert with its button named `choose`, and says what it asked. */
@@ -131,6 +132,18 @@ describe("the Mac's sheet", () => {
     await view.unmount();
     await render(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} />);
     expect(screen.queryByRole("button", { name: "Support development" })).toBeNull();
+  });
+
+  it("sets what the Work tab's number counts, for a Mac that has Work: new steps until opened, unless chosen otherwise", async () => {
+    resetWorkBadge();
+    await render(<MacSheet state={connectedWith(["work"])} onClose={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.getByRole("menu", { name: "Work badge, Until opened" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("menuitem", { name: "Never" }));
+    expect(screen.getByRole("menu", { name: "Work badge, Never" })).toBeTruthy();
+    await screen.unmount();
+    await render(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.queryByRole("menu", { name: /^Work badge/ })).toBeNull();
+    resetWorkBadge();
   });
 
   it("says that unpairing only forgets the Mac here, and unpairs or is done", async () => {

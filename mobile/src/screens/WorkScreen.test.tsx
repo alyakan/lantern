@@ -1,11 +1,13 @@
 import { Linking, StyleSheet } from "react-native";
-import { act, fireEvent, screen, within } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, NOW, renderWith } from "../test/render";
 import { BAR_TEXT_SCALE, Txt } from "../ui/components";
 import { PhoneTabs } from "./PhoneTabs";
+import { resetWorkBadge, setWorkBadge } from "../workBadge";
+import { resetKnown } from "../prefsKnown";
 import { WorkScreen } from "./WorkScreen";
 
 let mockTab: "chats" | "work" | "insights" = "work";
@@ -26,6 +28,8 @@ jest.mock("../deskLog", () => ({ loadDeskLog: jest.fn(async () => []), saveDeskL
 
 beforeEach(() => {
   mockTab = "work";
+  resetWorkBadge();
+  resetKnown();
 });
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
@@ -73,10 +77,24 @@ describe("Your work on a tablet", () => {
 });
 
 describe("Your work on the phone", () => {
-  it("is a tab beside the chats for a Mac that has it, with how many steps wait", async () => {
+  it("is a tab beside the chats for a Mac that has it, with how many steps wait until it is looked at", async () => {
+    mockTab = "chats";
     await open();
-    expect(screen.getByRole("tab", { name: "Work, 3 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work, 3 waiting" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("tab", { name: "Work, 3 waiting" }));
+    expect(screen.getByRole("tab", { name: "Work" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(screen.getByLabelText("Your work")).toBeTruthy();
+    // Seen: going back to the chats, it doesn't count them again.
+    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy());
+  });
+
+  it("counts every step waiting, looked at or not, when the phone is set to Always, and none when set to Never", async () => {
+    setWorkBadge("always");
+    await open();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work, 3 waiting" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await act(async () => setWorkBadge("never"));
+    expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy();
   });
 
   it("is its own headline, with no bar over the list", async () => {

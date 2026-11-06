@@ -13,7 +13,8 @@ import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
-import { DangerButton, LOOKS, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
+import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
+import { setWorkBadge, useWorkBadge, type WorkBadge } from "../workBadge";
 import { radius, space, useColors } from "../ui/theme";
 import { loadVoiceEngine, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
@@ -274,6 +275,19 @@ function LockRow() {
 }
 
 /** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
+const BADGES: { value: WorkBadge; label: string; hint: string }[] = [
+  { value: "opened", label: "Until opened", hint: "Counts the steps that came since you last looked at Work." },
+  { value: "always", label: "Always", hint: "Counts every step waiting, looked at or not." },
+  { value: "never", label: "Never", hint: "No number on the Work tab." },
+];
+
+/** What the Work tab's number counts, on this phone. */
+function WorkBadgeRow() {
+  const { mode } = useWorkBadge();
+  const chosen = BADGES.find((b) => b.value === mode) ?? BADGES[0];
+  return <MenuRow look={LOOKS.badge} title="Work badge" value={chosen.label} detail={chosen.hint} choices={BADGES} selected={mode} onPick={(v) => setWorkBadge(v as WorkBadge)} />;
+}
+
 function VoiceRow({ onPress }: { onPress: () => void }) {
   const [engine, setEngine] = useState<VoiceEngine | null>(null);
   useEffect(() => {
@@ -297,6 +311,7 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
   const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
   const canTodos = state.kind === "connected" && state.welcome.features?.includes("todos") === true && !!onTodos;
+  const canWork = state.kind === "connected" && state.welcome.features?.includes("work") === true;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   // What a button opens comes once this sheet is away: iOS shows no sheet while another is still going.
   const next = useRef<(() => void) | null>(null);
@@ -344,6 +359,7 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
               <SettingsSection label="This phone">
                 <LockRow />
                 {onVoice && <VoiceRow onPress={then(onVoice)} />}
+                {canWork && <WorkBadgeRow />}
               </SettingsSection>
               <SettingsSection label="Lantern">
                 {onWhatsNew && <SettingsRow look={LOOKS.whatsNew} title="What's new" onPress={then(onWhatsNew)} />}

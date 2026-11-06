@@ -17,6 +17,7 @@ import { nextSteps } from "../view/work";
 import { HomeScreen, type HomeProps } from "./HomeScreen";
 import { InsightsScreen } from "./InsightsScreen";
 import { WorkScreen } from "./WorkScreen";
+import { badgeCount, markWorkSeen, stepId, useWorkBadge } from "../workBadge";
 
 export interface PhoneTabsProps extends Omit<HomeProps, "selectedSlot" | "pinned" | "onTogglePin" | "onOpenWork" | "workShown"> {
   /** The compose button: typed, or (held down) by talking. */
@@ -70,7 +71,16 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
     setChosen(t);
     void saveTab(t);
   };
-  const tabs: TabChoice[] = [{ id: "chats", label: "Chats", badge: cards(waiting, chats).length }, ...(canWork ? [{ id: "work" as const, label: "Work", badge: work ? nextSteps(work.items).length : 0 }] : []), ...(canInsights ? [{ id: "insights" as const, label: "Insights" }] : [])];
+  // Work's badge: the steps waiting, as the phone's setting says (by default only those new since Work was looked at). Looking
+  // at Work sees them, and so do steps that come in while it is open.
+  const badge = useWorkBadge();
+  const steps = work ? nextSteps(work.items).map(stepId) : [];
+  const stepsKey = steps.join("\n");
+  useEffect(() => {
+    if (tab === "work" && work) markWorkSeen(steps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, stepsKey, !!work]);
+  const tabs: TabChoice[] = [{ id: "chats", label: "Chats", badge: cards(waiting, chats).length }, ...(canWork ? [{ id: "work" as const, label: "Work", badge: tab === "work" && badge.mode !== "always" ? 0 : badgeCount(badge, steps) }] : []), ...(canInsights ? [{ id: "insights" as const, label: "Insights" }] : [])];
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {opened.has("chats") && (
