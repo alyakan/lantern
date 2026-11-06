@@ -92,12 +92,18 @@ export async function saveFolded(projects: string[]): Promise<void> {
 
 const PINNED_KEY = "lantern.sidebar-pinned";
 
-/** Whether a tablet keeps the chats beside the chat (pinned), or slides them in when asked and away once a chat is chosen. Not pinned until chosen. */
-export async function loadSidebarPinned(): Promise<boolean> {
+/**
+ * Whether a tablet keeps the chats beside the chat (pinned), slides them in when asked and away once a chat is chosen (not
+ * pinned), or was never told (null): then the window decides, as iPadOS shows its sidebar beside the content sideways and puts
+ * it away upright.
+ */
+export async function loadSidebarPinned(): Promise<boolean | null> {
   try {
-    return (await SecureStore.getItemAsync(PINNED_KEY, OPTIONS)) === "1";
+    const saved = await SecureStore.getItemAsync(PINNED_KEY, OPTIONS);
+    return saved === null ? null : saved === "1";
   } catch {
-    return false;
+    // Unreadable is not a choice either way: the window decides, and nothing was pinned away for good.
+    return null;
   }
 }
 

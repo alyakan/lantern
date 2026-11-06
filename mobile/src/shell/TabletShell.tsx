@@ -171,9 +171,9 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
         {...(split ? {} : toEdge)}
       >
         {/* Its shadow while it floats, and its hairline while it is pinned: one gives way to the other. */}
-        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.paper, opacity: float, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 4, height: 0 } }]} />
+        <Animated.View testID="chats-column-shadow" pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.paper, opacity: float, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 4, height: 0 } }]} />
         {sidebar}
-        <Animated.View pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: float.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
+        <Animated.View testID="chats-column-rule" pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: float.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
       </Animated.View>
     </View>
   );
