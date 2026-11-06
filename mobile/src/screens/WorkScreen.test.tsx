@@ -62,16 +62,13 @@ describe("Your work on the phone", () => {
     expect(screen.getByLabelText("Your work")).toBeTruthy();
   });
 
-  it("has its bar float over the list, which starts below the bar once it is measured", async () => {
+  it("is its own headline, with no bar over the list", async () => {
     await open();
-    const start = () => StyleSheet.flatten(screen.getByLabelText("Your work").props.contentContainerStyle).paddingTop;
-    const before = start();
-    // The bar takes no touches itself (it only passes them to what is in it), so the event goes to its handler directly.
-    await act(async () => {
-      screen.getByTestId("work-bar").props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 120 } } });
-    });
-    expect(start()).toBe(132);
-    expect(before).not.toBe(132);
+    expect(screen.getByRole("header", { name: "Work" })).toBeTruthy();
+    expect(screen.queryByTestId("work-bar")).toBeNull();
+    // The list starts below the clock rather than below a bar.
+    const start = StyleSheet.flatten(screen.getByLabelText("Your work").props.contentContainerStyle).paddingTop;
+    expect(start).toBeGreaterThan(0);
   });
 
   it("is not offered by a Mac that lists no work, which opens on the chats", async () => {
@@ -123,8 +120,17 @@ describe("Your work on the phone", () => {
     expect(page.getByRole("tab", { name: "Needs you, 2" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(page.getByText(/Retry fetchJson/)).toBeTruthy();
     expect(page.getByText(/Cache settings/)).toBeTruthy();
-    await fireEvent.press(page.getByRole("button", { name: "‹ Work" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
     expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
+  });
+
+  it("puts the way back beside the bar, as a chat's is: a glass circle with a finger's worth of a target", async () => {
+    await open();
+    const page = await openCard("Reliability");
+    const back = within(screen.getByTestId("work-page-bar")).getByRole("button", { name: "Back to Work" });
+    expect(StyleSheet.flatten(back.props.style).minHeight).toBe(44);
+    // It is the bar's, not the page's: the page's own heading no longer carries it, so it can't scroll away.
+    expect(page.queryByRole("button", { name: "Back to Work" })).toBeNull();
   });
 
   it("has four tabs, each with the rows of its state, and dims one with nothing in it", async () => {
@@ -145,7 +151,7 @@ describe("Your work on the phone", () => {
     expect(page.getByRole("tab", { name: "Shipped" }).props.accessibilityState).toMatchObject({ selected: true });
     // Its project is a chip, so the line doesn't say it.
     expect(page.getByText(/merged 2 h ago/)).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "‹ Work" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
     const dashboard = await openCard("Dashboard");
     expect(dashboard.getByRole("tab", { name: "To start" }).props.accessibilityState).toMatchObject({ selected: true });
     clock.mockRestore();
@@ -192,7 +198,7 @@ describe("Your work on the phone", () => {
   it("has no cards when everything is in one feature: its page is the screen", async () => {
     await open({ work: { ...work, items: work.items.filter((i) => i.feature === "Reliability") } });
     expect(screen.getByLabelText("Reliability")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "‹ Work" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
     expect(screen.getByText("2 things need you.")).toBeTruthy();
   });
 

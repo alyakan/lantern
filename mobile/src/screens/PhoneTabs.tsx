@@ -55,7 +55,7 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
   const tabs: TabChoice[] = [{ id: "chats", label: "Chats", badge: cards(waiting, chats).length }, ...(canWork ? [{ id: "work" as const, label: "Work", badge: work ? nextSteps(work.items).length : 0 }] : []), ...(canInsights ? [{ id: "insights" as const, label: "Insights" }] : [])];
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {tab === "work" ? <WorkScreen top={<Header title="Work" />} onOpenChat={home.onOpenChat} tabbed /> : tab === "insights" ? <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} /> : <HomeScreen {...home} tabbed />}
+      {tab === "work" ? <WorkScreen onOpenChat={home.onOpenChat} tabbed /> : tab === "insights" ? <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} /> : <HomeScreen {...home} tabbed />}
       <TabBar tabs={tabs} value={tab} onChange={pick} onCompose={() => onComposeNew(false)} onComposeVoice={() => onComposeNew(true)} />
     </View>
   );

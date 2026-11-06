@@ -1,20 +1,22 @@
 import { tabBarRoom } from "../ui/TabBar";
 import { useState, type ReactNode } from "react";
-import { Linking, RefreshControl, ScrollView, View } from "react-native";
+import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
+import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
+import { Glass } from "../ui/Glass";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
-import { radius, space, useColors, type Palette } from "../ui/theme";
+import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
-  /** Above the page: Home's top on a phone (the Mac's name, the Desk, Work and Chats switch), the page's own header on a tablet. */
-  top: ReactNode;
+  /** The bar over the list, for a tablet (the page's own header, with the chats' button); a phone has none, its headline says where it is. */
+  top?: ReactNode;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
   /** A tablet's main area: the page is held to a column that reads well. */
@@ -397,10 +399,13 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
     return (
       <View accessibilityLabel={g.label}>
-        {!alone && <Link label="‹ Work" hint="Back to every feature" onPress={() => setPage(null)} />}
-        <Txt variant="title" style={{ marginTop: alone ? 0 : 6 }}>
-          {g.label}
-        </Txt>
+        {/* With one feature its page is the screen, and a tablet's bar keeps saying "Work": there the name is the headline.
+            On a phone, pushed, the page's bar carries the name instead. */}
+        {(alone || !!top) && (
+          <Txt variant="title" style={{ marginTop: 0 }}>
+            {g.label}
+          </Txt>
+        )}
         <Txt variant="small" tone="ink3" style={{ marginTop: 4 }}>
           {live} open, {g.items.length - live} shipped
         </Txt>
@@ -420,7 +425,9 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
-        <Txt variant="title">Work</Txt>
+        <Txt variant="title" accessibilityRole="header">
+          Work
+        </Txt>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
           <Txt variant="body" tone="ink2" style={{ flexShrink: 1 }}>
             {!looked
@@ -460,34 +467,103 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     </View>
   );
 
+  /**
+   * The way back from a feature's page: the chat's back button, a circle of glass. The page goes away as the stack takes it
+   * away (a swipe in from the edge does the same, with the list coming out from under it).
+   */
+  const backCircle = (
+    <PressScale accessibilityRole="button" accessibilityLabel="Back to Work" accessibilityHint="Goes back to every feature" onPress={() => setPage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} haptic="select" scaleTo={0.88} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, justifyContent: "center" }}>
+      <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+      </Glass>
+    </PressScale>
+  );
+
+  /**
+   * A feature's page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
+   * bar does. The way back leads, and the page's name sits where a chat's title does — the tablet brings its own header
+   * (`top`) instead.
+   */
+  const pageBar = (g: WorkGroup) => (
+    <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: top ? 0 : space.lg }}>
+        <View style={top ? { marginLeft: space.lg } : undefined}>{backCircle}</View>
+        <View style={{ flex: 1 }}>
+          {top ?? (
+            <Glass style={{ height: control, borderRadius: control / 2, paddingHorizontal: 18, justifyContent: "center" }}>
+              <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
+                {g.label}
+              </Txt>
+            </Glass>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+
+  /** The room a screen's list keeps round it. */
+  const margins: ViewStyle = { paddingHorizontal: wide ? space.xl : space.lg, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) };
+
+  // The tab is the app's own stack, as a chat's screen is: the list, and the feature's page pushed over it — so going back
+  // uncovers the list itself, sliding out from under, rather than a blank screen.
+  const listScreen: StackItem = {
+    key: "work:list",
+    kind: "push",
+    element: (
+      <View style={{ flex: 1, backgroundColor: colors.paper }}>
+        <ScrollView
+          accessibilityLabel="Your work"
+          style={{ flex: 1 }}
+          contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}
+          refreshControl={work !== null && !alone ? <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" /> : undefined}
+        >
+          {work === null ? (
+            <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Dots />
+            </View>
+          ) : alone && open ? (
+            <>
+              <View style={{ marginBottom: 4 }}>{overviewNote()}</View>
+              {featurePage(open)}
+            </>
+          ) : (
+            overview
+          )}
+        </ScrollView>
+        {/* A phone has no bar over the list (the headline is its own); a tablet's floats over it. The status bar's strip is paper, so words don't run under the clock. */}
+        {!top && <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />}
+        {top && (
+          <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
+            {top}
+          </View>
+        )}
+      </View>
+    ),
+  };
+  const screens: StackItem[] =
+    !alone && open
+      ? [
+          listScreen,
+          {
+            key: `work:${open.key}`,
+            kind: "push",
+            element: (
+              <View style={{ flex: 1, backgroundColor: colors.paper }}>
+                {pageBar(open)}
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
+                  {featurePage(open)}
+                </ScrollView>
+              </View>
+            ),
+          },
+        ]
+      : [listScreen];
+
   const shown = detail ? items.find((i) => i.key === detail) : undefined;
   const metaOfShown = shown ? metaUnder(shown, now, null) : "";
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <ScrollView
-        accessibilityLabel="Your work"
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
-      >
-        {work === null ? (
-          <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
-            <Dots />
-          </View>
-        ) : open ? (
-          <>
-            {alone && <View style={{ marginBottom: 4 }}>{overviewNote()}</View>}
-            {featurePage(open)}
-          </>
-        ) : (
-          overview
-        )}
-      </ScrollView>
-      {/* The bar floats over the list, which scrolls under it. The status bar's own strip is paper, so words don't run under the clock. */}
-      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
-      <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
-        {top}
-      </View>
+      <AnimatedStack items={screens} onBack={() => setPage(null)} />
       {shown && (
         <Sheet onClose={() => setDetail(null)}>
           {(close, scroll) => {
