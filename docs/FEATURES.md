@@ -449,7 +449,7 @@ The **disk button** in the title bar, just before the Settings gear, opens **Sto
 
 - **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, restore points before each message, whether the sidebar moves a chat up when it does something, and whether starting a team asks first.
 - **Appearance**: the theme (see below), the text size and the menu bar.
-- **Models**: the model presets (who does the work, the advisor and the subagents) that the Models chip offers, and, for teams, **Agents running at once**, **Say an agent is quiet after**, **Tidy up an agent after its merge** and **Pause agents when their provider's usage reaches**.
+- **Models**: the model presets (who does the work, the advisor and the subagents) that the Models chip offers, and, for teams, **Agents running at once**, **Say an agent is quiet after**, **Tidy up an agent after its merge** and **Pause agents when their provider's usage reaches**. On a chat that runs on another provider (Codex, an endpoint), the page offers that provider's own **Model** and **Thinking effort** instead, so the settings aren't Claude's alone.
 - **Routines**: prompts that Lantern sends by itself at set times (see [Away](#away)).
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on its row and on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.

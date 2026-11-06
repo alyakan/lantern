@@ -25,6 +25,7 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
+import { ProviderModels, type ProviderModelsProps } from "./ProviderModels";
 import { SettingsHint, SettingsRow } from "./SettingsRow";
 import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
@@ -129,6 +130,8 @@ interface Props {
   onRestartChat?: () => void;
   /** The harness presets, for the Harness page. */
   harness?: HarnessSettingsProps;
+  /** The chat's provider's own models, for a chat not on Claude Code (Model, and its thinking effort). */
+  providerModels?: ProviderModelsProps;
   /** The running version and how updating is going, for the Updates page. */
   updates?: UpdatesPageProps;
   /** Notifications, appearance and text size, for the General page (App keeps them saved). */
@@ -150,19 +153,19 @@ interface Props {
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
+export function SettingsView({ open, onClose, harness, providerModels, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
   // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
-  const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor);
+  const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor || caps.model_switchable);
   const tab = offered(picked) ? picked : "general";
   // The search narrows the nav; ⌘F focuses it and Enter opens the first match.
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
   // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
   const available = (t: SettingsTab) =>
-    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "harness" || harness || providerModels) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
   const q = query.trim().toLowerCase();
   const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
   const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
@@ -276,6 +279,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <GeneralPage {...general} />
             ) : tab === "appearance" && general ? (
               <AppearancePage {...general} />
+            ) : tab === "harness" && !caps.supports_advisor && providerModels ? (
+              <ProviderModels {...providerModels} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
             ) : tab === "endpoints" && endpoints ? (
