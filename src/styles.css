@@ -4169,18 +4169,29 @@ a.yw-issue:hover { background: color-mix(in srgb, var(--text) 12%, var(--pane));
 .yw-pdot.yw-b-start, .yw-frow.yw-b-start > .yw-pdot { background: transparent; border: 1.5px solid var(--muted-text); opacity: 1; }
 .yw-ask { font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); overflow-wrap: anywhere; }
 .yw-ask b { color: var(--yw); font-weight: 650; }
-.yw-fpage { --yw: var(--muted-text); display: flex; flex-direction: column; padding: 4px 2px 0; }
-.yw-fpage .desk-back { align-self: flex-start; }
-.yw-ftitle { margin: 6px 0 2px; font: 700 calc(22px * var(--font-scale)) var(--ui); letter-spacing: -0.015em; color: var(--text); }
-.yw-tabs { display: flex; gap: 22px; margin-top: 14px; border-bottom: 0.5px solid var(--line); }
-.yw-tab { margin-bottom: -0.5px; padding: 0 0 9px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--muted-text); font: 600 calc(13px * var(--font-scale)) var(--ui); cursor: pointer; }
-.yw-tab.on { border-bottom-color: var(--text); color: var(--text); }
-.yw-tab.zero:not(.on) { opacity: 0.5; }
-.yw-tab-n { margin-left: 5px; font-style: normal; font-weight: 700; color: var(--accent); }
-.yw-empty { padding: 18px 0; }
-.yw-flist { margin: 0; padding: 0; list-style: none; }
+/* A feature's page: a card of its own in the colour of its project — its mark, its name, what is open — with a tab per state and
+   the work under the one chosen, so the rows read as this feature's and not as rows loose on the page. */
+.yw-fpage { --yw: var(--muted-text); position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid color-mix(in srgb, var(--proj, var(--accent)) 24%, var(--line)); border-radius: var(--radius-float); background: var(--pane); }
+.yw-fpage::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: color-mix(in srgb, var(--proj, var(--accent)) 72%, transparent); }
+.yw-fhead { padding: 10px 16px 12px; }
+.yw-fhead-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 22px; }
+.yw-fcounts { display: inline-flex; align-items: baseline; gap: 14px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.yw-fcounts b { color: var(--text); font-weight: 650; }
+.yw-fhead-body { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.yw-fmark { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border: 0.5px solid color-mix(in srgb, var(--proj, var(--accent)) 38%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--proj, var(--accent)) 14%, var(--pane)); color: var(--proj, var(--accent)); font: 700 calc(12px * var(--font-scale)) var(--ui); }
+.yw-fhead-id { min-width: 0; }
+.yw-ftitle { margin: 1px 0 0; font: 700 calc(18px * var(--font-scale)) var(--ui); line-height: 1.25; letter-spacing: -0.01em; color: var(--text); overflow-wrap: anywhere; }
+/* The states as a segmented control, with each one's count: the shape of the feature's work at a glance. */
+.yw-tabs { display: inline-flex; align-self: flex-start; gap: 2px; margin: 0 16px 12px; padding: 2px; border-radius: var(--radius-pill); background: var(--seg-track); }
+.yw-tab { height: 26px; padding: 0 12px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font: 600 calc(12.5px * var(--font-scale)) var(--ui); cursor: pointer; }
+.yw-tab.on { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
+.yw-tab.zero:not(.on) { opacity: 0.45; }
+.yw-tab-n { margin-left: 6px; font-style: normal; font-weight: 650; color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.yw-tab.on .yw-tab-n { color: var(--text); }
+.yw-empty { padding: 16px; border-top: 0.5px solid var(--line); }
+.yw-flist { margin: 0; padding: 0 16px; list-style: none; border-top: 0.5px solid var(--line); }
 /* A piece of work here is taller than a list row: it carries its pipeline. */
-.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 16px 2px 18px; border-top: 0.5px solid var(--line); }
+.yw-frow { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0 16px; border-top: 0.5px solid var(--line); }
 .yw-frow:first-child { border-top: none; }
 .yw-frow > .yw-pdot { margin-top: 6px; }
 .yw-frow.yw-warn { --yw: var(--warn); }

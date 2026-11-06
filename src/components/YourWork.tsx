@@ -8,6 +8,7 @@ import { Card } from "./DeskCard";
 import { safeIssueUrl } from "../lib/linear";
 import { ExternalLink } from "./ExternalLink";
 import { useMenuKeys } from "./useMenuKeys";
+import { initials } from "../lib/sidebar";
 
 export interface YourWorkProps {
   repos: RepoStatus[] | null;
@@ -445,29 +446,49 @@ function FeatureRow({ item, issues, heading, dropName, chats, repos, onStep }: {
   );
 }
 
-/** A feature's page: its name, its tabs (Needs you, Moving, To start, Shipped), and the rows under the one chosen. */
+/** A feature's page: a card of its own in the colour of its project — its mark, its name, how much of it is open, a tab per state
+ * with its count, and the rows under the one chosen — so the work under it reads as one feature, not as rows on the page. */
 function FeatureDetail({ group, issues, dropName, tab, onTab, onBack, chats, repos, onStep }: { group: WorkGroup; issues: boolean; dropName: boolean; tab: Bucket | null; onTab: (b: Bucket) => void; onBack: (() => void) | null; chats: InboxRow[]; repos: RepoStatus[] | null; onStep: YourWorkProps["onStep"] }) {
   const on = tab ?? openBucket(group.items);
   const rows = group.items.filter((i) => bucketOf(i) === on);
   const live = group.items.filter((i) => bucketOf(i) !== "shipped").length;
   return (
     <section className="yw-fpage" aria-label={group.label}>
-      {onBack && (
-        <button className="desk-back" onClick={onBack}>
-          ‹ Work
-        </button>
-      )}
-      <h3 className="yw-ftitle">{group.label}</h3>
-      <p className="yw-quiet">
-        {live} open, {group.items.length - live} shipped
-      </p>
+      <header className="yw-fhead">
+        <div className="yw-fhead-top">
+          {onBack ? (
+            <button className="desk-back" onClick={onBack}>
+              ‹ Work
+            </button>
+          ) : (
+            <span />
+          )}
+          <span className="yw-fcounts">
+            <span>
+              <b>{live}</b> open
+            </span>
+            <span>
+              <b>{group.items.length - live}</b> shipped
+            </span>
+          </span>
+        </div>
+        <div className="yw-fhead-body">
+          <span className="yw-fmark" aria-hidden>
+            {initials(group.label, 2)}
+          </span>
+          <div className="yw-fhead-id">
+            <span className="yw-kicker">{issues ? "Feature" : "Project"}</span>
+            <h3 className="yw-ftitle">{group.label}</h3>
+          </div>
+        </div>
+      </header>
       <div className="yw-tabs" role="tablist" aria-label={`${group.label} work`}>
         {BUCKETS.map(({ bucket, label }) => {
           const n = group.items.filter((i) => bucketOf(i) === bucket).length;
           return (
             <button key={bucket} role="tab" aria-selected={bucket === on} className={`yw-tab${bucket === on ? " on" : ""}${n === 0 ? " zero" : ""}`} onClick={() => onTab(bucket)}>
               {label}
-              {bucket === "attn" && n > 0 && <i className="yw-tab-n">{n}</i>}
+              <span className="yw-tab-n">{n}</span>
             </button>
           );
         })}

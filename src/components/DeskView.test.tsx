@@ -349,12 +349,13 @@ describe("the Desk", () => {
     fireEvent.click(within(stand).getByRole("button", { name: /^Sync, 1 open/ }));
     const sync = within(screen.getByRole("region", { name: "Sync" }));
     expect(sync.getByRole("tab", { name: /^Needs you/ })).toHaveAttribute("aria-selected", "true");
-    for (const name of ["Moving", "To start", "Shipped"]) expect(sync.getByRole("tab", { name })).toBeInTheDocument();
+    // Each says how much of the feature is in it, so an empty state is still there to open.
+    for (const name of [/^Moving 0/, /^To start 0/, /^Shipped 0/]) expect(sync.getByRole("tab", { name })).toBeInTheDocument();
     // A row carries the item's pipeline and its step.
     expect(sync.getByRole("button", { name: /#7 PR 7/ })).toBeInTheDocument();
     expect(sync.getByLabelText(/^At Checks/)).toBeInTheDocument();
     expect(sync.getByRole("button", { name: "Fix failing checks on #7" })).toBeInTheDocument();
-    fireEvent.click(sync.getByRole("tab", { name: "Moving" }));
+    fireEvent.click(sync.getByRole("tab", { name: /^Moving/ }));
     expect(sync.getByText("Nothing here.")).toBeInTheDocument();
     fireEvent.click(sync.getByRole("button", { name: "‹ Work" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getByRole("button", { name: /^Sync, 1 open/ })).toBeInTheDocument();
@@ -392,7 +393,7 @@ describe("the Desk", () => {
     const page = within(screen.getByRole("region", { name: "lantern" }));
     expect(page.queryByRole("button", { name: "‹ Work" })).toBeNull();
     expect(page.getByRole("tab", { name: /^Needs you/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(page.getByRole("tab", { name: "Moving" }));
+    fireEvent.click(page.getByRole("tab", { name: /^Moving/ }));
     expect(page.getByText(/PR 8/)).toBeInTheDocument();
   });
 

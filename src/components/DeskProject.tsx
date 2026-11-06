@@ -206,8 +206,7 @@ function useProjectColor(folders: string[], fallback: string): string {
  * A project's own head, first on its page: its name and mark in the sidebar's colour, where its checkout stands, and the features
  * its work is in, a chip each that opens it. A page plainly a project's, not the Desk's: the way back is here, and the colour.
  */
-function ProjectHead({ row, repo, here, chats, work, onBack, onFeature }: { row: ProjectRow; repo: RepoStatus | null | undefined; here: RepoStatus["folders"][number] | undefined; chats: InboxRow[]; work: WorkItem[] | undefined; onBack: () => void; onFeature: (key: string) => void }) {
-  const color = useProjectColor([row.folder, ...(repo?.folders.map((f) => f.folder) ?? [])], "var(--accent)");
+function ProjectHead({ row, repo, here, chats, work, color, onBack, onFeature }: { row: ProjectRow; repo: RepoStatus | null | undefined; here: RepoStatus["folders"][number] | undefined; chats: InboxRow[]; work: WorkItem[] | undefined; color: string; onBack: () => void; onFeature: (key: string) => void }) {
   const features = repo ? projectsOf(work ?? [], repo.repo) : [];
   const prs = repo?.prs.length ?? 0;
   return (
@@ -274,9 +273,11 @@ export function DeskProject({ row, chats, repo, work, issues = false, onStep, on
   const startTodo = (todo: Todo) => (onStartTodo ? onStartTodo(row.folder, todo) : startChat(todoPrompt(todo)));
   // The feature opened from the head card, shown on the work board below.
   const [feature, setFeature] = useState<string | null>(null);
+  // The page's own colour: the head card wears it, and so does a feature opened under it.
+  const color = useProjectColor([row.folder, ...(repo?.folders.map((f) => f.folder) ?? [])], "var(--accent)");
   return (
-    <section className="desk-project-page" aria-label={`Project ${row.label}`}>
-      <ProjectHead row={row} repo={repo} here={here} chats={chats} work={work} onBack={onBack} onFeature={setFeature} />
+    <section className="desk-project-page" aria-label={`Project ${row.label}`} style={{ "--proj": color } as CSSProperties}>
+      <ProjectHead row={row} repo={repo} here={here} chats={chats} work={work} color={color} onBack={onBack} onFeature={setFeature} />
 
       {/* Its own work first: where each pull request, branch and issue of this project stands, grouped by feature when Linear is on. */}
       {work && work.length > 0 && (
