@@ -49,16 +49,18 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
   // folded is shown again, for good. So each file, and each new version of one, gets an editor of its own. (Reading the
   // same text again is the same version: nothing is redrawn.)
   const version = useMemo(() => (diff ? `${diff.path}\n${hashOf(diff.original)}:${hashOf(diff.current)}` : ""), [diff]);
-  // Another file (or another version of this one) fades in where the last was, rather than cutting to it. An animation of its
-  // own rather than a class taken off and put back: Safari doesn't restart the same animation when the class goes back on in the
-  // same frame, even around a reflow. The editor under it is not redrawn for it.
+  // Another file fades in where the last was, rather than cutting to it. Not a new version of the same file: while Claude edits
+  // the one that is open it is read again at every change, and the diff would blink at each. An animation of its own rather than
+  // a class taken off and put back: Safari doesn't restart the same animation when the class goes back on in the same frame, even
+  // around a reflow. The editor under it is not redrawn for it.
   const body = useRef<HTMLDivElement>(null);
+  const shown = diff?.path ?? "";
   useLayoutEffect(() => {
     const el = body.current;
     const less = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
     if (!el || less || typeof el.animate !== "function") return;
     el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
-  }, [version]);
+  }, [shown]);
 
   if (error) return <div className="empty">{error}</div>;
   if (!diff) return <div className="empty">Loading…</div>;

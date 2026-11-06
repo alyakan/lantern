@@ -162,7 +162,15 @@ export function DeskProjects({ rows, chats, repos, items, now, onOpen, onPage }:
           return (
             <article key={r.folder} className="desk-tile" aria-label={r.label} onClick={() => onPage(r.folder)}>
               <header className="desk-tile-head">
-                <button className="desk-project" title={`Open ${r.folder}`} onClick={() => onPage(r.folder)}>
+                <button
+                  className="desk-project"
+                  title={`Open ${r.folder}`}
+                  onClick={(e) => {
+                    // The tile opens the page too; one press is one opening.
+                    e.stopPropagation();
+                    onPage(r.folder);
+                  }}
+                >
                   {r.label}
                 </button>
                 {r.unread > 0 && <span className="desk-unread-count">{r.unread} unread</span>}

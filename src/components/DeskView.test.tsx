@@ -144,6 +144,20 @@ describe("the Desk", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("opens a project's page once from a press anywhere on its tile, and not at all from the chats menu it holds", () => {
+    const { props } = setup({ chats: [row(1)], projects: [project("/p/lantern", { chats: 1 })] });
+    const tile = screen.getByRole("article", { name: "lantern" });
+    // Its name is a button inside the tile: its press is not counted twice on the way up to the tile.
+    fireEvent.click(within(tile).getByRole("button", { name: "lantern" }));
+    expect(props.onPage).toHaveBeenCalledTimes(1);
+    fireEvent.click(tile);
+    expect(props.onPage).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(tile).getByRole("button", { name: "Show the chats of lantern" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Chat 1" }));
+    expect(props.onOpen).toHaveBeenCalledWith("s1");
+    expect(props.onPage).toHaveBeenCalledTimes(2);
+  });
+
   it("adds each project's branch, your work and release, and says why when GitHub can't be asked", () => {
     const now = Date.now();
     const repos = [
@@ -359,6 +373,19 @@ describe("the Desk", () => {
     expect(sync.getByText("Nothing here.")).toBeInTheDocument();
     fireEvent.click(sync.getByRole("button", { name: "‹ Work" }));
     expect(within(screen.getByRole("region", { name: "Where things stand" })).getByRole("button", { name: /^Sync, 1 open/ })).toBeInTheDocument();
+  });
+
+  it("does not carry a feature opened on one project's page over to the next project's, which may have one of the same name", () => {
+    const issue = (identifier: string, team: string) => ({ identifier, title: "Sync it", url: `https://linear.app/a/issue/${identifier}`, priority: 3, due: null, state: "In Progress", state_type: "started", team, project: "Sync", project_id: "p1", branch: null, links: [] });
+    const linear = { work: { connected: true, viewer: "Aly", org: "A", teams: [{ key: "ENG", name: "Eng" }, { key: "WEB", name: "Web" }], issues: [issue("ENG-1", "ENG"), issue("WEB-1", "WEB")], error: null }, teamOf: { "/p/lantern": "ENG", "/p/web": "WEB" } };
+    const repos = [repo("/p/lantern", { prs: [pr(7, "fail", { branch: "aly/eng-1-a" }), pr(8, "pending")] }), repo("/p/web", { github: "aly/web", prs: [pr(3, "fail", { branch: "aly/web-1-a" }), pr(4, "pending")] })];
+    const props = { chats: [], projects: [project("/p/lantern"), project("/p/web")], needs: [], onPage: vi.fn(), onNewChat: vi.fn(), onOpen: vi.fn(), onGo: vi.fn(), onDecide: vi.fn(), onStep: vi.fn(() => true), onRefreshRepos: vi.fn(), onAsk: vi.fn() };
+    const { rerender } = render(<DeskView {...props} page="/p/lantern" repos={repos} linear={linear} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the feature Sync" }));
+    expect(screen.getByRole("region", { name: "Sync" })).toBeInTheDocument();
+    rerender(<DeskView {...props} page="/p/web" repos={repos} linear={linear} />);
+    expect(screen.queryByRole("region", { name: "Sync" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Sync, 1 open/ })).toBeInTheDocument();
   });
 
   it("opens an item's details from a row of a feature's page", () => {

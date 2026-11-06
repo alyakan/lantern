@@ -130,6 +130,19 @@ describe("FullDiff of a file that was changed", () => {
     expect(editorOf()).not.toBe(first);
   });
 
+  it("does not blink the diff of the file that is open each time Claude edits it again", async () => {
+    vi.mocked(api.getFileDiff).mockResolvedValueOnce(changed("/p/a.ts", "a\nB\nc\n"));
+    const { container, rerender } = render(<FullDiff path="/p/a.ts" refreshKey={0} layout="inline" />);
+    await screen.findByTestId("diff");
+    const body = container.querySelector(".diff-body");
+    await waitFor(() => expect(fades).toEqual([body]));
+    // The same file, read again with new text: a new editor under the same body, and no new fade.
+    vi.mocked(api.getFileDiff).mockResolvedValueOnce(changed("/p/a.ts", "a\nB\nC\n"));
+    rerender(<FullDiff path="/p/a.ts" refreshKey={1} layout="inline" />);
+    await waitFor(() => expect(screen.getByTestId("diff")).toHaveAttribute("data-modified", "a\nB\nC\n"));
+    expect(fades).toEqual([body]);
+  });
+
   it("keeps the editor when the same text is read again, or only the layout changes", async () => {
     vi.mocked(api.getFileDiff).mockResolvedValue(changed("/p/a.ts", "a\nB\nc\n"));
     const { rerender } = render(<FullDiff path="/p/a.ts" refreshKey={0} layout="inline" />);

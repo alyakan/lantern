@@ -4430,23 +4430,23 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(12px) scale(0.995); } }
 @keyframes fade-in { from { opacity: 0; } }
 /* The Desk's home, a project's page, and the chat card: each mounts on its own, so each rises in once as it appears. */
-.desk-main > .desk-bento, .desk-project-page { animation: view-in var(--dur-3) var(--ease-out) both; }
-.chat-pane { animation: view-in var(--dur-2) var(--ease-out) both; }
+.desk-main > .desk-bento, .desk-project-page { animation: view-in var(--dur-3) var(--ease-out) backwards; }
+.chat-pane { animation: view-in var(--dur-2) var(--ease-out) backwards; }
 /* The work board's cards, and one feature's page in their place; a review tab's body as it comes up; a chat as it is opened. */
-.yw-fgrid, .yw-fpage, .tab-body { animation: view-in-sm var(--dur-2) var(--ease-out) both; }
-.chat-wrap { animation: fade-in var(--dur-2) var(--ease-out) both; }
+.yw-fgrid, .yw-fpage, .tab-body { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
+.chat-wrap { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
 /* A file opened in Files fades in, its editor with it (each file has one of its own, so it is a fresh mount). */
-.editable-editor { animation: fade-in var(--dur-2) var(--ease-out) both; }
+.editable-editor { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
 /* Menus and popovers open out of the control that asked for them; dialogs come up over a scrim that fades in first. */
-.menu, .canvas-menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) both; }
-.canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) both; }
-.confirm-dialog, .desk-ask-sheet { animation: sheet-in var(--dur-2) var(--ease-out) both; }
+.menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) backwards; }
+.canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) backwards; }
+.confirm-dialog, .desk-ask-sheet { animation: sheet-in var(--dur-2) var(--ease-out) backwards; }
 /* What can be opened lifts a hair, and the ones safe to press answer the pointer; a tile lifts under the keyboard's focus too. */
 .yw-fcard, .desk-tile { transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
 .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: translateY(-1px); box-shadow: var(--shadow); }
 .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .canvas-menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
+  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }

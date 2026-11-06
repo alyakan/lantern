@@ -210,7 +210,9 @@ export function DeskView(props: DeskViewProps) {
         {pageRow ? (
           <>
           {waiting.length > 0 ? <NeedsYou waiting={waiting} now={now} onGo={onGo} onDecide={onDecide} onAnswer={props.onAnswer} /> : <div className="desk-clear">✓ Nothing needs you</div>}
+          {/* Its own state per project: a feature opened on one is not carried to the next, which may have one of the same name. */}
           <DeskProject
+            key={pageRow.folder}
             row={pageRow}
             chats={props.chats.filter((c) => c.folder === pageRow.folder)}
             repo={props.repos === null ? undefined : pageRepo}
