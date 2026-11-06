@@ -7,6 +7,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
 import { listKey } from "../lib/listKey";
 import { insertPaths, onFileDrop } from "../lib/drop";
+import { IMAGES_MAX, imagesIn, imageToken, nextImage, shrinkImage, type PastedImage } from "../lib/images";
 import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, nextNumber, placeholder as pasteToken, tokenBefore, type Pastes } from "../lib/paste";
 import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
@@ -35,8 +36,9 @@ interface Props {
   idlePlaceholder?: string;
   /** On a Step-by-step page: ⌘Enter (or the button) sends the message and approves the step, moving on. */
   sendAndNext?: (text: string) => void;
-  /** `draft`: the box as typed, encoded (see lib/paste.ts), so the message keeps its paste placeholders. */
-  onSend: (text: string, draft?: string) => void;
+  /** `draft`: the box as typed, encoded (see lib/paste.ts), so the message keeps its paste placeholders. `images`: the pictures
+   * pasted into it, in order (see lib/images.ts). */
+  onSend: (text: string, draft?: string, images?: PastedImage[]) => void;
   onStop: () => void;
   /** While Claude starts, a way out: Cancel stops the start. */
   onCancelStart?: () => void;
@@ -109,6 +111,9 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
+  // The box's text as it is now, for work that finishes later (a pasted picture being shrunk).
+  const latestText = useRef(text);
+  latestText.current = text;
   const pastes = useRef<Pastes>(restored.pastes);
   const setText = (next: string) => {
     pastes.current = inUse(next, pastes.current);
@@ -129,7 +134,12 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   // Terminal mode, like Claude Code's: the "!" that starts it isn't shown; the box shows the command after it.
   const terminal = !!onRun && text.startsWith("!");
   const shown = terminal ? text.slice(1) : text;
-  const canSend = canType && shown.trim() !== "";
+  // Pictures pasted into the box, by their number in `[Image #n]`; one whose token is deleted isn't sent.
+  const images = useRef<Record<number, PastedImage>>({});
+  const attached = terminal ? [] : imagesIn(text, images.current);
+  // A message with pictures goes when Claude is free: the queue carries text only.
+  const waitsForImages = running && attached.length > 0;
+  const canSend = canType && shown.trim() !== "" && !waitsForImages && attached.length <= IMAGES_MAX;
   const placeholder =
     status === "no_folder"
       ? "Open a folder to start"
@@ -233,7 +243,13 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     if (running) {
       queuedBox.current.set(full, { box: t, pastes: inUse(t, pastes.current) });
       setQueued([...queued, full]);
-    } else onSend(full, encodeDraft(t, inUse(t, pastes.current)));
+    } else {
+      const sent = imagesIn(t, images.current);
+      const draft = encodeDraft(t, inUse(t, pastes.current));
+      if (sent.length > 0) onSend(full, draft, sent);
+      else onSend(full, draft);
+      images.current = {};
+    }
   };
 
   // A sent prompt joins the folder's history, kept as its draft so ↑ brings the paste placeholders back too.
@@ -508,6 +524,23 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             onPaste={(e) => {
               // A big paste goes in as a placeholder (its text is kept for sending); a small one as usual.
               if (terminal) return;
+              // A picture goes in as `[Image #n]`, as in Claude Code's terminal, once it's been shrunk to send.
+              const picture = caps.supports_images !== false ? Array.from(e.clipboardData.files ?? []).find((f) => f.type.startsWith("image/")) : undefined;
+              if (picture) {
+                e.preventDefault();
+                const { selectionStart: from, selectionEnd: to } = e.currentTarget;
+                void shrinkImage(picture).then((image) => {
+                  if (!image) return;
+                  const box = latestText.current;
+                  const n = nextImage(box, images.current);
+                  images.current = { ...images.current, [n]: image };
+                  const token = imageToken(n);
+                  const at = Math.min(from, box.length);
+                  caretTo.current = at + token.length;
+                  setText(box.slice(0, at) + token + box.slice(Math.min(to, box.length)));
+                });
+                return;
+              }
               const pasted = e.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
               if (!isBigPaste(pasted)) return;
               e.preventDefault();
@@ -590,6 +623,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           />
         </div>
         <div className="composer-footer">
+          {(waitsForImages || attached.length > IMAGES_MAX) && (
+            <span className="terminal-hint" role="status">
+              {attached.length > IMAGES_MAX ? `A message carries ${IMAGES_MAX} pictures at most` : `Pictures go once ${agent} is done`}
+            </span>
+          )}
           {!terminal && providers && providers.options.length > 1 && <ProviderPicker options={providers.options} chosen={providers.chosen} onChoose={providers.onChoose} disabled={busy} />}
           {terminal ? (
             <span className="terminal-hint">{agent} sees the output with your next message · backspace to leave</span>

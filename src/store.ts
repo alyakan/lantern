@@ -438,7 +438,7 @@ export type Action =
   /** The chat runs on this provider (chosen, or told by the backend): what it can't do is hidden from now on. */
   | { type: "provider_set"; provider: ProviderInfo }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
-  | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean }
+  | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean; images?: number }
   | { type: "wakes_taken" }
   | { type: "orchestrator_set"; on: boolean }
   /** `autoApprove`: Step by step's Permissions (kept as it is when absent; other modes say it with the mode). */
@@ -941,7 +941,7 @@ export function reducer(state: State, action: Action): State {
     }
     case "user_sent": {
       const seq = state.seq + 1;
-      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo, ...(action.explained ? { explained: true } : {}) } : {}), ...(action.draft ? { draft: action.draft } : {}) };
+      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.images ? { images: action.images } : {}), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo, ...(action.explained ? { explained: true } : {}) } : {}), ...(action.draft ? { draft: action.draft } : {}) };
       // A picked flavour went with this message.
       // The commands run since the last message went with this one (unless it's a slash command).
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;

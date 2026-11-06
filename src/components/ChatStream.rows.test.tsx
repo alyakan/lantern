@@ -30,8 +30,8 @@ describe("ChatStream rows", () => {
       { type: "user", id: "u3", text: "Plain words" },
     ];
     render(<ChatStream items={items} folder={null} {...handlers} />);
-    expect(screen.getByText("2 photos from your phone")).toBeInTheDocument();
-    expect(screen.getByText("1 photo from your phone")).toBeInTheDocument();
+    expect(screen.getByText("2 pictures sent with it")).toBeInTheDocument();
+    expect(screen.getByText("1 picture sent with it")).toBeInTheDocument();
     expect(screen.getAllByRole("note")).toHaveLength(2);
   });
 

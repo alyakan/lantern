@@ -78,6 +78,7 @@ In the box:
 - Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message (the hint under the box says so, and that backspace leaves the terminal). Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
 - Dropping files anywhere on the window puts their paths in the box, at the cursor, as dropping them into a terminal does (a path with spaces in quotes). Claude reads them, images and PDFs included.
+- Pasting a picture (a screenshot, say) shows `[Image #1]` and sends the picture to Claude with the message, as in a terminal, shrunk to 1568 pixels on its long side. Up to four a message; delete the token and that picture isn't sent. A message with pictures waits in the box while Claude works (the queue carries text only). Only for a provider that takes images.
 - Send while Claude is working and the message is queued until its turn ends.
 
 ### Side chat
