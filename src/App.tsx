@@ -13,7 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
 import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
-import { worktreeCalls } from "./lib/worktree";
+import { forgetWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
@@ -227,6 +227,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
   const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  // The worktree each session was put in (enter_worktree, or the Changes pane's picker), which it goes back to when it wakes.
+  const [worktreeBySession, setWorktreeBySession] = usePersistentState<Record<string, string>>("settings.worktreeBySession", {});
   // Which agent CLI each project's new chats start on (absent: Claude Code, as before there was a choice), and each session's
   // when it isn't Claude's. The model and effort of every provider but Claude, whose own are the app-wide ones above.
   const [providerByFolder, setProviderByFolder] = usePersistentState<Record<string, string>>("settings.providerByFolder", {});
@@ -1861,6 +1863,36 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [active, state.folder, state.changedFiles, state.status, pinCalls]);
   const shownWorktree = worktree?.slot === active ? worktree.view : null;
   const worktreeKey = shownWorktree ? `${shownWorktree.path}:${shownWorktree.main}` : "";
+  // The worktree a session was put in is kept for it, so a sleep or a restart (which lose the chat's slot) doesn't lose it.
+  // Claude leaving it with enter_worktree forgets it; so does the user's pick of none (see pickWorktree).
+  const leftWorktree = worktreeOf(state.items) === null;
+  // Read when a pin is refused, after the render that asked for it.
+  const savedWorktrees = useRef(worktreeBySession);
+  savedWorktrees.current = worktreeBySession;
+  useEffect(() => {
+    const sid = state.sessionId;
+    if (!sid) return;
+    if (shownWorktree?.pinned && worktreeBySession[sid] !== shownWorktree.path) setWorktreeBySession({ ...worktreeBySession, [sid]: shownWorktree.path });
+    else if (!shownWorktree?.pinned && leftWorktree && sid in worktreeBySession) setWorktreeBySession(forgetWorktree(worktreeBySession, sid));
+  }, [state.sessionId, shownWorktree, leftWorktree]);
+  // A chat that wakes or reopens goes back into its worktree, once per session: the one saved for it, else the one its
+  // transcript says. Not an agent's, whose own folder is its worktree. The backend checks it is still one of the
+  // project's worktrees; one removed since (merged and cleaned up) is forgotten.
+  const restoredWorktree = useRef(new Set<string>());
+  useEffect(() => {
+    const sid = state.sessionId;
+    if (!sid || !state.folder || chats.agents[active] || (state.status !== "idle" && state.status !== "running")) return;
+    const key = `${active}:${sid}`;
+    if (restoredWorktree.current.has(key)) return;
+    restoredWorktree.current.add(key);
+    const path = worktreeToRestore(worktreeBySession[sid], state.items);
+    if (!path) return;
+    const slot = active;
+    api.pinWorktree(slot, path).then(
+      () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
+      () => sid in savedWorktrees.current && setWorktreeBySession(forgetWorktree(savedWorktrees.current, sid)),
+    );
+  }, [active, state.sessionId, state.status, state.folder]);
   const chooseWorktreeView = (main: boolean) => {
     if (!shownWorktree) return;
     const slot = active;
@@ -1880,6 +1912,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The user's pick: that worktree, or (null) whichever the chat's latest edit says again.
   const pickWorktree = (path: string | null) => {
     const slot = active;
+    const sid = state.sessionId;
+    // None: kept as "", so a reopened chat doesn't go back to the worktree its transcript names.
+    if (path === null && sid) setWorktreeBySession({ ...worktreeBySession, [sid]: "" });
     api.pinWorktree(slot, path).then(
       () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
       // Only a worktree removed since the list was read is refused: read the list again.

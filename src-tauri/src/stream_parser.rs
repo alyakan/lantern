@@ -513,6 +513,8 @@ pub fn summarize(name: &str, input: &Value) -> String {
             input.get("base").and_then(Value::as_str).filter(|b| !b.trim().is_empty()).unwrap_or("auto")
         )),
         "mcp__lantern__steps_guide" => s("flavour"),
+        // The worktree it put the chat in (empty: it left it), which a reopened chat goes back to (see worktree.ts worktreeOf).
+        "mcp__lantern__enter_worktree" => s("path"),
         // A workflow's name, from its script's meta (or the saved one it runs).
         "Workflow" => s("name").or_else(|| {
             let script = s("script")?;
@@ -1093,6 +1095,8 @@ mod tests {
         assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": 512})), "pr=512 base=auto");
         assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": null, "base": "feat/core"})), "pr=none base=feat/core");
         assert_eq!(summarize("mcp__lantern__steps_guide", &serde_json::json!({"flavour": "Review"})), "Review");
+        assert_eq!(summarize("mcp__lantern__enter_worktree", &serde_json::json!({"path": "/wt/review-units"})), "/wt/review-units");
+        assert_eq!(summarize("mcp__lantern__enter_worktree", &serde_json::json!({"path": null})), "");
     }
 
     #[test]

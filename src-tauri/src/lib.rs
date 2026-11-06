@@ -2233,7 +2233,11 @@ async fn continue_fresh(app: AppHandle, state: State<'_, AppState>, slot: String
     let conversation_id = info.session_id.clone().ok_or("Send a message before continuing this chat fresh")?;
     let mut chat = conversation_of(&state, &s, &cfg, conversation_id).await?;
     let previous_chat = chat.clone();
-    let handoff = conversations::handoff_note("Conversation continued in a fresh session, with only its words carried over.", &chat.handoff(80_000));
+    // The worktree it works in carries over too: the new session keeps the slot (so the Changes pane stays on it), but
+    // not the tool calls that told Claude where it was.
+    let worktree = { let s = s.clone(); tauri::async_runtime::spawn_blocking(move || s.work_folder()).await.ok().flatten() };
+    let lead = format!("Conversation continued in a fresh session, with only its words carried over.{}", worktree.map(|w| format!(" {}", workdir::handoff_line(&w))).unwrap_or_default());
+    let handoff = conversations::handoff_note(&lead, &chat.handoff(80_000));
     cfg.resume = None;
     cfg.helper.project_notes = conversations::notes_with(cfg.helper.project_notes.as_deref(), Some(&handoff));
     chat.handoff = Some(handoff);
