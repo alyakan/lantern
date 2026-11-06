@@ -56,6 +56,8 @@ export const NOT_FOLDER_KEYED = [
   "sidebar.view",
   "settings.modeBySession",
   "settings.harnessBySession",
+  // The worktree a session was put in (a path it goes back to, refused and forgotten once that worktree is gone).
+  "settings.worktreeBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.
   "session.agentIds",
   // The provider a session runs on (set only for one that isn't Claude's), and each other provider's model and effort.

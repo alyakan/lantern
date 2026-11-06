@@ -411,7 +411,7 @@ async function playReview(slot: string, text: string) {
   }
   const pages = [
     "# Frame — Retry transient errors in fetchJson (#128)\n\n**Intent:** retry 429 and gateway errors with exponential backoff, up to 3 attempts.\n\n**Files, in review order:**\n\n1. `src/client/retry.ts` (+14 −3), the retry loop\n2. `src/client/retry.test.ts` (+32 −0), its tests\n\nSay \"Next\" to start with the first file.",
-    "# File 1 of 2 — src/client/retry.ts (+14 −3)\n\nThis is the core of the PR, so I read it against `fetch`'s behaviour on network errors too.\n\n### What changed\n\n- `RETRYABLE` names 429, 502, 503 and 504.\n- `fetchJson` takes `attempts = 3` and loops, waiting `250·2^i` ms between tries.\n\n### Findings\n\n⚠ line 7 (blocker): a network error (`fetch` rejecting) isn't retried; it escapes the loop on the first try, which is the most common transient failure.\n\n⚠ line 9 (should-fix): the first wait is 500 ms, not 250, because `i` starts at 1. Use `2 ** (i - 1)`.\n\n⚠ line 3 (nit): `attempts` reads better as `maxAttempts`.\n\n### Notes\n\n**Retry-After:** a 429 usually says how long to wait. Not required for this PR, but worth a follow-up.\n\nSay \"Next\" to go on, or tell me which findings to drop.",
+    "# File 1 of 2 — src/client/retry.ts (+14 −3)\n\nThis is the core of the PR, so I read it against `fetch`'s behaviour on network errors too.\n\n### What changed\n\n- `RETRYABLE` names 429, 502, 503 and 504.\n- `fetchJson` takes `attempts = 3` and loops, waiting `250·2^i` ms between tries.\n\n### Findings\n\n⚠ `src/client/retry.ts:7` (blocker): a network error (`fetch` rejecting) isn't retried; it escapes the loop on the first try, which is the most common transient failure.\n\n⚠ `src/client/retry.ts:9` (should-fix): the first wait is 500 ms, not 250, because `i` starts at 1. Use `2 ** (i - 1)`.\n\n⚠ `src/client/retry.ts:3` (nit): `attempts` reads better as `maxAttempts`.\n\n### Notes\n\n**Retry-After:** a 429 usually says how long to wait. Not required for this PR, but worth a follow-up.\n\nSay \"Next\" to go on, or tell me which findings to drop.",
     "# File 2 of 2 — src/client/retry.test.ts (+32 −0)\n\n### What changed\n\n- Tests for 503, 503, 200 resolving and 404 throwing at once.\n\n### Findings\n\nNone.\n\n### Notes\n\n**What I checked:** fake timers are restored after each test, and the 404 case asserts a single `fetch` call.",
     "# Summary — 2 files reviewed\n\nThe loop is right in shape; the network-error gap is the one thing to fix before merging.",
   ];
@@ -1997,7 +1997,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return [
             { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
             { flavour: "Explain", text: "Explain as you go: explain the why on every page.", headings: [] },
-            { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
+            { flavour: "Review", text: "Review: one review unit per page (a file, or a group of related mechanical files), then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# File N of M — #<PR> <PR title>, <group title> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
         case "set_subagents":
         case "set_agent_limit":
@@ -2452,7 +2452,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           const files = ["src/client/retry.ts", "src/client/retry.test.ts", "src/client/index.ts", "src/server/app.ts", "src/server/routes.ts", "src/index.ts", "test/retry.e2e.ts", "package.json", "README.md", "tsconfig.json"];
           return (a.mentions as string[]).map((m) => {
             const rel = m.replace(/^\.\//, "").replace(`${FOLDER}/`, "");
-            const hit = files.find((f) => f === rel) ?? files.filter((f) => f.endsWith(`/${rel}`)).sort((x, y) => x.length - y.length)[0];
+            const hit = files.find((f) => f === rel) ?? (a.wholePathsOnly ? undefined : files.filter((f) => f.endsWith(`/${rel}`)).sort((x, y) => x.length - y.length)[0]);
             return hit ? `${FOLDER}/${hit}` : null;
           });
         }

@@ -16,6 +16,8 @@ export interface Heading {
   explain?: boolean;
   /** A lettered step ("Step 6b"): the letter, which tells it from step 6a. */
   sub?: string;
+  /** A Review page that covers a group of files: the paths of its `Files:` line (the title is then the group's, not a path). */
+  files?: string[];
 }
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
@@ -48,6 +50,21 @@ const fileTitle = (file: RegExpExecArray) => `${file[1].trim()} (${file[2].repla
 /** The line after the heading, if it's the skill's file line. */
 const fileLineUnder = (text: string) => FILE_LINE.exec((text.split("\n").filter((l) => l.trim())[1] ?? "").trim());
 
+/** A group page's first line under its heading: `Files: a/b.ts, c/d.ts` (also bold, or with the paths in backticks). */
+const FILES_LINE = /^(?:\*\*)?Files:?(?:\*\*)?:?[ \t]*(.+)$/i;
+
+/** The paths of the `Files:` line right under the heading, when the page has one (a Review page for a group of files). */
+export function filesUnder(text: string): string[] | null {
+  const m = FILES_LINE.exec((text.split("\n").filter((l) => l.trim())[1] ?? "").trim());
+  const files = (m?.[1] ?? "").split(",").map((f) => f.replace(/\*\*/g, "").trim().replace(/^`+|`+$/g, "").trim()).filter(Boolean);
+  return files.length ? files : null;
+}
+
+const filesOf = (text: string) => {
+  const files = filesUnder(text);
+  return files ? { files } : {};
+};
+
 /** The heading a message's first line is, if it is one. */
 function parseHeadingLine(text: string): Heading | null {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
@@ -67,7 +84,7 @@ function parseHeadingLine(text: string): Heading | null {
   }
   if (word.startsWith("evidence")) return { kind: "evidence", n: m[9] ? Number(m[9]) : null, total: null, title };
   if (word === "fix") return { kind: "fix", n: null, total: null, title };
-  if (word.startsWith("file")) return { kind: "file", n: Number(m[7]), total: Number(m[8]), title };
+  if (word.startsWith("file")) return { kind: "file", n: Number(m[7]), total: Number(m[8]), title, ...filesOf(text) };
   if (word === "summary") return { kind: "summary", n: null, total: null, title };
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
   if (word === "overview") return { kind: "overview", n: null, total: null, title };
@@ -150,11 +167,13 @@ export interface StepPage {
 }
 
 // The heading line comes out of the message (it's the page's title): a "#" heading, a bold one, or the skill's bold file
-// or summary line. A file line right under a heading says the same as the heading, so it goes too.
+// or summary line. A file line or a group's `Files:` line right under a heading says the same as the heading (the page
+// shows the files itself), so it goes too.
 const withoutHeadingLine = (text: string) => {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
   const rest = text.replace(/^\s*[^\n]*\n?/, "").replace(/^\s+/, "");
-  return !FILE_LINE.test(first) && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
+  const sayingTheSame = !FILE_LINE.test(first) && (fileLineUnder(text) || parseHeadingLine(text)?.files);
+  return sayingTheSame ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
 };
 // A sentence Claude wrote before the heading stays, above what follows it.
 const withoutHeading = (text: string) => {

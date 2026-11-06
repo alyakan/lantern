@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseBranchOf, findingsOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue } from "./review";
+import { baseBranchOf, findingsOf, matchChanged, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue } from "./review";
 
 // As Claude wrote it for PostHog/posthog-ios#863 (trimmed).
 const clean = `### What changed
@@ -53,6 +53,54 @@ describe("review pages", () => {
       [60, null, "nit"],
     ]);
     expect(r.findings[1].text).toBe("the delay grows without a cap;\na slow upstream stalls the UI for minutes.");
+  });
+
+  it("reads a group page: its title and files, and findings that name their file", () => {
+    const group = `### What changed
+Threads \`nickname\` through.
+
+### Findings
+⚠ Lumiform/User/UserDTO.swift:12 (nit): the key is spelled two ways.
+⚠ \`Lumiform/Tests/UserTests.swift:40-44\` (nit): no case for a missing nickname.
+
+### Notes
+Checked the decoding.`;
+    const r = parseReviewFile("#548 Add the field, model and mapping (+31 −2)", group, ["Lumiform/User/User.swift", "Lumiform/User/UserDTO.swift"])!;
+    expect(r).toMatchObject({ path: null, group: "#548 Add the field, model and mapping", added: 31, removed: 2, files: ["Lumiform/User/User.swift", "Lumiform/User/UserDTO.swift"] });
+    expect(r.findings.map((f) => [f.path, f.line, f.lineEnd, f.severity, f.text])).toEqual([
+      ["Lumiform/User/UserDTO.swift", 12, null, "nit", "the key is spelled two ways."],
+      ["Lumiform/Tests/UserTests.swift", 40, 44, "nit", "no case for a missing nickname."],
+    ]);
+    // A page about one file has no group, and its findings no path of their own.
+    const one = parseReviewFile("a.m (+96 −1)", clean)!;
+    expect(one).toMatchObject({ path: "a.m", group: null, files: [] });
+  });
+
+  it("labels a group's findings by path and line, and reads them back from a Next", () => {
+    const findings = findingsOf("⚠ src/a.ts:42 (nit): x\n⚠ src/b.ts:42 (nit): y\n⚠ src/b.ts:7-9 (nit): z").findings;
+    const message = verdictMessage(findings, { 0: "agree", 1: "reject", 2: "agree" });
+    expect(message).toBe("Next. Agreed: src/a.ts:42, src/b.ts:7-9. Rejected: src/b.ts:42.");
+    expect(verdictsFromNext(message, findings)).toEqual({ 0: "agree", 1: "reject", 2: "agree" });
+  });
+
+  it("takes the files of a group page for the repository hints", () => {
+    const items = [{ type: "assistant" as const, id: "a", text: "# File 2 of 5 — #548 Model (+3 −0)\n\nFiles: src/a.ts, src/b.ts\n\n### What changed\nx" }];
+    expect(reviewHints(items as never, null)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("matches a path to the changed files: whole, or cut short only when exactly one ends in it", () => {
+    const changed = ["/p/App/User/User.swift", "/p/App/Cart/User.swift", "/p/App/Cart/Item.swift", "/p/Other/App/Cart/Item.swift"];
+    expect(matchChanged(changed, "App/User/User.swift", "/p")).toBe("/p/App/User/User.swift");
+    expect(matchChanged(changed, "/p/App/Cart/Item.swift", "/p")).toBe("/p/App/Cart/Item.swift");
+    // The whole path from the root wins over the file that merely ends the same way.
+    expect(matchChanged(changed, "App/Cart/Item.swift", "/p")).toBe("/p/App/Cart/Item.swift");
+    // A bare name two files share is no file at all: it must not open one of them by chance.
+    expect(matchChanged(changed, "User.swift", "/p")).toBeNull();
+    expect(matchChanged(changed, "Item.swift", "/p")).toBeNull();
+    expect(matchChanged(changed, "Cart/User.swift", "/p")).toBe("/p/App/Cart/User.swift");
+    expect(matchChanged(changed, "Missing.swift", "/p")).toBeNull();
+    expect(matchChanged(["/p/a/only.ts"], "only.ts", "/p")).toBe("/p/a/only.ts");
+    expect(matchChanged(changed, "", "/p")).toBeNull();
   });
 
   it("keeps the severity however Claude writes the finding's header", () => {

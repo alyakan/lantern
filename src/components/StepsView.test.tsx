@@ -350,6 +350,34 @@ describe("StepsView", () => {
     expect(onSend).toHaveBeenCalledWith(expect.stringMatching(/^Write it up/));
   });
 
+  it("reviews a group of files on one page: the group's title, its files, and the files handed to the Changes pane", () => {
+    const turn = (id: string): ChatItem => ({ type: "turn", id, isError: false, stopped: false, result: null, durationMs: 1, denied: 0 });
+    const group =
+      "# File 2 of 5 — #548 Add the field, model and mapping (+31 −2)\n\nFiles: src/user/User.swift, src/user/UserDTO.swift\n\n### What changed\n\nThreads the field through.\n\n### Findings\n\n⚠ src/user/UserDTO.swift:12 (nit): the key is spelled two ways.\n\n### Notes\n\nChecked the decoding.";
+    // Their own ids: verdicts not yet sent are remembered by page key.
+    const reviewed: ChatItem[] = [
+      { type: "user", id: "g1", text: "Review PR 548", turn: 0 },
+      { type: "assistant", id: "ga1", text: "# Frame — Add the field (#548)\n\nFive pages." },
+      turn("gt1"),
+      { type: "user", id: "g2", text: "Next", turn: 1 },
+      { type: "assistant", id: "ga2", text: group },
+      turn("gt2"),
+    ];
+    const onReviewFile = vi.fn();
+    const h = handlers("review");
+    render(<StepsView state={state({ items: reviewed })} {...h} onReviewFile={onReviewFile} />);
+    expect(current().querySelector(".review-file-name")).toHaveTextContent("#548 Add the field, model and mapping");
+    expect(current().querySelector(".counts")).toHaveTextContent("+31−2");
+    expect([...current().querySelectorAll(".review-group-files li")].map((li) => li.textContent)).toEqual(["src/user/User.swift", "src/user/UserDTO.swift"]);
+    // The Files: line is not left in the page as text, and the finding says which file it is in.
+    expect(current()).not.toHaveTextContent("Files:");
+    expect(current().querySelector(".finding-line")).toHaveTextContent("UserDTO.swift:12");
+    expect(onReviewFile).toHaveBeenLastCalledWith(["src/user/User.swift", "src/user/UserDTO.swift"]);
+    fireEvent.click(current().querySelector(".finding-verdict button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Next file →" }));
+    expect(h.onNext).toHaveBeenCalledWith("Next. Agreed: src/user/UserDTO.swift:12.");
+  });
+
   describe("review verdicts that outlive the view", () => {
     const turn = (id: string): ChatItem => ({ type: "turn", id, isError: false, stopped: false, result: null, durationMs: 1, denied: 0 });
     const file =

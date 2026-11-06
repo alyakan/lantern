@@ -264,7 +264,7 @@ export function summarize(pages: StepPage[]): StepsSummary {
     const base = { id: page.key, kind, label: h.kind === "summary" ? summaryLabel : pageLabel(h), title: pageTitle(page) ?? "", built: true, current: page.key === lastKey, page: page.key, planPage: null, findings: null, stats: null } as const;
     if (h.kind === "file") {
       const file = splitFileTitle(h.title);
-      const review = parseReviewFile(h.title, messageOf(page));
+      const review = parseReviewFile(h.title, messageOf(page), h.files);
       return {
         ...base,
         title: file.path,
@@ -287,8 +287,11 @@ export function summarize(pages: StepPage[]): StepsSummary {
     const built = steps.filter((r) => r.built).length;
     parts.push(`Plan: ${total} step${total === 1 ? "" : "s"}${locked ? " · locked" : ""} · ${built === total ? "all built" : `${built} built`}`);
   }
+  // A page is a file, or a group of files: the count says files, and pages too once a group makes them differ.
   const files = rows.filter((r) => r.kind === "file").length;
-  if (files) parts.push(filesTotal && filesTotal > files ? `${files} of ${filesTotal} files reviewed` : `${files} file${files === 1 ? "" : "s"} reviewed`);
+  const fileCount = included.reduce((n, p) => n + (p.heading?.kind === "file" ? (p.heading.files?.length ?? 1) : 0), 0);
+  if (files && fileCount > files) parts.push(filesTotal && filesTotal > files ? `${fileCount} files reviewed (${files} of ${filesTotal} pages)` : `${fileCount} files reviewed in ${files} pages`);
+  else if (files) parts.push(filesTotal && filesTotal > files ? `${files} of ${filesTotal} files reviewed` : `${files} file${files === 1 ? "" : "s"} reviewed`);
   const mapped = rows.filter((r) => r.kind === "part").length;
   if (mapped) parts.push(`${mapped} part${mapped === 1 ? "" : "s"} mapped`);
   const evidence = rows.filter((r) => r.kind === "evidence").length;

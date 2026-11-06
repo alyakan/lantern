@@ -2233,7 +2233,11 @@ async fn continue_fresh(app: AppHandle, state: State<'_, AppState>, slot: String
     let conversation_id = info.session_id.clone().ok_or("Send a message before continuing this chat fresh")?;
     let mut chat = conversation_of(&state, &s, &cfg, conversation_id).await?;
     let previous_chat = chat.clone();
-    let handoff = conversations::handoff_note("Conversation continued in a fresh session, with only its words carried over.", &chat.handoff(80_000));
+    // The worktree it works in carries over too: the new session keeps the slot (so the Changes pane stays on it), but
+    // not the tool calls that told Claude where it was.
+    let worktree = { let s = s.clone(); tauri::async_runtime::spawn_blocking(move || s.work_folder()).await.ok().flatten() };
+    let lead = format!("Conversation continued in a fresh session, with only its words carried over.{}", worktree.map(|w| format!(" {}", workdir::handoff_line(&w))).unwrap_or_default());
+    let handoff = conversations::handoff_note(&lead, &chat.handoff(80_000));
     cfg.resume = None;
     cfg.helper.project_notes = conversations::notes_with(cfg.helper.project_notes.as_deref(), Some(&handoff));
     chat.handoff = Some(handoff);
@@ -3630,13 +3634,15 @@ async fn search_text(state: State<'_, AppState>, slot: String, query: files::Tex
         .map_err(|e| e.to_string())?
 }
 
-/// For each file mention in Claude's text, the file in the chat's folder it means, if any.
+/// For each file mention in Claude's text, the file in the chat's folder it means, if any. `whole_paths_only`: a bare or
+/// partial name means nothing (a review, whose links must not open a file that merely shares a name).
 #[tauri::command]
-async fn resolve_files(state: State<'_, AppState>, slot: String, mentions: Vec<String>) -> Result<Vec<Option<String>>, String> {
+async fn resolve_files(state: State<'_, AppState>, slot: String, mentions: Vec<String>, whole_paths_only: Option<bool>) -> Result<Vec<Option<String>>, String> {
     let (root, paths) = file_index(&state, &slot).await?;
+    let partial = !whole_paths_only.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
         let set: std::collections::HashSet<&str> = paths.iter().map(String::as_str).collect();
-        mentions.iter().map(|m| files::resolve(&root, &set, m)).collect()
+        mentions.iter().map(|m| files::resolve(&root, &set, m, partial)).collect()
     })
     .await
     .map_err(|e| e.to_string())

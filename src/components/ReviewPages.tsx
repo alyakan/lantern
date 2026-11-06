@@ -6,15 +6,20 @@ import { Md } from "./Md";
 
 const SEVERITY: Record<Severity, string> = { blocker: "Blocker", "should-fix": "Should fix", nit: "Nit" };
 
-/** "line 42" that opens the file there in the right pane, once the file is found in the folder. */
+/**
+ * "line 42" that opens the file there in the right pane, once the file is found in the folder. A group's finding names
+ * its file, so it reads "retry.ts:42" and opens that one.
+ */
 function LineChip({ path, finding }: { path: string | null; finding: Finding }) {
   const links = useFileLinks();
   if (finding.line === null) return null;
-  const label = `line ${finding.line}${finding.lineEnd ? `–${finding.lineEnd}` : ""}`;
-  const file = path && links ? links.resolve(path) : null;
-  if (!file || !links) return <span className="finding-line">{label}</span>;
+  const own = finding.path ?? path;
+  const span = `${finding.line}${finding.lineEnd ? `–${finding.lineEnd}` : ""}`;
+  const label = finding.path ? `${finding.path.split("/").pop()}:${span}` : `line ${span}`;
+  const file = own && links ? links.resolve(own) : null;
+  if (!file || !links) return <span className="finding-line" title={finding.path}>{label}</span>;
   return (
-    <button className="finding-line link" title={`Open ${path} at line ${finding.line}`} onClick={() => links.open(file, finding.line)}>
+    <button className="finding-line link" title={`Open ${own} at line ${finding.line}`} onClick={() => links.open(file, finding.line)}>
       {label}
     </button>
   );
@@ -52,6 +57,7 @@ export function FindingCard({ path, finding, verdict, onVerdict }: { path: strin
 export function ReviewFileView({ file, verdicts, onVerdict }: { file: ReviewFile; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void }) {
   return (
     <div className="review-file">
+      {file.files.length > 0 && <GroupFiles files={file.files} />}
       {file.preface && (
         <div className="review-preface">
           <Md>{file.preface}</Md>
@@ -85,6 +91,45 @@ export function ReviewFileView({ file, verdicts, onVerdict }: { file: ReviewFile
             <Md>{file.clean ? file.notes.replace(/^\*\*What I checked:?\*\*:?\s*/i, "") : file.notes}</Md>
           </div>
         </section>
+      )}
+    </div>
+  );
+}
+
+/** A group page's files, each a link to the file (once it is found in the folder; a name that matches no changed file stays plain). */
+function GroupFiles({ files }: { files: string[] }) {
+  const links = useFileLinks();
+  return (
+    <ul className="review-group-files" aria-label="Files on this page">
+      {files.map((path) => {
+        const file = links?.resolve(path) ?? null;
+        return (
+          <li key={path}>
+            {file && links ? (
+              <button className="file-link" title={`Open ${path}`} onClick={() => links.open(file, null)}>
+                <code>{path}</code>
+              </button>
+            ) : (
+              <code>{path}</code>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The page header for a group of reviewed files: its title (the pull request and what the group is) and counts. */
+export function ReviewGroupHeader({ title, added, removed }: { title: string; added: number | null; removed: number | null }) {
+  return (
+    <div className="review-file-header">
+      <DocIcon />
+      <span className="review-file-name">{title}</span>
+      {added !== null && (
+        <span className="counts">
+          <span className="added">+{added}</span>
+          <span className="removed">−{removed}</span>
+        </span>
       )}
     </div>
   );

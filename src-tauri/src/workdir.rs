@@ -29,6 +29,13 @@ pub struct WorkFolder {
     pub branch: Option<String>,
 }
 
+/// What a chat continued fresh is told about the worktree it works in: its words are carried over, but not the tool calls
+/// that said where it was working, so it would otherwise start again in the project's own folder.
+pub fn handoff_line(w: &WorkFolder) -> String {
+    let branch = w.branch.as_deref().map(|b| format!(" (branch {b})")).unwrap_or_default();
+    format!("This chat works in the git worktree {}{branch}, and Lantern's Changes pane shows it: keep working there by absolute path.", w.path)
+}
+
 /// The linked worktrees of `folder`'s repository (not the main one) as (path, branch), from `git worktree list`.
 fn linked(folder: &Path) -> Vec<(PathBuf, Option<String>)> {
     let Ok(out) = Command::new("git").arg("-C").arg(folder).args(["worktree", "list", "--porcelain"]).output() else { return Vec::new() };
@@ -170,6 +177,14 @@ mod tests {
     fn git_in(dir: &Path, args: &[&str]) {
         let out = Command::new("git").arg("-C").arg(dir).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    #[test]
+    fn a_chat_continued_fresh_is_told_its_worktree() {
+        let w = WorkFolder { path: "/wt/review-units".into(), name: "review-units".into(), branch: Some("feat/review-units".into()) };
+        let line = handoff_line(&w);
+        assert!(line.contains("/wt/review-units (branch feat/review-units)") && line.contains("absolute path"), "{line}");
+        assert!(!handoff_line(&WorkFolder { branch: None, ..w }).contains("branch"));
     }
 
     #[test]

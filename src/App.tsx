@@ -12,8 +12,8 @@ import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
-import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
-import { worktreeCalls } from "./lib/worktree";
+import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { forgetWorktree, isGoneWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
@@ -227,6 +227,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
   const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  // The worktree each session was put in (enter_worktree, or the Changes pane's picker), which it goes back to when it wakes.
+  const [worktreeBySession, setWorktreeBySession] = usePersistentState<Record<string, string>>("settings.worktreeBySession", {});
   // Which agent CLI each project's new chats start on (absent: Claude Code, as before there was a choice), and each session's
   // when it isn't Claude's. The model and effort of every provider but Claude, whose own are the app-wide ones above.
   const [providerByFolder, setProviderByFolder] = usePersistentState<Record<string, string>>("settings.providerByFolder", {});
@@ -1861,6 +1863,38 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [active, state.folder, state.changedFiles, state.status, pinCalls]);
   const shownWorktree = worktree?.slot === active ? worktree.view : null;
   const worktreeKey = shownWorktree ? `${shownWorktree.path}:${shownWorktree.main}` : "";
+  // The worktree a session was put in is kept for it, so a sleep or a restart (which lose the chat's slot) doesn't lose it.
+  // Claude leaving it with enter_worktree forgets it; so does the user's pick of none (see pickWorktree).
+  const leftWorktree = worktreeOf(state.items) === null;
+  // Read when a pin is refused, after the render that asked for it.
+  const savedWorktrees = useRef(worktreeBySession);
+  savedWorktrees.current = worktreeBySession;
+  useEffect(() => {
+    const sid = state.sessionId;
+    if (!sid) return;
+    if (shownWorktree?.pinned && worktreeBySession[sid] !== shownWorktree.path) setWorktreeBySession({ ...worktreeBySession, [sid]: shownWorktree.path });
+    else if (!shownWorktree?.pinned && leftWorktree && sid in worktreeBySession) setWorktreeBySession(forgetWorktree(worktreeBySession, sid));
+  }, [state.sessionId, shownWorktree, leftWorktree]);
+  // A chat that wakes or reopens goes back into its worktree, once each time its claude starts: the one saved for its
+  // session, else the one its transcript says. A wake keeps the slot and the session, so the start's generation is what
+  // tells it apart. Not an agent's, whose own folder is its worktree. The backend checks it is still one of the project's
+  // worktrees; one removed since (merged and cleaned up) is forgotten.
+  const restoredWorktree = useRef(new Set<string>());
+  useEffect(() => {
+    const sid = state.sessionId;
+    if (!sid || !state.folder || chats.agents[active] || (state.status !== "idle" && state.status !== "running")) return;
+    const key = `${active}:${sid}:${startGen.current[active] ?? 0}`;
+    if (restoredWorktree.current.has(key)) return;
+    restoredWorktree.current.add(key);
+    const path = worktreeToRestore(worktreeBySession[sid], state.items);
+    if (!path) return;
+    const slot = active;
+    api.pinWorktree(slot, path).then(
+      () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
+      // Only a worktree that is gone is forgotten, not one refused because the chat closed meanwhile.
+      (e) => isGoneWorktree(errText(e)) && sid in savedWorktrees.current && setWorktreeBySession(forgetWorktree(savedWorktrees.current, sid)),
+    );
+  }, [active, state.sessionId, state.status, state.folder]);
   const chooseWorktreeView = (main: boolean) => {
     if (!shownWorktree) return;
     const slot = active;
@@ -1880,6 +1914,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The user's pick: that worktree, or (null) whichever the chat's latest edit says again.
   const pickWorktree = (path: string | null) => {
     const slot = active;
+    const sid = state.sessionId;
+    // None: kept as "", so a reopened chat doesn't go back to the worktree its transcript names.
+    if (path === null && sid) setWorktreeBySession({ ...worktreeBySession, [sid]: "" });
     api.pinWorktree(slot, path).then(
       () => api.workFolder(slot).then((view) => setWorktree({ slot, view }), () => {}),
       // Only a worktree removed since the list was read is refused: read the list again.
@@ -1965,13 +2002,22 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [scope, active, state.folder, reviewPr]);
   const shownPr = prFiles?.key === prKey ? prFiles : null;
   const shownFiles = scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
-  // A review page's file, shown in the PR's changes once they're in.
-  const [reviewFile, setReviewFile] = useState<string | null>(null);
+  // A review page's files, shown in the PR's changes once they're in: one file, or the files of a group page. A path that
+  // matches no changed file, or several, is left out (a bare name must not pick one by chance).
+  const [reviewFiles, setReviewFiles] = useState<string[]>([]);
+  const reviewFilesKey = reviewFiles.join("\n");
+  const pageFiles = scope === "pr" || scope === "branch" ? [...new Set(reviewFiles.flatMap((f) => matchChanged(shownFiles.map((c) => c.path), f, state.folder) ?? []))] : [];
+  // A group page shows exactly its files in the pane; "All files" shows the rest again, until the next page.
+  const [allFiles, setAllFiles] = useState(false);
+  useEffect(() => setAllFiles(false), [reviewFilesKey]);
+  const grouped = reviewFiles.length > 1 && pageFiles.length > 0;
+  const paneFiles = grouped && !allFiles ? shownFiles.filter((f) => pageFiles.includes(f.path)) : shownFiles;
   useEffect(() => {
-    if ((scope !== "pr" && scope !== "branch") || !reviewFile) return;
-    const match = shownFiles.find((f) => f.path === reviewFile || f.path.endsWith(`/${reviewFile}`));
-    if (match && match.path !== state.selectedFile) dispatch({ type: "select_file", path: match.path });
-  }, [reviewFile, shownPr, shownBranch]);
+    if (!pageFiles.length || pageFiles.includes(state.selectedFile ?? "")) return;
+    dispatch({ type: "select_file", path: pageFiles[0] });
+  }, [reviewFilesKey, shownPr, shownBranch]);
+  // The files links in a review's pages may mean: what is reviewed, so a name cut short can't open some other file.
+  const reviewChanged = flavour === "review" && reviewing && peek === null ? (reviewPr !== null ? shownPr : shownBranch)?.files.map((f) => f.path) ?? [] : undefined;
 
   const selectFile = (path: string) => dispatch({ type: "select_file", path });
   const openFile = (path: string) => {
@@ -2085,7 +2131,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       focusAgent(worker);
       setBranchPeek({ slot: worker, base: chats.agents[worker]?.base ?? null, key: Date.now() });
       setChangeScope("branch");
-      setReviewFile(file ?? null);
+      setReviewFiles(file ? [file] : []);
       setReviewCollapsed(false);
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
@@ -2164,12 +2210,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const onKey = (e: KeyboardEvent) => {
       if (reviewCollapsed || desk || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
-      const next = delta && stepFile(shownFiles, state.selectedFile, delta);
+      const next = delta && stepFile(paneFiles, state.selectedFile, delta);
       if (next && next !== state.selectedFile) selectFile(next);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reviewCollapsed, desk, shownFiles, state.selectedFile]);
+  }, [reviewCollapsed, desk, paneFiles, state.selectedFile]);
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
@@ -3441,9 +3487,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
                   <ErrorBoundary key={active} name="chat">
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
-                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
+                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention} changed={reviewChanged}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
@@ -3469,7 +3515,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
                 ready={state.status !== "starting"}
-                files={shownFiles}
+                files={paneFiles}
+                pageFocus={grouped ? { pageCount: pageFiles.length, total: shownFiles.length, all: allFiles, onToggle: () => setAllFiles((all) => !all) } : undefined}
                 chatBusy={state.status === "running"}
                 prChecks={state.folder ? { view: prChecks.views[activeWork!], busy: isBusy(state), onSend: () => prChecks.sendFailure(activeWork!, active), onStop: () => prChecks.stop(activeWork!) } : undefined}
                 onShip={state.folder ? () => setShipping(true) : undefined}

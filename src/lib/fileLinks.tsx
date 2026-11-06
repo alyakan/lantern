@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { api } from "../api";
 import { ExternalLink } from "../components/ExternalLink";
+import { matchChanged } from "./review";
 
 /**
  * File mentions in Claude's text (`src/a.ts`, `src/a.ts:42`, `AppDelegate.swift`) become links that open the file in
@@ -36,9 +37,15 @@ interface Lookups {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** `epoch`: bump it when files may have appeared (a turn ended), so mentions that weren't files are asked again. */
-export function FileLinksProvider({ slot, folder, epoch, onOpen, children }: { slot: string; folder: string | null; epoch: number; onOpen: (path: string, line: number | null) => void; children: ReactNode }) {
-  const lookups = useMemo<Lookups>(() => ({ known: new Map(), queued: new Set(), timer: null }), [slot, folder]);
+/**
+ * `epoch`: bump it when files may have appeared (a turn ended), so mentions that weren't files are asked again.
+ * `changed`: in a review, the changed files of what is reviewed (absolute paths). A mention then means one of them (a path
+ * cut short only when exactly one ends in it) or a whole path in the folder, and a bare name never opens some other file
+ * of that name.
+ */
+export function FileLinksProvider({ slot, folder, epoch, onOpen, changed, children }: { slot: string; folder: string | null; epoch: number; onOpen: (path: string, line: number | null) => void; changed?: readonly string[]; children: ReactNode }) {
+  const changedKey = changed ? changed.join("\n") : null;
+  const lookups = useMemo<Lookups>(() => ({ known: new Map(), queued: new Set(), timer: null }), [slot, folder, changedKey]);
   // The lookups on screen now: results for any other set are dropped.
   const shown = useRef(lookups);
   shown.current = lookups;
@@ -57,7 +64,8 @@ export function FileLinksProvider({ slot, folder, epoch, onOpen, children }: { s
       const batch = [...lookups.queued];
       lookups.queued.clear();
       if (!batch.length || !folder || shown.current !== lookups) return;
-      api.resolveFiles(slot, batch).then(
+      const ask = changed ? batch.map((m) => matchChanged(changed, m, folder) ?? m) : batch;
+      api.resolveFiles(slot, ask, !!changed).then(
         (paths) => {
           if (shown.current !== lookups) return;
           batch.forEach((m, i) => lookups.known.set(m, paths[i] ?? null));

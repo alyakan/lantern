@@ -41,6 +41,23 @@ describe("ReviewPanel's Ship it", () => {
   });
 });
 
+describe("ReviewPanel's group page", () => {
+  it("offers all the changed files back when a page shows only its own, and says how many each is", () => {
+    const onToggle = vi.fn();
+    const only = { pageCount: 1, total: 2, all: false, onToggle };
+    const { rerender } = render(<ReviewPanel {...base} files={[files[0]]} selected="/p/src/a.ts" follow scope="pr" pr={548} pageFocus={only} />);
+    fireEvent.click(screen.getByRole("button", { name: "All 2" }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
+    rerender(<ReviewPanel {...base} selected="/p/src/a.ts" follow scope="pr" pr={548} pageFocus={{ ...only, all: true }} />);
+    expect(screen.getByRole("button", { name: "This page's 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    // A page of one file has no such button.
+    rerender(<ReviewPanel {...base} selected="/p/src/a.ts" follow scope="pr" pr={548} />);
+    expect(screen.queryByRole("button", { name: /^All \d+$|^This page's/ })).toBeNull();
+  });
+});
+
 describe("ReviewPanel's worktree chip", () => {
   it("names the worktree the chat works in and switches to the chat's own folder and back", () => {
     const onToggle = vi.fn();

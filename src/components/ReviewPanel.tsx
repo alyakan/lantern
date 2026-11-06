@@ -54,6 +54,11 @@ interface Props {
   worktrees?: { list: { path: string; name: string; branch: string | null }[]; current: string | null; pinned: boolean; onPick: (path: string | null) => void };
   /** On a Step-by-step page: the turns "turn" means (null: not all known, e.g. an earlier page of a reopened session). */
   stepRange?: { from: number; to: number } | null;
+  /**
+   * A Review page for a group of files: `files` holds only that page's (`pageCount` of the `total`), until `all` is
+   * switched on with `onToggle`.
+   */
+  pageFocus?: { pageCount: number; total: number; all: boolean; onToggle: () => void };
   /** How many files each filter would show (null: not known yet). */
   scopeCounts?: Partial<Record<ChangeScope, number | null>>;
   /** Why the Git or PR filter has nothing to show (e.g. not a git repository, gh failed). */
@@ -413,7 +418,7 @@ function PlanTab({ summary, architecture, view, onView, revert }: Props & { view
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
@@ -455,6 +460,11 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
         <FilePicker files={files} current={current} folder={folder} onSelect={onSelect} />
         <Counts added={current.added} removed={current.removed} />
         <div className="spacer" />
+        {pageFocus && (
+          <button className="ghost" aria-pressed={pageFocus.all} title={pageFocus.all ? "Back to the files of this review page" : "Show every changed file, not only this page's"} onClick={pageFocus.onToggle}>
+            {pageFocus.all ? `This page's ${pageFocus.pageCount}` : `All ${pageFocus.total}`}
+          </button>
+        )}
         {!follow && scope !== "pr" && scope !== "branch" && (
           <button className="ghost" title="Follow Claude's edits again" onClick={onFollow}>
             ↓ Latest
