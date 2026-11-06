@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, ScrollView, Switch, TextInput, View } from "react-native";
+import { Alert, Animated, Easing, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
@@ -135,6 +135,14 @@ export function LastKnownList() {
   );
 }
 
+/** Unpairing forgets the Mac on this phone, and only a new code from the Mac undoes it: it is asked first. */
+export function askUnpair(onUnpair: () => void) {
+  Alert.alert("Unpair this phone?", "This phone forgets your Mac, and what it kept of its chats. To use it again, pair it with a new code from your Mac.", [
+    { text: "Cancel", style: "cancel" },
+    { text: "Unpair", style: "destructive", onPress: onUnpair },
+  ]);
+}
+
 /**
  * Not connected yet: connecting (a moment), or why not and what to check. Once a try has failed it stays on why, through
  * the tries that follow on their own, so the address being typed in isn't swept away by each one.
@@ -170,7 +178,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           {onAddress && <AddressField onAddress={onAddress} />}
           <LastKnownList />
-          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
+          <Button label="Unpair this phone" kind="ghost" onPress={() => askUnpair(onUnpair)} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}
     </AboveKeyboard>
@@ -338,7 +346,7 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
                 {onWhatsNew && <SettingsRow look={LOOKS.whatsNew} title="What's new" onPress={then(onWhatsNew)} />}
                 {onSupport && <SettingsRow look={LOOKS.support} title="Support development" onPress={then(onSupport)} />}
               </SettingsSection>
-              <DangerButton label="Unpair this phone" onPress={then(onUnpair)} footer="Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control." />
+              <DangerButton label="Unpair this phone" onPress={() => askUnpair(then(onUnpair))} footer="Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control." />
             </ScrollView>
           </View>
         );

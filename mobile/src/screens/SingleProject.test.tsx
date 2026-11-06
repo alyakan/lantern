@@ -62,6 +62,16 @@ describe("One project on Home", () => {
     expect(session.lastOf("set_single")).toEqual({ op: "set_single", project: "/w/nahar" });
   });
 
+  it("says the projects couldn't be had, not that the Mac has none, and asks again on Try again", async () => {
+    let calls = 0;
+    await home(null, { projects: () => (++calls === 1 ? new Error("Your Mac didn't answer in time.") : [{ id: "/w/nahar", name: "nahar" }]) });
+    await fireEvent.press(screen.getByRole("button", { name: "One project" }));
+    await waitFor(() => expect(screen.getByText("Your Mac didn't answer in time.")).toBeTruthy());
+    expect(screen.queryByText(/no projects/)).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "nahar" })).toBeTruthy());
+  });
+
   it("starts a new chat in the project, and offers no suggestions about others", async () => {
     const h = handlers();
     const { controller } = makeController();

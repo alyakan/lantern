@@ -27,7 +27,9 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
   const { sync } = useController();
   const lock = useAppLock();
   const [data, setData] = useState<RemoteStorage | null>(null);
+  // What went wrong with a scan or a clear, and (apart, so a good poll doesn't wipe the other) with asking what the Mac has.
   const [problem, setProblem] = useState<string | null>(null);
+  const [loadProblem, setLoadProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   // What the Mac said it started: it may take fewer than the list showed, so this is what the progress line says.
@@ -39,9 +41,9 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
       const next = await sync.storage();
       if (!live.current) return;
       setData(next);
-      setProblem((p) => (p && p.startsWith("Couldn't")) ? null : p);
+      setLoadProblem(null);
     } catch (e) {
-      if (live.current) setProblem((e as Error).message || "Couldn't reach your Mac.");
+      if (live.current) setLoadProblem((e as Error).message || "Couldn't reach your Mac.");
     }
   }, [sync]);
 
@@ -113,7 +115,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
           <Txt variant="heading" accessibilityRole="header">
             Your Mac's storage
           </Txt>
-          {!data && !problem && (
+          {!data && !loadProblem && (
             <Txt variant="body" tone="ink2">
               Asking your Mac…
             </Txt>
@@ -178,10 +180,20 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
               )}
             </>
           )}
-          {problem && (
+          {(problem ?? loadProblem) && (
             <Txt variant="small" tone="stop" accessibilityRole="alert">
-              {problem}
+              {problem ?? loadProblem}
             </Txt>
+          )}
+          {!data && loadProblem && (
+            <Button
+              label="Try again"
+              kind="ghost"
+              onPress={() => {
+                setLoadProblem(null);
+                void load();
+              }}
+            />
           )}
           {confirming && totals ? (
             <View style={{ gap: 8, marginTop: 4 }}>

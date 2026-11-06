@@ -5,7 +5,7 @@ import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import { useController } from "../shell/hooks";
-import { Txt } from "../ui/components";
+import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
@@ -49,17 +49,21 @@ export function SingleSheet({ chats, onDismiss }: { chats: RemoteChat[]; onDismi
   const { sync } = useController();
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // Asking for the projects failed (not "no projects"): why, with Try again, which bumps `asks`.
+  const [loadProblem, setLoadProblem] = useState<string | null>(null);
+  const [asks, setAsks] = useState(0);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
+    setLoadProblem(null);
     sync.projects().then(
       (all) => live.current && setProjects([...all].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))),
-      () => live.current && setProjects([]),
+      (e: unknown) => live.current && setLoadProblem(e instanceof Error ? e.message : String(e)),
     );
     return () => {
       live.current = false;
     };
-  }, [sync]);
+  }, [sync, asks]);
   const colorOf = (name: string) => projectColorOf(chats.find((c) => c.project === name)?.project_color) ?? colors.ink3;
   return (
     <Sheet onClose={onDismiss}>
@@ -76,7 +80,14 @@ export function SingleSheet({ chats, onDismiss }: { chats: RemoteChat[]; onDismi
               {problem}
             </Txt>
           )}
-          {projects === null ? (
+          {projects === null && loadProblem ? (
+            <View style={{ gap: 8, alignItems: "flex-start" }}>
+              <Txt variant="small" tone="stop" accessibilityRole="alert">
+                {loadProblem}
+              </Txt>
+              <Button label="Try again" kind="ghost" onPress={() => setAsks((n) => n + 1)} />
+            </View>
+          ) : projects === null ? (
             <Txt variant="small" tone="ink3">
               Asking your Mac…
             </Txt>

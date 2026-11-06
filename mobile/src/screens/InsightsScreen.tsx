@@ -11,14 +11,14 @@ import type { InsightsBar } from "../protocol/generated/InsightsBar";
 import type { InsightsRange } from "../protocol/generated/InsightsRange";
 import type { InsightsShare } from "../protocol/generated/InsightsShare";
 import { useController, useSyncState } from "../shell/hooks";
-import { Txt } from "../ui/components";
+import { Button, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
 import { tabBarRoom } from "../ui/TabBar";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { projectColorOf, projectTint } from "../view/home";
-import { change, percent, tokens, wait } from "../view/insights";
+import { change, kept, percent, tokens, wait } from "../view/insights";
 
 const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "today", label: "Today" },
@@ -26,8 +26,6 @@ const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "month", label: "Month" },
 ];
 
-// What was shown last, per stretch: the tab opens on it while the Mac works out a fresh one.
-const kept = new Map<InsightsRange, Insights>();
 
 function Section({ label, headline, children }: { label: string; headline: string; children: ReactNode }) {
   return (
@@ -162,7 +160,9 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabBarRoom(insets.bottom), gap: 22 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={() => load(range)} />}
+        // The pull asks again, and the line under the ranges says it is updating (as Home and Work show theirs): no spinner that
+        // springs back at once.
+        refreshControl={<RefreshControl refreshing={false} tintColor="transparent" onRefresh={() => load(range)} />}
       >
         <View accessibilityRole="tablist" style={{ flexDirection: "row", padding: 2, borderRadius: radius.pill, backgroundColor: colors.wash }}>
           {RANGES.map((r) => (
@@ -183,9 +183,12 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
           </View>
         )}
         {error && !loading && (
-          <Txt variant="small" tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: 4 }}>
-            {error}
-          </Txt>
+          <View style={{ paddingHorizontal: 4, gap: 4, alignItems: "flex-start" }}>
+            <Txt variant="small" tone="stop" accessibilityRole="alert">
+              {error}
+            </Txt>
+            <Button label="Try again" kind="ghost" onPress={() => load(range)} />
+          </View>
         )}
 
         {i && (

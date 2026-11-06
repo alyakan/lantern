@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTipJar, useTips } from "../shell/tipsContext";
@@ -83,12 +83,16 @@ function Content({ close, scroll, bottom, thanked, onThanksSeen }: { close: () =
   const busy = tips.phase === "purchasing";
   const tipped = tips.lastTipAt !== null || tips.pledger;
 
+  // The thanks stays its time from when it came: a sheet drawn again meanwhile (the store ticking) hands a new `onThanksSeen`,
+  // which mustn't start it over (or buzz again).
+  const seen = useRef(onThanksSeen);
+  seen.current = onThanksSeen;
   useEffect(() => {
     if (!thanked) return;
     buzz("success");
-    const t = setTimeout(onThanksSeen, THANKS_MS);
+    const t = setTimeout(() => seen.current(), THANKS_MS);
     return () => clearTimeout(t);
-  }, [thanked, onThanksSeen]);
+  }, [thanked]);
 
   return (
     <View style={[{ flexShrink: 1 }]}>

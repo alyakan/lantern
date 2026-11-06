@@ -195,7 +195,8 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const [unconfigured, setUnconfigured] = useState(false);
   useEffect(() => {
     let current = true;
-    if (open && canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, () => { if (current) setUnconfigured(true); });
+    // Their rows go, and the sheet says why rather than leaving them out without a word.
+    if (open && canConversation) sync.conversationSettings(slot).then((v) => { if (current) setConfiguration(v); }, (e: Error) => { if (current) { setUnconfigured(true); setProblem(`Couldn't get the provider and model: ${e.message}`); } });
     return () => { current = false; };
   }, [open, slot, chat?.provider, canConversation, sync]);
   const [closing, setClosing] = useState(false);

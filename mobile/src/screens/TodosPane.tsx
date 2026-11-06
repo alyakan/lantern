@@ -66,8 +66,12 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
     };
   }, []);
 
+  // Asking for the projects failed: not "no projects" (it says why, and asks again on Try again, which bumps `asks`).
+  const [projectsProblem, setProjectsProblem] = useState<string | null>(null);
+  const [asks, setAsks] = useState(0);
   useEffect(() => {
     if (!up) return;
+    setProjectsProblem(null);
     sync.projects().then(
       (all) => {
         if (!live.current) return;
@@ -75,9 +79,9 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
         setProjects(sorted);
         setProject((now) => now ?? sorted.find((p) => !!projectName && p.name === projectName)?.id ?? sorted[0]?.id ?? null);
       },
-      () => live.current && setProjects([]),
+      (e) => live.current && setProjectsProblem((e as Error).message || "Couldn't reach your Mac."),
     );
-  }, [sync, up, projectName]);
+  }, [sync, up, projectName, asks]);
 
   const load = useCallback(async () => {
     if (!project || !up) return;
@@ -169,10 +173,21 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
           {problem}
         </Txt>
       )}
-      {projects !== null && choices.length === 0 ? (
+      {projectsProblem && !project ? (
+        <Retry text={projectsProblem} onPress={() => setAsks((n) => n + 1)} />
+      ) : projects !== null && choices.length === 0 ? (
         <Empty text="No projects yet. Open a folder in Lantern on your Mac first." />
       ) : !list ? (
-        !problem && <Empty text={up ? "Asking your Mac…" : "Connecting to your Mac…"} />
+        problem ? (
+          <Retry
+            onPress={() => {
+              setProblem(null);
+              void load();
+            }}
+          />
+        ) : (
+          <Empty text={up ? "Asking your Mac…" : "Connecting to your Mac…"} />
+        )
       ) : (
         <ScrollView testID="todo-items" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: space.xl }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
           {openCount === 0 && <Empty text={items.length === 0 ? "Nothing on this list yet." : "Nothing left to do here."} />}
@@ -208,6 +223,20 @@ function Empty({ text }: { text: string }) {
     <Txt variant="body" tone="ink3" style={{ paddingHorizontal: space.xl, paddingTop: 28, textAlign: "center" }}>
       {text}
     </Txt>
+  );
+}
+
+/** Asking the Mac failed: why (when it isn't said above already), and a way to ask again. */
+function Retry({ text, onPress }: { text?: string; onPress: () => void }) {
+  return (
+    <View style={{ alignItems: "center", gap: 8, paddingHorizontal: space.xl, paddingTop: 28 }}>
+      {text && (
+        <Txt variant="body" tone="stop" accessibilityRole="alert" style={{ textAlign: "center" }}>
+          {text}
+        </Txt>
+      )}
+      <Button label="Try again" kind="ghost" onPress={onPress} />
+    </View>
   );
 }
 

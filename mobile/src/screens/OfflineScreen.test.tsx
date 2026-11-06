@@ -1,8 +1,18 @@
-import { Keyboard } from "react-native";
+import { Alert, Keyboard } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import type { ConnectionState } from "../net/connection";
 import { connected } from "../test/render";
 import { MacSheet, OfflineScreen, PILL_DELAY_MS, ReconnectPill } from "./OfflineScreen";
+
+/** Answers the next alert with its button named `choose`, and says what it asked. */
+const answerAlert = (choose: string) => {
+  const asked: string[] = [];
+  jest.spyOn(Alert, "alert").mockImplementationOnce((title, _m, buttons) => {
+    asked.push(title ?? "");
+    buttons?.find((b) => b.text === choose)?.onPress?.();
+  });
+  return asked;
+};
 
 describe("the Offline screen", () => {
   it("says it is connecting, with a lantern being lit rather than a spinner", async () => {
@@ -20,8 +30,14 @@ describe("the Offline screen", () => {
     expect(screen.getByText("Can't reach your Mac")).toBeTruthy();
     expect(screen.getByText("Can't reach Aly's Mac. Check that it's awake.")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
     expect(onRetry).toHaveBeenCalled();
+    // Unpairing asks first: Cancel keeps the pairing.
+    answerAlert("Cancel");
+    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
+    expect(onUnpair).not.toHaveBeenCalled();
+    const asked = answerAlert("Unpair");
+    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
+    expect(asked).toEqual(["Unpair this phone?"]);
     expect(onUnpair).toHaveBeenCalled();
   });
 
@@ -123,6 +139,7 @@ describe("the Mac's sheet", () => {
     await render(<MacSheet state={{ kind: "offline", reason: "x", retryInMs: 1 }} onClose={onClose} onUnpair={onUnpair} />);
     expect(screen.getByText("Not connected")).toBeTruthy();
     expect(screen.getByText(/also remove this phone in Lantern's Settings/)).toBeTruthy();
+    answerAlert("Unpair");
     await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
     await fireEvent.press(screen.getByRole("button", { name: "Done" }));
     expect(onUnpair).toHaveBeenCalled();

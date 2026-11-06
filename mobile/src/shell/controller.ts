@@ -15,6 +15,7 @@ import { forgetDeskLog } from "../deskLog";
 import { forgetPins } from "../pins";
 import { forgetPlaces } from "../view/stepPlace";
 import { forgetPanels } from "../view/panelChoice";
+import { forgetInsights } from "../view/insights";
 import { pushKeyStore } from "../platformPushKey";
 
 export interface ControllerDeps {
@@ -167,6 +168,7 @@ export class Controller {
     void forgetPins();
     forgetPlaces();
     forgetPanels();
+    forgetInsights();
     // The key for the words of notifications was for this Mac: it goes with the pairing.
     void pushKeyStore?.forget().catch(() => {});
   }

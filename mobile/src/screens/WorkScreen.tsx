@@ -422,6 +422,14 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   };
 
   /** The Work screen: how many things need you, and a card for each feature. */
+  // A refresh says it is going where its link was (the list's own pull spinner is hidden; a tap on the link showed nothing).
+  const refreshLink = refreshing ? (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel="Refreshing" style={{ minHeight: 22, justifyContent: "center" }}>
+      <Dots />
+    </View>
+  ) : (
+    <Link label="Refresh" onPress={refresh} />
+  );
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
@@ -440,7 +448,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           </Txt>
           {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
           <View style={{ marginLeft: "auto" }}>
-            <Link label="Refresh" onPress={refresh} />
+            {refreshLink}
           </View>
         </View>
         {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
@@ -462,7 +470,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
       </Txt>
       {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
       <View style={{ marginLeft: "auto" }}>
-        <Link label="Refresh" onPress={refresh} />
+        {refreshLink}
       </View>
     </View>
   );

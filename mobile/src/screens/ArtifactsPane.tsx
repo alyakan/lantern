@@ -39,6 +39,8 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
         .join("|"),
     [chatItems],
   );
+  // Try again after a list or a page that didn't come: asked again by bumping this.
+  const [asks, setAsks] = useState(0);
   useEffect(() => {
     let live = true;
     controller.sync.artifacts(slot).then(
@@ -52,7 +54,7 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
     return () => {
       live = false;
     };
-  }, [controller, slot, edits]);
+  }, [controller, slot, edits, asks]);
   const current = useMemo(() => items?.find((a) => a.name === picked) ?? items?.[0] ?? null, [items, picked]);
   const stamp = current ? `${current.name}:${current.modified}:${current.size}` : "";
   useEffect(() => {
@@ -66,7 +68,7 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
       live = false;
     };
     // A page is read again when its own size or time change (Claude wrote it again): the old text stays up until the new arrives.
-  }, [controller, slot, stamp]);
+  }, [controller, slot, stamp, asks]);
   // The text read for another artifact is not this one's: a page being read shows its skeleton.
   const own = read && current && read.name === current.name ? read : null;
   const text = own?.text ?? null;
@@ -94,9 +96,12 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
         <Button label={hideLabel} kind="ghost" onPress={onHide} />
       </View>
       {listError && (
-        <Txt tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg, paddingBottom: 8 }}>
-          {listError}
-        </Txt>
+        <View style={{ paddingHorizontal: space.lg, paddingBottom: 8, gap: 4, alignItems: "flex-start" }}>
+          <Txt tone="stop" accessibilityRole="alert">
+            {listError}
+          </Txt>
+          <Button label="Try again" kind="ghost" onPress={() => setAsks((n) => n + 1)} />
+        </View>
       )}
       {items === null ? (
         // The skeleton waits for the list; a list that failed to come has said why above.
@@ -125,19 +130,22 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
             ))}
           </ScrollView>
           <View style={{ height: 1, backgroundColor: colors.rule }} />
-          {current && <Viewer artifact={current} text={text} error={error} bottom={insets.bottom} />}
+          {current && <Viewer artifact={current} text={text} error={error} bottom={insets.bottom} onRetry={() => setAsks((n) => n + 1)} />}
         </>
       )}
     </View>
   );
 }
 
-function Viewer({ artifact, text, error, bottom }: { artifact: Artifact; text: string | null; error: string | null; bottom: number }) {
+function Viewer({ artifact, text, error, bottom, onRetry }: { artifact: Artifact; text: string | null; error: string | null; bottom: number; onRetry: () => void }) {
   if (error) {
     return (
-      <Txt tone="stop" accessibilityRole="alert" style={{ padding: space.lg }}>
-        {error}
-      </Txt>
+      <View style={{ padding: space.lg, gap: 4, alignItems: "flex-start" }}>
+        <Txt tone="stop" accessibilityRole="alert">
+          {error}
+        </Txt>
+        <Button label="Try again" kind="ghost" onPress={onRetry} />
+      </View>
     );
   }
   if (text === null) {

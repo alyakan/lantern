@@ -76,6 +76,8 @@ const HEADER_SLOP = { top: 0, left: 8, right: 8, bottom: 8 };
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
+/** How long what went wrong is said over the chat. */
+const PROBLEM_MS = 8000;
 /** How much has to have happened while away for "Caught up on…" to be said: a few events is just the chat going on. */
 export const BANNER_AT = 10;
 
@@ -180,6 +182,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [swiping, setSwiping] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // What went wrong is said for a while, not for as long as the chat stays open (a tap puts it away sooner).
+  useEffect(() => {
+    if (!problem) return;
+    const t = setTimeout(() => setProblem(null), PROBLEM_MS);
+    return () => clearTimeout(t);
+  }, [problem]);
   // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
   // the message box (a quote, an edit).
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
@@ -640,7 +648,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </View>
       )}
       {problem && (
-        <Pressable accessibilityRole="alert" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: "#d93b3b14", borderRadius: 10, padding: 10 }}>
+        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
           <Txt variant="small" tone="stop">
             {problem}
           </Txt>
