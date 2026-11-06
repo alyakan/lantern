@@ -110,7 +110,7 @@ export const stepSentTo = (key: string, sig: string): string | null => {
 export const markStepSent = (key: string, sig: string, to: string) => void sent.set(key, { sig, to });
 
 /** Its path, a node a stage: green behind it, ringed in its state's colour where it is, grey ahead. With Linear, the path starts
- * at the issue; work with no issue in Linear has that node dashed. */
+ * at the issue; work with no issue in Linear has that node struck through. */
 function Nodes({ item, issues }: { item: WorkItem; issues: boolean }) {
   const stages = issues ? STAGES : STAGES.filter((s) => s.stage !== "issue");
   const at = stages.findIndex((s) => s.stage === item.stage);
