@@ -19,10 +19,16 @@ export interface Finding {
   lineEnd: number | null;
   severity: Severity | null;
   text: string;
+  /** The file it is in, when the finding names it (`⚠ src/a.ts:42 (nit): …`, as a group's findings do). */
+  path?: string;
 }
 
 export interface ReviewFile {
+  /** The file, for a page about one file; null for a group's. */
   path: string | null;
+  /** A group's title ("#548 Add the field, model and mapping") and its files, for a page that covers several; else null and empty. */
+  group: string | null;
+  files: string[];
   added: number | null;
   removed: number | null;
   /** Anything said before the sections (e.g. about the last file's verdicts). */
@@ -49,6 +55,8 @@ export const withoutCue = (text: string) => text.replace(CUE, "").replace(STOP_C
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
 const FINDING = /^\s*(?:[-*]\s*)?(?:\*\*)?⚠️?\s*(.*)$/i;
 const LINE_REF = /^lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?/i;
+// A repo-relative path with its line, where a finding's header starts: `src/a.ts:42`, `src/a.ts:42-47`, also in backticks.
+const PATH_REF = /^`?([^\s`:()]+\.[A-Za-z]\w{0,9})`?:(\d+)(?:\s*[–-]\s*(\d+))?`?\s*(.*)$/;
 // A severity in brackets, which may be followed by a tag ("(should-fix, convention)"), or the whole header in bold.
 const SEVERITY_IN = /[([]\s*(blocker|should[- ]?fix|nit)\b[^)\]]*[)\]]/i;
 const SEVERITY_ALONE = /^\**\s*(blocker|should[- ]?fix|nit)\s*\**$/i;
@@ -61,6 +69,12 @@ const SEVERITY_ALONE = /^\**\s*(blocker|should[- ]?fix|nit)\s*\**$/i;
 function readFinding(line: string): Omit<Finding, "index"> | null {
   const m = FINDING.exec(line);
   if (!m) return null;
+  // The skill's own shape names the file: `src/a.ts:42 (nit): text`. Read as the line shape, with the file kept.
+  const at = PATH_REF.exec(m[1]);
+  if (at) {
+    const inner = readFinding(`⚠ line ${at[2]}${at[3] ? `-${at[3]}` : ""} ${at[4]}`);
+    return inner && { ...inner, path: at[1] };
+  }
   const rest = m[1];
   const colon = rest.indexOf(":");
   const head = colon < 0 ? rest : rest.slice(0, colon);
@@ -96,16 +110,20 @@ export function findingsOf(section: string): { findings: Finding[]; clean: boole
   return { findings, clean: false };
 }
 
-/** A file page's parts; null when the message doesn't have the skill's sections. */
-export function parseReviewFile(title: string | null, text: string): ReviewFile | null {
+/**
+ * A unit's parts; null when the message doesn't have the skill's sections. `files`: the paths of a group's `Files:` line
+ * (a Heading's `files`), which makes the title the group's.
+ */
+export function parseReviewFile(title: string | null, text: string, files: readonly string[] = []): ReviewFile | null {
   const parts = withoutCue(text).split(/^###\s+(.+)$/m);
   if (parts.length < 3) return null;
   const sections = new Map<string, string>();
   for (let i = 1; i < parts.length; i += 2) sections.set(parts[i].trim().toLowerCase(), parts[i + 1] ?? "");
   if (!sections.has("what changed") && !sections.has("findings")) return null;
-  const file = title ? splitFileTitle(title) : { path: null, added: null, removed: null };
+  const named = title ? splitFileTitle(title) : { path: null, added: null, removed: null };
+  const file = files.length ? { ...named, path: null, group: named.path } : { ...named, group: null };
   const { findings, clean } = findingsOf(sections.get("findings") ?? "");
-  return { ...file, preface: parts[0].trim(), changed: (sections.get("what changed") ?? "").trim(), findings, clean, notes: (sections.get("notes") ?? "").trim() };
+  return { ...file, files: [...files], preface: parts[0].trim(), changed: (sections.get("what changed") ?? "").trim(), findings, clean, notes: (sections.get("notes") ?? "").trim() };
 }
 
 /**
@@ -164,7 +182,7 @@ export function reviewHints(items: readonly ChatItem[], folder: string | null): 
     for (const it of list) {
       if (it.type === "assistant") {
         const h = parseHeading(it.text);
-        if (h?.kind === "file") hints.add(splitFileTitle(h.title).path);
+        if (h?.kind === "file") for (const path of h.files ?? [splitFileTitle(h.title).path]) hints.add(path);
       } else if (it.type === "tool") {
         if (folder) for (const m of it.summary.matchAll(/(?:^|[\s"'=])(\/[^\s"'`;|&]+)/g)) if (m[1].startsWith(`${folder}/`)) hints.add(m[1]);
         walk(it.children);
@@ -175,9 +193,28 @@ export function reviewHints(items: readonly ChatItem[], folder: string | null): 
   return [...hints].slice(-30);
 }
 
+/**
+ * The changed file a page's path means: the path as written (from the repo's root, or whole), or, written cut short, the
+ * one changed file it ends. Null when nothing matches, and when several do: a bare name must never pick one by chance.
+ * `changed` may hold absolute paths; `folder` is what they are relative to.
+ */
+export function matchChanged(changed: readonly string[], mention: string, folder: string | null = null): string | null {
+  const m = mention.trim().replace(/^\.\//, "");
+  if (!m) return null;
+  const rel = (p: string) => (folder && p.startsWith(`${folder}/`) ? p.slice(folder.length + 1) : p);
+  const exact = changed.filter((p) => p === m || rel(p) === m);
+  if (exact.length === 1) return exact[0];
+  const ends = exact.length ? [] : changed.filter((p) => p.endsWith(`/${m}`));
+  return ends.length === 1 ? ends[0] : null;
+}
+
 export type Verdict = "agree" | "reject";
 
-const where = (f: Finding) => (f.line === null ? `finding ${f.index + 1}` : `line ${f.line}${f.lineEnd ? `-${f.lineEnd}` : ""}`);
+const where = (f: Finding) => {
+  if (f.line === null) return `finding ${f.index + 1}`;
+  const span = `${f.line}${f.lineEnd ? `-${f.lineEnd}` : ""}`;
+  return f.path ? `${f.path}:${span}` : `line ${span}`;
+};
 
 /** The Next message carrying a page's verdicts: "Next. Agreed: line 42. Rejected: line 17." */
 export function verdictMessage(findings: Finding[], verdicts: Record<number, Verdict> | undefined): string {
@@ -200,7 +237,8 @@ export function verdictsFromNext(text: string, findings: Finding[]): Record<numb
   if (!isVerdictNext(text)) return undefined;
   const out: Record<number, Verdict> = {};
   for (const [verdict, key] of [["agree", "agreed"], ["reject", "rejected"]] as const) {
-    const list = new RegExp(`${key}:\\s*([^.]+)\\.`, "i").exec(text)?.[1];
+    // The list ends at a full stop that ends a word ("src/a.ts:42" has dots inside it).
+    const list = new RegExp(`${key}:\\s*(.+?)\\.(?=\\s|$)`, "i").exec(text)?.[1];
     for (const label of list?.split(",").map((s) => s.trim()) ?? []) {
       const found = findings.find((f) => where(f) === label && out[f.index] === undefined);
       if (found) out[found.index] = verdict;

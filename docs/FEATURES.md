@@ -141,9 +141,13 @@ Point a review at a pull request or a branch. Nothing is posted to GitHub.
 
 ![Choosing a pull request to review](images/review-pick.png)
 
-Each changed file gets its own page: what changed, then findings with a line and a severity (Blocker, Should fix, Nit). Each finding is a card you **Agree** with or **Reject**, and your verdicts go back to Claude when you press Next file. A rejected finding is dropped for good. At the end, Claude sums up and can write the findings up or fix them step by step.
+Each page is a **review unit**: one file, or a group of related mechanical files from the same pull request (a field threaded through a model, its decoding, its persistence and the fixture tests that pass it along). A file with real logic gets a page of its own, and so does one with a Should fix or a Blocker; a Nit may stay in its group. A page says what changed, then lists findings with a line and a severity (Blocker, Should fix, Nit). Each finding is a card you **Agree** with or **Reject**, and your verdicts go back to Claude when you press Next file. A rejected finding is dropped for good. At the end, Claude sums up and can write the findings up or fix them step by step.
 
 ![A review page: the file's changes and three findings with Agree and Reject](images/review-file.png)
+
+The Frame lists the planned pages, as page ranges per pull request ("2–4: #548"), and what it skips (project files, pure renames, generated or `.strings` files) with the check that justifies skipping each. When a review covers a stack of pull requests, each page names its pull request by number and title, and the Changes pane follows to the pull request the page is in.
+
+A group's page has the files it covers listed under its title, and the Changes pane shows exactly those files (**All 72** puts the rest back until the next page). Its findings name their file, as `src/a.ts:42`. Every file in a review is written as a full path from the repository's root with a line. A name cut short links only when exactly one changed file ends in it; a bare name that two files share is left as plain text, so it never opens the wrong file.
 
 A branch stacked on another is compared with the branch it was built on, not the default branch. Claude names the base in the review's Frame.
 

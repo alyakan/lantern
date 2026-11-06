@@ -148,7 +148,7 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["exportText", () => api.exportText("out.md", "# Doc"), ["export_text", { fileName: "out.md", text: "# Doc" }]],
   ["findFiles", () => api.findFiles("s1", "retry"), ["find_files", { slot: "s1", query: "retry" }]],
   ["searchText", () => api.searchText("s1", query), ["search_text", { slot: "s1", query }]],
-  ["resolveFiles", () => api.resolveFiles("s1", ["retry.ts"]), ["resolve_files", { slot: "s1", mentions: ["retry.ts"] }]],
+  ["resolveFiles", () => api.resolveFiles("s1", ["retry.ts"]), ["resolve_files", { slot: "s1", mentions: ["retry.ts"], wholePathsOnly: false }]],
   ["updateStatus", () => api.updateStatus(), ["update_status"]],
   ["restartToUpdate", () => api.restartToUpdate(), ["restart_to_update"]],
   ["updateState", () => api.updateState(), ["update_state"]],

@@ -1,6 +1,8 @@
 /**
  * A Review page as the Mac reads it (src/lib/review.ts, copied here line for line so the two agree): a file page's parts, and
- * the Next that carries your verdicts on its findings, which is what Claude reads whichever of them sent it.
+ * the Next that carries your verdicts on its findings, which is what Claude reads whichever of them sent it. What isn't
+ * here: a group page's Files: line and header (the phone shows it as the text Claude wrote); only its findings, which name
+ * their file (`src/a.ts:42 (nit): …`), are read, so a verdict on one reads back from the Next like the Mac's.
  */
 
 /**
@@ -20,6 +22,8 @@ export interface Finding {
   lineEnd: number | null;
   severity: Severity | null;
   text: string;
+  /** The file it is in, when the finding names it (`⚠ src/a.ts:42 (nit): …`, as a group's findings do). */
+  path?: string;
 }
 
 export interface ReviewFile {
@@ -50,6 +54,8 @@ export const withoutCue = (text: string) => text.replace(CUE, "").replace(STOP_C
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
 const FINDING = /^\s*(?:[-*]\s*)?(?:\*\*)?⚠️?\s*(.*)$/i;
 const LINE_REF = /^lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?/i;
+// A repo-relative path with its line, where a finding's header starts: `src/a.ts:42`, `src/a.ts:42-47`, also in backticks.
+const PATH_REF = /^`?([^\s`:()]+\.[A-Za-z]\w{0,9})`?:(\d+)(?:\s*[–-]\s*(\d+))?`?\s*(.*)$/;
 // A severity in brackets, which may be followed by a tag ("(should-fix, convention)"), or the whole header in bold.
 const SEVERITY_IN = /[([]\s*(blocker|should[- ]?fix|nit)\b[^)\]]*[)\]]/i;
 const SEVERITY_ALONE = /^\**\s*(blocker|should[- ]?fix|nit)\s*\**$/i;
@@ -62,6 +68,12 @@ const SEVERITY_ALONE = /^\**\s*(blocker|should[- ]?fix|nit)\s*\**$/i;
 function readFinding(line: string): Omit<Finding, "index"> | null {
   const m = FINDING.exec(line);
   if (!m) return null;
+  // The skill's own shape names the file: `src/a.ts:42 (nit): text`. Read as the line shape, with the file kept.
+  const at = PATH_REF.exec(m[1]);
+  if (at) {
+    const inner = readFinding(`⚠ line ${at[2]}${at[3] ? `-${at[3]}` : ""} ${at[4]}`);
+    return inner && { ...inner, path: at[1] };
+  }
   const rest = m[1];
   const colon = rest.indexOf(":");
   const head = colon < 0 ? rest : rest.slice(0, colon);
@@ -111,7 +123,11 @@ export function parseReviewFile(title: string | null, text: string): ReviewFile 
 
 export type Verdict = "agree" | "reject";
 
-const where = (f: Finding) => (f.line === null ? `finding ${f.index + 1}` : `line ${f.line}${f.lineEnd ? `-${f.lineEnd}` : ""}`);
+const where = (f: Finding) => {
+  if (f.line === null) return `finding ${f.index + 1}`;
+  const span = `${f.line}${f.lineEnd ? `-${f.lineEnd}` : ""}`;
+  return f.path ? `${f.path}:${span}` : `line ${span}`;
+};
 
 /** The Next message carrying a page's verdicts: "Next. Agreed: line 42. Rejected: line 17." */
 export function verdictMessage(findings: Finding[], verdicts: Record<number, Verdict> | undefined): string {
@@ -134,7 +150,8 @@ export function verdictsFromNext(text: string, findings: Finding[]): Record<numb
   if (!isVerdictNext(text)) return undefined;
   const out: Record<number, Verdict> = {};
   for (const [verdict, key] of [["agree", "agreed"], ["reject", "rejected"]] as const) {
-    const list = new RegExp(`${key}:\\s*([^.]+)\\.`, "i").exec(text)?.[1];
+    // The list ends at a full stop that ends a word ("src/a.ts:42" has dots inside it).
+    const list = new RegExp(`${key}:\\s*(.+?)\\.(?=\\s|$)`, "i").exec(text)?.[1];
     for (const label of list?.split(",").map((s) => s.trim()) ?? []) {
       const found = findings.find((f) => where(f) === label && out[f.index] === undefined);
       if (found) out[found.index] = verdict;

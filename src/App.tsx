@@ -12,7 +12,7 @@ import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
-import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
 import { worktreeCalls } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
@@ -1965,13 +1965,22 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [scope, active, state.folder, reviewPr]);
   const shownPr = prFiles?.key === prKey ? prFiles : null;
   const shownFiles = scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
-  // A review page's file, shown in the PR's changes once they're in.
-  const [reviewFile, setReviewFile] = useState<string | null>(null);
+  // A review page's files, shown in the PR's changes once they're in: one file, or the files of a group page. A path that
+  // matches no changed file, or several, is left out (a bare name must not pick one by chance).
+  const [reviewFiles, setReviewFiles] = useState<string[]>([]);
+  const reviewFilesKey = reviewFiles.join("\n");
+  const pageFiles = scope === "pr" || scope === "branch" ? [...new Set(reviewFiles.flatMap((f) => matchChanged(shownFiles.map((c) => c.path), f, state.folder) ?? []))] : [];
+  // A group page shows exactly its files in the pane; "All files" shows the rest again, until the next page.
+  const [allFiles, setAllFiles] = useState(false);
+  useEffect(() => setAllFiles(false), [reviewFilesKey]);
+  const grouped = reviewFiles.length > 1 && pageFiles.length > 0;
+  const paneFiles = grouped && !allFiles ? shownFiles.filter((f) => pageFiles.includes(f.path)) : shownFiles;
   useEffect(() => {
-    if ((scope !== "pr" && scope !== "branch") || !reviewFile) return;
-    const match = shownFiles.find((f) => f.path === reviewFile || f.path.endsWith(`/${reviewFile}`));
-    if (match && match.path !== state.selectedFile) dispatch({ type: "select_file", path: match.path });
-  }, [reviewFile, shownPr, shownBranch]);
+    if (!pageFiles.length || pageFiles.includes(state.selectedFile ?? "")) return;
+    dispatch({ type: "select_file", path: pageFiles[0] });
+  }, [reviewFilesKey, shownPr, shownBranch]);
+  // The files links in a review's pages may mean: what is reviewed, so a name cut short can't open some other file.
+  const reviewChanged = flavour === "review" && reviewing && peek === null ? (reviewPr !== null ? shownPr : shownBranch)?.files.map((f) => f.path) ?? [] : undefined;
 
   const selectFile = (path: string) => dispatch({ type: "select_file", path });
   const openFile = (path: string) => {
@@ -2085,7 +2094,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       focusAgent(worker);
       setBranchPeek({ slot: worker, base: chats.agents[worker]?.base ?? null, key: Date.now() });
       setChangeScope("branch");
-      setReviewFile(file ?? null);
+      setReviewFiles(file ? [file] : []);
       setReviewCollapsed(false);
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
@@ -2164,12 +2173,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const onKey = (e: KeyboardEvent) => {
       if (reviewCollapsed || desk || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
-      const next = delta && stepFile(shownFiles, state.selectedFile, delta);
+      const next = delta && stepFile(paneFiles, state.selectedFile, delta);
       if (next && next !== state.selectedFile) selectFile(next);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [reviewCollapsed, desk, shownFiles, state.selectedFile]);
+  }, [reviewCollapsed, desk, paneFiles, state.selectedFile]);
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
@@ -3441,9 +3450,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
                   <ErrorBoundary key={active} name="chat">
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
-                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
+                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention} changed={reviewChanged}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
@@ -3469,7 +3478,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
                 ready={state.status !== "starting"}
-                files={shownFiles}
+                files={paneFiles}
+                pageFocus={grouped ? { pageCount: pageFiles.length, total: shownFiles.length, all: allFiles, onToggle: () => setAllFiles((all) => !all) } : undefined}
                 chatBusy={state.status === "running"}
                 prChecks={state.folder ? { view: prChecks.views[activeWork!], busy: isBusy(state), onSend: () => prChecks.sendFailure(activeWork!, active), onStop: () => prChecks.stop(activeWork!) } : undefined}
                 onShip={state.folder ? () => setShipping(true) : undefined}

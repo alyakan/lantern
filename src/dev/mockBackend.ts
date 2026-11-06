@@ -1997,7 +1997,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return [
             { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
             { flavour: "Explain", text: "Explain as you go: explain the why on every page.", headings: [] },
-            { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
+            { flavour: "Review", text: "Review: one review unit per page (a file, or a group of related mechanical files), then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# File N of M — <PR>, <group title> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
         case "set_subagents":
         case "set_agent_limit":
@@ -2452,7 +2452,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           const files = ["src/client/retry.ts", "src/client/retry.test.ts", "src/client/index.ts", "src/server/app.ts", "src/server/routes.ts", "src/index.ts", "test/retry.e2e.ts", "package.json", "README.md", "tsconfig.json"];
           return (a.mentions as string[]).map((m) => {
             const rel = m.replace(/^\.\//, "").replace(`${FOLDER}/`, "");
-            const hit = files.find((f) => f === rel) ?? files.filter((f) => f.endsWith(`/${rel}`)).sort((x, y) => x.length - y.length)[0];
+            const hit = files.find((f) => f === rel) ?? (a.wholePathsOnly ? undefined : files.filter((f) => f.endsWith(`/${rel}`)).sort((x, y) => x.length - y.length)[0]);
             return hit ? `${FOLDER}/${hit}` : null;
           });
         }

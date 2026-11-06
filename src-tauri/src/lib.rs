@@ -3630,13 +3630,15 @@ async fn search_text(state: State<'_, AppState>, slot: String, query: files::Tex
         .map_err(|e| e.to_string())?
 }
 
-/// For each file mention in Claude's text, the file in the chat's folder it means, if any.
+/// For each file mention in Claude's text, the file in the chat's folder it means, if any. `whole_paths_only`: a bare or
+/// partial name means nothing (a review, whose links must not open a file that merely shares a name).
 #[tauri::command]
-async fn resolve_files(state: State<'_, AppState>, slot: String, mentions: Vec<String>) -> Result<Vec<Option<String>>, String> {
+async fn resolve_files(state: State<'_, AppState>, slot: String, mentions: Vec<String>, whole_paths_only: Option<bool>) -> Result<Vec<Option<String>>, String> {
     let (root, paths) = file_index(&state, &slot).await?;
+    let partial = !whole_paths_only.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
         let set: std::collections::HashSet<&str> = paths.iter().map(String::as_str).collect();
-        mentions.iter().map(|m| files::resolve(&root, &set, m)).collect()
+        mentions.iter().map(|m| files::resolve(&root, &set, m, partial)).collect()
     })
     .await
     .map_err(|e| e.to_string())

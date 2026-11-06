@@ -2246,6 +2246,8 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .review-file-open:hover:not(:disabled) { background: none; text-decoration-color: currentColor; }
 .review-file-dir { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); font-weight: 400; color: var(--muted); }
 .review-file-header .counts { font-size: calc(12px * var(--font-scale)); font-weight: 400; }
+.review-group-files { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-size: calc(12px * var(--font-scale)); overflow-wrap: anywhere; }
+.review-group-files code { color: var(--text-2); }
 .review-preface { padding: 8px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); font-size: calc(13px * var(--font-scale)); }
 .review-preface p, .review-changed p, .review-notes p, .finding-text p { margin: 0 0 6px; }
 .review-preface > :last-child, .review-changed > :last-child, .review-notes > :last-child, .finding-text > :last-child { margin-bottom: 0; }

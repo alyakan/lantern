@@ -18,7 +18,7 @@ import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 import { isVerdictNext, parseReviewFile, recallVerdicts, rememberVerdicts, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
 import { unreadReply } from "../lib/pageNote";
-import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
+import { ReviewFileHeader, ReviewFileView, ReviewGroupHeader, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
 import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
 import { PHASES, phasesOf } from "../lib/phases";
@@ -35,7 +35,7 @@ function reviewOf(page: StepPage): ReviewFile | null {
   if (page.heading?.kind !== "file") return null;
   const main = page.turns[page.main];
   const msg = main.items.find((it) => it.id === main.messageId);
-  return msg?.type === "assistant" ? parseReviewFile(page.heading.title, msg.text) : null;
+  return msg?.type === "assistant" ? parseReviewFile(page.heading.title, msg.text, page.heading.files) : null;
 }
 
 /** An Architecture part page's parts, if its message has the sections. */
@@ -63,8 +63,8 @@ interface Props extends StreamHandlers {
   onPage: (range: { from: number; to: number } | null) => void;
   /** The page that's on screen (once a slide has come to rest): the Map tab lights the boxes it covers. */
   onShown?: (pageKey: string) => void;
-  /** Review: the file of the page that's on screen, so the Changes pane can show it. */
-  onReviewFile?: (path: string) => void;
+  /** Review: the files of the page that's on screen (one, or a group's; none on any other page), so the Changes pane can show them. */
+  onReviewFile?: (paths: string[]) => void;
   /** The Summary tab asked for this page; `key` changes with every request, so asking again for the same page works. */
   jump?: { page: string; key: number } | null;
   /** What the Done page hands off to (the side panel, the export, a new chat); without it the page has no actions. */
@@ -129,10 +129,17 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   useEffect(() => {
     if (restingPage) onShown?.(restingPage.key);
   }, [restingPage?.key]);
-  const restingFile = restingPage?.heading?.kind === "file" ? splitFileTitle(restingPage.heading.title).path : null;
+  const restingHeading = restingPage?.heading;
+  const restingFiles = restingHeading?.kind === "file" ? (restingHeading.files ?? [splitFileTitle(restingHeading.title).path]) : [];
+  const restingFilesKey = restingFiles.join("\n");
+  // Files are reported as pages come to rest, and none only after some were (to show every file again on the Summary):
+  // a view that starts on a page with no file says nothing, so it can't clear the file a merge card's Review diff chose.
+  const reportedFiles = useRef(false);
   useEffect(() => {
-    if (restingFile) onReviewFile?.(restingFile);
-  }, [restingFile]);
+    if (restingFiles.length === 0 && !reportedFiles.current) return;
+    reportedFiles.current = restingFiles.length > 0;
+    onReviewFile?.(restingFiles);
+  }, [restingFilesKey]);
 
   const go = (i: number) => setIndex(Math.max(0, Math.min(last, i)));
   // A page the Summary tab asked for. Not one asked for before this view was drawn (switching back to this chat).
@@ -250,7 +257,7 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   const reviewed: ReviewedFinding[] = review
     ? pages.flatMap((p) => {
         const r = reviewOf(p);
-        return r ? r.findings.map((f) => ({ path: r.path, finding: f, verdict: verdicts[p.key]?.[f.index] })) : [];
+        return r ? r.findings.map((f) => ({ path: f.path ?? r.path ?? r.group, finding: f, verdict: verdicts[p.key]?.[f.index] })) : [];
       })
     : [];
 
@@ -494,7 +501,7 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
   return (
     <div ref={root} className={`step-page-body${teach ? " teach" : ""}${h?.kind === "step" ? " built-step" : ""}`}>
       <div className="step-eyebrow">{pageLabel(h)}</div>
-      <h1 className="step-title">{reviewFile?.path ? <ReviewFileHeader path={reviewFile.path} added={reviewFile.added} removed={reviewFile.removed} /> : h?.kind === "switch" && h.flavour ? `${FLAVOUR_LABEL[h.flavour]}?` : pageTitle(page) || (live ? "Working…" : "Untitled step")}</h1>
+      <h1 className="step-title">{reviewFile?.group ? <ReviewGroupHeader title={reviewFile.group} added={reviewFile.added} removed={reviewFile.removed} /> : reviewFile?.path ? <ReviewFileHeader path={reviewFile.path} added={reviewFile.added} removed={reviewFile.removed} /> : h?.kind === "switch" && h.flavour ? `${FLAVOUR_LABEL[h.flavour]}?` : pageTitle(page) || (live ? "Working…" : "Untitled step")}</h1>
       {asked && <UserMessage className="step-asked" text={asked} at={opening.prompt.at} tag={first ? "Task" : movesOn(opening.prompt.text) ? "Then moved on" : null} />}
       <div className="step-content">
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />

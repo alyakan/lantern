@@ -107,6 +107,18 @@ describe("review pages", () => {
     expect(verdictsFromNext("Next. Agreed: line 99. Rejected: line 42.", r.findings)).toEqual({ 0: "reject" });
   });
 
+  it("reads a finding that names its file, and its verdict round-trips like the Mac's", () => {
+    const { findings } = findingsOf("⚠ src/a.ts:42 (nit): x\n⚠ `src/b.ts:7-9` (nit): y\n⚠ line 3 (nit): z");
+    expect(findings.map((f) => [f.path, f.line, f.lineEnd, f.severity])).toEqual([
+      ["src/a.ts", 42, null, "nit"],
+      ["src/b.ts", 7, 9, "nit"],
+      [undefined, 3, null, "nit"],
+    ]);
+    const sent = verdictMessage(findings, { 0: "agree", 1: "reject", 2: "agree" });
+    expect(sent).toBe("Next. Agreed: src/a.ts:42, line 3. Rejected: src/b.ts:7-9.");
+    expect(verdictsFromNext(sent, findings)).toEqual({ 0: "agree", 1: "reject", 2: "agree" });
+  });
+
   it("drops a closing cue from any message", () => {
     expect(withoutCue("All good.\n\nI'll stop here. Say \"Next\" to open file 1.")).toBe("All good.");
     expect(withoutCue("All good.\n\nSay next to open file 1")).toBe("All good.");

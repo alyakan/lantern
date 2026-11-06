@@ -335,7 +335,7 @@ export const api = {
   /** Lines matching `query` across the chat folder's files. A newer search cancels an older one (it rejects). */
   searchText: (slot: string, query: TextQuery) => invoke<TextResults>("search_text", { slot, query }),
   /** For each file mention in Claude's text, the file in the chat's folder it means (null: not a file there). */
-  resolveFiles: (slot: string, mentions: string[]) => invoke<(string | null)[]>("resolve_files", { slot, mentions }),
+  resolveFiles: (slot: string, mentions: string[], wholePathsOnly = false) => invoke<(string | null)[]>("resolve_files", { slot, mentions, wholePathsOnly }),
   /** A newer Lantern already downloaded and verified, if there is one. */
   updateStatus: () => invoke<UpdateInfo | null>("update_status"),
   /** Installs the downloaded update and relaunches Lantern (stopping every chat's claude). */

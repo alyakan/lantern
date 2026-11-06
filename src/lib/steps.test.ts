@@ -28,6 +28,17 @@ describe("parseHeading", () => {
     expect(parseHeading("# Step 1 of 3 — Add slugify\n\n**What changed:** utils.js")).toMatchObject({ kind: "step" });
   });
 
+  it("reads a group page's Files: line, and takes it out of the page", () => {
+    const text = "# File 3 of 9 — #548 Add the field, model and mapping (+31 −2)\n\nFiles: Lumiform/User/User.swift, `Lumiform/User/UserDTO.swift`, **Lumiform/Tests/UserTests.swift**\n\n### What changed\nThreads the field through.\n\n### Findings\nNone.";
+    expect(parseHeading(text)).toEqual({ kind: "file", n: 3, total: 9, title: "#548 Add the field, model and mapping (+31 −2)", files: ["Lumiform/User/User.swift", "Lumiform/User/UserDTO.swift", "Lumiform/Tests/UserTests.swift"] });
+    // One file has no such line; a line further down is not the page's.
+    expect(parseHeading("# File 2 of 9 — Lumiform/User/User.swift (+4 −1)\n\n### What changed\nFiles: a.ts")).not.toHaveProperty("files");
+    expect(parseHeading("# Frame — x\n\nFiles: a.ts, b.ts")).not.toHaveProperty("files");
+    const [, page] = pagesOf([{ type: "user", id: "u1", text: "Review" }, { type: "assistant", id: "a1", text: "# Frame — x" }, { type: "user", id: "u2", text: "Next" }, { type: "assistant", id: "a2", text }]);
+    expect(page.heading?.files).toHaveLength(3);
+    expect(page.turns[0].items.map((it) => (it.type === "assistant" ? it.text : ""))).toEqual(["### What changed\nThreads the field through.\n\n### Findings\nNone."]);
+  });
+
   it("reads Claude's suggestion of a flavour, and Debug's pages", () => {
     expect(parseHeading("# Switch to Debug — this is a bug\n\nCause first.")).toEqual({ kind: "switch", n: null, total: null, title: "this is a bug", flavour: "debug" });
     expect(parseHeading("# Evidence 2 — Does the page reload?")).toMatchObject({ kind: "evidence", n: 2, title: "Does the page reload?" });

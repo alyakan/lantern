@@ -137,9 +137,10 @@ pub fn find(root: &Path, paths: &[String], query: &str, limit: usize) -> Vec<Fou
 }
 
 /// The file a mention in Claude's text means (`src/a.ts`, `./a.ts`, `/abs/path/a.ts`, `client/a.ts`, `a.ts`), as an
-/// absolute path, if it's one of `paths` (files under `root`). A partial path or bare name matching several files
-/// means the shallowest.
-pub fn resolve(root: &Path, paths: &std::collections::HashSet<&str>, mention: &str) -> Option<String> {
+/// absolute path, if it's one of `paths` (files under `root`). With `partial`, a partial path or bare name matching
+/// several files means the shallowest; without it only a whole path counts (a review's links, where a bare name must
+/// never open some other file of the same name).
+pub fn resolve(root: &Path, paths: &std::collections::HashSet<&str>, mention: &str, partial: bool) -> Option<String> {
     let mention = mention.trim().trim_start_matches("./");
     if mention.is_empty() {
         return None;
@@ -150,6 +151,9 @@ pub fn resolve(root: &Path, paths: &std::collections::HashSet<&str>, mention: &s
     }
     if paths.contains(mention) {
         return Some(root.join(mention).display().to_string());
+    }
+    if !partial {
+        return None;
     }
     let tail = format!("/{mention}");
     paths.iter().filter(|p| p.ends_with(&tail)).min_by_key(|p| (p.len(), p.to_string())).map(|p| root.join(p).display().to_string())
@@ -550,7 +554,7 @@ mod tests {
     fn resolves_mentions_to_files_in_the_folder() {
         let paths: std::collections::HashSet<&str> = ["src/client/retry.ts", "src/server/retry.ts", "README.md", "ios/App/AppDelegate.swift"].into_iter().collect();
         let root = Path::new("/p");
-        let r = |m: &str| resolve(root, &paths, m);
+        let r = |m: &str| resolve(root, &paths, m, true);
         assert_eq!(r("src/client/retry.ts").as_deref(), Some("/p/src/client/retry.ts"));
         assert_eq!(r("./README.md").as_deref(), Some("/p/README.md"));
         assert_eq!(r("/p/ios/App/AppDelegate.swift").as_deref(), Some("/p/ios/App/AppDelegate.swift"));
@@ -561,6 +565,13 @@ mod tests {
         // Not files here: something that only looks like one, a path outside the folder, a partial name.
         for m in ["res.json", "/etc/hosts", "etry.ts", ""] {
             assert_eq!(r(m), None, "{m}");
+        }
+        // A review's links take whole paths only: a bare or partial name is not matched to some file of that name.
+        let whole = |m: &str| resolve(root, &paths, m, false);
+        assert_eq!(whole("src/client/retry.ts").as_deref(), Some("/p/src/client/retry.ts"));
+        assert_eq!(whole("/p/ios/App/AppDelegate.swift").as_deref(), Some("/p/ios/App/AppDelegate.swift"));
+        for m in ["retry.ts", "client/retry.ts", "AppDelegate.swift"] {
+            assert_eq!(whole(m), None, "{m}");
         }
     }
 
