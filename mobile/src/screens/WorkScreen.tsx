@@ -15,7 +15,7 @@ import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
-  /** The bar over the list, for a tablet (the page's own header, with the chats' button); a phone has none, its headline says where it is. */
+  /** The bar over the list, for a tablet (the page's own header, held to the page's column); a phone has none, its headline says where it is. */
   top?: ReactNode;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
@@ -425,9 +425,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
-        <Txt variant="title" accessibilityRole="header">
-          Work
-        </Txt>
+        {/* A phone's list is its own big "Work" headline; a tablet's bar says it, and a second one under the bar is just the same word twice. */}
+        {!top && (
+          <Txt variant="title" accessibilityRole="header">
+            Work
+          </Txt>
+        )}
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
           <Txt variant="body" tone="ink2" style={{ flexShrink: 1 }}>
             {!looked
@@ -480,14 +483,20 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   );
 
   /**
+   * The column a bar keeps on a tablet: the page's own, so the bar's edges are the content's. A bar as wide as the window over
+   * content held to 640 points reads as a second, wider screen.
+   */
+  const barColumn: ViewStyle = wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", paddingHorizontal: space.xl } : {};
+
+  /**
    * A feature's page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
    * bar does. The way back leads, and the page's name sits where a chat's title does — the tablet brings its own header
    * (`top`) instead.
    */
   const pageBar = (g: WorkGroup) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: top ? 0 : space.lg }}>
-        <View style={top ? { marginLeft: space.lg } : undefined}>{backCircle}</View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, ...(top ? barColumn : { paddingHorizontal: space.lg }) }}>
+        {backCircle}
         <View style={{ flex: 1 }}>
           {top ?? (
             <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
@@ -534,7 +543,8 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {!top && <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />}
         {top && (
           <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
-            {top}
+            {/* The bar rides the list's column: its edges are the cards', not the window's. */}
+            <View pointerEvents="box-none" style={barColumn}>{top}</View>
           </View>
         )}
       </View>

@@ -1,4 +1,4 @@
-import { Linking, StyleSheet } from "react-native";
+import { Linking, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { act, fireEvent, screen, within } from "@testing-library/react-native";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -58,6 +58,23 @@ async function openCard(name: string) {
 }
 
 describe("Your work on a tablet", () => {
+  it("says Work in its bar and nowhere under it, and holds the bar to the page's column", async () => {
+    const { controller } = makeController();
+    attachSession(controller, { work }, ["desk", "work"]);
+    await renderWith(<WorkScreen top={<Txt>Work</Txt>} wide onOpenChat={jest.fn()} />, { connection: connectedWith(["desk", "work"]), chats: [chat({ slot: "a" })] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    // The bar is the one headline: the list under it has no big "Work" of its own (a phone's does).
+    expect(screen.queryByRole("header", { name: "Work" })).toBeNull();
+    expect(within(screen.getByTestId("work-bar")).getByText("Work")).toBeTruthy();
+    // And the bar is on the list's column, not the window's: the cards' width, centered, not a second wider edge.
+    const column = screen.getByTestId("work-bar").children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };
+    expect(StyleSheet.flatten(column.props.style)).toMatchObject({ maxWidth: 640, alignSelf: "center" });
+    // A feature's page bar rides the same column.
+    await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
+    const row = screen.getByTestId("work-page-bar").children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };
+    expect(StyleSheet.flatten(row.props.style)).toMatchObject({ maxWidth: 640, alignSelf: "center" });
+  });
+
   it("keeps the tablet's own header on a feature's page, beside the way back, and the list's copy of it is out of reach", async () => {
     const { controller } = makeController();
     attachSession(controller, { work }, ["desk", "work"]);

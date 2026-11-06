@@ -150,11 +150,10 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
       wide
       onOpenChat={onOpenChat}
       top={
-        <TopBar>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 32 }}>
-            <Txt variant="title">Work</Txt>
-            {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
-          </View>
+        // One bar, on the page's own column (the Work screen widths it): its edges are the content's, and it says only where
+        // you are — a tablet in a narrow pane still reaches the chats from the one in the chat's bar.
+        <TopBar style={{ marginHorizontal: 0 }}>
+          <Txt variant="title">Work</Txt>
         </TopBar>
       }
     />
