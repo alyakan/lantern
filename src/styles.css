@@ -3937,9 +3937,27 @@ html.menubar-window, html.menubar-window body, html.menubar-window #root { backg
 /* A project's own page on the Desk: a card per section (its title, a count, one action), and every row in a card the same
    shape: a title with one short thing on its right, and one quiet line under it. Nothing floats or wraps into a column. */
 .desk-project-page { display: flex; flex-direction: column; gap: 14px; }
-.desk-page-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.desk-back { padding: 0; border: none; background: none; color: var(--accent); font-size: calc(12.5px * var(--font-scale)); }
-.desk-page-title { margin: 4px 0 0; font-size: calc(18px * var(--font-scale)); font-weight: 700; }
+.desk-back { display: inline-flex; align-items: center; height: 24px; padding: 0 9px 0 7px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.desk-back:hover:not(:disabled) { background: var(--bg-active); color: var(--text); }
+/* A project's page opens on the project itself: its mark in the colour its sidebar gives it, where its checkout stands, and the
+   features its work is in, a chip each that opens it below. It is plainly a project's page, not the Desk. */
+.dp-project { --proj: var(--accent); position: relative; border-color: color-mix(in srgb, var(--proj) 26%, var(--line)); }
+.dp-project::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: color-mix(in srgb, var(--proj) 72%, transparent); }
+.dp-project-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px 0; }
+.dp-project-facts { display: inline-flex; align-items: baseline; gap: 14px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.dp-project-facts b { color: var(--text); font-weight: 650; }
+.dp-project-body { display: flex; align-items: center; gap: 12px; padding: 8px 14px 12px; }
+.dp-project-mark { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-md); border: 0.5px solid color-mix(in srgb, var(--proj) 38%, transparent); background: color-mix(in srgb, var(--proj) 16%, var(--pane)); color: var(--proj); font: 700 calc(13px * var(--font-scale)) var(--ui); }
+.dp-project-id { min-width: 0; }
+.dp-project-name { margin: 0; font: 700 calc(19px * var(--font-scale)) var(--ui); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-project-meta { margin: 2px 0 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow-wrap: anywhere; }
+.dp-muted { color: var(--muted); }
+.dp-project-features { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 14px 10px; border-top: 0.5px solid color-mix(in srgb, var(--proj) 18%, var(--line)); background: color-mix(in srgb, var(--proj) 4%, var(--pane)); }
+.dp-project-features .yw-kicker { margin-right: 2px; }
+.dp-feature { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border: 0.5px solid color-mix(in srgb, var(--proj) 28%, var(--line)); border-radius: var(--radius-pill); background: var(--pane); font-size: calc(12px * var(--font-scale)); }
+.dp-feature:hover:not(:disabled) { border-color: color-mix(in srgb, var(--proj) 60%, var(--line)); background: color-mix(in srgb, var(--proj) 10%, var(--pane)); }
+.dp-feature-name { color: var(--text); font-weight: 550; }
+.dp-feature-n { color: var(--muted-text); font-size: calc(11px * var(--font-scale)); font-variant-numeric: tabular-nums; }
 .dp-card { border: 0.5px solid var(--line); border-radius: var(--radius-md); background: var(--pane); overflow: hidden; }
 .dp-card-head { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px; border-bottom: 0.5px solid var(--line); }
 .dp-card-head :is(h2, h3) { margin: 0; font: 650 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); }
@@ -4342,3 +4360,4 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* The session recap above the box, quiet like the terminal's (see RecapLine). */
 .recap-line { flex: none; margin: 0 auto; width: 100%; max-width: calc(var(--col) + 80px); padding: 6px 24px 0; box-sizing: border-box; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); font-style: italic; line-height: 1.45; }
 .recap-label { font-style: normal; font-weight: 600; color: var(--text-2); }
+

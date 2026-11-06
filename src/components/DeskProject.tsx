@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import type { InboxRow, ProjectRow, RowState } from "../lib/deskBoard";
+import { PROJECT_COLORS } from "../lib/projectColors";
+import { initials } from "../lib/sidebar";
 import { elapsed } from "../lib/time";
 import { todoPrompt, type Todo } from "../lib/todos";
-import type { WorkItem, Target } from "../lib/yourWork";
+import { projectsOf, type WorkItem, type Target } from "../lib/yourWork";
 import type { RepoStatus, StorageItem } from "../types";
 import { Card, Row } from "./DeskCard";
 import { DeskProjectLanding } from "./DeskProjectLanding";
 import { ExternalLink } from "./ExternalLink";
-import { YourWork } from "./YourWork";
+import { ProjectColors, YourWork } from "./YourWork";
 
 export interface DeskProjectProps {
   row: ProjectRow;
@@ -193,6 +195,69 @@ function Worktrees({ worktrees, folders, storage }: { worktrees: Wt[]; folders: 
   );
 }
 
+/** The project's colour in the sidebar, so its page wears the same mark as its tile and its chats. */
+function useProjectColor(folders: string[], fallback: string): string {
+  const colors = useContext(ProjectColors);
+  const index = folders.map((f) => colors[f]).find((i) => i !== undefined);
+  return index !== undefined ? (PROJECT_COLORS[index] ?? fallback) : fallback;
+}
+
+/**
+ * A project's own head, first on its page: its name and mark in the sidebar's colour, where its checkout stands, and the features
+ * its work is in, a chip each that opens it. A page plainly a project's, not the Desk's: the way back is here, and the colour.
+ */
+function ProjectHead({ row, repo, here, chats, work, onBack, onFeature }: { row: ProjectRow; repo: RepoStatus | null | undefined; here: RepoStatus["folders"][number] | undefined; chats: InboxRow[]; work: WorkItem[] | undefined; onBack: () => void; onFeature: (key: string) => void }) {
+  const color = useProjectColor([row.folder, ...(repo?.folders.map((f) => f.folder) ?? [])], "var(--accent)");
+  const features = repo ? projectsOf(work ?? [], repo.repo) : [];
+  const prs = repo?.prs.length ?? 0;
+  return (
+    <div className="dp-card dp-project" style={{ "--proj": color } as CSSProperties}>
+      <div className="dp-project-top">
+        <button className="desk-back" onClick={onBack}>
+          ‹ All projects
+        </button>
+        <span className="dp-project-facts">
+          <span>
+            <b>{chats.length}</b> chat{chats.length === 1 ? "" : "s"}
+          </span>
+          {prs > 0 && (
+            <span>
+              <b>{prs}</b> PR{prs === 1 ? "" : "s"}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="dp-project-body">
+        <span className="dp-project-mark" aria-hidden>
+          {initials(row.label, 2)}
+        </span>
+        <div className="dp-project-id">
+          <h2 className="dp-project-name" title={row.folder}>
+            {row.label}
+          </h2>
+          <p className="dp-project-meta">
+            {here?.branch ? <span className="dp-mono">{here.branch}</span> : <span className="dp-muted">{repo === null ? "Not a git repository" : repo === undefined ? "Nothing in flight" : "No checkout read yet"}</span>}
+            {!!here?.changed && ` · ${here.changed} changed`}
+            {repo?.github && ` · ${repo.github}`}
+          </p>
+        </div>
+      </div>
+      {features.length > 0 && (
+        <div className="dp-project-features" role="group" aria-label="Features">
+          <span className="yw-kicker">Features</span>
+          {features.map((f) => (
+            <button key={f.project} className="dp-feature" aria-label={`Open the feature ${f.project}`} title="Its work, on this page" onClick={() => onFeature(f.project)}>
+              <span className="dp-feature-name">{f.project}</span>
+              {f.doing > 0 && <span className="dp-feature-n">{f.doing} doing</span>}
+              {f.todo > 0 && <span className="dp-feature-n">{f.todo} to start</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * One project on the Desk, on its own: its chats, its open pull requests and their checks, its worktrees (with what the Storage
  * scan says of each, and Remove when that found it safe), and its open to-dos, each a card. Everything is what Lantern, git, gh
@@ -207,26 +272,15 @@ export function DeskProject({ row, chats, repo, work, issues = false, onStep, on
   const landing = repo !== undefined && !(work && work.length > 0);
   const startChat = (first: string) => (first && onStartChat ? onStartChat(row.folder, first) : onNewChat(row.folder));
   const startTodo = (todo: Todo) => (onStartTodo ? onStartTodo(row.folder, todo) : startChat(todoPrompt(todo)));
+  // The feature opened from the head card, shown on the work board below.
+  const [feature, setFeature] = useState<string | null>(null);
   return (
     <section className="desk-project-page" aria-label={`Project ${row.label}`}>
-      <header className="desk-page-head">
-        <button className="desk-back" onClick={onBack}>
-          ‹ All projects
-        </button>
-        <h2 className="desk-page-title" title={row.folder}>
-          {row.label}
-        </h2>
-        {here?.branch && (
-          <span className="dp-meta">
-            <span className="dp-mono desk-branch">{here.branch}</span>
-            {!!here.changed && ` · ${here.changed} changed`}
-          </span>
-        )}
-      </header>
+      <ProjectHead row={row} repo={repo} here={here} chats={chats} work={work} onBack={onBack} onFeature={setFeature} />
 
       {/* Its own work first: where each pull request, branch and issue of this project stands, grouped by feature when Linear is on. */}
       {work && work.length > 0 && (
-        <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} onOpen={onOpen} standFirst />
+        <YourWork repos={repo ? [repo] : null} items={work} issues={issues} chats={chats} onStep={onStep ?? (() => false)} onRefresh={onRefresh ?? (() => {})} onOpen={onOpen} standFirst feature={feature} onFeature={setFeature} />
       )}
 
       {landing && <DeskProjectLanding label={row.label} repo={repo} here={here} todos={todos} onStartChat={startChat} onStartTodo={startTodo} />}

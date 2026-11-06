@@ -27,6 +27,10 @@ export interface YourWorkProps {
   nextOnly?: boolean;
   /** Opens a chat on the Desk (an item's details offer the one on its branch). */
   onOpen?: (slot: string) => void;
+  /** A project's page: the feature opened from its head card (null: the cards), and where opening or closing one is reported.
+   *  With it, the cards are the layout, whatever the last one chosen was. */
+  feature?: string | null;
+  onFeature?: (key: string | null) => void;
 }
 
 /** History's search over every past chat, and opening one of them: an item's details find the last chat about it with them. */
@@ -586,7 +590,7 @@ function Bar({ by, issues, onBy, counts, only, onOnly, grouped, allOpen, onAll }
  * as a row of nodes, grouped by feature (its Linear project) or by project, and filtered by state. Every state is what git, gh and
  * Linear said; a step goes to a chat only when you click it.
  */
-export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen }: YourWorkProps) {
+export function YourWork({ repos, items, issues, chats, onStep, onRefresh, standFirst = false, nextOnly = false, onOpen, feature, onFeature }: YourWorkProps) {
   const [all, setAll] = useState(false);
   // Items of several projects in one list (the Desk's own Next, or grouped by feature or none): each says its project in a tag.
   const tagged = (repos?.length ?? 0) > 1;
@@ -601,7 +605,11 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
   const [nextClosed, setNextClosed] = usePersistentState("desk.work.nextClosed", false);
   // Cards (a card per feature that opens into tabs) or the list; the feature whose page is open, by its group key, and its tab.
   const [layout, setLayout] = usePersistentState<Layout>("desk.work.layout", "cards");
-  const [cardPage, setCardPage] = useState<string | null>(null);
+  // A project's head card opens a feature here: that is the cards, and the feature's own page from the start.
+  const shownLayout: Layout = feature != null ? "cards" : layout;
+  const [ownPage, setOwnPage] = useState<string | null>(null);
+  const cardPage = feature !== undefined ? feature : ownPage;
+  const setCardPage = (key: string | null) => (onFeature ? onFeature(key) : setOwnPage(key));
   const [cardTab, setCardTab] = useState<Bucket | null>(null);
   if (!repos || repos.length === 0) return null;
   const next = nextSteps(items);
@@ -627,7 +635,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         title="Next"
         count={next.length}
         heading="h2"
-        className={`yw-card yw-next${layout === "cards" ? " yw-calm" : ""}`}
+        className={`yw-card yw-next${shownLayout === "cards" ? " yw-calm" : ""}`}
         action={
           <span className="yw-next-actions">
             <button className="desk-more" aria-expanded={!nextClosed} onClick={() => setNextClosed(!nextClosed)}>
@@ -696,7 +704,15 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
         )}
       </Card>
   );
-  const viewToggle = <ViewToggle layout={layout} onLayout={setLayout} />;
+  const viewToggle = (
+    <ViewToggle
+      layout={shownLayout}
+      onLayout={(l) => {
+        setLayout(l);
+        if (l === "list") onFeature?.(null);
+      }}
+    />
+  );
   // The cards ignore the list's state filter (the tabs are the filter) and its grouping: a card is a feature with Linear, a project without.
   const cardGroups = groupWork(items, issues ? "feature" : "project");
   // One feature (or project) needs no card to open it: its page is the list.
@@ -726,7 +742,7 @@ export function YourWork({ repos, items, issues, chats, onStep, onRefresh, stand
       )}
     </section>
   );
-  const standCard = items.length > 0 && layout === "cards" ? cardsCard : items.length > 0 ? (
+  const standCard = items.length > 0 && shownLayout === "cards" ? cardsCard : items.length > 0 ? (
         <Card title="Where things stand" count={listed.length} heading="h2" className="yw-card yw-stand" action={viewToggle}>
           <Bar by={by} issues={issues} onBy={setChosen} counts={stateCounts(items)} only={only} onOnly={setOnly} grouped={!flat && groups.length > 1} allOpen={allOpen} onAll={toggleAll} />
           {groups.length === 0 ? (
