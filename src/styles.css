@@ -4405,8 +4405,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* The work board's cards, and one feature's page in their place; a review tab's body as it comes up; a chat as it is opened. */
 .yw-fgrid, .yw-fpage, .tab-body { animation: view-in-sm var(--dur-2) var(--ease-out) both; }
 .chat-wrap { animation: fade-in var(--dur-2) var(--ease-out) both; }
-/* Another file's diff fades in where the last was (see FullDiff): opacity only, as the editor under it measures itself. */
-.diff-body.diff-in { animation: fade-in var(--dur-2) var(--ease-out); }
+/* A file opened in Files fades in, its editor with it (each file has one of its own, so it is a fresh mount). */
+.editable-editor { animation: fade-in var(--dur-2) var(--ease-out) both; }
 /* Menus and popovers open out of the control that asked for them; dialogs come up over a scrim that fades in first. */
 .menu, .canvas-menu, .mb-card, .usage-pop { animation: menu-in var(--dur-1) var(--ease-out) both; }
 .canvas-modal, .desk-ask-overlay { animation: fade-in var(--dur-2) var(--ease-out) both; }
@@ -4416,7 +4416,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .yw-fcard:hover, .desk-tile:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .diff-body.diff-in, .menu, .canvas-menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
+  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .canvas-menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .desk-tile:hover { transform: none; }
 }

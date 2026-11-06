@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { api } from "../api";
@@ -75,9 +75,21 @@ describe("FullDiff of a file that was created", () => {
 describe("FullDiff of a file that was changed", () => {
   const changed = (path: string, current: string): FileDiff => ({ path, original: "a\nb\nc\n", current, created: false, deleted: false } as FileDiff);
   const editorOf = () => screen.getByTestId("diff").getAttribute("data-editor");
+  // jsdom has no Web Animations: this keeps what each fade was asked to draw on, as the browser would hear it.
+  const fades: Element[] = [];
+  const animate = Element.prototype.animate;
 
   beforeEach(() => {
     vi.mocked(api.getFileDiff).mockReset();
+    fades.length = 0;
+    Element.prototype.animate = function (this: Element) {
+      fades.push(this);
+      return { cancel() {} } as unknown as Animation;
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.animate = animate;
   });
 
   it("gives each version of a file, and each file, a new diff editor, so its unchanged code is folded away again", async () => {
@@ -107,14 +119,14 @@ describe("FullDiff of a file that was changed", () => {
     const { container, rerender } = render(<FullDiff path="/p/a.ts" refreshKey={0} layout="inline" />);
     await screen.findByTestId("diff");
     const body = container.querySelector(".diff-body");
-    expect(body).toHaveClass("diff-in");
+    await waitFor(() => expect(fades).toEqual([body]));
     const first = editorOf();
-    // The class is put back on the same node (around a reflow) so the animation runs for the next file, not only on arrival.
+    // The same node fades again for the next file, so the fade runs every time and not only on arrival.
     vi.mocked(api.getFileDiff).mockResolvedValueOnce(changed("/p/b.ts", "a\nb\nz\n"));
     rerender(<FullDiff path="/p/b.ts" refreshKey={1} layout="inline" />);
     await waitFor(() => expect(screen.getByTestId("diff")).toHaveAttribute("data-modified", "a\nb\nz\n"));
     expect(container.querySelector(".diff-body")).toBe(body);
-    expect(body).toHaveClass("diff-in");
+    await waitFor(() => expect(fades).toEqual([body, body]));
     expect(editorOf()).not.toBe(first);
   });
 
