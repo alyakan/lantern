@@ -923,6 +923,22 @@ describe("what waits on you, in a chat", () => {
     expect(screen.getByText("Denied on your Mac")).toBeTruthy();
   });
 
+  it("opens a decided card to what was asked: a command's fields, or the change", async () => {
+    const ran = { kind: "prompt" as const, id: "p2", toolName: "Bash", input: { command: "git push origin feat/x", description: "Push the branch" }, state: "denied" as const, by: "desktop" };
+    await render(<PromptRow item={ran} me="phone-x" onReview={() => {}} />);
+    expect(screen.queryByText("git push origin feat/x")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Push the branch, Denied on your Mac" }));
+    expect(screen.getByText("git push origin feat/x")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Push the branch, Denied on your Mac" }));
+    expect(screen.queryByText("git push origin feat/x")).toBeNull();
+    await screen.unmount();
+
+    const edit = { kind: "prompt" as const, id: "p3", toolName: "Edit", input: { file_path: "/p/a.ts", old_string: "let a = 1;", new_string: "let a = 2;" }, state: "allowed" as const, by: "phone-x" };
+    await render(<PromptRow item={edit} me="phone-x" onReview={() => {}} />);
+    await fireEvent.press(screen.getByRole("button", { name: /Change a\.ts/ }));
+    expect(screen.getByText(/let a = 2;/)).toBeTruthy();
+  });
+
   it("shows what this phone answered a question with, as the answer, not as JSON or only 'answered'", async () => {
     const item = { kind: "prompt" as const, id: "q1", toolName: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }], multiSelect: false }] }, state: "allowed" as const, by: "phone-x", answer: "Stable" };
     await render(<PromptRow item={item} me="phone-x" onReview={() => {}} />);

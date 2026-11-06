@@ -22,7 +22,7 @@ export type Row =
   | { key: string; kind: "assistant"; item: Extract<Item, { kind: "assistant" }>; /** The files its turn edited: a path in the words that names one opens its diff. */ files: string[] }
   | { key: string; kind: "page"; item: Extract<Item, { kind: "assistant" }>; page: Page; live: boolean; /** The files its turn edited (a Build step's): named in its words, each is a link to its change. */ files: string[] }
   | { key: string; kind: "summary"; item: Extract<Item, { kind: "assistant" }>; chips: StepChip[]; durationMs: number | null; files: string[] }
-  | { key: string; kind: "steps"; chips: StepChip[]; /** How long the turn took, when it ended and this is its last row of steps ("42 s"). */ took: string | null }
+  | { key: string; kind: "steps"; chips: StepChip[]; /** How long the turn took, when it ended and this is its last row of steps ("42 s"). */ took: string | null; /** What the agent (Claude, Codex, Gemini…) said between these steps, folded into them (see `foldedNotes`). */ notes: string[]; /** The files its turn edited: a path in the notes that names one opens its diff. */ files: string[] }
   | { key: string; kind: "prompt"; item: Extract<Item, { kind: "prompt" }> }
   | { key: string; kind: "desktop"; item: Extract<Item, { kind: "desktop" }> }
   | { key: string; kind: "turn"; item: Extract<Item, { kind: "turn" }> }
@@ -119,6 +119,49 @@ export function summaryOf(items: Item[], i: number): { chips: StepChip[]; durati
   const says = text.length >= 160 || /^\s*(?:[-*•]|\d+[.)])\s/m.test(text);
   if (!worked || !says) return null;
   return { chips: stepChips(steps).filter((c) => SUMMARY_CHIPS.includes(c.key)), durationMs: end.durationMs };
+}
+
+/** The shortest message said between steps that stays in the conversation (see `important`); the same as the Mac's. */
+export const KEPT_MESSAGE_CHARS = 280;
+
+/**
+ * Whether something the agent says between its steps is a message for the user (a finding, a status, what it needs), not a note
+ * on what it does next: a long one, or one with a list or a heading. As the Mac's `important` (src/lib/activity.ts).
+ */
+export function important(text: string): boolean {
+  const t = text.trim();
+  return t.length >= KEPT_MESSAGE_CHARS || /^\s*([-*+]|\d+[.)]|#{1,6})\s+\S/m.test(t);
+}
+
+/**
+ * The places of the messages folded into the steps around them, as the Mac folds a turn's work into one line: a note said
+ * after the turn's first step and before its last. Its opening words, its reply (the last message, when none came after
+ * the steps), an important message and a Step-by-step page stay where they were said.
+ */
+export function foldedNotes(items: Item[]): Set<number> {
+  const out = new Set<number>();
+  let from = 0;
+  const close = (to: number) => {
+    const at = (kind: Item["kind"]) => items.slice(from, to).flatMap((it, k) => (it.kind === kind ? [from + k] : []));
+    const steps = at("step");
+    const said = at("assistant");
+    if (steps.length) {
+      const [first, last] = [steps[0], steps[steps.length - 1]];
+      const reply = said.some((i) => i > last) ? -1 : (said.at(-1) ?? -1);
+      for (const i of said) {
+        const it = items[i] as Extract<Item, { kind: "assistant" }>;
+        if (i > first && i < last && i !== reply && !it.streaming && !important(it.text) && !readPage(it.text)) out.add(i);
+      }
+    }
+    from = to;
+  };
+  // A turn ends at its end or (a chat replayed from its transcript has no turn ends) at the next message.
+  items.forEach((it, i) => {
+    if (it.kind === "user") close(i);
+    else if (it.kind === "turn") close(i + 1);
+  });
+  close(items.length);
+  return out;
 }
 
 /** What a post-hook made Claude say and do, kept apart from the turn it followed. */
@@ -231,15 +274,22 @@ function filesByItem(items: Item[]): string[][] {
 export function timeline(all: Item[], now = Date.now(), working = false): Row[] {
   const { main: items, hooks } = apart(all);
   const files = filesByItem(items);
+  const folded = foldedNotes(items);
   const rows: Row[] = [];
   let run: Step[] = [];
+  let notes: string[] = [];
+  let noteFiles = NO_FILES;
   // Where the current turn's rows start (after its user row), the last day said and the last message's time.
   let turnStart = 0;
   let lastDay: string | null = null;
   let lastAt: number | null = null;
   const endRun = () => {
-    if (run.length) rows.push({ key: `steps-${run[0].id}`, kind: "steps", chips: stepChips(run), took: null });
+    // Notes with no steps yet (a prompt came between) wait for the steps after them.
+    if (!run.length) return;
+    rows.push({ key: `steps-${run[0].id}`, kind: "steps", chips: stepChips(run), took: null, notes, files: noteFiles });
     run = [];
+    notes = [];
+    noteFiles = NO_FILES;
   };
   const hookAt = (i: number) => {
     const h = hooks.get(i);
@@ -252,6 +302,11 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
   items.forEach((item, i) => {
     hookAt(i);
     if (item.kind === "step") return void run.push(item);
+    // A note between steps goes with them, and the steps on either side of it stay one row.
+    if (item.kind === "assistant" && folded.has(i)) {
+      noteFiles = files[i] ?? NO_FILES;
+      return void notes.push(item.text);
+    }
     endRun();
     switch (item.kind) {
       case "user": {
