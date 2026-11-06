@@ -78,6 +78,23 @@ describe("Your work on a tablet", () => {
     expect(StyleSheet.flatten(row.props.style)).toMatchObject({ maxWidth: 640, alignSelf: "center" });
   });
 
+  it("searches the page from its bar, over names, numbers, tickets and features, and puts it all back", async () => {
+    const { controller } = makeController();
+    attachSession(controller, { work }, ["desk", "work"]);
+    await renderWith(<WorkScreen top={<Txt>Work</Txt>} wide onOpenChat={jest.fn()} />, { connection: connectedWith(["desk", "work"]), chats: [chat({ slot: "a" })] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
+    await fireEvent.press(screen.getByRole("button", { name: "Search your work" }));
+    await fireEvent.changeText(screen.getByLabelText("Search"), "ENG-5");
+    // What is typed is counted in the bar, and the page under it is just what says it.
+    expect(screen.getByText("1 item")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ENG-5 Rate limit/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Retry fetchJson/ })).toBeNull();
+    // The way out puts the page back as it was, its cards and all.
+    await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+    expect(screen.queryByLabelText("Search")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Reliability, / })).toBeTruthy();
+  });
+
   it("keeps the tablet's own header on a feature's page, beside the way back, and the list's copy of it is out of reach", async () => {
     const { controller } = makeController();
     attachSession(controller, { work }, ["desk", "work"]);

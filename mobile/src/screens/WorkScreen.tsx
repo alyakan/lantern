@@ -1,6 +1,6 @@
 import { tabBarRoom } from "../ui/TabBar";
-import { useState, type ReactNode } from "react";
-import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
@@ -10,6 +10,7 @@ import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
+import { Magnifier, RoundButton, SearchContents, type BarSearch } from "./SearchBar";
 import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
@@ -142,6 +143,12 @@ const Link = ({ label, onPress, hint }: { label: string; onPress: () => void; hi
   </PressScale>
 );
 
+/** Whether a piece of work says what is typed: its name, its number, its issue, its feature, its repo, its state or its branch. */
+const says = (i: RemoteWorkItem, typed: string) => {
+  const q = typed.trim().toLowerCase();
+  return [i.number === null ? "" : `#${i.number}`, i.title, i.issue ?? "", i.feature ?? "", i.repo, i.word, i.branch ?? ""].some((f) => f.toLowerCase().includes(q));
+};
+
 /** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
 const ASK_ORDER: Tone[] = ["you", "bad", "move"];
 const askOf = (items: RemoteWorkItem[]): RemoteWorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(toneOf(a)) - ASK_ORDER.indexOf(toneOf(b)));
@@ -177,8 +184,34 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Searching the page (a tablet's bar): the field is open, and what is typed narrows the list to what says it.
+  const [finding, setFinding] = useState(false);
+  const [query, setQuery] = useState("");
+  const findInput = useRef<ComponentRef<typeof TextInput>>(null);
   const now = Date.now();
   const items = work?.items ?? [];
+  // What is found by what is typed, over every piece of work (shipped included: it is the one way to look one up).
+  const found = query.trim() ? items.filter((i) => says(i, query)) : [];
+  const barSearch: BarSearch = {
+    active: finding,
+    query,
+    count: found.length,
+    position: 0,
+    onOpen: () => {},
+    onChange: setQuery,
+    onStep: () => {},
+    onCancel: () => {
+      setFinding(false);
+      setQuery("");
+      Keyboard.dismiss();
+    },
+    placeholder: "Search your work",
+    list: true,
+    noun: "item",
+  };
+  useEffect(() => {
+    if (finding) findInput.current?.focus();
+  }, [finding]);
   const issues = work?.issues === true;
   const looked = work?.looked === true;
   const blind = work?.blind ?? [];
@@ -495,15 +528,23 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const barColumn: ViewStyle = wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", paddingHorizontal: space.xl } : {};
 
   /**
-   * A tablet's bar: where you are, and the one thing the page does — Refresh. The glass is as wide as the two words in it, not the
-   * column, so it reads as a pill rather than an empty band.
+   * A tablet's bar: where you are, and the two things the page does — Search, which opens the field in the bar, and Refresh. The
+   * glass is as wide as what is in it, not the column, so it reads as a pill rather than an empty band; the open field takes the
+   * column's width, as a search field does.
    */
   const tabletBar = (
-    <TopBar style={{ alignSelf: "flex-start", marginHorizontal: 0 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
-        {top}
-        <Link label="Refresh" onPress={refresh} />
-      </View>
+    <TopBar style={{ marginHorizontal: 0, alignSelf: finding ? "stretch" : "flex-start" }}>
+      {finding ? (
+        <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
+      ) : (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+          {top}
+          <RoundButton label="Search your work" onPress={() => setFinding(true)}>
+            <Magnifier />
+          </RoundButton>
+          <Link label="Refresh" onPress={refresh} />
+        </View>
+      )}
     </TopBar>
   );
 
@@ -547,7 +588,18 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
         >
-          {work === null ? (
+          {finding ? (
+            // What says what is typed, wherever it sits: a name, a number, an issue, a feature, a repo, a branch.
+            <View accessibilityLabel="Found work">
+              {found.length === 0 ? (
+                <Txt variant="body" tone="ink3">
+                  {query.trim() ? `Nothing says “${query.trim()}”.` : "Search your work: a name, a #number, a ticket, a feature or a repo."}
+                </Txt>
+              ) : (
+                found.map((i, n) => row(i, null, n))
+              )}
+            </View>
+          ) : work === null ? (
             <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
               <Dots />
             </View>
