@@ -297,9 +297,9 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
               );
               // A step's output can be asked for only where the Mac sends it: not for a chip of "other tools".
               return onOutput && opened.key !== "other" ? (
-                <Pressable key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
+                <PressScale key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
                   {line}
-                </Pressable>
+                </PressScale>
               ) : (
                 <View key={i}>{line}</View>
               );
@@ -330,11 +330,11 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
         </Txt>
         {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />}
         {page.body.length >= 260 && !paged && (
-          <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
+          <PressScale accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">
               {cut ? "Show the whole page" : "Show less"}
             </Txt>
-          </Pressable>
+          </PressScale>
         )}
         {/* On a page of its own, the files the step changed, each a link to its change: whether or not its words name them. */}
         {paged && onFile && row.files.length > 0 && (
@@ -343,11 +343,11 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
               Changed in this step
             </Txt>
             {row.files.map((f) => (
-              <Pressable key={f} accessibilityRole="link" accessibilityLabel={f.split("/").pop() ?? f} accessibilityHint="Shows what changed in this file" onPress={() => onFile(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
+              <PressScale key={f} accessibilityRole="link" accessibilityLabel={f.split("/").pop() ?? f} accessibilityHint="Shows what changed in this file" onPress={() => onFile(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
                 <Txt variant="small" tone="cobalt" numberOfLines={1} ellipsizeMode="head" style={{ textDecorationLine: "underline" }}>
                   {f.split("/").slice(-3).join("/")}
                 </Txt>
-              </Pressable>
+              </PressScale>
             ))}
           </View>
         )}
@@ -423,9 +423,9 @@ function DecisionCard({ title, status, mark, details }: { title: string; status:
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
       {details ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
           {head}
-        </Pressable>
+        </PressScale>
       ) : (
         head
       )}
@@ -864,7 +864,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               editable={!disabled && !running}
               style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
             />
-            <Pressable
+            <PressScale
               accessibilityRole="button"
               accessibilityLabel="Run"
               accessibilityState={{ disabled: !command.trim() || running || !!disabled }}
@@ -873,7 +873,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
             >
               <Text style={{ color: command.trim() && !running && !disabled ? term.bg : term.dim, fontFamily: fonts.mono, fontSize: 13, fontWeight: "700" }}>{running ? "…" : "Run"}</Text>
-            </Pressable>
+            </PressScale>
           </View>
           <Txt variant="tiny" tone="ink3" style={{ marginTop: 6, marginLeft: 8, fontFamily: fonts.mono }}>
             Runs on your Mac, outside Claude · backspace to leave

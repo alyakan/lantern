@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { Button, Txt } from "../ui/components";
+import { Button, Txt, MAX_TEXT_SCALE } from "../ui/components";
 import { tokenColour } from "../ui/Markdown";
 import { fonts, space, type as scale, useColors, type Palette } from "../ui/theme";
 import { isMarkdown, languageOf, markdownOf, parseUnifiedDiff, tokensOf, type DiffRow, type MdLine, type RowKind } from "../view/fileDiff";
@@ -25,32 +25,32 @@ function Inline({ spans, colors }: { spans: Span[]; colors: Palette }): ReactNod
     switch (s.kind) {
       case "code":
         return (
-          <Text key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: colors.wash }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: colors.wash }}>
             {s.text}
           </Text>
         );
       case "bold":
         return (
-          <Text key={i} style={{ fontWeight: "700" }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={i} style={{ fontWeight: "700" }}>
             {inner}
           </Text>
         );
       case "italic":
         return (
-          <Text key={i} style={{ fontStyle: "italic" }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={i} style={{ fontStyle: "italic" }}>
             {inner}
           </Text>
         );
       case "strike":
         return (
-          <Text key={i} style={{ textDecorationLine: "line-through", opacity: 0.7 }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={i} style={{ textDecorationLine: "line-through", opacity: 0.7 }}>
             {inner}
           </Text>
         );
       case "link":
       case "file":
         return (
-          <Text key={i} style={{ color: colors.cobalt, textDecorationLine: "underline" }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={i} style={{ color: colors.cobalt, textDecorationLine: "underline" }}>
             {inner}
           </Text>
         );
@@ -67,15 +67,15 @@ function MdText({ line, colors }: { line: MdLine; colors: Palette }) {
   switch (line.kind) {
     case "heading":
       return (
-        <Text selectable style={[scale.body, ink, { fontWeight: "700" }]}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.body, ink, { fontWeight: "700" }]}>
           {words ?? <Inline spans={parseInline(line.text)} colors={colors} />}
         </Text>
       );
     case "list":
       return (
         <View style={{ flexDirection: "row", gap: 6, paddingLeft: line.depth * 16 }}>
-          <Text style={[scale.body, { color: colors.ink3 }]}>{line.marker}</Text>
-          <Text selectable style={[scale.body, ink, { flex: 1 }]}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[scale.body, { color: colors.ink3 }]}>{line.marker}</Text>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.body, ink, { flex: 1 }]}>
             {words ?? <Inline spans={parseInline(line.text)} colors={colors} />}
           </Text>
         </View>
@@ -83,7 +83,7 @@ function MdText({ line, colors }: { line: MdLine; colors: Palette }) {
     case "quote":
       return (
         <View style={{ borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: 8 }}>
-          <Text selectable style={[scale.body, { color: colors.ink2, fontStyle: "italic" }]}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.body, { color: colors.ink2, fontStyle: "italic" }]}>
             {words ?? <Inline spans={parseInline(line.text)} colors={colors} />}
           </Text>
         </View>
@@ -91,17 +91,17 @@ function MdText({ line, colors }: { line: MdLine; colors: Palette }) {
     case "rule":
       return <View style={{ height: 1, backgroundColor: colors.rule, marginVertical: 9 }} />;
     case "fence":
-      return <Text style={[scale.mono, { color: colors.ink3 }]}>{line.text || " "}</Text>;
+      return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[scale.mono, { color: colors.ink3 }]}>{line.text || " "}</Text>;
     case "code":
     case "table":
       return (
-        <Text selectable style={[scale.mono, { color: line.kind === "code" ? colors.ink : colors.ink2 }]}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.mono, { color: line.kind === "code" ? colors.ink : colors.ink2 }]}>
           {line.text || " "}
         </Text>
       );
     default:
       return (
-        <Text selectable style={[scale.body, ink]}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.body, ink]}>
           {words ?? <Inline spans={parseInline(line.text)} colors={colors} />}
         </Text>
       );
@@ -135,7 +135,7 @@ export function DiffView({ path, text }: { path: string; text: string }) {
   // A View round the number, so its wash is as tall as the row when a markdown line wraps.
   const number = (n: number | null, row: DiffRow) => (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: gutter, backgroundColor: washOf(row.kind, colors, true) }}>
-      <Text style={[scale.mono, { textAlign: "right", paddingRight: 6, color: colors.ink3 }]}>{n ?? ""}</Text>
+      <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[scale.mono, { textAlign: "right", paddingRight: 6, color: colors.ink3 }]}>{n ?? ""}</Text>
     </View>
   );
   const body = (
@@ -169,13 +169,13 @@ export function DiffView({ path, text }: { path: string; text: string }) {
                 <MdText line={md} colors={colors} />
               </View>
             ) : (
-              <Text selectable style={[scale.mono, { color: row.kind === "ctx" ? colors.ink2 : colors.ink, paddingLeft: 8, paddingRight: space.lg }]}>
+              <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.mono, { color: row.kind === "ctx" ? colors.ink2 : colors.ink, paddingLeft: 8, paddingRight: space.lg }]}>
                 {code.length === 0 || row.text === ""
                   ? row.text || " "
                   : code.map((t, j) => {
                       const colour = codeColour(t.kind, colors);
                       return colour ? (
-                        <Text key={j} style={{ color: colour }}>
+                        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} key={j} style={{ color: colour }}>
                           {t.text}
                         </Text>
                       ) : (
