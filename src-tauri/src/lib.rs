@@ -3483,9 +3483,13 @@ async fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bo
         publish_state(state, slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
+        Err(NOT_PENDING.into())
     }
 }
+
+/// What answering a prompt that's already closed says. The window matches it word for word (store.ts `NOT_PENDING`): it
+/// was a lost race, not a failure, since the card is closed by the answer that won (or by the withdrawal).
+const NOT_PENDING: &str = "That permission request is no longer pending: it was answered already, or Claude stopped asking.";
 
 /// The "Always allow" rules Settings lists: this chat's (when it's open), then every folder's.
 #[tauri::command]
@@ -4808,6 +4812,13 @@ mod hooks_flow_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window tells a lost race from a failure by these exact words, so its copy must say the same.
+    #[test]
+    fn the_window_knows_the_not_pending_words() {
+        let store = include_str!("../../src/store.ts");
+        assert!(store.contains(&format!("export const NOT_PENDING = \"{NOT_PENDING}\";")));
+    }
 
     /// A swap script's marker brings the chats back once, and one left from long ago (or none) doesn't.
     #[test]

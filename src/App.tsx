@@ -27,7 +27,7 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
+import { answerFailed, hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend, type Chats } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
@@ -1814,9 +1814,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // can't be saved, this request is still answered and the error is shown.
   const decideIn = (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
     to(slot)({ type: "permission_decided", id, allow, note });
-    const answer = () => api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    const answer = () =>
+      api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => {
+        const failed = answerFailed(errText(e));
+        if (failed) to(slot)(failed);
+      });
     if (!remember) return answer();
-    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) })).then(answer);
+    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "failed", text: errText(e) })).then(answer);
   };
   const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => decideIn(active, id, allow, note, answered, remember);
 

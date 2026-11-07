@@ -230,6 +230,7 @@ export const api = {
   pinWorktree: (slot: string, path: string | null) => invoke<void>("pin_worktree", { slot, path }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce or approval request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
+  /** Fails with store.ts's NOT_PENDING when the prompt was already answered (on a phone, say) or withdrawn. */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
     invoke<void>("respond_permission", { slot, requestId, allow, message, updatedInput }),
   /** Step by step's flavours as the prompt Claude runs with has them: each one's instructions and its pages' headings. */

@@ -419,6 +419,18 @@ export function hasPendingPrompt(items: ChatItem[]): boolean {
   return pending;
 }
 
+/** What respond_permission fails with when the prompt was answered elsewhere first or withdrawn (lib.rs NOT_PENDING). */
+export const NOT_PENDING = "That permission request is no longer pending: it was answered already, or Claude stopped asking.";
+
+/**
+ * What an answer to a card that didn't go through does to the chat. Answered first elsewhere (a phone) or withdrawn: a
+ * lost race, nothing, since the card closes with the answer that won. Anything else didn't reach claude, so the turn
+ * can't go on.
+ */
+export function answerFailed(text: string): Action | null {
+  return text === NOT_PENDING ? null : { type: "turn_failed", text };
+}
+
 export type Action =
   | { type: "ui_event"; event: UiEvent }
   | { type: "agent_available" }
@@ -766,17 +778,19 @@ function applyEvent(state: State, ev: UiEvent): State {
         ...state,
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: "denied" } : it)),
       };
-    case "permission_resolved":
-      // Answered (here, or on a paired phone first): the card closes with that answer. One this window answered itself
-      // already shows it.
+    case "permission_resolved": {
+      // Answered (here, or on a paired phone first): the card closes with that answer, the one that counted. A card this
+      // window answered at the same moment as a phone shows the phone's answer if the phone's came first.
+      const decision = ev.allow ? "allowed" : "denied";
       return {
         ...state,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: ev.allow ? "allowed" : "denied" } : it)),
+        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision !== decision ? { ...it, decision } : it)),
       };
+    }
     // The person stopped this turn (here, on a phone, or wherever it was asked for), before the interrupt landed. What
     // follows is the stop's: the step claude was in the middle of ends with an error result, and so does the turn.
     case "turn_stopping":
-      return { ...state, stopRequested: true, items: denyPending(state.items) };
+      return state.status === "running" ? { ...state, stopRequested: true, items: denyPending(state.items) } : state;
     case "session_ended": {
       const detail = lastLine(ev.stderr_tail);
       const text = `${agentName(state.provider)} stopped unexpectedly${ev.code === null ? "" : ` (exit code ${ev.code})`}.${detail ? ` ${detail}` : ""}`;
@@ -973,12 +987,16 @@ export function reducer(state: State, action: Action): State {
         activityAt: Date.now(),
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === action.id ? { ...it, decision: action.allow ? "allowed" : "denied", note: action.note } : it)),
       };
+    // Only while a turn runs: a Stop that lands just after the turn ended would stay set while the chat sits idle, and
+    // a crash later would then pass for the stop's (no error shown, and a quiet restart).
     case "stop_requested":
-      return {
-        ...state,
-        stopRequested: true,
-        items: denyPending(state.items),
-      };
+      return state.status === "running"
+        ? {
+            ...state,
+            stopRequested: true,
+            items: denyPending(state.items),
+          }
+        : state;
     // The old claude's cost is kept: the new one counts from nothing, and its first total may be more than the old one's.
     case "restarting":
       return {
