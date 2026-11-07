@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
-import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
@@ -104,9 +104,16 @@ const SUMMARY_COLLAPSED = 230;
 /**
  * How tall each summary's words came out, by the words: a cell the list draws again for a summary already seen starts at its
  * size. Scrolling up through a chat draws its cells anew, and a long summary laid out whole and then clipped moved everything
- * under the reader's finger, one summary after another, as if the chat pulled them back down.
+ * under the reader's finger, one summary after another, as if the chat pulled them back down. By the words and the width they were
+ * laid out at (a turned iPad or larger text lays them out differently), and only the latest are kept (the oldest goes first).
  */
 const summaryHeights = new Map<string, number>();
+export const SUMMARY_HEIGHTS_KEPT = 300;
+const rememberHeight = (key: string, h: number) => {
+  summaryHeights.delete(key);
+  summaryHeights.set(key, h);
+  if (summaryHeights.size > SUMMARY_HEIGHTS_KEPT) summaryHeights.delete(summaryHeights.keys().next().value as string);
+};
 /** About how many characters fill a clipped summary on a phone: a summary not measured yet that is longer is taken as long. */
 const SUMMARY_LONG_CHARS = 600;
 
@@ -118,12 +125,14 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
   const colors = useColors();
   // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
   const [full, setFull] = useRecyclingState(false, [row.key]);
-  const [height, setHeight] = useRecyclingState<number | null>(() => summaryHeights.get(row.item.text) ?? null, [row.key]);
+  const { width, fontScale } = useWindowDimensions();
+  const heightKey = `${Math.round(width)}:${fontScale}:${row.item.text}`;
+  const [height, setHeight] = useRecyclingState<number | null>(() => summaryHeights.get(heightKey) ?? null, [row.key, heightKey]);
   const [copied, setCopied] = useRecyclingState(false, [row.key]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
   const measured = (h: number) => {
-    summaryHeights.set(row.item.text, h);
+    rememberHeight(heightKey, h);
     setHeight(h);
   };
   // Until it is measured, its length says: its Show all is there from the first drawing, not added under it a moment later.
