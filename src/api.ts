@@ -14,7 +14,7 @@ import type { PastedImage } from "./lib/images";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
-import type { AsideEvent, AuthState, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, CaptureStatus, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -405,14 +405,19 @@ export const api = {
   dashboardClearRuns: (folder: string, file: string, form: string) => invoke<void>("dashboard_clear_runs", { folder, file, form }),
   /** A dashboard was trusted, started, stopped or finished a run, or a run was deleted. */
   onDashboardsChanged: (cb: () => void): Promise<UnlistenFn> => listen("dashboards-changed", () => cb()),
-  /** The folder's Network tab: its watches, the requests that matched them (and summaries), and Network Monitor's state. */
+  /** The folder's Network tab: its watches, the requests that matched them (and summaries), and the capture's state. */
   networkState: (folder: string) => invoke<NetworkView>("network_state", { folder }),
-  /** One request's headers and bodies (rejects with why, e.g. Network Monitor no longer has it). */
+  /** Lantern's capture: whether it's on, and how a phone connects to it. */
+  captureStatus: () => invoke<CaptureStatus>("capture_status"),
+  /** Starts its proxy and WireGuard endpoint; the status says why if it couldn't. */
+  captureStart: () => invoke<CaptureStatus>("capture_start"),
+  captureStop: () => invoke<CaptureStatus>("capture_stop"),
+  /** One request's headers and bodies (rejects with why, e.g. the capture no longer has it). */
   networkResponse: (folder: string, id: string) => invoke<NetworkDetail>("network_response", { folder, id }),
   /** Removes a watch; false if the folder had none by that label. */
   networkUnwatch: (folder: string, label: string) => invoke<boolean>("network_unwatch", { folder, label }),
   networkRewatch: (folder: string, label: string, method: string | null, url: string) => invoke<void>("network_rewatch", { folder, label, method, url }),
-  /** A folder's Network tab has something new: a match, a summary, a watch, or Network Monitor going up or down. */
+  /** A folder's Network tab has something new: a match, a summary, a watch, or the capture starting or stopping. */
   onNetworkChanged: (cb: () => void): Promise<UnlistenFn> => listen("network-changed", () => cb()),
   /** The Storage tab: the last scan, Claude's suggestions on it, free space. */
   storageState: () => invoke<StorageView>("storage_state"),

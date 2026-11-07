@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NetworkTab } from "./NetworkTab";
 import { api } from "../api";
-import type { NetworkDetail, NetworkItem, NetworkTx, NetworkView } from "../types";
+import type { CaptureStatus, NetworkDetail, NetworkItem, NetworkTx, NetworkView } from "../types";
 
-vi.mock("../api", () => ({ api: { networkResponse: vi.fn(), networkUnwatch: vi.fn(), networkRewatch: vi.fn() } }));
+vi.mock("../api", () => ({ api: { networkResponse: vi.fn(), networkUnwatch: vi.fn(), networkRewatch: vi.fn(), captureStatus: vi.fn(), captureStart: vi.fn(), captureStop: vi.fn(), onNetworkChanged: vi.fn() } }));
 
 const tx = (id: string, over: Partial<NetworkTx> = {}): NetworkTx => ({
   id, revision: 1, started_at: Date.now() - 5_000, method: "GET", url: `https://api.x/v1/checklists/${id}`, host: "api.x", path: "/v1/checklists", status: 200, duration_ms: 120,
@@ -20,6 +20,11 @@ const detail = (t: NetworkTx, body: string): NetworkDetail => ({
 });
 const view = (over: Partial<NetworkView> = {}): NetworkView => ({ link: { status: "connected" }, watches: [{ label: "Checklists", method: "GET", url: "/v1/checklists" }], items: [], ...over });
 
+const capture = (running: boolean, over: Partial<CaptureStatus> = {}): CaptureStatus => ({
+  running, proxy: running ? "192.168.1.20:8888" : null, setupUrl: running ? "http://192.168.1.20:8888/" : null, wireguardConfig: running ? "[Interface]\n" : null,
+  wireguardQr: running ? "<svg/>" : null, error: null, captured: 0, ...over,
+});
+
 const responses: Record<string, string> = {
   one: JSON.stringify({ data: [{ id: 1, title: "Fire safety", owner: null }], meta: { total: 41 } }),
   two: JSON.stringify({ error: "not found" }),
@@ -29,14 +34,34 @@ beforeEach(() => {
   vi.mocked(api.networkResponse).mockImplementation(async (_folder, id) => detail(tx(id), responses[id]));
   vi.mocked(api.networkUnwatch).mockResolvedValue(true);
   vi.mocked(api.networkRewatch).mockResolvedValue(undefined);
+  vi.mocked(api.captureStatus).mockResolvedValue(capture(true));
+  vi.mocked(api.onNetworkChanged).mockResolvedValue(() => {});
 });
 
 describe("NetworkTab", () => {
-  it("says when nothing matches yet, and when Network Monitor isn't running", () => {
-    const { rerender } = render(<NetworkTab folder="/p" view={view()} onSummarize={null} />);
+  it("says when nothing matches yet, with how to connect a phone, and when the capture is off", async () => {
+    render(<NetworkTab folder="/p" view={view()} onSummarize={null} />);
+    expect(await screen.findByText("Capturing")).toBeInTheDocument();
     expect(screen.getByText(/No requests match yet/)).toBeInTheDocument();
-    rerender(<NetworkTab folder="/p" view={view({ link: { status: "not_running" } })} onSummarize={null} />);
-    expect(screen.getAllByText(/Network Monitor isn't running/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Connect a phone" })).toHaveAttribute("aria-expanded", "true");
+    vi.mocked(api.captureStatus).mockResolvedValue(capture(false));
+    render(<NetworkTab folder="/q" view={view()} onSummarize={null} />);
+    expect(await screen.findByText(/Lantern's capture is off\. Start it/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start capturing" })).toBeInTheDocument();
+  });
+
+  it("stops the capture from its switch", async () => {
+    vi.mocked(api.captureStop).mockResolvedValue(capture(false));
+    render(<NetworkTab folder="/p" view={view()} onSummarize={null} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(api.captureStop).toHaveBeenCalled();
+    expect(await screen.findByText("Capture is off")).toBeInTheDocument();
+  });
+
+  it("shows why the capture couldn't start under the bar", async () => {
+    vi.mocked(api.captureStatus).mockResolvedValue(capture(false, { error: "Couldn't listen on port 8888." }));
+    render(<NetworkTab folder="/p" view={view()} onSummarize={null} />);
+    expect(await screen.findByRole("status")).toHaveTextContent("Couldn't listen on port 8888.");
   });
 
   it("shows the newest request's outline and JSON until Claude summarizes it, and another when picked", async () => {
@@ -60,8 +85,8 @@ describe("NetworkTab", () => {
     await screen.findByRole("group", { name: "Response JSON" });
   });
 
-  it("keeps a summary whose response Network Monitor has forgotten", async () => {
-    vi.mocked(api.networkResponse).mockRejectedValue("Network Monitor no longer has that request");
+  it("keeps a summary whose response the capture has forgotten", async () => {
+    vi.mocked(api.networkResponse).mockRejectedValue("The capture no longer has that request");
     const gone = item("one", { watch: null, has_response: false, summary: { id: "one", method: "GET", url: "u", status: 200, started_at: 0, text: "Three items", written_at: Date.now() } });
     render(<NetworkTab folder="/p" view={view({ items: [gone] })} onSummarize={null} />);
     expect(screen.getByText("Three items")).toBeInTheDocument();
@@ -124,8 +149,8 @@ describe("NetworkTab", () => {
   });
 
   it("shows a link error under the status, not only in a tooltip", () => {
-    render(<NetworkTab folder="/p" view={view({ link: { status: "error", message: "Network Monitor answered 500" } })} onSummarize={null} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Network Monitor answered 500");
+    render(<NetworkTab folder="/p" view={view({ link: { status: "error", message: "The capture answered 500" } })} onSummarize={null} />);
+    expect(screen.getByRole("status")).toHaveTextContent("The capture answered 500");
   });
 
   it("shows Summarizing… until the summary arrives or Claude's turn ends, and Copied for a moment", async () => {

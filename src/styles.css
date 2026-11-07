@@ -1989,13 +1989,23 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .test-chip.failed { color: var(--del); }
 .test-chip.failed:hover:not(:disabled) { color: var(--del); }
 
-/* The Network tab: Network Monitor's requests that match the folder's watches, the picked one's summary and JSON below. */
+/* The Network tab: the captured requests that match the folder's watches, the picked one's summary and JSON below. */
 .network-link { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
 .network-link-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
 .network-link.connected .network-link-dot { background: var(--add); }
 .network-link.error .network-link-dot { background: var(--del); }
 .network-link.not_running { color: var(--muted-text); }
 .network-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+button.ghost.network-capture-toggle { height: var(--pill-s); padding: 0 10px; border-radius: var(--radius-pill); font-size: calc(11.5px * var(--font-scale)); }
+.network-capture-empty { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.network-capture-error { color: var(--del); }
+/* Connect a phone: the WireGuard QR beside the steps; under it at a narrow width. */
+.network-connect { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px; padding: 8px 12px 12px; text-align: left; font-size: calc(12.5px * var(--font-scale)); line-height: 1.5; color: var(--text-2); }
+.remote-qr.network-qr { width: 200px; height: 200px; }
+.network-connect-steps { flex: 1 1 240px; min-width: 0; }
+.network-connect-steps ol { margin: 4px 0 10px; padding-left: 18px; }
+.network-connect-steps p { margin: 4px 0 10px; }
+.network-connect-steps code { font-family: var(--mono); font-size: 0.95em; overflow-wrap: anywhere; }
 .network-watches { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
 .network-watch { display: inline-flex; align-items: center; gap: 2px; height: var(--pill-s); padding: 0 2px 0 8px; border-radius: var(--radius-pill); background: var(--bg-active); font-size: calc(11.5px * var(--font-scale)); color: var(--text); }
 button.network-watch-remove { width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: calc(12px * var(--font-scale)); line-height: 1; }

@@ -2,14 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { bodyJson, formatBytes, outline, shortUrl, statusLabel, tone } from "../lib/network";
 import { relativeTime } from "../lib/time";
-import type { NetworkDetail, NetworkItem, NetworkLink, NetworkView, NetworkWatch } from "../types";
+import type { CaptureStatus, NetworkDetail, NetworkItem, NetworkView, NetworkWatch } from "../types";
 import { JsonTree } from "./JsonTree";
 import { Md } from "./Md";
 import { Fold } from "./TestsTab";
-import { ExternalLink } from "./ExternalLink";
 import { TabEmpty } from "./TabEmpty";
-
-const NETWORK_MONITOR_URL = "https://github.com/alyakan/network-monitor";
 
 
 /** The folder's Network tab data, loaded when the folder opens and again whenever the backend says it changed. */
@@ -31,23 +28,107 @@ export function useNetworkView(folder: string | null): NetworkView | null {
   return view;
 }
 
+/** Lantern's capture, loaded when the tab opens and again whenever the backend says the Network tab changed. */
+export function useCapture(): [CaptureStatus | null, (s: CaptureStatus) => void] {
+  const [status, setStatus] = useState<CaptureStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () => api.captureStatus().then((s) => live && setStatus(s), () => {});
+    load();
+    // Outside the app (tests, a browser) there are no events to listen to.
+    const unlisten = api.onNetworkChanged(load).catch(() => null);
+    return () => {
+      live = false;
+      unlisten.then((f) => f?.());
+    };
+  }, []);
+  return [status, setStatus];
+}
+
 /**
- * The Network tab before there is anything to list: what Network Monitor is and how requests get here, or, when Network
- * Monitor is running and nothing is watched yet, how to add a watch.
+ * The Network tab before there is anything to list: the capture's switch and how to connect a phone, and how requests
+ * get here (Claude saves a watch).
  */
-export function NetworkEmpty({ link }: { link: NetworkLink | null }) {
-  const running = link?.status === "connected";
+export function NetworkEmpty() {
+  const [capture, setCapture] = useCapture();
   return (
     <TabEmpty title="Network">
       <p>
-        {running
-          ? "Network Monitor is running, but nothing is watched yet. Tell Claude which requests matter (for example, “watch the request that loads the orders list”) and it saves a watch; matching requests show up here, and Claude can summarize their responses."
-          : "Network Monitor is a Mac app that records the HTTP traffic of your app. Route your app's traffic through it, then tell Claude which requests matter: Claude saves a watch, and the matching requests show up here, with summaries of their responses."}
+        {capture?.running
+          ? "Lantern is capturing. Tell Claude which requests matter (for example, “watch the request that loads the orders list”) and it saves a watch; matching requests show up here, and Claude can summarize their responses."
+          : "Lantern can capture a phone's HTTP and HTTPS traffic: start the capture, connect the phone, then tell Claude which requests matter. Claude saves a watch, and the matching requests show up here, with summaries of their responses."}
       </p>
-      <p>
-        <ExternalLink href={NETWORK_MONITOR_URL}>github.com/alyakan/network-monitor</ExternalLink>
-      </p>
+      {capture && (
+        <div className="network-capture-empty">
+          <CaptureSwitch status={capture} onChange={setCapture} />
+        </div>
+      )}
+      {capture?.error && <p className="network-capture-error">{capture.error}</p>}
+      {capture?.running && <ConnectPhone status={capture} open />}
     </TabEmpty>
+  );
+}
+
+/** The capture's switch: whether it's on, and a button to start or stop it. */
+function CaptureSwitch({ status, onChange }: { status: CaptureStatus; onChange: (s: CaptureStatus) => void }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = () => {
+    setBusy(true);
+    (status.running ? api.captureStop() : api.captureStart()).then(onChange, () => {}).finally(() => setBusy(false));
+  };
+  const title = status.running ? `Capturing on this Mac's local network: ${status.captured === 1 ? "1 request" : `${status.captured} requests`} so far` : "Lantern's proxy and WireGuard tunnel are off";
+  return (
+    <>
+      <span className={`network-link ${status.running ? "connected" : "not_running"}`} title={title}>
+        <span className="network-link-dot" aria-hidden />
+        {status.running ? "Capturing" : "Capture is off"}
+      </span>
+      <button className="ghost network-capture-toggle" disabled={busy} onClick={toggle}>
+        {status.running ? "Stop" : busy ? "Starting…" : "Start capturing"}
+      </button>
+    </>
+  );
+}
+
+/** How a phone connects: the WireGuard tunnel (every app's traffic), or the Wi-Fi proxy (apps that follow it). */
+function ConnectPhone({ status, open = false }: { status: CaptureStatus; open?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+  if (!status.running) return null;
+  const [host, port] = status.proxy?.split(":") ?? [];
+  return (
+    <Fold title="Connect a phone" open={open}>
+      <div className="network-connect">
+        {status.wireguardQr && <img className="remote-qr network-qr" alt="WireGuard tunnel for the phone" src={`data:image/svg+xml;utf8,${encodeURIComponent(status.wireguardQr)}`} />}
+        <div className="network-connect-steps">
+          <div className="tests-heading">WireGuard: every app</div>
+          <ol>
+            <li>In the WireGuard app, tap +, then Create from QR code, and scan this.</li>
+            <li>Turn the tunnel on: all the phone's traffic now comes through this Mac.</li>
+            <li>
+              Install Lantern's certificate: open <code>{status.setupUrl ?? "the setup page"}</code> in Safari, install the profile, then turn on full trust in Settings → General → About → Certificate Trust Settings.
+            </li>
+          </ol>
+          {host && (
+            <>
+              <div className="tests-heading">Or the Wi-Fi proxy: apps that follow it</div>
+              <p>
+                Settings → Wi-Fi → ⓘ → Configure Proxy → Manual: server <code>{host}</code>, port <code>{port}</code>. Then install the certificate the same way.
+              </p>
+            </>
+          )}
+          {status.wireguardConfig && (
+            <button className="ghost" onClick={() => navigator.clipboard?.writeText(status.wireguardConfig ?? "").then(() => setCopied(true), () => {})}>
+              {copied ? "Copied" : "Copy WireGuard config"}
+            </button>
+          )}
+        </div>
+      </div>
+    </Fold>
   );
 }
 
@@ -60,7 +141,7 @@ interface Props {
   busy?: boolean;
 }
 
-// The requests that match the folder's watches, as Network Monitor captures them: newest first, the one picked below
+// The requests that match the folder's watches, as Lantern captures them: newest first, the one picked below
 // with Claude's summary (or the response's outline until there is one), then the response as a tree and its headers.
 export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
   const [picked, setPicked] = useState<string | null>(null);
@@ -95,6 +176,7 @@ export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
   }, [seen, top]);
   const fresh = Math.max(0, view.items.findIndex((i) => i.tx.id === seen));
   const current = view.items.find((i) => i.tx.id === picked) ?? view.items.find((i) => i.tx.id === seen) ?? view.items[0] ?? null;
+  const [capture, setCapture] = useCapture();
   const showNewest = () => {
     setTop(first);
     setPicked(first);
@@ -103,20 +185,21 @@ export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
   return (
     <>
       <div className="review-bar network-bar">
-        <LinkStatus link={view.link} />
+        {capture && <CaptureSwitch status={capture} onChange={setCapture} />}
         <div className="spacer" />
         {view.items.length > 0 && <span className="position">{view.items.length === 1 ? "1 request" : `${view.items.length} requests`}</span>}
       </div>
-      {view.link.status === "error" && (
+      {(capture?.error ?? (view.link.status === "error" ? view.link.message : null)) && (
         <div className="network-link-note" role="status">
-          {view.link.message}
+          {capture?.error ?? (view.link.status === "error" ? view.link.message : null)}
         </div>
       )}
       <div className="network-body">
+        {capture?.running && view.items.length === 0 && <ConnectPhone status={capture} open />}
         {view.watches.length > 0 && <Watches folder={folder} watches={view.watches} />}
         {view.items.length === 0 ? (
           <div className="tests-note network-empty">
-            {view.link.status === "not_running" ? "Network Monitor isn't running. Open it and send your app's traffic through it; matching requests show up here." : "No requests match yet. Use your app, and the ones that match show up here as they happen."}
+            {capture && !capture.running ? "Lantern's capture is off. Start it and connect your phone; matching requests show up here." : "No requests match yet. Use your app, and the ones that match show up here as they happen."}
           </div>
         ) : (
           <div className="network-list-wrap">
@@ -143,20 +226,6 @@ export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
         {current && <RequestDetail key={current.tx.id} folder={folder} item={current} onSummarize={onSummarize} busy={busy} />}
       </div>
     </>
-  );
-}
-
-function LinkStatus({ link }: { link: NetworkLink }) {
-  const [text, title] =
-    link.status === "connected" ? ["Network Monitor", "Following Network Monitor's captured traffic"] :
-    link.status === "not_running" ? ["Network Monitor isn't running", "Open Network Monitor to capture requests; Lantern finds it on its own"] :
-    link.status === "error" ? ["Can't read Network Monitor", link.message] :
-    ["Network Monitor", "Not looked for yet"];
-  return (
-    <span className={`network-link ${link.status}`} title={title}>
-      <span className="network-link-dot" aria-hidden />
-      {text}
-    </span>
   );
 }
 
@@ -284,7 +353,7 @@ function RequestDetail({ folder, item, onSummarize, busy }: { folder: string; it
       {!detail ? (
         <div className="tests-note">Loading the response…</div>
       ) : detail.error ? (
-        <div className="tests-note">{item.summary ? "The response itself is gone: Network Monitor no longer has it." : detail.error}</div>
+        <div className="tests-note">{item.summary ? "The response itself is gone: the capture no longer has it." : detail.error}</div>
       ) : (
         detail.value && <Response detail={detail.value} json={json} />
       )}
@@ -325,7 +394,7 @@ function Response({ detail, json }: { detail: NetworkDetail; json: unknown }) {
         ) : (
           <div className="tests-note">Binary, {formatBytes(body.size)}</div>
         )}
-        {body.truncated && <div className="tests-note">Lantern kept only the first 2 MB of this response.</div>}
+        {body.truncated && <div className="tests-note">Lantern kept only the start of this response.</div>}
       </Fold>
       <Fold title="Response headers" count={detail.response_headers.length}>
         <Headers headers={detail.response_headers} />

@@ -318,7 +318,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "network" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
-          {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
+          {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty />}
         </div>
       )}
       {tab === "dashboard" && (
