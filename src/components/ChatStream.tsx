@@ -219,7 +219,7 @@ const RowView = memo(function RowView({ row, folder, verb, latest, streaming = f
       const actions: MessageAction[] = regen ? [{ label: "Regenerate", title: REGENERATE_TITLE, onClick: regen }] : [];
       return (
         <>
-          <div className="msg assistant">
+          <div className={`msg assistant${streaming ? " streaming" : ""}`}>
             <MdStream>{row.text}</MdStream>
           </div>
           {!streaming && <MessageActions text={row.text} align="start" actions={actions} />}
