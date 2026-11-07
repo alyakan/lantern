@@ -175,10 +175,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
         onScrim={() => toggleChanges(false)}
         onResizeStart={() => setResizing(true)}
         onResize={resizeTo}
-        onResizeEnd={() => {
+        onResizeEnd={(w) => {
           setResizing(false);
-          void saveChangesShare(shareOf(paneWidth, size.width));
+          void saveChangesShare(shareOf(w, size.width));
         }}
+        fit={(w) => changesWidth(shareOf(w, size.width), size.width)}
         onStep={(dir) => {
           const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
           touched.current = true;
