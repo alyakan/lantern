@@ -52,6 +52,8 @@ export interface BarSearch {
   placeholder?: string;
   /** What it searches is a list (Home's chats): it says how many there are, and has no arrows to step between them. */
   list?: boolean;
+  /** What one of a list's matches is called, in the count ("chat" unless told: "item"). */
+  noun?: string;
 }
 
 /** The circle's size until the bar has been measured; it then takes the bar's own height, which is the same number at rest. */
@@ -137,7 +139,7 @@ export function SearchContents({ search, input, onFocused, onCancel }: { search:
         style={{ flex: 1, fontSize: body.fontSize, color: colors.ink, paddingVertical: 8 }}
       />
       <Txt accessibilityLiveRegion="polite" variant="tiny" tone="ink2" style={{ minWidth: 44, textAlign: "right" }}>
-        {typed ? (none ? "No match" : search.list ? (search.count === 1 ? "1 chat" : `${search.count} chats`) : `${search.position} of ${search.count}`) : ""}
+        {typed ? (none ? "No match" : search.list ? (search.count === 1 ? `1 ${search.noun ?? "chat"}` : `${search.count} ${search.noun ?? "chat"}s`) : `${search.position} of ${search.count}`) : ""}
       </Txt>
       {!search.list && (
         <>

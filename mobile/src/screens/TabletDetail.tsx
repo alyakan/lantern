@@ -19,7 +19,6 @@ import { PanelMenu, type Panel } from "./PanelMenu";
 import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
-import { TopBar } from "../ui/TopBar";
 import { WorkScreen } from "./WorkScreen";
 
 /** The widest a decision goes: it is a card to read and swipe, not a page. */
@@ -149,14 +148,8 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <WorkScreen
       wide
       onOpenChat={onOpenChat}
-      top={
-        <TopBar>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 32 }}>
-            <Txt variant="title">Work</Txt>
-            {layout === "overlay" && !chatsOpen && <Button label="Chats" kind="ghost" onPress={onShowChats} />}
-          </View>
-        </TopBar>
-      }
+      // The bar's glass (and its Refresh) is the Work screen's: this says only where you are.
+      top={<Txt variant="title">Work</Txt>}
     />
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
