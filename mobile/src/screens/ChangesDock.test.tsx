@@ -67,6 +67,14 @@ describe("the Changes beside a tablet's chat", () => {
     expect(p.onResizeEnd).toHaveBeenCalledWith(566);
   });
 
+  it("take a finger on a 44-point divider, most of it over the pane so the chat's buttons at its edge stay clear", async () => {
+    await render(<ChangesDock {...props("dock")} />);
+    const style = StyleSheet.flatten(screen.getByTestId("changes-divider").props.style);
+    expect(style.width).toBe(44);
+    // 14 points over the chat, 30 over the pane.
+    expect(style.left).toBe(683 - 14);
+  });
+
   it("are left as they were by a drag that comes back to where it began", async () => {
     const p = props("dock");
     await render(<ChangesDock {...p} />);

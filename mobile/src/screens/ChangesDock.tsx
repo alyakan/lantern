@@ -7,8 +7,10 @@ import { floatFrame } from "../view/layout";
 /** Where the Changes are: away, beside the chat at the right, or floating over it as a big card. */
 export type DockMode = "hidden" | "dock" | "float";
 
-/** How wide the divider takes a finger, either side of the line between the chat and the pane. */
-const GRAB = 22;
+/** How wide the divider takes a finger: a full 44 points, most of it over the pane, so the chat's own buttons at its edge (send) stay clear. */
+const GRAB = 44;
+/** How much of that is over the chat. */
+const GRAB_CHAT = 14;
 
 export interface ChangesDockProps {
   mode: DockMode;
@@ -188,13 +190,13 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
           accessibilityValue={{ text: share }}
           accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
           onAccessibilityAction={(e) => onStep(e.nativeEvent.actionName === "increment" ? 1 : -1)}
-          style={{ position: "absolute", top: 0, bottom: 0, left: dock.x - GRAB / 2, width: GRAB, alignItems: "center", justifyContent: "center", transform: [{ translateX: edge }] }}
+          style={{ position: "absolute", top: 0, bottom: 0, left: dock.x - GRAB_CHAT, width: GRAB, justifyContent: "center", transform: [{ translateX: edge }] }}
           {...grab}
         >
           {/* While dragged, the line the pane will start at. */}
-          {dragging && <View pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, left: GRAB / 2 - 1, width: 2, backgroundColor: colors.hi }} />}
+          {dragging && <View pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, left: GRAB_CHAT - 1, width: 2, backgroundColor: colors.hi }} />}
           {/* A grip in the middle of the line, as iPadOS draws one between two apps side by side. */}
-          <View style={{ width: 6, height: 44, borderRadius: 3, backgroundColor: dragging ? colors.hi : colors.ink3, opacity: dragging ? 1 : 0.55 }} />
+          <View style={{ marginLeft: GRAB_CHAT - 3, width: 6, height: 44, borderRadius: 3, backgroundColor: dragging ? colors.hi : colors.ink3, opacity: dragging ? 1 : 0.55 }} />
         </Animated.View>
       )}
     </>
