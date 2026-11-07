@@ -532,16 +532,19 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
    * glass is as wide as what is in it, not the column, so it reads as a pill rather than an empty band; the open field takes the
    * column's width, as a search field does.
    */
-  const tabletBar = (
-    <TopBar style={{ marginHorizontal: 0, alignSelf: finding ? "stretch" : "flex-start" }}>
-      {finding ? (
+  const tabletBar = (searchable: boolean) => (
+    <TopBar style={{ marginHorizontal: 0, alignSelf: searchable && finding ? "stretch" : "flex-start" }}>
+      {searchable && finding ? (
         <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
           {top}
-          <RoundButton label="Search your work" onPress={() => setFinding(true)}>
-            <Magnifier />
-          </RoundButton>
+          {/* Search filters the list; a feature's page has no list to filter, so its bar doesn't offer it. */}
+          {searchable && (
+            <RoundButton label="Search your work" onPress={() => setFinding(true)}>
+              <Magnifier />
+            </RoundButton>
+          )}
           <Link label="Refresh" onPress={refresh} />
         </View>
       )}
@@ -559,7 +562,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {backCircle}
         <View style={{ flex: 1 }}>
           {top ? (
-            tabletBar
+            tabletBar(false)
           ) : (
             <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
               <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
@@ -618,7 +621,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
             {/* The bar starts where the list's column does, and is as wide as what it says. */}
             <View pointerEvents="box-none" style={barColumn}>
-              {tabletBar}
+              {tabletBar(true)}
             </View>
           </View>
         )}

@@ -76,6 +76,9 @@ describe("Your work on a tablet", () => {
     await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
     const row = screen.getByTestId("work-page-bar").children[0] as unknown as { props: { style: StyleProp<ViewStyle> } };
     expect(StyleSheet.flatten(row.props.style)).toMatchObject({ maxWidth: 640, alignSelf: "center" });
+    // Search filters the list, so a feature's page bar doesn't offer it (it would open a field that filters nothing); Refresh stays.
+    expect(within(screen.getByTestId("work-page-bar")).queryByRole("button", { name: "Search your work" })).toBeNull();
+    expect(within(screen.getByTestId("work-page-bar")).getByText("Refresh")).toBeTruthy();
   });
 
   it("searches the page from its bar, over names, numbers, tickets and features, and puts it all back", async () => {
