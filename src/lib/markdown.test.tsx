@@ -237,13 +237,14 @@ describe("MdStream", () => {
     expect(html(<MdStream>{text}</MdStream>)).toBe(html(<Md>{text}</Md>));
   });
 
-  it("keeps a block that finished as the same element while the next one streams", () => {
-    const start = "Here:\n\n```ts\nconst a = 1;\n```\n\nNext pa";
+  it("keeps a block that finished as the same element when the next one starts, and after", () => {
+    // Nothing is cut yet: the code is the last block, still being written as far as anyone knows.
+    const start = "```ts\nconst a = 1;\n```";
     const { container, rerender } = render(<MdStream>{start}</MdStream>);
     const code = container.querySelector("pre");
-    const intro = container.querySelector("p");
-    rerender(<MdStream>{start + "ragraph.\n\nAnd another"}</MdStream>);
+    rerender(<MdStream>{start + "\n\nNext"}</MdStream>);
     expect(container.querySelector("pre")).toBe(code);
-    expect(container.querySelector("p")).toBe(intro);
+    rerender(<MdStream>{start + "\n\nNext paragraph.\n\nAnd another"}</MdStream>);
+    expect(container.querySelector("pre")).toBe(code);
   });
 });
