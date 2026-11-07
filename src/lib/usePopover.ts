@@ -17,7 +17,12 @@ export function usePopover(open: boolean, close: () => void, focusFirst = true) 
   }, [open, focusFirst]);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && button.current?.focus();
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Used up by the popover it closes (see useDismiss).
+      e.preventDefault();
+      button.current?.focus();
+    };
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
   }, [open]);

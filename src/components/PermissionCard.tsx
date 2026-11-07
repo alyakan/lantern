@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useDismiss } from "../lib/useDismiss";
 import { Md } from "./Md";
 import type { ChatItem } from "../store";
 import { QuestionCard } from "./QuestionCard";
@@ -31,6 +32,9 @@ export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDec
 // Any other tool: Allow or Deny, and Always allow… for a rule that covers this kind of call from now on.
 function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // Escape or a press elsewhere closes Always allow… (and that Escape doesn't also deny the card).
+  const menu = useRef<HTMLDivElement>(null);
+  useDismiss(menuOpen, menu, () => setMenuOpen(false));
   const detail = describeInput(item.input);
   if (item.decision !== null && item.autoRule) {
     return (
@@ -70,7 +74,7 @@ function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }
         </button>
       </div>
       {menuOpen && (
-        <div className="always-menu">
+        <div className="always-menu" ref={menu}>
           {RULE_SCOPES.map(([scope, heading]) => (
             <div key={scope} role="group" aria-label={heading} className="always-group">
               <div className="always-heading">{heading}</div>

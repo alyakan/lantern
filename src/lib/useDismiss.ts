@@ -7,7 +7,12 @@ export function useDismiss(open: boolean, box: RefObject<HTMLElement | null>, cl
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && latest.current();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && latest.current();
+    // The Escape that closes it is used up: nothing behind it (a chat's waiting card) also takes it.
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      latest.current();
+    };
     document.addEventListener("pointerdown", away);
     document.addEventListener("keydown", esc);
     return () => {

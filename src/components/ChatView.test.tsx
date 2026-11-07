@@ -66,8 +66,12 @@ describe("ChatView", () => {
     it("is denied by Escape in the chat in front, never allowed, and not while typing or in a dialog", () => {
       const onDecide = vi.fn();
       render(<ChatView front state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      // The chat's own box, as the window has it.
+      const composer = document.createElement("div");
+      composer.className = "composer";
       const box = document.createElement("textarea");
-      document.body.appendChild(box);
+      composer.appendChild(box);
+      document.body.appendChild(composer);
       box.value = "half a sentence";
       fireEvent.keyDown(box, { key: "Escape" });
       expect(onDecide).not.toHaveBeenCalled();
@@ -82,7 +86,24 @@ describe("ChatView", () => {
       expect(onDecide).toHaveBeenCalledWith("p1", false);
       fireEvent.keyDown(window, { key: "Enter" });
       expect(onDecide).toHaveBeenCalledTimes(1);
-      box.remove();
+      composer.remove();
+    });
+
+    it("isn't denied by the Escape that closes its Always allow… menu, or one pressed in another pane's editor", () => {
+      const onDecide = vi.fn();
+      render(<ChatView front state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(screen.queryByRole("button", { name: "Always allow…", expanded: true })).toBeNull();
+      expect(onDecide).not.toHaveBeenCalled();
+      const editor = document.createElement("div");
+      editor.className = "monaco-editor";
+      const hidden = document.createElement("textarea");
+      editor.appendChild(hidden);
+      document.body.appendChild(editor);
+      fireEvent.keyDown(hidden, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      editor.remove();
     });
 
     it("isn't answered by Escape from a chat on the canvas, or when two cards wait", () => {

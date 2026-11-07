@@ -196,14 +196,20 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
   // Escape answers No to the one card waiting, as Deny does: never Allow, which only a click or a key on the card itself
   // gives. Not while typing (a word in the box, an open menu), nor in a dialog, nor once something else took the key.
   const denyNow = useRef<(() => void) | null>(null);
-  const pending = state.items.filter((it) => it.type === "permission" && it.decision === null);
-  denyNow.current = front && pending.length === 1 ? () => handlers.onDecide(pending[0].id, false) : null;
+  const wrap = useRef<HTMLDivElement>(null);
+  const pending = front && hasPendingPrompt(state.items) ? state.items.filter((it) => it.type === "permission" && it.decision === null) : [];
+  denyNow.current = pending.length === 1 ? () => handlers.onDecide(pending[0].id, false) : null;
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || !denyNow.current) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|SELECT)$/.test(t.tagName) || (t.tagName === "TEXTAREA" && (t as HTMLTextAreaElement).value !== ""))) return;
-      if (document.querySelector('[role="dialog"], [aria-modal="true"], [role="menu"]')) return;
+      // Only from the chat itself, its empty box, or nowhere in particular (the page): never from another pane's editor, a
+      // field with words in it, or anything open over the chat.
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      const page = !t || t === document.body;
+      const emptyBox = t?.tagName === "TEXTAREA" && !!t.closest(".composer") && (t as HTMLTextAreaElement).value === "";
+      const inChat = !!t && !!wrap.current?.contains(t) && !t.isContentEditable && !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+      if (!(page || emptyBox || inChat)) return;
+      if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], [role="menu"]')) return;
       e.preventDefault();
       denyNow.current();
     };
@@ -217,7 +223,7 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   };
   return (
-    <div className="chat-wrap">
+    <div className="chat-wrap" ref={wrap}>
       {state.restoreUndo && (
         <div className="restore-undo" role="status">
           <span className="revert-undo-text">{undoFailed ?? state.restoreUndo.summary}</span>

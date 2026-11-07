@@ -331,7 +331,9 @@ export class Sync {
 
   /** A message written while the Mac can't be reached: it shows as waiting, kept on the phone, and goes once a connection is up. */
   hold(slot: string, text: string) {
-    const project = this.state.chats.find((c) => c.slot === slot)?.project ?? null;
+    // Its chat's project, to check it against once the Mac is back; unknown (not in the list) leaves that check out.
+    const chat = this.state.chats.find((c) => c.slot === slot);
+    const project = chat ? (chat.project ?? null) : undefined;
     const held: Held = { slot, text, clientId: this.newId(), epoch: this.state.epoch ?? this.lastEpoch, at: this.now(), project };
     this.apply({ type: "held", slot, clientId: held.clientId, text, at: held.at });
     this.outbox.push(held);
