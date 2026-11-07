@@ -183,12 +183,16 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
     const el = scroller.current;
     if (!el || typeof MutationObserver === "undefined") return;
     const arrivals = new MutationObserver((records) => {
-      const added = records.flatMap((r) => Array.from(r.addedNodes)).filter((n): n is HTMLElement => n instanceof HTMLElement);
-      if (added.length === 0 || added.length > ENTER_AT_ONCE || loadingEarlierRef.current) return;
-      for (const node of added) {
-        const parent = node.parentElement;
-        if (parent === el ? node.classList.contains("turn-section") : parent?.classList.contains("turn-section") || node.matches(ENTERS)) node.classList.add("enter");
-      }
+      if (loadingEarlierRef.current) return;
+      // Only what would settle in counts (not the words and colours a streaming reply adds inside itself).
+      const entering = records
+        .flatMap((r) => Array.from(r.addedNodes))
+        .filter((n): n is HTMLElement => n instanceof HTMLElement)
+        .filter((n) => (n.parentElement === el ? n.classList.contains("turn-section") : !!n.parentElement?.classList.contains("turn-section") || n.matches(ENTERS)));
+      // A turn arrives alone: more than one at once, or many rows, is a load (a woken chat's history, however short).
+      const turns = entering.filter((n) => n.parentElement === el).length;
+      if (turns > 1 || entering.length > ENTER_AT_ONCE) return;
+      for (const node of entering) node.classList.add("enter");
     });
     arrivals.observe(el, { childList: true, subtree: true });
     return () => arrivals.disconnect();
@@ -246,7 +250,7 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   };
   return (
-    <div className="chat-wrap" ref={wrap}>
+    <div className={`chat-wrap${waiting ? " waiting" : ""}`} ref={wrap}>
       {state.restoreUndo && (
         <div className="restore-undo" role="status">
           <span className="revert-undo-text">{undoFailed ?? state.restoreUndo.summary}</span>

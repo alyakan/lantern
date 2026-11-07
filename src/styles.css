@@ -1400,6 +1400,9 @@ button.msg-action:disabled { opacity: 0.5; cursor: default; }
 }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
 @media (prefers-reduced-motion: reduce) { .activity.live > .activity-line:first-child .activity-text { animation: none; color: var(--text-2); background: none; } }
+/* A card waits for the user: the step it came from isn't working either, so it neither sweeps nor spins. */
+.chat-wrap.waiting .activity.live > .activity-line:first-child .activity-text { animation: none; color: var(--text-2); background: none; }
+.chat-wrap.waiting .activity.live .spinner { animation: none; border-color: var(--attn); opacity: 0.6; }
 /* Narration between steps, shown only in the expanded timeline. */
 .step-note { margin: 3px 0; padding: 0 6px; font-size: calc(12px * var(--font-scale)); line-height: 1.5; color: var(--muted); }
 .step-note p { margin: 0; }
@@ -4783,8 +4786,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
    appearing in one frame. Marked by the chat itself, only for what came after it was first drawn (see ChatView). Only its
    look moves, never its height, so the place being read stays put. */
 .chat .enter { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
-/* A reply still coming in ends in a soft caret, so it reads as being written, not finished (not after a code block). */
-.msg.assistant.streaming > :last-child:not(.code-block):not(pre):not(ul):not(ol):not(table)::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; border-radius: 1px; background: currentColor; opacity: 0.45; animation: caret-blink 1.1s steps(2, start) infinite; }
+/* A reply still coming in ends in a soft caret after its words, so it reads as being written (not after code, a list or a table). */
+.msg.assistant.streaming > :is(p, h1, h2, h3, h4):last-child::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; border-radius: 1px; background: currentColor; opacity: 0.45; animation: caret-blink 1.1s steps(2, start) infinite; }
 @keyframes caret-blink { to { visibility: hidden; } }
 .aside { animation: sheet-in var(--dur-2) var(--ease-out) backwards; }
 .queue-item { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
@@ -4807,7 +4810,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet, .chat .enter, .aside, .queue-item { animation: none; }
   .chev, .msg-actions, button.code-block-copy, .composer-box { transition: none; }
-  .msg.assistant.streaming > :last-child::after { animation: none; }
+  .msg.assistant.streaming > :is(p, h1, h2, h3, h4):last-child::after { animation: none; }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }

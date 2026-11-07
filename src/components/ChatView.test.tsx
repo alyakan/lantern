@@ -63,10 +63,11 @@ describe("ChatView", () => {
     rerender(<ChatView state={{ ...base, items: more }} {...props} />);
     await new Promise((r) => setTimeout(r, 0));
     expect(container.querySelector(".turn-section[data-turn='u2']")?.classList.contains("enter")).toBe(true);
-    const many: ChatItem[] = [...more, ...[3, 4, 5, 6, 7, 8].map((n): ChatItem => ({ type: "user", id: `u${n}`, text: `Question ${n}` }))];
+    const many: ChatItem[] = [...more, ...[3, 4].map((n): ChatItem => ({ type: "user", id: `u${n}`, text: `Question ${n}` }))];
     rerender(<ChatView state={{ ...base, items: many }} {...props} />);
     await new Promise((r) => setTimeout(r, 0));
-    expect(container.querySelector(".turn-section[data-turn='u5']")?.classList.contains("enter")).toBe(false);
+    // Two turns at once: a short history loading, not something happening.
+    expect(container.querySelector(".turn-section[data-turn='u3']")?.classList.contains("enter")).toBe(false);
   });
 
   describe("a card waiting for an answer", () => {
