@@ -4644,6 +4644,8 @@ pub fn run() {
                     tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(state.desk_agents.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
+                    // The chats' last saves are made on a thread of their own: on disk before Lantern goes.
+                    state.conversations.flush();
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
                 if let Some(updates) = app.try_state::<updates::Updates>() {
