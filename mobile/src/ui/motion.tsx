@@ -157,13 +157,24 @@ const opacityOf = (p: Animated.Value, glass: boolean) => (glass ? 1 : p);
  * `animate={false}` is for things that were there from the start: they just are. `glass`: it holds Liquid Glass, so it only
  * moves up, without the fade (see `opacityOf`).
  */
-export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, glass = false, style }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; glass?: boolean; style?: StyleProp<ViewStyle> }) {
+export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, glass = false, style, id }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; glass?: boolean; style?: StyleProp<ViewStyle>; /** What it holds, in a list cell that is reused: another one there plays it as it appears, if `animate` says it is new. */ id?: string }) {
   const p = useRef(new Animated.Value(skips() || !animate ? 1 : 0)).current;
+  const shown = useRef(id);
   useEffect(() => {
     if (animate) run(p, 1, ms, undefined, delay);
     // Only when it appears: a list's recycled cell holding another item must not play it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A reused cell given another item: new, it comes in as a first one would; one seen before (scrolled back to) is just there.
+  useEffect(() => {
+    if (id === shown.current) return;
+    shown.current = id;
+    if (animate && !skips()) {
+      p.setValue(0);
+      run(p, 1, ms, undefined, delay);
+    } else p.setValue(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   return <Animated.View style={[style, { opacity: opacityOf(p, glass), transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] }]}>{children}</Animated.View>;
 }
 

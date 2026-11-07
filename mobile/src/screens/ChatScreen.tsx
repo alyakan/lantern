@@ -629,7 +629,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     // While searching, the match being looked at has an outline in the accent, and the other matches a faint one.
     const mark = marks.here === row.key ? "here" : marks.all.has(row.key) ? "other" : null;
     return (
-      <FadeSlideIn animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
+      <FadeSlideIn id={row.key} animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
         {body}
         {mark && <View testID={`match-${mark}`} pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: 6, borderRadius: radius.inner, borderWidth: mark === "here" ? 2 : 1, borderColor: mark === "here" ? colors.cobalt : `${colors.cobalt}55` }]} />}
       </FadeSlideIn>
