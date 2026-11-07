@@ -1,5 +1,5 @@
-import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Linking, ScrollView, Text, View } from "react-native";
+import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Linking, ScrollView, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
 import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
@@ -14,9 +14,10 @@ type Tone = "ink" | "night" | "white" | "on-ink";
 
 /** What a tone's surroundings look like: a raised box, a faint wash behind code, a hairline, and the colour of code. */
 function look(tone: Tone, colors: Palette) {
-  if (tone === "ink") return { raised: colors.paper, wash: colors.wash, line: colors.rule, code: colors.ink, label: "ink3" as const };
-  if (tone === "on-ink") return { raised: `${colors.onInk}1f`, wash: `${colors.onInk}1f`, line: `${colors.onInk}30`, code: colors.onInk, label: "on-ink" as const };
-  return { raised: colors.nightRaised, wash: colors.nightRaised, line: colors.nightLine, code: colors.white, label: "night" as const };
+  if (tone === "ink") return { raised: colors.paper, wash: colors.wash, line: colors.rule, code: colors.ink, label: "ink3" as const, quote: "ink2" as const, bar: colors.rule };
+  // On your own (ink) bubble a raised box is see-through, so there is no one colour for an edge to fade into: it has none.
+  if (tone === "on-ink") return { raised: `${colors.onInk}1f`, wash: `${colors.onInk}1f`, line: `${colors.onInk}30`, code: colors.onInk, label: "on-ink" as const, quote: "on-ink" as const, bar: `${colors.onInk}66` };
+  return { raised: colors.nightRaised, wash: colors.nightRaised, line: colors.nightLine, code: colors.white, label: "night" as const, quote: "night" as const, bar: colors.nightLine };
 }
 
 /** What a chat search looks for, in the soft highlighter wash with ink words on it (a bubble's own words would be lost on it). */
@@ -171,6 +172,36 @@ export function tokenColour(kind: TokenKind, colors: Palette): string | undefine
   }
 }
 
+/** The strips of a side fade, from clear to the surface's own colour. */
+const FADE = [0.15, 0.45, 0.75, 0.95];
+
+/**
+ * What scrolls sideways when it is wider than its box (code, a table): while there is more of it to the right, that edge fades
+ * into the surface under it, so it reads as one that scrolls (iOS shows no bar until it moves, and a cut column looked like the
+ * end of it).
+ */
+function SideScroll({ children, surface, style, contentContainerStyle }: { children: ReactNode; /** The colour the edge fades into: what is under the box. */ surface: string; style?: StyleProp<ViewStyle>; contentContainerStyle?: StyleProp<ViewStyle> }) {
+  const [box, setBox] = useState(0);
+  const [inner, setInner] = useState(0);
+  const [x, setX] = useState(0);
+  const more = box > 0 && inner - box - x > 4;
+  const hex = surface.length === 7 ? surface : null;
+  return (
+    <View style={style}>
+      <ScrollView testID="side-scroll" horizontal showsHorizontalScrollIndicator={false} onLayout={(e) => setBox(e.nativeEvent.layout.width)} onContentSizeChange={(w) => setInner(w)} onScroll={(e) => setX(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32} contentContainerStyle={contentContainerStyle}>
+        {children}
+      </ScrollView>
+      {more && hex && (
+        <View testID="side-fade" pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 28, flexDirection: "row" }}>
+          {FADE.map((a) => (
+            <View key={a} style={{ flex: 1, backgroundColor: `${hex}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
 function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; tone: Tone; mark?: string }) {
   const [copied, setCopied] = useState(false);
@@ -205,7 +236,7 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
           </Txt>
         </PressScale>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
+      <SideScroll surface={l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
         <Text selectable style={[scale.mono, { color: l.code }]}>
           {shown.map((line, i) => (
             <Fragment key={i}>
@@ -223,7 +254,7 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
             </Fragment>
           ))}
         </Text>
-      </ScrollView>
+      </SideScroll>
       {folds && (
         <PressScale accessibilityRole="button" accessibilityLabel={folded ? `Show ${total - FOLDED_LINES} more lines of code` : "Show less code"} accessibilityState={{ expanded: !folded }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
           <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "700" }}>
@@ -235,15 +266,20 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
   );
 }
 
+/** A column no wider than this (a cell wraps past it): on a phone the next column still shows the start of itself. */
+const COLUMN_MAX = 180;
+/** How wide a heading's letter is, in bold: wider than a cell's, or a heading as long as its column broke mid-word ("Remove / d"). */
+const HEAD_CHAR = 8.6;
+
 /** What a column of a table needs, from what is longest in it: wide enough to read, narrow enough to leave room for the next. */
-const columnWidth = (cells: Span[][]) => Math.round(Math.min(240, Math.max(72, Math.max(...cells.map((c) => plainText(c).length)) * 7.6 + 26)));
+const columnWidth = (head: Span[], cells: Span[][]) => Math.round(Math.min(COLUMN_MAX, Math.max(72, plainText(head).length * HEAD_CHAR + 30, Math.max(0, ...cells.map((c) => plainText(c).length)) * 7.6 + 26)));
 
 /**
  * A table in a box of its own: the header on a tint, a line between rows, columns as wide as their content (up to a
  * limit, past which a cell wraps), aligned as the table says. It scrolls sideways in there when it can't fit, not the page.
  */
-function Table({ block, tone, mark }: { block: Extract<Block, { kind: "table" }>; tone: Tone; mark?: string }) {
-  const widths = block.head.map((h, c) => columnWidth([h, ...block.rows.map((r) => r[c] ?? [])]));
+function Table({ block, tone, mark, surface }: { block: Extract<Block, { kind: "table" }>; tone: Tone; mark?: string; surface: string }) {
+  const widths = block.head.map((h, c) => columnWidth(h, block.rows.map((r) => r[c] ?? [])));
   const textAlign = (a: Align) => a;
   const colors = useColors();
   const { raised, line } = look(tone, colors);
@@ -259,12 +295,12 @@ function Table({ block, tone, mark }: { block: Extract<Block, { kind: "table" }>
     </View>
   );
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ borderWidth: 1, borderColor: line, borderRadius: radius.inner }}>
+    <SideScroll surface={surface} style={{ borderWidth: 1, borderColor: line, borderRadius: radius.inner, overflow: "hidden" }}>
       <View>
         {row(block.head, "head", true, block.rows.length === 0)}
         {block.rows.map((r, i) => row(r, `r${i}`, false, i === block.rows.length - 1))}
       </View>
-    </ScrollView>
+    </SideScroll>
   );
 }
 
@@ -272,7 +308,7 @@ function Table({ block, tone, mark }: { block: Extract<Block, { kind: "table" }>
 const BULLET_WIDTH = 10;
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile, surface }: { text: string; tone?: Tone; /** What the words sit on (a table's edge fades into it while it scrolls sideways): the page unless said. */ surface?: string; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
   // Where a tap can open a change: a link to a file always can, and code naming one of the turn's files too.
@@ -323,14 +359,15 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
             );
           case "quote":
             return (
-              <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: 10 }}>
-                <Txt variant="body" tone="ink2" selectable={selectable}>
+              // In the quote's own tone: on your ink bubble a grey quote was dark on dark.
+              <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: look(tone, colors).bar, paddingLeft: 10, opacity: tone === "on-ink" ? 0.8 : 1 }}>
+                <Txt variant="body" tone={look(tone, colors).quote} selectable={selectable}>
                   <Spans spans={b.spans} tone={tone} mark={mark} />
                 </Txt>
               </View>
             );
           case "table":
-            return <Table key={i} block={b} tone={tone} mark={mark} />;
+            return <Table key={i} block={b} tone={tone} mark={mark} surface={surface ?? (tone === "ink" ? colors.paper : tone === "on-ink" ? "" : colors.night)} />;
           case "rule":
             return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
           case "code":

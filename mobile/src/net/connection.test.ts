@@ -288,6 +288,47 @@ describe("what goes wrong around a connection", () => {
     conn.stop();
   });
 
+  it("coming back to the foreground on a link that died while away dials again, instead of looking connected", async () => {
+    const r = rig(connectCase);
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    (r.conn as unknown as { d: { probeWait: number } }).d.probeWait = 20;
+    await r.conn.start();
+    for (let i = 0; i < 10; i++) await flush();
+    expect(r.states.at(-1)).toMatchObject({ kind: "connected" });
+    r.mac.silent = true;
+    r.conn.resume();
+    await new Promise((res) => setTimeout(res, 40));
+    r.mac.silent = false;
+    for (let i = 0; i < 20 && r.mac.opened.length < 2; i++) await flush();
+    expect(r.mac.opened).toHaveLength(2);
+    for (let i = 0; i < 10; i++) await flush();
+    expect(r.states.at(-1)).toMatchObject({ kind: "connected" });
+    r.conn.stop();
+  });
+
+  it("coming back to the foreground on a link that still answers keeps it", async () => {
+    const r = rig(connectCase);
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    (r.conn as unknown as { d: { probeWait: number } }).d.probeWait = 20;
+    await r.conn.start();
+    for (let i = 0; i < 10; i++) await flush();
+    r.conn.resume();
+    await new Promise((res) => setTimeout(res, 40));
+    expect(r.mac.opened).toHaveLength(1);
+    expect(r.mac.requests.map((q) => q.op)).toContain("list_waiting");
+    r.conn.stop();
+  });
+
+  it("a Mac that lets the phone in and then drops it at once is tried again after a pause, not in a tight loop", async () => {
+    const r = rig(connectCase, { dropAfterWelcome: true });
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    await r.conn.start();
+    for (let i = 0; i < 80 && r.waits.length < 3; i++) await new Promise((res) => setTimeout(res, 0));
+    r.conn.stop();
+    expect(r.waits.slice(0, 3)).toEqual(BACKOFF_MS.slice(0, 3));
+    expect(r.states.some((s) => s.kind === "offline")).toBe(true);
+  });
+
   it("a Mac that goes quiet during the handshake is said so, and the link is let go", async () => {
     const k = phoneKeys(pairCase);
     const mac = new FakeMac(pairCase, { reachable: ["192.168.1.20"] });

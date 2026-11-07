@@ -1,7 +1,7 @@
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, Txt } from "../ui/components";
-import { Sheet } from "../ui/Sheet";
+import { Txt } from "../ui/components";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import type { ReleaseNotes } from "../whatsNew";
 
@@ -12,14 +12,12 @@ export function WhatsNewSheet({ notes, onClose }: { notes: ReleaseNotes; onClose
   return (
     <Sheet onClose={onClose}>
       {(close, scroll) => (
-        <View style={{ flexShrink: 1, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            What's new
-          </Txt>
-          <Txt variant="small" tone="ink3">
+        <View style={{ flexShrink: 1, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
+          <SheetBar title="What's new" close={{ label: "Close", onPress: close }} />
+          <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.xl }}>
             Build {notes.build}
           </Txt>
-          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 10, paddingVertical: space.sm }}>
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 10, paddingVertical: space.sm, paddingHorizontal: space.xl }}>
             {notes.notes.map((note, i) => (
               <View key={i} style={{ flexDirection: "row", gap: 10 }}>
                 <Txt variant="body" tone="ink2" accessibilityElementsHidden importantForAccessibility="no">
@@ -31,7 +29,6 @@ export function WhatsNewSheet({ notes, onClose }: { notes: ReleaseNotes; onClose
               </View>
             ))}
           </ScrollView>
-          <Button label="Close" onPress={close} />
         </View>
       )}
     </Sheet>

@@ -170,6 +170,16 @@ describe("the Mac's storage", () => {
     expect(screen.getByText("This Mac can't show its storage.")).toBeTruthy();
   });
 
+  it("offers to ask again when the first ask failed, and once that works the problem is gone", async () => {
+    let calls = 0;
+    await open({ answers: { storage: () => (++calls === 1 ? new Error("Your Mac didn't answer in time.") : view()) } });
+    expect(screen.getByText("Your Mac didn't answer in time.")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(screen.queryByText("Your Mac didn't answer in time.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
   it("says how many more there are on the Mac than are listed", async () => {
     await open({ answers: { storage: view({ more: 12 }) } });
     expect(screen.getByText(/and 12 more on your Mac/)).toBeTruthy();

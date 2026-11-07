@@ -12,8 +12,9 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { ProjectsSkeleton } from "../ui/skeleton";
-import { radius, space, useBody, useColors } from "../ui/theme";
+import { Bar, Pulse } from "../ui/skeleton";
+import { SheetBar } from "../ui/Sheet";
+import { barButton, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
 import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 import { loadLastProject, loadNewChatPermissions, saveLastProject, saveNewChatPermissions } from "../prefs";
@@ -129,10 +130,14 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   // The options behind the line that says what it runs on.
   const [opened, setOpened] = useState(false);
 
+  // Asking for the projects failed: said where the project goes, with Try again (which bumps `asks`).
+  const [projectsProblem, setProjectsProblem] = useState<string | null>(null);
+  const [asks, setAsks] = useState(0);
   useEffect(() => {
     // Carrying on a chat needs no project.
     if (continueChat) return;
     let live = true;
+    setProjectsProblem(null);
     sync.projects().then(
       (list) => {
         if (!live) return;
@@ -143,14 +148,13 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
       },
       (e: Error) => {
         if (!live) return;
-        setProjects([]);
-        setError(e.message);
+        setProjectsProblem(e.message || "Couldn't reach your Mac.");
       },
     );
     return () => {
       live = false;
     };
-  }, [sync, continueChat]);
+  }, [sync, continueChat, asks]);
 
   useEffect(() => {
     let live = true;
@@ -219,86 +223,102 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
         closeSheet.current = close;
         return (
         <View style={[{ flexShrink: 1 }]}>
+          {/* iOS's sheet bar: Cancel in glass at the left, the title in the middle (a swipe down closes it too). */}
+          <SheetBar title={continueChat ? "Carry on" : "New chat"} close={{ label: "Cancel", onPress: close, disabled: busy }} />
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
-          <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 14 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <Txt variant="title" accessibilityRole="header">
-                {continueChat ? "Carry on" : "New chat"}
-              </Txt>
-              {/* The way out for a screen reader too, which has no outside to tap. */}
-              <PressScale accessibilityRole="button" accessibilityLabel="Cancel" disabled={busy} onPress={close} hitSlop={12} scaleTo={0.92} haptic="none" style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 4 }}>
-                <Txt variant="body" tone="cobalt" style={{ fontWeight: "600" }}>
-                  Cancel
-                </Txt>
-              </PressScale>
-            </View>
-
-            {continueChat ? (
-              <Txt variant="small" tone="ink2">
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 8, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 12 }}>
+            {continueChat && (
+              <Txt variant="small" tone="ink2" style={{ marginHorizontal: 4 }}>
                 This goes to “{continueChat.title}”. Read it first: you can change it.
               </Txt>
-            ) : !(supported && controls) ? (
-              <Txt variant="small" tone="ink2">
+            )}
+
+            {/* The chat's own message box: the words, and under them its row of tools, photos and options at the left, the
+                microphone and send at the right. */}
+            <View testID="new-chat-box" style={[{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, padding: 6 }, shadow.card, { shadowOpacity: 0.05 }]}>
+              {attach.images.length > 0 && (
+                <View style={{ paddingHorizontal: 6, paddingTop: 6 }}>
+                  <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />
+                </View>
+              )}
+              <TextInput
+                accessibilityLabel="What to start with"
+                value={text}
+                {...list}
+                onChangeText={(t) => {
+                  dictation.edited();
+                  list.onChangeText(t);
+                }}
+                autoFocus={!listen}
+                placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
+                placeholderTextColor={colors.ink3}
+                multiline
+                editable={!busy}
+                style={{ minHeight: 96, maxHeight: 200, color: colors.ink, fontSize: body.fontSize, lineHeight: body.lineHeight, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4, textAlignVertical: "top" }}
+              />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
+                {canPhotos && (
+                  <PressScale accessibilityRole="button" accessibilityLabel="Add photos" accessibilityHint="Hold to take a photo" disabled={attach.busy || attach.full} opacity={attach.busy || attach.full ? 0.4 : 1} onPress={() => void attach.add("library")} onLongPress={() => void attach.add("camera")} accessibilityActions={[{ name: "longpress", label: "Take a photo" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && void attach.add("camera")} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+                    <PhotoGlyph color={colors.ink2} />
+                  </PressScale>
+                )}
+                {!continueChat && supported && controls && (
+                  <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: opened ? colors.ink : "transparent" }}>
+                      <MoreGlyph color={opened ? colors.onInk : colors.ink2} />
+                    </View>
+                  </PressScale>
+                )}
+                <View style={{ flex: 1 }} />
+                {dictation.available && !busy && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+                <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={() => void start()} />
+              </View>
+            </View>
+
+            {/* Where it goes: a guess until picked. While the projects come, one quiet pill holds its place. */}
+            {!continueChat && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: MIN_TARGET, marginHorizontal: 4 }}>
+                {!(projects && projects.length === 0) && (
+                  <Txt variant="small" tone="ink2">
+                    In
+                  </Txt>
+                )}
+                {projects === null && projectsProblem ? (
+                  <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Txt variant="small" tone="stop" accessibilityRole="alert" numberOfLines={2} style={{ flexShrink: 1 }}>
+                      {projectsProblem}
+                    </Txt>
+                    <Button label="Try again" kind="ghost" onPress={() => setAsks((n) => n + 1)} />
+                  </View>
+                ) : projects === null ? (
+                  <Pulse label="Looking at your projects">
+                    <Bar w={120} h={32} r={radius.pill} />
+                  </Pulse>
+                ) : projects.length === 0 ? (
+                  <Txt variant="small" tone="ink2" style={{ flex: 1 }}>
+                    No projects yet. Open a folder in Lantern on your Mac first.
+                  </Txt>
+                ) : (
+                  <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} hitSlop={{ top: 6, bottom: 6 }} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 32, borderRadius: radius.pill, backgroundColor: colors.wash }}>
+                    <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(projects.find((p) => p.id === project)?.name ?? "") }} />
+                    <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1 }}>
+                      {projects.find((p) => p.id === project)?.name ?? "Pick a project"}
+                    </Txt>
+                    {guessed && (
+                      <Txt variant="tiny" tone="ink3">
+                        guessed
+                      </Txt>
+                    )}
+                    <Chevron open={choosingProject} size={5} />
+                  </PressScale>
+                )}
+              </View>
+            )}
+            {!continueChat && !(supported && controls) && (
+              <Txt variant="small" tone="ink2" style={{ marginHorizontal: 4 }}>
                 It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.
               </Txt>
-            ) : null}
-
-            {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-            <TextInput
-              accessibilityLabel="What to start with"
-              value={text}
-              {...list}
-              onChangeText={(t) => {
-                dictation.edited();
-                list.onChangeText(t);
-              }}
-              autoFocus={!listen}
-              placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
-              placeholderTextColor={colors.ink3}
-              multiline
-              editable={!busy}
-              style={{ backgroundColor: colors.wash, borderRadius: 14, padding: 12, minHeight: 110, maxHeight: 200, color: colors.ink, fontSize: body.fontSize, textAlignVertical: "top" }}
-            />
-
-            {/* One row: where it goes (a guess until picked), photos, the options, the microphone, and send. */}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              {continueChat ? null : projects === null ? (
-                <View style={{ flex: 1 }}>
-                  <ProjectsSkeleton />
-                </View>
-              ) : projects.length === 0 ? (
-                <Txt variant="small" tone="ink2" style={{ flex: 1 }}>
-                  {error ?? "No projects yet. Open a folder in Lantern on your Mac first."}
-                </Txt>
-              ) : (
-                <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 36, borderRadius: radius.pill, backgroundColor: colors.wash }}>
-                  <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(projects.find((p) => p.id === project)?.name ?? "") }} />
-                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1 }}>
-                    {projects.find((p) => p.id === project)?.name ?? "Pick a project"}
-                  </Txt>
-                  {guessed && (
-                    <Txt variant="tiny" tone="ink3">
-                      guessed
-                    </Txt>
-                  )}
-                </PressScale>
-              )}
-              {canPhotos && (
-                <PressScale accessibilityRole="button" accessibilityLabel="Add photos" accessibilityHint="Hold to take a photo" disabled={attach.busy || attach.full} opacity={attach.busy || attach.full ? 0.4 : 1} onPress={() => void attach.add("library")} onLongPress={() => void attach.add("camera")} accessibilityActions={[{ name: "longpress", label: "Take a photo" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && void attach.add("camera")} haptic="light" scaleTo={0.88} style={{ width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.wash }}>
-                  <PhotoGlyph color={colors.ink2} />
-                </PressScale>
-              )}
-              {!continueChat && supported && controls && (
-                <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.88} style={{ width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: opened ? colors.ink : colors.wash }}>
-                  <Txt variant="body" style={{ fontWeight: "900", color: opened ? colors.onInk : colors.ink2, marginTop: -6 }}>
-                    ⋯
-                  </Txt>
-                </PressScale>
-              )}
-              <View style={{ flex: 1 }} />
-              {dictation.available && !busy && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-              <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={() => void start()} />
-            </View>
+            )}
             {(dictation.problem ?? attach.problem) && (
               <Txt variant="small" tone="stop" accessibilityRole="alert">
                 {(dictation.problem ?? attach.problem)!.words}
@@ -393,6 +413,20 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
         );
       }}
     </Sheet>
+  );
+}
+
+/** The box's corners, as the chat's message box has them. */
+const BOX_RADIUS = 18;
+
+/** More, drawn: three dots in a row, in the middle of the circle (a "⋯" glyph sits on the type's baseline, low in it). */
+function MoreGlyph({ color }: { color: string }) {
+  return (
+    <View accessibilityElementsHidden style={{ flexDirection: "row", gap: 3 }}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
+      ))}
+    </View>
   );
 }
 

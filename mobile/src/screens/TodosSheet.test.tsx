@@ -146,6 +146,16 @@ describe("the to-do sheet", () => {
     expect(asked.filter((r) => r.op === "todos")[0]).toEqual({ op: "todos", project: "0123456789abcdef" });
   });
 
+  it("says the projects couldn't be had, not that there are none, and asks again on Try again", async () => {
+    let calls = 0;
+    await open(list(item("a")), null, (() => (++calls === 1 ? new Error("Your Mac didn't answer in time.") : [{ id: "/Users/me/app", name: "app" }])) as never);
+    expect(screen.queryByText(/No projects yet/)).toBeNull();
+    expect(screen.getByText("Your Mac didn't answer in time.")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(screen.getByRole("checkbox", { name: "Item a" })).toBeTruthy();
+  });
+
   it("says what the Mac refused", async () => {
     const { controller } = makeController();
     attachSession(controller, { projects: [{ id: "/p", name: "p" }], todos: new Error("That isn't one of your projects on this Mac.") }, ["todos"]);

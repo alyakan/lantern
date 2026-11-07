@@ -5,15 +5,15 @@ import { useSyncState } from "../shell/hooks";
 import { Txt } from "../ui/components";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { PressScale } from "../ui/motion";
-import { useColors } from "../ui/theme";
+import { MIN_TARGET, useColors } from "../ui/theme";
 import { ago } from "../view/home";
 import { firstSentence } from "../view/desk";
 
 /** How many finished answers show before "Show more". */
 const FINISHED_SHOWN = 3;
 
-/** What finished on the Mac lately, one quiet line each, newest first: a few, the rest on asking. A line opens its chat. It sits under
- * what needs you on the Chats tab (the phone has no Desk). */
+/** What finished on the Mac lately, one quiet line each, newest first: a few, the rest on asking. A line opens its chat. It sits on
+ * the Work tab, beside where things stand (the chats list only chats and what needs you). */
 export function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen: (slot: string) => void }) {
   const colors = useColors();
   const { chats } = useSyncState();
@@ -23,14 +23,14 @@ export function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen:
   const now = Date.now();
   return (
     <View accessibilityLabel="Just finished" style={{ gap: 2 }}>
-      <Txt variant="small" tone="ink3" style={{ fontWeight: "700", marginBottom: 4 }}>
+      <Txt variant="small" tone="ink3" accessibilityRole="header" style={{ fontWeight: "700", marginBottom: 2 }}>
         Just finished
       </Txt>
       {shown.map((c) => {
         const bad = c.outcome !== "done";
         const line = c.said ? firstSentence(c.said) : c.outcome === "failed" ? "Failed" : c.outcome === "stopped" ? "Stopped" : "";
         return (
-          <PressScale key={c.key} accessibilityRole="button" accessibilityLabel={`${c.title}: ${c.said || c.asked}`} accessibilityHint="Opens the chat" onPress={() => onOpen(c.slot)} scaleTo={0.98} style={{ flexDirection: "row", alignItems: "baseline", gap: 10, paddingVertical: 7 }}>
+          <PressScale key={c.key} accessibilityRole="button" accessibilityLabel={`${c.title}: ${c.said || c.asked}`} accessibilityHint="Opens the chat" onPress={() => onOpen(c.slot)} scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: MIN_TARGET }}>
             <Txt variant="small" style={{ fontWeight: "700", color: bad ? colors.stop : colors.go, width: 14 }}>
               {c.outcome === "done" ? "✓" : c.outcome === "failed" ? "✕" : "■"}
             </Txt>
@@ -50,7 +50,7 @@ export function JustFinished({ list, onOpen }: { list: RemoteDeskCard[]; onOpen:
         );
       })}
       {list.length > FINISHED_SHOWN && (
-        <PressScale accessibilityRole="button" onPress={() => setAll(!all)} hitSlop={8} style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+        <PressScale accessibilityRole="button" onPress={() => setAll(!all)} style={{ alignSelf: "flex-start", minHeight: MIN_TARGET, justifyContent: "center" }}>
           <Txt variant="small" tone="cobalt" style={{ fontWeight: "600" }}>
             {all ? "Show fewer" : `Show ${list.length - FINISHED_SHOWN} more`}
           </Txt>

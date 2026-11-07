@@ -45,6 +45,8 @@ export interface FakeMacOptions {
   hosts?: string[];
   /** The Mac's answer to a request; an Error is sent back as the request's error. */
   answer?: (req: Request) => unknown;
+  /** Drops each connection right after letting the phone in (a Mac that takes the phone and then shuts it out). */
+  dropAfterWelcome?: boolean;
 }
 
 /** A transport that sends each address to its own fake Mac (an address with none is unreachable). */
@@ -98,8 +100,11 @@ export class FakeMac implements Transport {
         if (msg.type === "hello") {
           this.hellos.push(msg);
           this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, features: [], ...(this.o.hosts ? { hosts: this.o.hosts } : {}) } as ServerMessage);
+          if (this.o.dropAfterWelcome) setTimeout(() => conn.link.end(), 0);
         } else {
           this.requests.push(msg.request);
+          // A link that died without either side hearing it: what is sent goes nowhere, and nothing comes back.
+          if (this.silent) return;
           let ok: unknown = null;
           let error: string | null = null;
           try {
@@ -125,6 +130,9 @@ export class FakeMac implements Transport {
     const conn = this.live[this.live.length - 1];
     if (conn?.channel) this.sendOn(conn, msg);
   }
+
+  /** Stops answering without closing anything, as a link does that died while the phone was away (asleep, or off Wi-Fi). */
+  silent = false;
 
   /** Drops every connection, as a Mac going to sleep would. */
   dropAll() {

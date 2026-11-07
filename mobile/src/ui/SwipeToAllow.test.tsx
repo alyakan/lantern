@@ -91,6 +91,25 @@ describe("swipe to allow taking the touch", () => {
   });
 });
 
+describe("swipe to allow taken away mid-drag", () => {
+  it("lets go of the screen it held still, which never hears the release (the prompt was answered on the Mac meanwhile)", async () => {
+    const onDrag = jest.fn();
+    const view = await render(<SwipeToAllow onAllow={jest.fn()} onDrag={onDrag} />);
+    const touch = { nativeEvent: { touches: [], changedTouches: [], identifier: 0, pageX: 0, pageY: 0, timestamp: 0 }, touchHistory: { touchBank: [{ touchActive: true, startPageX: 0, startPageY: 0, startTimeStamp: 0, currentPageX: 0, currentPageY: 0, currentTimeStamp: 0, previousPageX: 0, previousPageY: 0, previousTimeStamp: 0 }], numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: 0 } };
+    await act(async () => screen.getByTestId("swipe-knob").props.onResponderGrant(touch));
+    expect(onDrag).toHaveBeenLastCalledWith(true);
+    await view.unmount();
+    expect(onDrag).toHaveBeenLastCalledWith(false);
+  });
+
+  it("says nothing on going away when it wasn't being dragged", async () => {
+    const onDrag = jest.fn();
+    const view = await render(<SwipeToAllow onAllow={jest.fn()} onDrag={onDrag} />);
+    await view.unmount();
+    expect(onDrag).not.toHaveBeenCalled();
+  });
+});
+
 describe("swipe to allow while it is dragged", () => {
   it("shows no green until the knob moves, then fills the bar behind it", async () => {
     const x = await bar();

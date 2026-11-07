@@ -7,6 +7,7 @@ import { Txt } from "./components";
 import { PressScale } from "./motion";
 import { Dots } from "./skeleton";
 import { radius, space, useColors } from "./theme";
+import { SheetBar } from "./Sheet";
 
 /**
  * The settings sheets' one look, as iOS's own Settings: a small grey label over a card of rows, each row a coloured square with
@@ -282,21 +283,9 @@ export function DangerButton({ label, onPress, footer }: { label: string; onPres
   );
 }
 
-/** A sheet's title and its round Done button (✕), which VoiceOver hears as Done. */
+/** A settings sheet's bar: its title, and Close in glass (see SheetBar). */
 export function SheetHeader({ title, onDone }: { title?: string; onDone: () => void }) {
-  const colors = useColors();
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 4, gap: 8 }}>
-      <Txt variant="body" accessibilityRole="header" style={{ flex: 1, fontWeight: "700" }}>
-        {title ?? ""}
-      </Txt>
-      <PressScale accessibilityRole="button" accessibilityLabel="Done" onPress={onDone} hitSlop={10} haptic="select" scaleTo={0.9} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.wash, alignItems: "center", justifyContent: "center" }}>
-        <Txt variant="small" tone="ink2" style={{ fontWeight: "700" }}>
-          ✕
-        </Txt>
-      </PressScale>
-    </View>
-  );
+  return <SheetBar title={title} close={{ label: "Close", onPress: onDone }} />;
 }
 
 /** The usual squares: each setting's colour and symbol, so the same setting looks the same in every sheet. */
@@ -316,4 +305,5 @@ export const LOOKS = {
   theme: { symbol: "paintpalette.fill", glyph: "◐", tint: "#d14d7a" },
   whatsNew: { symbol: "sparkles", glyph: "✦", tint: "#d4693f" },
   support: { symbol: "heart.fill", glyph: "♥", tint: "#d14d7a" },
+  badge: { symbol: "app.badge", glyph: "●", tint: "#d93b3b" },
 } satisfies Record<string, Look>;

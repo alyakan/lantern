@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Animated, ScrollView, TextInput, View } from "react-native";
+import { Animated, PanResponder, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { GlassView } from "expo-glass-effect";
+import { useGlass } from "../ui/Glass";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
@@ -8,7 +10,8 @@ import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
-import { radius, space, useBody, useColors } from "../ui/theme";
+import { Dots } from "../ui/skeleton";
+import { control, radius, space, useBody, useColors } from "../ui/theme";
 import { diffPreviewOf } from "../view/diffPreview";
 import { approvalOf, fieldsOf, promptView, type PromptView, type Question } from "../view/prompts";
 import { ago, projectColorOf, projectTint } from "../view/home";
@@ -59,8 +62,8 @@ function OptionCard({ on, multi, label, description, onPress }: { on: boolean; m
         style={{
           borderRadius: radius.inner,
           borderWidth: 1.5,
-          borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,255,255,0.18)", colors.hi] }),
-          backgroundColor: sel.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,194,26,0)", "rgba(255,194,26,0.14)"] }),
+          borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [colors.nightLine, colors.hi] }),
+          backgroundColor: sel.interpolate({ inputRange: [0, 1], outputRange: [`${colors.hi}00`, `${colors.hi}24`] }),
           padding: 12,
           minHeight: 56,
           flexDirection: "row",
@@ -114,7 +117,7 @@ function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: stri
         onChangeText={onType}
         placeholder="Something else: write your own answer"
         placeholderTextColor={colors.nightText}
-        style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: typed.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, fontSize: body.fontSize }}
+        style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: typed.trim() ? colors.hi : colors.nightLine, color: colors.white, padding: 12, minHeight: 48, fontSize: body.fontSize }}
       />
     </View>
   );
@@ -137,11 +140,18 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The decision on its own, full screen: what is asked, where it runs, and a swipe to allow or a tap to deny. */
+/** How long a decision opened before the phone knows what waits gives the Mac to say, before it is taken as gone. */
+const LOAD_WAIT_MS = 8000;
+/** How far its top is dragged down before it is put away when let go. */
+const PULL_AWAY = 120;
+/** The page fading out under the buttons' tray: strips from clear to the page's own colour. */
+const TRAY_FADE = [0, 0.35, 0.7, 0.9, 1];
+
 export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const colors = useColors();
   const body = useBody();
   const controller = useController();
-  const { waiting, chats } = useSyncState();
+  const { waiting, waitingLoaded, chats } = useSyncState();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
@@ -172,6 +182,40 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     return () => clearTimeout(t);
   }, [outcome, onClose]);
 
+  const glass = useGlass();
+  const [gaveUp, setGaveUp] = useState(false);
+  useEffect(() => {
+    if (waitingLoaded) return;
+    const t = setTimeout(() => setGaveUp(true), LOAD_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [waitingLoaded]);
+  // Dragged down by its top it follows the finger, and past a little way (or flicked) it is put away; short of that it goes back.
+  const pulled = useRef(new Animated.Value(0)).current;
+  const close = useRef(onClose);
+  close.current = onClose;
+  const pullDown = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_, g) => pulled.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > PULL_AWAY || g.vy > 0.8) close.current();
+        else Animated.spring(pulled, { toValue: 0, useNativeDriver: true }).start();
+      },
+      onPanResponderTerminate: () => Animated.spring(pulled, { toValue: 0, useNativeDriver: true }).start(),
+    }),
+  ).current;
+
+  // Opened from a notification as the app starts, what waits isn't known yet: that isn't "answered already". The Mac gets a few
+  // seconds to say; then it is taken as gone (which has its Close), and it can be closed meanwhile.
+  if (!asked && !waitingLoaded && !gaveUp) {
+    return (
+      <View accessibilityLabel="Loading the decision" style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
+        <StatusBar style="light" />
+        <Dots color={colors.nightText} />
+        <Button label="Close" kind="night-ghost" onPress={onClose} />
+      </View>
+    );
+  }
   if (!asked) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
@@ -213,6 +257,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
     } catch (e) {
+      buzz("warning");
       setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "failed", why: (e as Error).message }));
     }
   };
@@ -227,15 +272,19 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
 
   return (
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
-    <AboveKeyboard style={{ backgroundColor: colors.night, overflow: "hidden", paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
+    // It rises like a sheet and is put away like one: dragged down by its top (or the circle at its top left).
+    <Animated.View style={{ flex: 1, transform: [{ translateY: pulled }] }}>
+    <AboveKeyboard style={{ backgroundColor: colors.night, overflow: "hidden", paddingTop: insets.top + 60, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: space.lg }}>
       <StatusBar style="light" />
       {/* The decision can be put away at any point (it keeps waiting, in the chat and on Home) and come back to with Review. */}
-      <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.94} hitSlop={10} style={{ position: "absolute", top: insets.top + 8, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, minHeight: 40 }}>
-        <Chevron open color={colors.white} />
-        <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
-          Minimize
-        </Txt>
-      </PressScale>
+      <View testID="decide-top" {...pullDown.panHandlers} style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top + 60 }}>
+        <View accessibilityElementsHidden style={{ position: "absolute", top: insets.top - 2, alignSelf: "center", width: 36, height: 5, borderRadius: 3, backgroundColor: colors.nightLine }} />
+        <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.88} style={{ position: "absolute", top: insets.top + 8, left: space.lg }}>
+          <View style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center", backgroundColor: colors.nightRaised, borderWidth: 1, borderColor: colors.nightLine }}>
+            <Chevron open color={colors.white} />
+          </View>
+        </PressScale>
+      </View>
       {/* The decision runs to the bottom, under its buttons, with nothing laid behind them. */}
       <View style={{ flex: 1 }}>
       <ScrollView testID="decide-scroll" style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: footHeight + 16 }}>
@@ -312,7 +361,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
               multiline
               placeholder="Add a note for Claude (optional)"
               placeholderTextColor={colors.nightText}
-              style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: note.trim() ? colors.hi : "rgba(255,255,255,0.18)", color: colors.white, padding: 12, minHeight: 48, maxHeight: 120, fontSize: body.fontSize }}
+              style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: note.trim() ? colors.hi : colors.nightLine, color: colors.white, padding: 12, minHeight: 48, maxHeight: 120, fontSize: body.fontSize }}
             />
           </FadeSlideIn>
         )}
@@ -334,9 +383,18 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         {view.kind === "question" && view.questions.map((q) => <Options key={q.question} q={q} picks={picks[q.question] ?? []} typed={typed[q.question] ?? ""} onPick={(l) => toggle(q, l)} onType={(t) => setTyped((s) => ({ ...s, [q.question]: t }))} />)}
       </ScrollView>
 
-      <View testID="decide-buttons" pointerEvents="box-none" onLayout={(e) => setFootHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
+      {/* Its buttons float over the end of the decision on a tray of glass, the page fading out under it, so they stand apart
+          from what scrolls beneath them. */}
+      <View testID="decide-buttons" pointerEvents="box-none" onLayout={(e) => setFootHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: -4, right: -4, bottom: 0 }}>
+      <View pointerEvents="none" style={{ position: "absolute", left: -space.lg, right: -space.lg, top: -28, bottom: -40 }}>
+        {TRAY_FADE.map((a, i) => (
+          <View key={i} style={{ flex: i === TRAY_FADE.length - 1 ? 6 : 1, backgroundColor: `${colors.night}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
+        ))}
+      </View>
+      <View testID="decide-tray" style={{ borderRadius: 30, padding: 10, gap: 6, backgroundColor: `${colors.night}e6`, borderWidth: 1, borderColor: colors.nightLine, overflow: "hidden" }}>
+      {glass && <GlassView colorScheme="dark" glassEffectStyle="regular" pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: 30 }]} />}
       {outcome.kind === "failed" && (
-        <Txt variant="small" tone="white" style={{ backgroundColor: "#d93b3b55", padding: 10, borderRadius: 10, marginBottom: 10 }} accessibilityRole="alert">
+        <Txt variant="small" tone="white" style={{ backgroundColor: `${colors.stop}55`, padding: 10, borderRadius: radius.inner, marginBottom: 10 }} accessibilityRole="alert">
           {outcome.why}
         </Txt>
       )}
@@ -357,23 +415,23 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         view.kind === "question" ? (
           <View style={{ gap: 8 }}>
             <Button label="Send answer" kind="hi" disabled={!answers || busy} onPress={() => answers && answer(true, answers)} />
-            <Button label="Decline" kind="night-ghost" link disabled={busy} onPress={() => answer(false)} />
+            <Button label="Decline" kind="night-ghost" disabled={busy} onPress={() => answer(false)} />
           </View>
         ) : (
-          <View style={{ gap: 12 }}>
+          <View style={{ gap: 8 }}>
             {/* It stays up while the answer goes, and shows it was allowed (it can't be dragged again). */}
             {/* A failed answer brings a fresh one back (the key), not the one that looks allowed. */}
             <SwipeToAllow key={outcome.kind === "failed" ? "again" : "first"} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => answer(true)} />
-            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" link disabled={busy} onPress={() => answer(false)} />
+            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled={busy} onPress={() => answer(false)} />
           </View>
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
-        <View testID="approved" style={{ gap: 12 }}>
+        <View testID="approved" style={{ gap: 8 }}>
           {/* The same bar, now closed in to a circle with the check: it closes this by itself, and a tap on it does so at once. */}
           <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
           {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
           <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ opacity: 0 }}>
-            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" link disabled onPress={() => {}} />
+            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled onPress={() => {}} />
           </View>
         </View>
       ) : (
@@ -381,6 +439,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       )}
       </View>
       </View>
+      </View>
     </AboveKeyboard>
+    </Animated.View>
   );
 }

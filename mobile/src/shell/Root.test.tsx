@@ -1,5 +1,5 @@
 import "@shopify/flash-list/jestSetup";
-import { BackHandler, StyleSheet } from "react-native";
+import { Alert, BackHandler, StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { toBase64Url } from "../pairing";
 import { attachSession } from "../test/fakeSession";
@@ -229,6 +229,7 @@ describe("the Mac's sheet", () => {
     const unpair = jest.spyOn(controller, "unpair").mockImplementation(async () => controller.setConnection({ kind: "unpaired" }));
     await press("Aly's MacBook Pro, connected");
     expect(screen.getByText("Connected through 192.168.1.20")).toBeTruthy();
+    jest.spyOn(Alert, "alert").mockImplementationOnce((_t, _m, buttons) => buttons?.find((b) => b.style === "destructive")?.onPress?.());
     await press("Unpair this phone");
     await settle();
     expect(unpair).toHaveBeenCalled();

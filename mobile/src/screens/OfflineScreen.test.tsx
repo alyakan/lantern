@@ -1,8 +1,19 @@
-import { Keyboard } from "react-native";
+import { Alert, Keyboard } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import type { ConnectionState } from "../net/connection";
-import { connected } from "../test/render";
+import { connected, connectedWith } from "../test/render";
+import { resetWorkBadge } from "../workBadge";
 import { MacSheet, OfflineScreen, PILL_DELAY_MS, ReconnectPill } from "./OfflineScreen";
+
+/** Answers the next alert with its button named `choose`, and says what it asked. */
+const answerAlert = (choose: string) => {
+  const asked: string[] = [];
+  jest.spyOn(Alert, "alert").mockImplementationOnce((title, _m, buttons) => {
+    asked.push(title ?? "");
+    buttons?.find((b) => b.text === choose)?.onPress?.();
+  });
+  return asked;
+};
 
 describe("the Offline screen", () => {
   it("says it is connecting, with a lantern being lit rather than a spinner", async () => {
@@ -20,8 +31,14 @@ describe("the Offline screen", () => {
     expect(screen.getByText("Can't reach your Mac")).toBeTruthy();
     expect(screen.getByText("Can't reach Aly's Mac. Check that it's awake.")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
     expect(onRetry).toHaveBeenCalled();
+    // Unpairing asks first: Cancel keeps the pairing.
+    answerAlert("Cancel");
+    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
+    expect(onUnpair).not.toHaveBeenCalled();
+    const asked = answerAlert("Unpair");
+    await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
+    expect(asked).toEqual(["Unpair this phone?"]);
     expect(onUnpair).toHaveBeenCalled();
   });
 
@@ -117,14 +134,27 @@ describe("the Mac's sheet", () => {
     expect(screen.queryByRole("button", { name: "Support development" })).toBeNull();
   });
 
+  it("sets what the Work tab's number counts, for a Mac that has Work: new steps until opened, unless chosen otherwise", async () => {
+    resetWorkBadge();
+    await render(<MacSheet state={connectedWith(["work"])} onClose={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.getByRole("menu", { name: "Work badge, Until opened" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("menuitem", { name: "Never" }));
+    expect(screen.getByRole("menu", { name: "Work badge, Never" })).toBeTruthy();
+    await screen.unmount();
+    await render(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.queryByRole("menu", { name: /^Work badge/ })).toBeNull();
+    resetWorkBadge();
+  });
+
   it("says that unpairing only forgets the Mac here, and unpairs or is done", async () => {
     const onClose = jest.fn();
     const onUnpair = jest.fn();
     await render(<MacSheet state={{ kind: "offline", reason: "x", retryInMs: 1 }} onClose={onClose} onUnpair={onUnpair} />);
     expect(screen.getByText("Not connected")).toBeTruthy();
     expect(screen.getByText(/also remove this phone in Lantern's Settings/)).toBeTruthy();
+    answerAlert("Unpair");
     await fireEvent.press(screen.getByRole("button", { name: "Unpair this phone" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Done" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     expect(onUnpair).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });

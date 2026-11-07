@@ -5,11 +5,11 @@ import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import { useController } from "../shell/hooks";
-import { Txt } from "../ui/components";
+import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
-import { projectColorOf } from "../view/home";
+import { Sheet, SheetBar } from "../ui/Sheet";
+import { lightColors, radius, space, useColors } from "../ui/theme";
+import { luminance, projectColorOf } from "../view/home";
 
 /** A target: one project at a time. Drawn as a ring with a dot, in `color`. */
 export function FocusGlyph({ color, size = 16 }: { color: string; size?: number }) {
@@ -24,14 +24,16 @@ export function FocusGlyph({ color, size = 16 }: { color: string; size?: number 
 export function SingleBanner({ single, onShowAll }: { single: RemoteSingle; onShowAll: () => void }) {
   const colors = useColors();
   const fill = projectColorOf(single.color) ?? colors.ink;
+  // Its words are white on its colour, or dark on a light one (a yellow), so they can be read.
+  const on = luminance(fill) > 0.45 ? lightColors.ink : "#ffffff";
   return (
     <View accessibilityRole="summary" accessibilityLabel={`Only ${single.name}`} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingLeft: 14, paddingRight: 6, paddingVertical: 6, minHeight: 44, borderRadius: radius.inner, backgroundColor: fill }}>
-      <FocusGlyph color="#ffffff" size={14} />
-      <Txt variant="body" numberOfLines={1} style={{ flex: 1, color: "#ffffff", fontWeight: "700" }}>
+      <FocusGlyph color={on} size={14} />
+      <Txt variant="body" numberOfLines={1} style={{ flex: 1, color: on, fontWeight: "700" }}>
         {single.name}
       </Txt>
       <PressScale accessibilityRole="button" accessibilityLabel="Show all projects" onPress={onShowAll} hitSlop={8} haptic="select" scaleTo={0.9} style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 18 }}>
-        <Txt variant="heading" style={{ color: "#ffffff", fontWeight: "500" }}>
+        <Txt variant="heading" style={{ color: on, fontWeight: "500" }}>
           ×
         </Txt>
       </PressScale>
@@ -49,43 +51,52 @@ export function SingleSheet({ chats, onDismiss }: { chats: RemoteChat[]; onDismi
   const { sync } = useController();
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // Asking for the projects failed (not "no projects"): why, with Try again, which bumps `asks`.
+  const [loadProblem, setLoadProblem] = useState<string | null>(null);
+  const [asks, setAsks] = useState(0);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
+    setLoadProblem(null);
     sync.projects().then(
       (all) => live.current && setProjects([...all].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))),
-      () => live.current && setProjects([]),
+      (e: unknown) => live.current && setLoadProblem(e instanceof Error ? e.message : String(e)),
     );
     return () => {
       live.current = false;
     };
-  }, [sync]);
+  }, [sync, asks]);
   const colorOf = (name: string) => projectColorOf(chats.find((c) => c.project === name)?.project_color) ?? colors.ink3;
   return (
     <Sheet onClose={onDismiss}>
-      {(close) => (
-        <View style={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6, maxHeight: 560 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            One project
-          </Txt>
-          <Txt variant="small" tone="ink2" style={{ marginBottom: 8 }}>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6, maxHeight: 560 }}>
+          <SheetBar title="One project" close={{ label: "Close", onPress: close }} />
+          <Txt variant="small" tone="ink2" style={{ marginBottom: 8, paddingHorizontal: space.xl }}>
             Your Mac and this phone show only its chats, until you show every project again.
           </Txt>
           {problem && (
-            <Txt variant="small" tone="stop" accessibilityLiveRegion="polite">
+            <Txt variant="small" tone="stop" accessibilityLiveRegion="polite" style={{ paddingHorizontal: space.xl }}>
               {problem}
             </Txt>
           )}
-          {projects === null ? (
-            <Txt variant="small" tone="ink3">
+          {projects === null && loadProblem ? (
+            <View style={{ gap: 8, alignItems: "flex-start", paddingHorizontal: space.xl }}>
+              <Txt variant="small" tone="stop" accessibilityRole="alert">
+                {loadProblem}
+              </Txt>
+              <Button label="Try again" kind="ghost" onPress={() => setAsks((n) => n + 1)} />
+            </View>
+          ) : projects === null ? (
+            <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.xl }}>
               Asking your Mac…
             </Txt>
           ) : projects.length === 0 ? (
-            <Txt variant="small" tone="ink3">
+            <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.xl }}>
               Your Mac has no projects to pick from yet.
             </Txt>
           ) : (
-            <ScrollView style={{ flexGrow: 0 }}>
+            <ScrollView ref={scroll} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.xl }}>
               {projects.map((p) => (
                 <PressScale
                   key={p.id}

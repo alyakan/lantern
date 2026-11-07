@@ -7,6 +7,7 @@ import { ControllerContext } from "../shell/hooks";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { resetSeen } from "../seen";
 import { resetPins } from "../pins";
+import { known, resetKnown } from "../prefsKnown";
 import { HomeScreen } from "./HomeScreen";
 
 // What Home remembers about how it lists the chats: kept in memory here, not in the Keychain.
@@ -227,6 +228,19 @@ describe("Home's chats by project", () => {
     expect(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
     // The project is in the heading, not repeated under every chat.
     expect(screen.getByRole("button", { name: "Release, Claude" })).toBeTruthy();
+  });
+
+  it("drawn again in the same run of the app, is listed as it was left from the first frame, not Recent first and then Projects", async () => {
+    known.grouping = "project";
+    known.folded = [];
+    try {
+      // Reading the Keychain would take a while: it isn't waited for.
+      mockRemembered = "recent";
+      await renderWith(<HomeScreen {...handlers()} />, { chats });
+      expect(screen.getByRole("button", { name: "Projects, selected" })).toBeTruthy();
+    } finally {
+      resetKnown();
+    }
   });
 
   it("puts each project and its chats in a card of their own, its header tinted in the project's colour", async () => {

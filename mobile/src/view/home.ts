@@ -48,7 +48,30 @@ export function projectColorOf(color: unknown): string | null {
 
 /** A project's colour as a quiet fill behind its name (the colour at about 15%), and the colour itself for the words; plain ones for a project the Mac gave no colour. */
 export function projectTint(color: string | null, plain: { bg: string; fg: string } = { bg: "#dce2e8", fg: "#566272" }): { bg: string; fg: string } {
-  return color ? { bg: `${color}26`, fg: color } : plain;
+  if (!color) return plain;
+  // The words are in the project's colour, kept readable: a light one (a yellow, a mint) is darkened on the light page, and a very
+  // dark one lightened on the night one. Which page it is shows in the plain tint's words, light on the night.
+  const night = luminance(plain.fg) > 0.3;
+  const l = luminance(color);
+  const fg = !night && l > 0.45 ? mix(color, "#000000", 0.45) : night && l < 0.08 ? mix(color, "#ffffff", 0.45) : color;
+  return { bg: `${color}26`, fg };
+}
+
+/** How light a colour looks (0 black to 1 white), as WCAG reckons it; a colour that isn't "#rrggbb" counts as middling. */
+export function luminance(hex: string): number {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return 0.2;
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = parseInt(m[1].slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** `hex` moved `by` (0 to 1) of the way to `to`. */
+function mix(hex: string, to: string, by: number): string {
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + i, 3 + i), 16);
+  return `#${[0, 2, 4].map((i) => Math.round(ch(hex, i) + (ch(to, i) - ch(hex, i)) * by).toString(16).padStart(2, "0")).join("")}`;
 }
 
 export interface Row {

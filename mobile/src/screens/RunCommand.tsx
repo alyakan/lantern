@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Text, View } from "react-native";
-import { Button, Txt } from "../ui/components";
+import { Button, Txt, MAX_TEXT_SCALE } from "../ui/components";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { term } from "../ui/terminal";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
@@ -16,7 +16,7 @@ export function RunCommandCard({ command, project, onRun, onCancel, onSwiping }:
   const colors = useColors();
   const [swiped, setSwiped] = useState(false);
   return (
-    <View style={[{ marginHorizontal: space.lg, marginBottom: 8, backgroundColor: colors.card, borderRadius: radius.card - 6, padding: space.lg, gap: 10 }, shadow.card]}>
+    <View style={[{ marginHorizontal: space.lg, marginBottom: 8, backgroundColor: colors.card, borderRadius: radius.block, padding: space.lg, gap: 10 }, shadow.card]}>
       <Txt variant="heading" accessibilityRole="header">
         Run on your Mac?
       </Txt>
@@ -25,8 +25,8 @@ export function RunCommandCard({ command, project, onRun, onCancel, onSwiping }:
       </Txt>
       {/* The whole command, as typed: what is run is what is read here. */}
       <View style={{ backgroundColor: term.bg, borderRadius: radius.inner, padding: 12, maxHeight: 160 }}>
-        <Text selectable accessibilityLabel={`Command: ${command}`} style={{ color: term.hi, fontFamily: fonts.mono, fontSize: 14, lineHeight: 20 }}>
-          <Text style={{ color: term.bright }}>› </Text>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable accessibilityLabel={`Command: ${command}`} style={{ color: term.hi, fontFamily: fonts.mono, fontSize: 14, lineHeight: 20 }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: term.bright }}>› </Text>
           {command}
         </Text>
       </View>

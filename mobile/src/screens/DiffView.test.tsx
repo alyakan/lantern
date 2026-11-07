@@ -72,6 +72,15 @@ describe("the file's change", () => {
     expect(screen.queryByRole("button", { name: /Show the other/ })).toBeNull();
   });
 
+  it("draws a very long change a page at a time, not all of the rest at once", async () => {
+    const n = MAX_ROWS * 2 + 5;
+    const body = Array.from({ length: n }, (_, i) => `+line ${i + 1}`).join("\n");
+    await renderWith(<DiffView path="/p/lock.json" text={`--- a\n+++ a\n@@ -0,0 +1,${n} @@\n${body}\n`} />);
+    await fireEvent.press(screen.getByRole("button", { name: `Show ${MAX_ROWS} more lines (of ${n - MAX_ROWS})` }));
+    expect(screen.getByLabelText(`Added, line ${MAX_ROWS * 2}: line ${MAX_ROWS * 2}`)).toBeTruthy();
+    expect(screen.queryByLabelText(`Added, line ${n}: line ${n}`)).toBeNull();
+  });
+
   it("shows words that are not a diff as they are", async () => {
     await renderWith(<DiffView path="/p/a.ts" text="That file isn't in this review." />);
     expect(screen.getByText("That file isn't in this review.")).toBeTruthy();

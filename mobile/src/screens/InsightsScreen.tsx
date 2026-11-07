@@ -4,21 +4,25 @@
  * from Claude Code's logs and git; this only shows them.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { RefreshControl, ScrollView, View } from "react-native";
+import { PixelRatio, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Insights } from "../protocol/generated/Insights";
 import type { InsightsBar } from "../protocol/generated/InsightsBar";
 import type { InsightsRange } from "../protocol/generated/InsightsRange";
 import type { InsightsShare } from "../protocol/generated/InsightsShare";
 import { useController, useSyncState } from "../shell/hooks";
-import { Txt } from "../ui/components";
+import { Button, Txt } from "../ui/components";
+import { useAccent } from "../ui/accent";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
 import { tabBarRoom } from "../ui/TabBar";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { projectColorOf, projectTint } from "../view/home";
-import { change, percent, tokens, wait } from "../view/insights";
+import { change, kept, percent, tokens, wait } from "../view/insights";
+
+/** How old the figures can be when the tab comes back into view before they are asked for again. */
+const STALE_MS = 60_000;
 
 const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "today", label: "Today" },
@@ -26,8 +30,6 @@ const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "month", label: "Month" },
 ];
 
-// What was shown last, per stretch: the tab opens on it while the Mac works out a fresh one.
-const kept = new Map<InsightsRange, Insights>();
 
 function Section({ label, headline, children }: { label: string; headline: string; children: ReactNode }) {
   return (
@@ -56,8 +58,9 @@ function Card({ children, label }: { children: ReactNode; label?: string }) {
 function Figure({ value, label, delta }: { value: string; label: string; delta?: { text: string; good: boolean } | null }) {
   const colors = useColors();
   return (
-    <View accessible accessibilityLabel={`${label}: ${value}${delta ? `, ${delta.text === "same" ? "about the same" : delta.text.replace("▲", "up").replace("▼", "down")}` : ""}`} style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, padding: 10, gap: 2 }}>
-      <Txt variant="heading" style={{ fontVariant: ["tabular-nums"] }}>
+    <View accessible accessibilityLabel={`${label}: ${value}${delta ? `, ${delta.text === "same" ? "about the same" : delta.text.replace("▲", "up").replace("▼", "down")}` : ""}`} style={{ flexGrow: 1, flexBasis: 0, minWidth: 76 * PixelRatio.getFontScale(), backgroundColor: colors.card, borderRadius: radius.inner, padding: 10, gap: 2 }}>
+      {/* A figure stays on its line, smaller if it must; at the larger text sizes the tiles go two to a row instead (see minWidth). */}
+      <Txt variant="heading" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6} style={{ fontVariant: ["tabular-nums"] }}>
         {value}
       </Txt>
       <Txt variant="tiny" tone="ink2">
@@ -75,20 +78,24 @@ function Figure({ value, label, delta }: { value: string; label: string; delta?:
 /** Bars over time: the highest is full height, the latest in the accent. */
 function Bars({ bars, every }: { bars: InsightsBar[]; /** Label only every nth bar (a month has 30). */ every: number }) {
   const colors = useColors();
+  const accent = useAccent();
   const top = Math.max(1, ...bars.map((b) => b.weighted));
   const H = 84;
   return (
     <View accessibilityLabel={`Usage over time. Highest: ${tokens(top)} weighted tokens.`} accessible>
       <View style={{ flexDirection: "row", alignItems: "flex-end", height: H, gap: bars.length > 12 ? 2 : 6 }}>
         {bars.map((b, i) => (
-          <View key={i} style={{ flex: 1, height: Math.max(2, (b.weighted / top) * H), borderRadius: 3, backgroundColor: i === bars.length - 1 ? colors.cobalt : b.weighted === 0 ? colors.rule : colors.shapeStrong }} />
+          <View key={i} style={{ flex: 1, height: Math.max(2, (b.weighted / top) * H), borderRadius: 3, backgroundColor: i === bars.length - 1 ? accent : b.weighted === 0 ? colors.rule : colors.shapeStrong }} />
         ))}
       </View>
       <View style={{ flexDirection: "row", gap: bars.length > 12 ? 2 : 6, marginTop: 4 }}>
+        {/* A label is wider than its bar on a month's thirty: it is centred under it and runs over its neighbours, which have none. */}
         {bars.map((b, i) => (
-          <Txt key={i} variant="tiny" tone="ink3" numberOfLines={1} maxFontSizeMultiplier={1.2} style={{ flex: 1, textAlign: "center", fontSize: 10 }}>
-            {i % every === 0 || i === bars.length - 1 ? b.label : ""}
-          </Txt>
+          <View key={i} style={{ flex: 1, alignItems: "center" }}>
+            <Txt variant="tiny" tone="ink3" numberOfLines={1} maxFontSizeMultiplier={1.2} style={{ width: 44, textAlign: "center", fontSize: 10 }}>
+              {i % every === 0 || i === bars.length - 1 ? b.label : ""}
+            </Txt>
+          </View>
         ))}
       </View>
     </View>
@@ -102,13 +109,13 @@ function Shares({ list, colorOf }: { list: InsightsShare[]; colorOf: (name: stri
     <View style={{ gap: 6 }}>
       {list.map((s) => (
         <View key={s.name} accessible accessibilityLabel={`${s.name}: ${percent(s.share)}`} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Txt variant="small" numberOfLines={1} style={{ width: 88 }}>
+          <Txt variant="small" numberOfLines={1} style={{ minWidth: 88, maxWidth: "40%" }}>
             {s.name}
           </Txt>
           <View style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: colors.wash, overflow: "hidden" }}>
             <View style={{ width: `${Math.max(2, s.share * 100)}%`, height: "100%", borderRadius: 4, backgroundColor: colorOf(s.name) }} />
           </View>
-          <Txt variant="small" tone="ink2" style={{ width: 40, textAlign: "right", fontVariant: ["tabular-nums"] }}>
+          <Txt variant="small" tone="ink2" numberOfLines={1} style={{ minWidth: 40, textAlign: "right", fontVariant: ["tabular-nums"] }}>
             {percent(s.share)}
           </Txt>
         </View>
@@ -117,7 +124,7 @@ function Shares({ list, colorOf }: { list: InsightsShare[]; colorOf: (name: stri
   );
 }
 
-export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: string) => void }) {
+export function InsightsScreen({ top, visible = true }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are a minute old. */ visible?: boolean }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
@@ -136,6 +143,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
       (i) => {
         kept.set(r, i);
         if (n !== asked.current) return;
+        loadedAt.current = Date.now();
         setShown(i);
         setLoading(false);
       },
@@ -147,6 +155,13 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
     );
   };
   useEffect(() => load(range), [range]);
+  const loadedAt = useRef(Date.now());
+  useEffect(() => {
+    if (!visible) return;
+    if (Date.now() - loadedAt.current > STALE_MS || error) load(range);
+    // Only on coming back into view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
   const pick = (r: InsightsRange) => {
     setShown(kept.get(r) ?? null);
     setRange(r);
@@ -162,7 +177,9 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabBarRoom(insets.bottom), gap: 22 }}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={() => load(range)} />}
+        // The pull asks again, and the line under the ranges says it is updating (as Home and Work show theirs): no spinner that
+        // springs back at once.
+        refreshControl={<RefreshControl refreshing={false} tintColor="transparent" onRefresh={() => load(range)} />}
       >
         <View accessibilityRole="tablist" style={{ flexDirection: "row", padding: 2, borderRadius: radius.pill, backgroundColor: colors.wash }}>
           {RANGES.map((r) => (
@@ -183,9 +200,12 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
           </View>
         )}
         {error && !loading && (
-          <Txt variant="small" tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: 4 }}>
-            {error}
-          </Txt>
+          <View style={{ paddingHorizontal: 4, gap: 4, alignItems: "flex-start" }}>
+            <Txt variant="small" tone="stop" accessibilityRole="alert">
+              {error}
+            </Txt>
+            <Button label="Try again" kind="ghost" onPress={() => load(range)} />
+          </View>
         )}
 
         {i && (
@@ -236,7 +256,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
             </Section>
 
             <Section label="Savings" headline={i.savings.headline}>
-              <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <Figure value={tokens(i.savings.per_call.now)} label="context a call" delta={change(i.savings.per_call, true)} />
                 <Figure value={tokens(i.savings.chat_start.now)} label="a chat's start" delta={change(i.savings.chat_start, true)} />
                 <Figure value={percent(i.savings.cached.now)} label="from the cache" delta={change(i.savings.cached, false, true)} />
@@ -247,7 +267,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
             </Section>
 
             <Section label="Done" headline={i.done.headline}>
-              <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <Figure value={`${i.done.merged}`} label="PRs merged" />
                 <Figure value={`${i.done.releases}`} label="releases" />
                 <Figure value={`${i.done.commits}`} label="commits" />
@@ -283,7 +303,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
                   ))}
                 </View>
               </Card>
-              <View style={{ flexDirection: "row", gap: 8 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 <Figure value={i.habits.reply_ms === null ? "—" : wait(i.habits.reply_ms)} label="a chat waits for you" />
                 <Figure value={percent(i.habits.away)} label="ran while you were away" />
               </View>

@@ -4,9 +4,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PlanUsage } from "../sync/reducer";
 import type { ProviderUsage } from "../protocol/generated/ProviderUsage";
 import { useUsageHistory } from "../usageHistory";
-import { Button, Txt } from "../ui/components";
+import { Txt } from "../ui/components";
 import { WindowRow } from "./ChatExtras";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { dailyBars, daysKnown } from "../view/usageHistory";
 
@@ -15,11 +15,12 @@ const CHART_HEIGHT = 72;
 export function UsageSheet({ plan, providers = {}, onClose }: { plan: PlanUsage | null; providers?: Record<string, ProviderUsage>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const claude = claudeUsage(plan);
-  return <Sheet size="large" onClose={onClose}>{(close, scroll) => <ScrollView ref={scroll} contentContainerStyle={{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }}>
-    <Txt variant="heading" accessibilityRole="header">Usage by provider</Txt>
-    {[...new Set(["claude", "codex", ...Object.keys(providers)])].map(id => <ProviderSection key={id} id={id} reading={id === "claude" ? claude : providers[id]} />)}
-    <Button label="Close" onPress={close} />
-  </ScrollView>}</Sheet>;
+  return <Sheet size="large" onClose={onClose}>{(close, scroll) => <View style={{ flex: 1 }}>
+    <SheetBar title="Usage by provider" close={{ label: "Close", onPress: close }} />
+    <ScrollView ref={scroll} contentContainerStyle={{ paddingHorizontal: space.xl, paddingTop: 8, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }}>
+      {[...new Set(["claude", "codex", ...Object.keys(providers)])].map(id => <ProviderSection key={id} id={id} reading={id === "claude" ? claude : providers[id]} />)}
+    </ScrollView>
+  </View>}</Sheet>;
 }
 
 function ProviderSection({ id, reading }: { id: string; reading?: ProviderUsage }) {
@@ -29,7 +30,8 @@ function ProviderSection({ id, reading }: { id: string; reading?: ProviderUsage 
   const windows = currentUsageWindows(reading, now);
   const bars = dailyBars(history, now);
   const known = daysKnown(history, now);
-  const name = id === "claude" ? "Claude" : id === "codex" ? "Codex" : id;
+  // A provider the phone has no name for (a gateway's, "deepseek") is its id with a capital, not the raw id.
+  const name = id === "claude" ? "Claude" : id === "codex" ? "Codex" : id.charAt(0).toUpperCase() + id.slice(1);
   return <View style={{ gap: 8 }}>
     <Txt variant="heading">{name}</Txt>
     {windows.length === 0 ? <Txt variant="body" tone="ink3">Usage unavailable</Txt> : windows.map(w => <WindowRow key={w.label} window={w} />)}

@@ -1,4 +1,4 @@
-import { Component, useMemo, type ComponentType, type ReactNode } from "react";
+import { Component, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { View } from "react-native";
 import { artifactDocument, isOwnPage } from "../view/artifacts";
 import { Txt } from "./components";
@@ -38,12 +38,21 @@ export function ArtifactPage({ html, testID }: { html: string; testID?: string }
   const colors = useColors();
   // Built once per page and palette, not per render: the pane draws again with every event of the chat.
   const source = useMemo(() => ({ html: artifactDocument(html, colors) }), [html, colors]);
+  // The web view said it couldn't draw the page (it would otherwise be blank, which reads as an empty page).
+  const [failed, setFailed] = useState(false);
   const gone = (
     <Txt variant="body" tone="ink2" style={{ padding: space.lg }}>
       This page can't be shown in this version of the app. It is on your Mac.
     </Txt>
   );
   if (!WebView) return gone;
+  if (failed) {
+    return (
+      <Txt variant="body" tone="ink2" style={{ padding: space.lg }}>
+        This page couldn't be drawn here. It is on your Mac.
+      </Txt>
+    );
+  }
   const Web = WebView;
   return (
     <View testID={testID} style={{ flex: 1, backgroundColor: colors.card }}>
@@ -63,6 +72,7 @@ export function ArtifactPage({ html, testID }: { html: string; testID?: string }
           setSupportMultipleWindows={false}
           mixedContentMode="never"
           onShouldStartLoadWithRequest={(r: { url: string }) => isOwnPage(r.url)}
+          onError={() => setFailed(true)}
           style={{ flex: 1, backgroundColor: "transparent" }}
         />
       </Boundary>

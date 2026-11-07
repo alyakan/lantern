@@ -52,6 +52,9 @@ export const DESK_WAIT = 170_000;
 /** How long the phone keeps what Claude suggested before it asks the Mac again. */
 export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
 
+/** How many closed chats keep their messages on the phone. */
+export const KEEP_CLOSED = 4;
+
 export class Sync {
   private suggested: { at: number; value: Suggestions } | null = null;
   private state: State = initialState;
@@ -61,6 +64,8 @@ export class Sync {
   private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
+  /** Chats closed, the latest first (see `unfollow`). */
+  private closed: string[] = [];
   private readonly schedule: (fn: () => void) => void;
   private readonly now: () => number;
   private readonly newId: () => string;
@@ -116,6 +121,7 @@ export class Sync {
     this.queue = [];
     this.session = null;
     this.followed.clear();
+    this.closed = [];
     this.state = initialState;
     for (const l of this.listeners) l();
   }
@@ -140,7 +146,10 @@ export class Sync {
   private subscribeTo(slot: string) {
     this.apply({ type: "load_started", slot });
     this.flush();
-    const after = this.state.views[slot]?.seq ?? 0;
+    // A chat whose pages stopped coming part way (the link dropped between them) starts over: its first page already gave the
+    // chat's latest number, and asking from there would skip the pages that never came (hours of a long chat went missing).
+    const view = this.state.views[slot];
+    const after = view && !view.resetting ? view.seq : 0;
     // A failure is the chat's to show (it has nothing else to show), not swallowed.
     return this.ask({ op: "subscribe", slot, after, epoch: this.state.epoch ?? 0 }).catch((e: Error) => this.apply({ type: "load_failed", slot, why: e.message || "Couldn't load this chat." }));
   }
@@ -255,11 +264,24 @@ export class Sync {
   unfollow(slot: string) {
     this.followed.delete(slot);
     void this.ask({ op: "unsubscribe", slot }).catch(() => {});
+    // The last few chats closed keep their messages, so going back to one is instant; older ones are let go, or a long
+    // session would hold every chat ever opened.
+    this.closed = [slot, ...this.closed.filter((s) => s !== slot)];
+    for (const old of this.closed.splice(KEEP_CLOSED)) if (!this.followed.has(old)) this.apply({ type: "forget", slot: old });
+  }
+
+  /**
+   * Sends again a message that didn't go, in its own place and under its own id: when the Mac did get it after all, its copy
+   * still takes the one place in the chat.
+   */
+  retry(slot: string, itemId: string) {
+    const item = this.state.views[slot]?.items.find((it) => it.kind === "user" && it.id === itemId);
+    if (item?.kind !== "user" || !item.failed || !item.id.startsWith("local-")) return Promise.resolve();
+    return this.send(slot, item.text, [], item.id.slice("local-".length));
   }
 
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */
-  async send(slot: string, text: string, images: PickedImage[] = []) {
-    const clientId = this.newId();
+  async send(slot: string, text: string, images: PickedImage[] = [], clientId: string = this.newId()) {
     this.apply({ type: "sending", slot, clientId, text, at: this.now(), ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
     let carded = false;
     try {

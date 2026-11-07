@@ -4,6 +4,7 @@ import { Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
+import { useAccent } from "../ui/accent";
 
 /**
  * Cruise, over the message box: a pill that turns it on; then, each time the chat goes idle, the next step Claude drafted
@@ -26,9 +27,12 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
   onStop: () => void;
 }) {
   const colors = useColors();
+  // The app's accent (a regular's Ember), as other choices and buttons have it.
+  const accent = useAccent();
   if (!on)
     return (
-      <View style={{ paddingHorizontal: space.lg, paddingBottom: 6 }}>
+      // At the message box's edge, as Cruise's card is when it is on: the edge doesn't jump as it turns on.
+      <View style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
         <PressScale
           accessibilityRole="button"
           accessibilityLabel="Cruise: suggest the next step each time the chat is idle"
@@ -37,7 +41,7 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
           scaleTo={0.97}
           style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 8, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card }}
         >
-          <Txt variant="small" tone="cobalt" style={{ fontWeight: "800" }}>
+          <Txt variant="small" style={{ fontWeight: "800", color: accent }}>
             ✨ Cruise
           </Txt>
           <Txt variant="small" tone="ink3">
@@ -50,13 +54,13 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
     <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
       <View style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 12, gap: 4 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "800" }}>
+          <Txt variant="tiny" style={{ fontWeight: "800", color: accent }}>
             ✨ CRUISE ON
           </Txt>
           <View style={{ flex: 1 }} />
           {resting && !draft && !asking && (
             <PressScale accessibilityRole="button" accessibilityLabel="Suggest a next step" onPress={onAsk} hitSlop={10} haptic="select" scaleTo={0.94}>
-              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+              <Txt variant="small" style={{ fontWeight: "700", color: accent }}>
                 Next step
               </Txt>
             </PressScale>
@@ -96,7 +100,7 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
             </Txt>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
               <PressScale accessibilityRole="button" accessibilityLabel={`Do it: ${draft.title}`} onPress={onDo} haptic="select" scaleTo={0.96} style={{ flex: 1 }}>
-                <View style={{ backgroundColor: colors.cobalt, borderRadius: radius.inner, alignItems: "center", paddingVertical: 10 }}>
+                <View style={{ backgroundColor: accent, borderRadius: radius.inner, alignItems: "center", paddingVertical: 10 }}>
                   <Txt variant="small" tone="white" style={{ fontWeight: "800" }}>
                     Do it
                   </Txt>

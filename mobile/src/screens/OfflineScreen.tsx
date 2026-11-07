@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, ScrollView, Switch, TextInput, View } from "react-native";
+import { Alert, Animated, Easing, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
@@ -12,8 +12,10 @@ import { DarkLantern } from "../ui/lanterns";
 import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
-import { radius, setThemeChoice, space, THEME_CHOICES, useColors, useThemeChoice, type ThemeChoice } from "../ui/theme";
+import { setWorkBadge, useWorkBadge, type WorkBadge } from "../workBadge";
+import { radius, setThemeChoice, space, THEME_CHOICES, useBody, useColors, useThemeChoice, type ThemeChoice } from "../ui/theme";
 import { loadVoiceEngine, saveTheme, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
 import { ProviderStrip } from "./ChatExtras";
@@ -53,6 +55,7 @@ function LitLantern() {
  */
 function AddressField({ onAddress }: { onAddress: (text: string) => Promise<string | null> }) {
   const colors = useColors();
+  const body = useBody();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -83,7 +86,7 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
         keyboardType="numbers-and-punctuation"
         // Done closes the keyboard (a one-line field does that on its own); Connect is the button under it.
         returnKeyType="done"
-        style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: 16 }}
+        style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: body.fontSize }}
       />
       {problem && (
         <Txt variant="small" tone="stop" accessibilityRole="alert">
@@ -135,6 +138,14 @@ export function LastKnownList() {
   );
 }
 
+/** Unpairing forgets the Mac on this phone, and only a new code from the Mac undoes it: it is asked first. */
+export function askUnpair(onUnpair: () => void) {
+  Alert.alert("Unpair this phone?", "This phone forgets your Mac, and what it kept of its chats. To use it again, pair it with a new code from your Mac.", [
+    { text: "Cancel", style: "cancel" },
+    { text: "Unpair", style: "destructive", onPress: onUnpair },
+  ]);
+}
+
 /**
  * Not connected yet: connecting (a moment), or why not and what to check. Once a try has failed it stays on why, through
  * the tries that follow on their own, so the address being typed in isn't swept away by each one.
@@ -146,7 +157,10 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
   const [lastReason, setLastReason] = useState<string | null>(state.kind === "offline" ? state.reason : null);
   if (state.kind === "offline" && state.reason !== lastReason) setLastReason(state.reason);
   return (
-    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
+    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.paper, paddingTop: insets.top }}>
+      {/* It scrolls when it is taller than the screen (a small phone, the larger text sizes, the keyboard up for the address), so
+          Unpair at its end can always be reached; otherwise it sits in the middle. */}
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", padding: space.xl }}>
       {connecting && lastReason === null ? (
         <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
           <LitLantern />
@@ -170,9 +184,10 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           {onAddress && <AddressField onAddress={onAddress} />}
           <LastKnownList />
-          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
+          <Button label="Unpair this phone" kind="ghost" onPress={() => askUnpair(onUnpair)} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}
+      </ScrollView>
     </AboveKeyboard>
   );
 }
@@ -211,7 +226,9 @@ export function ReconnectPill({ state }: { state: ConnectionState }) {
   // A run that gave up for good (the Mac is too new or too old for this phone) says why; the rest are still trying.
   const text = state.kind === "offline" && state.retryInMs === null ? state.reason : "Reconnecting to your Mac…";
   return (
-    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 6, left: 0, right: 0, alignItems: "center" }}>
+    // Under the screens' top bars (Home's, a chat's back button and title), not over them: it can't be touched, and what it
+    // covered could be touched without being seen.
+    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT + 8, left: 0, right: 0, alignItems: "center" }}>
       <FadeSlideIn from={-8} ms={200}>
         <View accessibilityRole="alert" accessibilityLabel={text} accessible style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 320, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
           <Animated.View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: regular ? EMBER : colors.hi, opacity: blink }} />
@@ -274,6 +291,19 @@ function ThemeRow() {
   return <MenuRow look={LOOKS.theme} title="Theme" value={THEME_CHOICES.find((t) => t.id === theme)?.label ?? ""} choices={choices} selected={theme} onPick={pick} />;
 }
 
+const BADGES: { value: WorkBadge; label: string; hint: string }[] = [
+  { value: "opened", label: "Until opened", hint: "Counts the steps that came since you last looked at Work." },
+  { value: "always", label: "Always", hint: "Counts every step waiting, looked at or not." },
+  { value: "never", label: "Never", hint: "No number on the Work tab." },
+];
+
+/** What the Work tab's number counts, on this phone. */
+function WorkBadgeRow() {
+  const { mode } = useWorkBadge();
+  const chosen = BADGES.find((b) => b.value === mode) ?? BADGES[0];
+  return <MenuRow look={LOOKS.badge} title="Work badge" value={chosen.label} detail={chosen.hint} choices={BADGES} selected={mode} onPick={(v) => setWorkBadge(v as WorkBadge)} />;
+}
+
 /** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
 function VoiceRow({ onPress }: { onPress: () => void }) {
   const [engine, setEngine] = useState<VoiceEngine | null>(null);
@@ -298,6 +328,7 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
   const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
   const canTodos = state.kind === "connected" && state.welcome.features?.includes("todos") === true && !!onTodos;
+  const canWork = state.kind === "connected" && state.welcome.features?.includes("work") === true;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   // What a button opens comes once this sheet is away: iOS shows no sheet while another is still going.
   const next = useRef<(() => void) | null>(null);
@@ -345,13 +376,14 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
               <SettingsSection label="This phone">
                 <ThemeRow />
                 <LockRow />
-                {onVoice &&<VoiceRow onPress={then(onVoice)} />}
+                {onVoice && <VoiceRow onPress={then(onVoice)} />}
+                {canWork && <WorkBadgeRow />}
               </SettingsSection>
               <SettingsSection label="Lantern">
                 {onWhatsNew && <SettingsRow look={LOOKS.whatsNew} title="What's new" onPress={then(onWhatsNew)} />}
                 {onSupport && <SettingsRow look={LOOKS.support} title="Support development" onPress={then(onSupport)} />}
               </SettingsSection>
-              <DangerButton label="Unpair this phone" onPress={then(onUnpair)} footer="Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control." />
+              <DangerButton label="Unpair this phone" onPress={() => askUnpair(then(onUnpair))} footer="Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control." />
             </ScrollView>
           </View>
         );

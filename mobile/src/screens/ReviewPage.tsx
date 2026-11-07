@@ -1,9 +1,9 @@
 import { memo } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { Txt } from "../ui/components";
 import { Markdown } from "../ui/Markdown";
 import { PressScale } from "../ui/motion";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import type { Finding, ReviewFile, Severity, Verdict } from "../view/review";
 
 const SEVERITY: Record<Severity, string> = { blocker: "Blocker", "should-fix": "Should fix", nit: "Nit" };
@@ -11,11 +11,11 @@ const SEVERITY: Record<Severity, string> = { blocker: "Blocker", "should-fix": "
 /** A link to the change in a file: a path, or a line in it. */
 function FileLink({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="link" accessibilityHint={hint} onPress={onPress} hitSlop={6}>
+    <PressScale accessibilityRole="link" accessibilityHint={hint} onPress={onPress} hitSlop={6}>
       <Txt variant="small" tone="cobalt" style={{ fontWeight: "700", textDecorationLine: "underline" }}>
         {label}
       </Txt>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -86,16 +86,16 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
   const path = file.path;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, gap: 16 }}>
-      <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 14, gap: 6 }}>
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.block, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
           {kicker}
         </Txt>
         {path ? (
-          <Pressable accessibilityRole="link" accessibilityLabel={path} accessibilityHint="Opens the change in this file" onPress={() => onOpen(path)} hitSlop={6}>
+          <PressScale accessibilityRole="link" accessibilityLabel={path} accessibilityHint="Opens the change in this file" onPress={() => onOpen(path)} hitSlop={6}>
             <Txt variant="heading" tone="cobalt" style={{ textDecorationLine: "underline" }}>
               {path}
             </Txt>
-          </Pressable>
+          </PressScale>
         ) : null}
         {(file.added !== null || file.removed !== null) && (
           <View style={{ flexDirection: "row", gap: 8 }}>

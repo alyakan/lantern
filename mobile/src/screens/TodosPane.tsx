@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActionSheetIOS, Alert, Animated, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActionSheetIOS, Alert, Animated, Keyboard, Platform, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
@@ -9,6 +9,7 @@ import type { RemoteUserTodos } from "../protocol/generated/RemoteUserTodos";
 import { useConnectionState, useController } from "../shell/hooks";
 import { useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
+import { SheetPill } from "../ui/Sheet";
 import { PressScale, run } from "../ui/motion";
 import { SwipeRow, type TrayButton } from "../ui/SwipeRow";
 import { radius, space, useBody, useColors } from "../ui/theme";
@@ -66,8 +67,12 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
     };
   }, []);
 
+  // Asking for the projects failed: not "no projects" (it says why, and asks again on Try again, which bumps `asks`).
+  const [projectsProblem, setProjectsProblem] = useState<string | null>(null);
+  const [asks, setAsks] = useState(0);
   useEffect(() => {
     if (!up) return;
+    setProjectsProblem(null);
     sync.projects().then(
       (all) => {
         if (!live.current) return;
@@ -75,9 +80,9 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
         setProjects(sorted);
         setProject((now) => now ?? sorted.find((p) => !!projectName && p.name === projectName)?.id ?? sorted[0]?.id ?? null);
       },
-      () => live.current && setProjects([]),
+      (e) => live.current && setProjectsProblem((e as Error).message || "Couldn't reach your Mac."),
     );
-  }, [sync, up, projectName]);
+  }, [sync, up, projectName, asks]);
 
   const load = useCallback(async () => {
     if (!project || !up) return;
@@ -132,7 +137,7 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
   const openCount = items.length - done.length;
   const name = list?.name ?? choices.find((p) => p.id === project)?.name ?? "To-dos";
   const switcher = (
-    <Pressable accessibilityRole="button" accessibilityLabel={`To-dos of ${name}`} accessibilityHint={choices.length > 1 ? "Shows another project's to-dos" : undefined} disabled={choices.length < 2} onPress={pickProject} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`To-dos of ${name}`} accessibilityHint={choices.length > 1 ? "Shows another project's to-dos" : undefined} disabled={choices.length < 2} onPress={pickProject} hitSlop={6} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}>
       <Txt variant={title ? "small" : "title"} numberOfLines={1} style={[{ flexShrink: 1 }, title ? { color: colors.ink2, fontWeight: "600" } : null]}>
         {name}
       </Txt>
@@ -141,7 +146,7 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
           ▾
         </Txt>
       )}
-    </Pressable>
+    </PressScale>
   );
 
   return (
@@ -162,17 +167,28 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
             <FloatIcon floating={float.floating} color={colors.ink} />
           </PressScale>
         )}
-        <Button label={hideLabel} kind="ghost" onPress={onHide} />
+        <SheetPill label={hideLabel} onPress={onHide} />
       </View>
       {problem && (
         <Txt variant="small" tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg, paddingTop: 6 }}>
           {problem}
         </Txt>
       )}
-      {projects !== null && choices.length === 0 ? (
+      {projectsProblem && !project ? (
+        <Retry text={projectsProblem} onPress={() => setAsks((n) => n + 1)} />
+      ) : projects !== null && choices.length === 0 ? (
         <Empty text="No projects yet. Open a folder in Lantern on your Mac first." />
       ) : !list ? (
-        !problem && <Empty text={up ? "Asking your Mac…" : "Connecting to your Mac…"} />
+        problem ? (
+          <Retry
+            onPress={() => {
+              setProblem(null);
+              void load();
+            }}
+          />
+        ) : (
+          <Empty text={up ? "Asking your Mac…" : "Connecting to your Mac…"} />
+        )
       ) : (
         <ScrollView testID="todo-items" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: space.xl }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive">
           {openCount === 0 && <Empty text={items.length === 0 ? "Nothing on this list yet." : "Nothing left to do here."} />}
@@ -188,11 +204,11 @@ export function TodosPane({ project: initial, projectName, onHide, hideLabel = "
           ))}
           {done.length > 0 && (
             <View style={{ marginTop: 16 }}>
-              <Pressable accessibilityRole="button" accessibilityState={{ expanded: showDone }} onPress={() => setShowDone(!showDone)} style={{ paddingHorizontal: space.lg, paddingVertical: 8 }}>
+              <PressScale accessibilityRole="button" accessibilityState={{ expanded: showDone }} onPress={() => setShowDone(!showDone)} style={{ paddingHorizontal: space.lg, paddingVertical: 8 }}>
                 <Txt variant="small" tone="ink3" style={{ fontWeight: "700" }}>
                   {showDone ? `Hide done (${done.length})` : `Show done (${done.length})`}
                 </Txt>
-              </Pressable>
+              </PressScale>
               {showDone && done.map((t) => <TodoRow key={t.id} todo={t} now={now} busy={busy} edit={edit} open={tray === t.id} onOpenChange={(o) => setTray(o ? t.id : null)} />)}
             </View>
           )}
@@ -208,6 +224,20 @@ function Empty({ text }: { text: string }) {
     <Txt variant="body" tone="ink3" style={{ paddingHorizontal: space.xl, paddingTop: 28, textAlign: "center" }}>
       {text}
     </Txt>
+  );
+}
+
+/** Asking the Mac failed: why (when it isn't said above already), and a way to ask again. */
+function Retry({ text, onPress }: { text?: string; onPress: () => void }) {
+  return (
+    <View style={{ alignItems: "center", gap: 8, paddingHorizontal: space.xl, paddingTop: 28 }}>
+      {text && (
+        <Txt variant="body" tone="stop" accessibilityRole="alert" style={{ textAlign: "center" }}>
+          {text}
+        </Txt>
+      )}
+      <Button label="Try again" kind="ghost" onPress={onPress} />
+    </View>
   );
 }
 
@@ -339,11 +369,11 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
       <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
         <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.ink3 }} />
         <TextInput accessibilityLabel="New to-do" autoFocus value={title} onChangeText={setTitle} placeholder="New To-Do" placeholderTextColor={colors.ink3} maxLength={200} returnKeyType="done" submitBehavior="submit" onSubmitEditing={() => void add()} style={{ flex: 1, fontSize: body.fontSize, color: colors.ink, paddingVertical: 4 }} />
-        <Pressable accessibilityRole="button" accessibilityLabel="Add" disabled={!title.trim() || busy} onPress={() => void add()} hitSlop={8}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Add" disabled={!title.trim() || busy} onPress={() => void add()} hitSlop={8}>
           <Txt variant="body" style={{ color: title.trim() && !busy ? accent : colors.ink3, fontWeight: "700" }}>
             Add
           </Txt>
-        </Pressable>
+        </PressScale>
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {quick.map((q) => (
@@ -362,19 +392,19 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
       {month && (
         <View style={{ gap: 2 }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Pressable accessibilityRole="button" accessibilityLabel="Previous month" onPress={() => step(-1)} hitSlop={10} style={{ padding: 6 }}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Previous month" onPress={() => step(-1)} hitSlop={10} style={{ padding: 6 }}>
               <Txt variant="body" style={{ color: accent, fontWeight: "700" }}>
                 ‹
               </Txt>
-            </Pressable>
+            </PressScale>
             <Txt variant="small" accessibilityRole="header" style={{ fontWeight: "700" }}>
               {MONTHS[shown.m]} {shown.y}
             </Txt>
-            <Pressable accessibilityRole="button" accessibilityLabel="Next month" onPress={() => step(1)} hitSlop={10} style={{ padding: 6 }}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Next month" onPress={() => step(1)} hitSlop={10} style={{ padding: 6 }}>
               <Txt variant="body" style={{ color: accent, fontWeight: "700" }}>
                 ›
               </Txt>
-            </Pressable>
+            </PressScale>
           </View>
           {monthWeeks(shown.y, shown.m).map((week, w) => (
             <View key={w} style={{ flexDirection: "row" }}>
@@ -383,7 +413,7 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
                 const on = !!d && d === date;
                 const past = !!d && d < todayKey;
                 return (
-                  <Pressable key={i} accessibilityRole="button" accessibilityLabel={d ? dueText(d, null, now) : undefined} accessibilityState={{ selected: on, disabled: !d || past }} disabled={!d || past} onPress={() => d && (pickDay(d), setMonth(null))} style={{ flex: 1, alignItems: "center", paddingVertical: 1 }}>
+                  <PressScale key={i} reach={false} accessibilityRole="button" accessibilityLabel={d ? dueText(d, null, now) : undefined} accessibilityState={{ selected: on, disabled: !d || past }} disabled={!d || past} onPress={() => d && (pickDay(d), setMonth(null))} style={{ flex: 1, alignItems: "center", paddingVertical: 1 }}>
                     <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: on ? accent : "transparent" }}>
                       {d && (
                         <Txt variant="small" style={{ color: on ? colors.white : past ? colors.shape : d === todayKey ? accent : colors.ink, fontWeight: d === todayKey || on ? "800" : "400" }}>
@@ -391,7 +421,7 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
                         </Txt>
                       )}
                     </View>
-                  </Pressable>
+                  </PressScale>
                 );
               })}
             </View>

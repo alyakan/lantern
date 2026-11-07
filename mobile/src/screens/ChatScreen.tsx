@@ -7,10 +7,10 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
-import { emptyView } from "../sync/reducer";
+import { emptyView, type Item } from "../sync/reducer";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
-import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
+import { barRoom, KEYBOARD_GAP, useTapAway } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
@@ -73,9 +73,12 @@ export interface ChatProps {
 
 /** The header's buttons take a touch a little way around them, but not above: that is the status bar, whose tap scrolls a list to its top. */
 const HEADER_SLOP = { top: 0, left: 8, right: 8, bottom: 8 };
+const NO_ITEMS: Item[] = [];
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
+/** How long what went wrong is said over the chat. */
+const PROBLEM_MS = 8000;
 /** How much has to have happened while away for "Caught up on…" to be said: a few events is just the chat going on. */
 export const BANNER_AT = 10;
 
@@ -148,9 +151,21 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [bottom, setBottom] = useState(0);
   const view = views[slot] ?? emptyView;
   const working = chat?.status === "working";
-  const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
+  // A chat that comes in pages (a long one opened, or one caught up on after a long time away) is drawn once, when it is whole:
+  // until then what was shown stays (the shape of a chat, breathing, when there was nothing). Drawn page by page it was laid out
+  // again with each one, too busy to draw what a finger scrolled into view, and a chat caught up on was cut back to its oldest
+  // page before it grew again. What this phone sends meanwhile shows at once.
+  const settled = useRef<Item[]>(view.resetting ? NO_ITEMS : view.items);
+  if (!view.resetting) settled.current = view.items;
+  const items = useMemo(() => {
+    if (!view.resetting) return view.items;
+    const held = settled.current;
+    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
+    return mine.length ? [...held, ...mine] : held;
+  }, [view.resetting, view.items]);
+  const rows = useMemo(() => timeline(items, Date.now(), working), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
-  const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
+  const queued = useMemo(() => queuedIds(items, working), [items, working]);
   const canCruise = useMacCan("cruise");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
@@ -158,7 +173,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [reviewed, setReviewed] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
   // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
-  const changed = useMemo(() => changedFiles(view.items), [view.items]);
+  const changed = useMemo(() => changedFiles(items), [items]);
   const [changesOpen, setChangesOpen] = useState(false);
   // What the sheet shows: the chat's changes, (a Mac that lists "artifacts") the artifacts of its folder, or (one that lists
   // "todos") its project's to-do list.
@@ -180,6 +195,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [swiping, setSwiping] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // What went wrong is said for a while, not for as long as the chat stays open (a tap puts it away sooner).
+  useEffect(() => {
+    if (!problem) return;
+    const t = setTimeout(() => setProblem(null), PROBLEM_MS);
+    return () => clearTimeout(t);
+  }, [problem]);
   // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
   // the message box (a quote, an edit).
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
@@ -215,6 +236,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const places = useMemo<PagePlaces>(() => ({ offset: (page) => placeOf(slot)?.offsets[page], keep: (page, y) => keepOffset(slot, page, y) }), [slot]);
   // How tall the newest page's floating buttons are: the page makes that much more room under its last line.
   const [floatHeight, setFloatHeight] = useState(0);
+  // How tall the suggestions floating over the end of the chat are (0 while there are none): the end keeps that much room.
+  const [replyHeight, setReplyHeight] = useState(0);
   // Opening the search (nothing typed yet) changes none of these, so the list isn't drawn again then, while the keyboard comes.
   const query = find?.query ?? null;
   const matches = useMemo(() => (query === null ? NO_MATCHES : findRows(rows, query)), [rows, query]);
@@ -297,13 +320,23 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return () => sub.remove();
   }, [controller, slot, busy]);
 
-  // A catch-up that covered a stretch away says so for a moment.
+  // A catch-up that covered a stretch away says so for a moment: once for each catch-up, not again with every event after it.
+  const announced = useRef(0);
   useEffect(() => {
-    if (view.caughtUp < BANNER_AT) return;
+    if (view.caughtUp < BANNER_AT) {
+      // A later catch-up of the same size is a new one.
+      announced.current = 0;
+      return;
+    }
+    if (view.caughtUp === announced.current) return;
+    announced.current = view.caughtUp;
     setBanner(true);
+  }, [view.caughtUp]);
+  useEffect(() => {
+    if (!banner) return;
     const t = setTimeout(() => setBanner(false), BANNER_MS);
     return () => clearTimeout(t);
-  }, [view.caughtUp, view.seq]);
+  }, [banner]);
 
   const online = connection.kind === "connected";
   const asleep = chat?.status === "asleep";
@@ -391,18 +424,28 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
 
   // What was in the chat when it finished loading just is; what comes after (a message sent, Claude's words, a prompt)
   // comes in with a fade and a rise.
+  // A row is new once: what comes in is known from its first drawing, so a cell drawn for it again later (scrolled back to) doesn't
+  // play it again. What "Show earlier messages" brings, above the first row known, was there all along and just is.
   const known = useRef<Set<string> | null>(null);
   if (known.current === null && !view.resetting && rows.length > 0) known.current = new Set(rows.map((r) => r.key));
-  const arrives = (key: string) => known.current !== null && !known.current.has(key);
+  const position = useMemo(() => new Map(rows.map((r, i) => [r.key, i])), [rows]);
+  const firstKnown = useMemo(() => (known.current ? rows.findIndex((r) => known.current!.has(r.key)) : -1), [rows]);
+  const arrives = (key: string) => {
+    const k = known.current;
+    if (k === null || k.has(key)) return false;
+    k.add(key);
+    return !(firstKnown > 0 && (position.get(key) ?? 0) < firstKnown);
+  };
 
   // Your last message can be edited and sent again; what Claude's last message asks, if it is a yes or no, can be answered at once.
-  const lastUser = [...rows].reverse().find((r) => r.kind === "user")?.key;
-  const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
+  // (Looked for from the end, without copying the rows: this runs with every word streamed.)
+  const lastUserText = rows.findLast((r) => r.kind === "user");
+  const lastUser = lastUserText?.key;
+  const lastWords = rows.findLast((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
-  const lastTurn = [...rows].reverse().find((r) => r.kind === "turn" || r.kind === "user");
+  const lastTurn = rows.findLast((r) => r.kind === "turn" || r.kind === "user");
   // The turn Cruise asks about: the last one Claude finished (a message you just sent is no turn yet).
   const turnKey = lastTurn?.kind === "turn" ? lastTurn.key : "";
-  const lastUserText = [...rows].reverse().find((r) => r.kind === "user");
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
   // again would do it all over.
   const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
@@ -485,18 +528,42 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     setAway((a) => (far ? (a ?? { since: rows.length }) : null));
   };
   const unseen = away ? Math.max(0, rows.length - away.since) : 0;
+  // A long chat comes in several pages as it opens, each landing at the end, and the list follows the end while the reader is
+  // near it: one who started scrolling up was pulled back down with every page. Once they have moved, it is left where they took
+  // it until the chat has come whole (then the end is followed again as before).
+  const [movedWhileLoading, setMovedWhileLoading] = useState(false);
+  const resetting = view.resetting;
+  useEffect(() => {
+    if (!resetting) setMovedWhileLoading(false);
+  }, [resetting]);
+  const followEnd = !(resetting && movedWhileLoading);
+  // (0, not none: with none the list stops looking, and a pull it had already decided on, from before the finger moved, still came.)
+  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? 0.2 : 0, startRenderingFromBottom: true }), [followEnd]);
 
+  // A row's handlers stay the same function from one drawing of the chat to the next (each calls the latest of what it does), so
+  // the rows, which are memoised, aren't all drawn again with every word streamed.
+  const handlers = useRef(new Map<string, () => void>());
+  const stable = useRef(new Map<string, () => void>());
+  const steady = (key: string, fn: () => void) => {
+    handlers.current.set(key, fn);
+    let s = stable.current.get(key);
+    if (!s) {
+      s = () => handlers.current.get(key)?.();
+      stable.current.set(key, s);
+    }
+    return s;
+  };
   const renderRow = ({ item: row }: { item: Row }) => {
     // What is searched for, given only to the messages that say it: the rest are not drawn again as it is typed.
     const term = marks.all.has(row.key) ? find?.query : undefined;
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
           // On a page of its own, a Review file page is laid out as the Mac's: its file a link to its change, and its findings.
           const file = paged ? reviewOf(row) : null;
@@ -534,7 +601,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
-              <ShellCard item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
+              <ShellCard key={row.item.id} item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
             </View>
           );
       }
@@ -635,7 +702,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </View>
       )}
       {problem && (
-        <Pressable accessibilityRole="alert" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: "#d93b3b14", borderRadius: 10, padding: 10 }}>
+        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
           <Txt variant="small" tone="stop">
             {problem}
           </Txt>
@@ -646,7 +713,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const foot = (
     <>
       <PlanCard todos={view.todos} />
-      {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
       {confirming && (
         <RunCommandCard
@@ -706,7 +772,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </Glass>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+        <Composer draftKey={slot} disabled={!online} placeholder={online ? undefined : "Waiting for your Mac…"} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );
@@ -726,7 +792,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         // A tap on the status bar would jump to the oldest message loaded, which in a chat is never where the reader wants to be,
         // and on a tablet the header's buttons are right under it.
         scrollsToTop={false}
-        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom } : undefined}
+        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : undefined}
         ref={list}
         onScroll={onScroll}
         scrollEventThrottle={64}
@@ -737,8 +803,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         scrollEnabled={!swiping}
         // With the keyboard up, a touch reaches what it lands on (a card's swipe to allow, a button) instead of only putting the keyboard away.
         keyboardShouldPersistTaps="handled"
-        getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind)}
-        maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
+        // Scrolling the chat puts the keyboard away (a tap does too: see tapAway).
+        keyboardDismissMode="on-drag"
+        // An answer that becomes the turn's summary when the turn ends keeps its cell (another type would swap the cell and play its
+        // entrance again: a blink as the turn ended).
+        getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind === "summary" ? "assistant" : r.kind)}
+        onScrollBeginDrag={resetting ? () => setMovedWhileLoading(true) : undefined}
+        maintainVisibleContentPosition={keepPosition}
         ListHeaderComponent={
           loadingEarlier ? (
             <ChatSkeleton label="Loading earlier messages" />
@@ -794,7 +865,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  // A tap on the chat (a message too) puts the keyboard away.
+  const tapAway = useTapAway();
   // What floats over the list rides the keyboard with the bar.
   const riding = (el: React.ReactNode) =>
     el ? (
@@ -802,17 +875,22 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         {el}
       </KeyboardStickyView>
     ) : null;
+  // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
+  // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
+  // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
+  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
+          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
             {body}
           </View>
           {riding(jump)}
           {riding(pageBar)}
+          {riding(replyBar)}
           {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
               the top, where the clock is, to nothing below) so the words under them never run into them. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
@@ -831,10 +909,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         <>
           {head}
-          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
+          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
             {body}
             {riding(jump)}
             {riding(pageBar)}
+            {riding(replyBar)}
           </View>
           <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>
         </>

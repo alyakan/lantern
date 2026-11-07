@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Text, TextInput, View } from "react-native";
+import { MAX_TEXT_SCALE } from "../ui/components";
+import { PressScale } from "../ui/motion";
 import type { Item } from "../sync/reducer";
 import { fonts, radius } from "../ui/theme";
 import { term } from "../ui/terminal";
@@ -58,12 +60,13 @@ export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onIn
   const failed = item.status === "failed";
   const end = endLine(item.status, item.code);
   return (
-    <View accessible={false} accessibilityLabel={`Command: ${item.command}`} style={{ backgroundColor: term.bg, borderColor: failed ? `${term.fail}66` : term.line, borderWidth: 1, borderRadius: radius.inner, overflow: "hidden" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 36, paddingLeft: 12, paddingRight: 8, paddingVertical: 6 }}>
-        <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 14 }}>
+    <View style={{ backgroundColor: term.bg, borderColor: failed ? `${term.fail}66` : term.line, borderWidth: 1, borderRadius: radius.inner, overflow: "hidden" }}>
+      {/* Its buttons are a thumb apart: Stop beside Reply is not one to hit by mistake. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, paddingLeft: 12, paddingRight: 8, paddingVertical: 6 }}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 14 }}>
           ›
         </Text>
-        <Text selectable style={{ flex: 1, color: term.hi, fontFamily: fonts.mono, fontSize: 13 }}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={{ flex: 1, color: term.hi, fontFamily: fonts.mono, fontSize: 13 }}>
           {item.command}
         </Text>
         {running ? (
@@ -76,7 +79,7 @@ export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onIn
           <>
             {/* Not for a command that read a password: its output is not offered to anyone. */}
             {onTell && !item.secret && !!clean.trim() && <HeaderButton label="Tell Claude" hint="Puts what it printed in the message box, to read and send" onPress={onTell} />}
-            <Text style={{ color: failed ? term.fail : term.dim, fontFamily: fonts.mono, fontSize: 11 }}>
+            <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: failed ? term.fail : term.dim, fontFamily: fonts.mono, fontSize: 11 }}>
               {end}
               {elapsed !== null && elapsed >= 1000 ? `${end ? " · " : ""}${took(elapsed)}` : ""}
             </Text>
@@ -84,12 +87,12 @@ export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onIn
         )}
       </View>
       {shown.hidden > 0 && (
-        <Pressable accessibilityRole="button" onPress={() => setAll(true)} style={{ paddingHorizontal: 12, paddingBottom: 4 }}>
-          <Text style={{ color: term.dim, fontFamily: fonts.mono, fontSize: 11, textDecorationLine: "underline" }}>Show all {shown.hidden + SHOWN_LINES} lines</Text>
-        </Pressable>
+        <PressScale accessibilityRole="button" onPress={() => setAll(true)} style={{ paddingHorizontal: 12, paddingBottom: 4 }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: term.dim, fontFamily: fonts.mono, fontSize: 11, textDecorationLine: "underline" }}>Show all {shown.hidden + SHOWN_LINES} lines</Text>
+        </PressScale>
       )}
       {!!shown.text && (
-        <Text selectable accessibilityLabel="Command output" style={{ color: term.out, fontFamily: fonts.mono, fontSize: 12, lineHeight: 18, paddingHorizontal: 12, paddingBottom: 10 }}>
+        <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable accessibilityLabel="Command output" style={{ color: term.out, fontFamily: fonts.mono, fontSize: 12, lineHeight: 18, paddingHorizontal: 12, paddingBottom: 10 }}>
           {shown.text}
         </Text>
       )}
@@ -110,9 +113,9 @@ export function ShellCard({ item, onInput, onStop, onTell }: { item: Shell; onIn
 
 function HeaderButton({ label, hint, onPress }: { label: string; hint: string; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} hitSlop={6} style={{ minHeight: 24, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: term.line, justifyContent: "center" }}>
-      <Text style={{ color: term.text, fontFamily: fonts.mono, fontSize: 11 }}>{label}</Text>
-    </Pressable>
+    <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} style={{ minHeight: 30, paddingHorizontal: 12, borderRadius: radius.pill, borderWidth: 1, borderColor: term.line, justifyContent: "center" }}>
+      <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: term.text, fontFamily: fonts.mono, fontSize: 11 }}>{label}</Text>
+    </PressScale>
   );
 }
 
@@ -125,7 +128,7 @@ function ShellAsk({ prompt, secret, onSend, onDismiss }: { prompt: string; secre
   };
   return (
     <View style={{ margin: 8, marginTop: 0, padding: 8, gap: 6, borderRadius: radius.inner, borderWidth: 1, borderColor: `${term.bright}59`, backgroundColor: term.field }}>
-      <Text numberOfLines={1} style={{ color: term.hi, fontFamily: fonts.mono, fontSize: 12 }}>
+      <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} numberOfLines={1} style={{ color: term.hi, fontFamily: fonts.mono, fontSize: 12 }}>
         {secret ? `🔒 ${prompt || "Password"}` : prompt || "Reply to the command"}
       </Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -146,12 +149,12 @@ function ShellAsk({ prompt, secret, onSend, onDismiss }: { prompt: string; secre
           placeholderTextColor={term.dim}
           style={{ flex: 1, minHeight: 34, color: term.hi, fontFamily: fonts.mono, fontSize: 14, paddingVertical: 4 }}
         />
-        <Pressable accessibilityRole="button" accessibilityLabel="Send reply" onPress={send} style={{ minHeight: 30, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: term.bright, justifyContent: "center" }}>
-          <Text style={{ color: term.bg, fontFamily: fonts.mono, fontSize: 12, fontWeight: "700" }}>Send</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Not now" onPress={onDismiss} hitSlop={8}>
-          <Text style={{ color: term.dim, fontFamily: fonts.mono, fontSize: 12 }}>Not now</Text>
-        </Pressable>
+        <PressScale accessibilityRole="button" accessibilityLabel="Send reply" onPress={send} style={{ minHeight: 30, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: term.bright, justifyContent: "center" }}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: term.bg, fontFamily: fonts.mono, fontSize: 12, fontWeight: "700" }}>Send</Text>
+        </PressScale>
+        <PressScale accessibilityRole="button" accessibilityLabel="Not now" onPress={onDismiss} hitSlop={8}>
+          <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} style={{ color: term.dim, fontFamily: fonts.mono, fontSize: 12 }}>Not now</Text>
+        </PressScale>
       </View>
     </View>
   );

@@ -45,9 +45,11 @@ export function Button({ label, onPress, kind = "ink", link = false, disabled, s
   // A filled button that can't be pressed yet is a solid grey with grey words, not the button faded: faded, it all but vanished over
   // what scrolls under a floating one (the decision's Send answer).
   const off = !!disabled && !link;
-  const bg = link ? "transparent" : off ? colors.shapeStrong : { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // On the night screens a button that can't be pressed is the night's raised grey with dim words: the day's grey glared there.
+  const night = kind.startsWith("night");
+  const bg = link ? "transparent" : off ? (night ? colors.nightRaised : colors.shapeStrong) : { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": colors.nightRaised, "night-ghost": colors.nightRaised }[kind];
   // On "hi" the words are dark in either appearance: they are on yellow. A link has no fill, so its words are the page's.
-  const fg = off ? "ink2" : link ? (kind === "night-stop" ? "night-stop" : kind.startsWith("night") ? "white" : "ink") : kind === "go" ? "on-go" : kind === "ink" && regular ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
+  const fg = off ? (night ? "night" : "ink2") : link ? (kind === "night-stop" ? "night-stop" : night ? "white" : "ink") : kind === "go" ? "on-go" : kind === "ink" && regular ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (
     <PressScale
       accessibilityRole="button"
@@ -56,7 +58,7 @@ export function Button({ label, onPress, kind = "ink", link = false, disabled, s
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
-      opacity={disabled && link ? 0.4 : 1}
+      opacity={disabled && (link || night) ? 0.45 : 1}
       style={[{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
     >
       <Txt variant="body" tone={fg} style={link ? { fontWeight: "600", textDecorationLine: "underline" } : { fontWeight: "700" }}>

@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useRecyclingState } from "@shopify/flash-list";
 import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
@@ -21,7 +22,7 @@ import type { ImageSource } from "../platformImages";
 import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
@@ -47,8 +48,9 @@ type UserItem = Extract<Item, { kind: "user" }>;
 /** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
 const TURN_GAP = 22;
 
-export const UserRow = memo(function UserRow({ item, onActions, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
+export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
+  const failed = !!item.failed;
   // Yours are on the right, Claude's words across the page from the left: who said what reads down the side.
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: TURN_GAP, alignItems: "flex-end" }}>
@@ -57,7 +59,7 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : 1 }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
@@ -75,9 +77,18 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
         {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
       </Pressable>
       {item.failed && (
-        <Txt variant="small" tone="stop" style={{ marginTop: 4, marginRight: 2, textAlign: "right" }}>
-          Not sent. {item.failed}
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>
+          <Txt variant="small" tone="stop" style={{ textAlign: "right", flexShrink: 1, paddingVertical: 4 }}>
+            Not sent. {item.failed}
+          </Txt>
+          {onRetry && (
+            <PressScale accessibilityRole="button" accessibilityLabel="Try again" accessibilityHint="Sends this message again" onPress={onRetry} haptic="select" scaleTo={0.94} style={{ minHeight: MIN_TARGET, justifyContent: "center" }}>
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                Try again
+              </Txt>
+            </PressScale>
+          )}
+        </View>
       )}
       {queued && !item.failed && (
         <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
@@ -90,6 +101,14 @@ export const UserRow = memo(function UserRow({ item, onActions, queued = false, 
 
 /** How tall a summary card's text is before "Show all" (a long one is clipped to this). */
 const SUMMARY_COLLAPSED = 230;
+/**
+ * How tall each summary's words came out, by the words: a cell the list draws again for a summary already seen starts at its
+ * size. Scrolling up through a chat draws its cells anew, and a long summary laid out whole and then clipped moved everything
+ * under the reader's finger, one summary after another, as if the chat pulled them back down.
+ */
+const summaryHeights = new Map<string, number>();
+/** About how many characters fill a clipped summary on a phone: a summary not measured yet that is longer is taken as long. */
+const SUMMARY_LONG_CHARS = 600;
 
 /**
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
@@ -97,13 +116,21 @@ const SUMMARY_COLLAPSED = 230;
  */
 export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark, onFile }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
   const colors = useColors();
-  const [full, setFull] = useState(false);
-  const [height, setHeight] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
+  // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
+  const [full, setFull] = useRecyclingState(false, [row.key]);
+  const [height, setHeight] = useRecyclingState<number | null>(() => summaryHeights.get(row.item.text) ?? null, [row.key]);
+  const [copied, setCopied] = useRecyclingState(false, [row.key]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
-  const long = height !== null && height > SUMMARY_COLLAPSED + 50;
-  const clipped = long && !full && !mark;
+  const measured = (h: number) => {
+    summaryHeights.set(row.item.text, h);
+    setHeight(h);
+  };
+  // Until it is measured, its length says: its Show all is there from the first drawing, not added under it a moment later.
+  const long = height !== null ? height > SUMMARY_COLLAPSED + 50 : row.item.text.length > SUMMARY_LONG_CHARS;
+  // Until its words are measured it is held at the clipped height: one that turns out short grows a little, where one laid out
+  // whole and then clipped shrank by a screen or more.
+  const clipped = (long || height === null) && !full && !mark;
   const took = row.durationMs ? turnLine({ kind: "turn", id: "", isError: false, result: null, durationMs: row.durationMs }).text.replace("Finished in ", "") : null;
   const copy = () => {
     void Promise.resolve(Clipboard.setStringAsync(row.item.text)).catch(() => {});
@@ -113,7 +140,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
   };
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View accessibilityLabel="Summary of the work" style={[{ backgroundColor: colors.card, borderRadius: 20, overflow: "hidden", flexDirection: "row" }, shadow.card, { shadowOpacity: 0.07 }]}>
+      <View accessibilityLabel="Summary of the work" style={[{ backgroundColor: colors.card, borderRadius: radius.block, overflow: "hidden", flexDirection: "row" }, shadow.card, { shadowOpacity: 0.06 }]}>
         <View accessibilityElementsHidden style={{ width: 4, backgroundColor: colors.go }} />
         <View style={{ flex: 1, padding: 14, gap: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -130,11 +157,11 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
             )}
           </View>
           <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
-            <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} />
+            <View testID="summary-words" onLayout={(e) => measured(e.nativeEvent.layout.height)}>
+              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
-            {clipped && (
+            {long && clipped && (
               <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44 }}>
                 {[0.25, 0.5, 0.75, 0.95].map((a) => (
                   <View key={a} style={{ flex: 1, backgroundColor: `${colors.card}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
@@ -201,7 +228,7 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
  */
 export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: Extract<Row, { kind: "hook" }>; onFiles: (files: string[]) => void; onOutput?: (step: { id: string; text: string }) => void }) {
   const colors = useColors();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useRecyclingState(false, [row.key]);
   const line = row.going ? "Running…" : lastLine(row.said) || "Done";
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
@@ -235,7 +262,7 @@ const NO_NOTES: string[] = [];
 export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useRecyclingState<string | null>(null, [rowKey]);
   const opened = chips.find((c) => c.key === open && c.items);
   const notesOpen = notes.length > 0 && (open === "notes" || (!!mark && notes.some((n) => markRanges(n, mark).length > 0)));
   // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in. A cell the list reuses
@@ -269,7 +296,7 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
         <FadeSlideIn>
           <View accessibilityLabel="Messages" style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 10 }}>
             {notes.map((n, i) => (
-              <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} />
+              <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} surface={colors.card} />
             ))}
           </View>
         </FadeSlideIn>
@@ -285,9 +312,9 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
               );
               // A step's output can be asked for only where the Mac sends it: not for a chip of "other tools".
               return onOutput && opened.key !== "other" ? (
-                <Pressable key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
+                <PressScale key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
                   {line}
-                </Pressable>
+                </PressScale>
               ) : (
                 <View key={i}>{line}</View>
               );
@@ -302,27 +329,27 @@ export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
 export const PageRow = memo(function PageRow({ row, answered, onAction, mark, paged = false, onFile }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void; /** A file its turn edited was tapped (named in its words, or in the list under it). */ onFile?: (path: string) => void; /** What a chat search looks for, marked in the words; a page cut short is shown whole. */ mark?: string; /** On a page of its own (Step by step's pages): shown whole, and its buttons are at the end of the page, not here. */ paged?: boolean }) {
   const colors = useColors();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useRecyclingState(false, [row.key]);
   const { page } = row;
   // A page is cut short unless it was opened or a search is marking it (the words looked for may be in the part cut).
   const cut = page.body.length >= 260 && !open && !mark && !paged;
   const body = cut ? `${page.body.slice(0, 240).trimEnd()}…` : page.body;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View style={[{ backgroundColor: colors.card, borderRadius: 18, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.block, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
           <Marked text={page.kicker} mark={mark} />
         </Txt>
         <Txt variant="heading">
           <Marked text={page.title} mark={mark} />
         </Txt>
-        {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} />}
+        {!!body && <Markdown text={body} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />}
         {page.body.length >= 260 && !paged && (
-          <Pressable accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
+          <PressScale accessibilityRole="button" onPress={() => setOpen(!open)} hitSlop={8}>
             <Txt variant="small" tone="cobalt">
               {cut ? "Show the whole page" : "Show less"}
             </Txt>
-          </Pressable>
+          </PressScale>
         )}
         {/* On a page of its own, the files the step changed, each a link to its change: whether or not its words name them. */}
         {paged && onFile && row.files.length > 0 && (
@@ -331,11 +358,11 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
               Changed in this step
             </Txt>
             {row.files.map((f) => (
-              <Pressable key={f} accessibilityRole="link" accessibilityLabel={f.split("/").pop() ?? f} accessibilityHint="Shows what changed in this file" onPress={() => onFile(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
+              <PressScale key={f} accessibilityRole="link" accessibilityLabel={f.split("/").pop() ?? f} accessibilityHint="Shows what changed in this file" onPress={() => onFile(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
                 <Txt variant="small" tone="cobalt" numberOfLines={1} ellipsizeMode="head" style={{ textDecorationLine: "underline" }}>
                   {f.split("/").slice(-3).join("/")}
                 </Txt>
-              </Pressable>
+              </PressScale>
             ))}
           </View>
         )}
@@ -409,11 +436,11 @@ function DecisionCard({ title, status, mark, details }: { title: string; status:
     </View>
   );
   return (
-    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
+    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
       {details ? (
-        <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
           {head}
-        </Pressable>
+        </PressScale>
       ) : (
         head
       )}
@@ -534,7 +561,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
   const readHere = !preview || fitsInline(preview);
   const swipe = view.kind === "allow" && !!onAllow && readHere;
   const openCard = (
-    <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
+    <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: radius.block, padding: 14, gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Tag>{view.tag}</Tag>
         {swipe && (
@@ -573,7 +600,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
   );
 
   const status = item.state === "withdrawn" ? "No longer pending" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
-  const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} details={hasDetails(item) ? <DecisionDetails item={item} /> : undefined} />;
+  const doneCard = <DecisionCard key={item.id} title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} details={hasDetails(item) ? <DecisionDetails item={item} /> : undefined} />;
 
   if (item.state === "open" || settling) {
     const going = !!settling && item.state !== "open";
@@ -608,7 +635,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
         </Txt>
         {/* A long answer wraps inside the screen: the chip is never wider than the chat, and its words may shrink to fit beside the check. */}
         <PopIn style={{ maxWidth: "100%" }}>
-          <View testID="answer-chip" style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" }}>
+          <View testID="answer-chip" style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: radius.inner, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" }}>
             <View accessibilityElementsHidden style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.go, transform: [{ rotate: "-45deg" }] }} />
             <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1 }}>
               {item.answer}
@@ -627,7 +654,7 @@ export const DesktopRow = memo(function DesktopRow({ item }: { item: Extract<Ite
   const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, padding: 12, gap: 2 }}>
+      <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 12, gap: 2 }}>
         <Txt variant="small" style={{ fontWeight: "700" }}>
           Answer this on your Mac
         </Txt>
@@ -852,7 +879,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               editable={!disabled && !running}
               style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
             />
-            <Pressable
+            <PressScale
               accessibilityRole="button"
               accessibilityLabel="Run"
               accessibilityState={{ disabled: !command.trim() || running || !!disabled }}
@@ -861,7 +888,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
               style={{ minHeight: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
             >
               <Text style={{ color: command.trim() && !running && !disabled ? term.bg : term.dim, fontFamily: fonts.mono, fontSize: 13, fontWeight: "700" }}>{running ? "…" : "Run"}</Text>
-            </Pressable>
+            </PressScale>
           </View>
           <Txt variant="tiny" tone="ink3" style={{ marginTop: 6, marginLeft: 8, fontFamily: fonts.mono }}>
             Runs on your Mac, outside Claude · backspace to leave
@@ -1199,7 +1226,6 @@ function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source
               close();
             }}
           />
-          <Button label="Cancel" kind="ghost" onPress={close} />
         </View>
       )}
     </Sheet>
@@ -1228,8 +1254,8 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
     <Sheet onClose={onClose} wide>
       {(close, scroll) => (
         <View style={{ flexShrink: 1, paddingBottom: insets.bottom + 8 }}>
-          <View style={{ padding: space.lg, gap: 8 }}>
-            <Txt variant="heading">What changed</Txt>
+          <SheetBar title="What changed" close={{ label: "Close", onPress: close }} />
+          <View style={{ paddingHorizontal: space.lg, paddingTop: 4, paddingBottom: space.lg, gap: 8 }}>
             {files.length > 1 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 {files.map((f) => (
@@ -1256,9 +1282,6 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
             )}
             {text !== null && <DiffView path={path} text={text} />}
           </ScrollView>
-          <View style={{ padding: space.lg }}>
-            <Button label="Close" kind="ghost" onPress={close} />
-          </View>
         </View>
       )}
     </Sheet>

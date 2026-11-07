@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, View } from "react-native";
+import { ScrollView, AppState, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import { useController } from "../shell/hooks";
 import { useAppLock } from "../shell/lockContext";
 import { Button, Txt } from "../ui/components";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
 import { countdown, isGrid, runs, squareSize } from "../view/qr";
 
@@ -132,11 +132,11 @@ export function PairDeviceSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={{ padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 10 }}>
-          <Txt variant="heading" accessibilityRole="header">
-            Pair another device
-          </Txt>
+      {(close, scroll) => (
+        <View style={{ flexShrink: 1 }}>
+          <SheetBar title="Pair a device" close={{ label: code ? "Done" : "Close", onPress: close }} />
+          {/* It scrolls: the code, its words and the copy button are taller than a small phone's sheet at the larger text sizes. */}
+          <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.xl, paddingTop: 8, paddingBottom: insets.bottom + space.xl, gap: 10 }}>
           {shown.kind === "checking" && (
             <Txt variant="body" tone="ink2">
               Checking it's you…
@@ -165,7 +165,7 @@ export function PairDeviceSheet({ onClose }: { onClose: () => void }) {
               <Button label={code.copied ? "Link copied" : "Copy the link"} kind="ghost" onPress={() => void copy()} />
             </>
           )}
-          <Button label={code ? "Done" : "Close"} kind={code ? "ink" : "ghost"} onPress={close} />
+          </ScrollView>
         </View>
       )}
     </Sheet>

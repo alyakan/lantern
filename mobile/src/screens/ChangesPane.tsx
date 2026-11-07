@@ -6,6 +6,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { useMacCan } from "../shell/useControls";
 import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
+import { SheetPill } from "../ui/Sheet";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
@@ -29,6 +30,9 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
   // the chat edits something, which changes the other views too.
   const [listed, setListed] = useState<{ scope: RemoteChangeScope; files: ChangedFile[]; base: string | null } | { scope: RemoteChangeScope; error: string } | null>(null);
   const edits = `${local.length}:${local.reduce((n, f) => n + f.added + f.removed, 0)}`;
+  // Try again after a list or a diff that didn't come: asked again by bumping this.
+  const [asks, setAsks] = useState(0);
+  const again = () => setAsks((n) => n + 1);
   useEffect(() => {
     if (!canScopes) return;
     let live = true;
@@ -39,7 +43,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
     return () => {
       live = false;
     };
-  }, [canScopes, controller, slot, scope, edits]);
+  }, [canScopes, controller, slot, scope, edits, asks]);
   const mine = listed?.scope === scope ? listed : null;
   // The chat's own edits stand in until the Mac's list comes (and are all there is from an older Mac).
   const known: ChangedFile[] | null = mine && "files" in mine ? (scope === "chat" ? inEditOrder(mine.files, local) : mine.files) : scope === "chat" ? local : null;
@@ -72,7 +76,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
       live = false;
     };
     // The diff of a file is read again when the file's own counts change (Claude edited it again).
-  }, [path, load, shownFile?.added, shownFile?.removed]);
+  }, [path, load, shownFile?.added, shownFile?.removed, asks]);
   const pickScope = (s: RemoteChangeScope) => {
     if (s === scope) return;
     setScope(s);
@@ -100,14 +104,17 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
             <FloatIcon floating={float.floating} color={colors.ink} />
           </PressScale>
         )}
-        <Button label={hideLabel} kind="ghost" onPress={onHide} />
+        <SheetPill label={hideLabel} onPress={onHide} />
       </View>
       {canScopes && <ScopeSwitch value={scope} onChange={pickScope} />}
       {files.length === 0 ? (
         known || failed ? (
-          <Txt variant="body" tone="ink2" accessibilityRole={failed ? "alert" : undefined} style={{ padding: space.lg }}>
-            {failed ?? EMPTY_SCOPE[scope]}
-          </Txt>
+          <View style={{ padding: space.lg, gap: 4, alignItems: "flex-start" }}>
+            <Txt variant="body" tone="ink2" accessibilityRole={failed ? "alert" : undefined}>
+              {failed ?? EMPTY_SCOPE[scope]}
+            </Txt>
+            {failed && <Button label="Try again" kind="ghost" onPress={again} />}
+          </View>
         ) : (
           <View style={{ padding: space.lg }}>
             <DiffSkeleton />
@@ -163,9 +170,12 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
               </View>
             )}
             {!!error && (
-              <Txt tone="stop" accessibilityRole="alert" style={{ paddingHorizontal: space.lg }}>
-                {error}
-              </Txt>
+              <View style={{ paddingHorizontal: space.lg, gap: 4, alignItems: "flex-start" }}>
+                <Txt tone="stop" accessibilityRole="alert">
+                  {error}
+                </Txt>
+                <Button label="Try again" kind="ghost" onPress={again} />
+              </View>
             )}
             {text !== null && path && <DiffView path={path} text={text} />}
           </ScrollView>

@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, LayoutAnimation, Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AccessibilityInfo, Animated, Easing, LayoutAnimation, Pressable, View, type Insets, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
+import { MIN_TARGET } from "./theme";
 
 /**
  * Whether to skip animations: always in tests (they run on Node, with no frames to draw), and for people who asked the
@@ -179,12 +180,23 @@ export function PopIn({ children, delay = 0, glass = false, animate = true, styl
 
 const APressable = Animated.createAnimatedComponent(Pressable);
 
+/** The reach a pressable was given, each side made at least what it needs to be a finger's size. */
+export function widen(given: PressableProps["hitSlop"], needed: Insets | undefined): PressableProps["hitSlop"] {
+  if (!needed) return given;
+  if (given == null) return needed;
+  const g = typeof given === "number" ? { top: given, bottom: given, left: given, right: given } : given;
+  return { top: Math.max(g.top ?? 0, needed.top ?? 0), bottom: Math.max(g.bottom ?? 0, needed.bottom ?? 0), left: Math.max(g.left ?? 0, needed.left ?? 0), right: Math.max(g.right ?? 0, needed.right ?? 0) };
+}
+
 /**
  * A pressable that gives under the finger: it shrinks a little while pressed and springs back, with a tap on the phone.
  * `opacity` is the resting opacity (a disabled one is dimmer); it dims a touch more while pressed.
  */
-export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", opacity = 1, disabled, onPressIn, onPressOut, ...rest }: Omit<PressableProps, "style" | "children"> & { children: ReactNode; style?: StyleProp<ViewStyle>; scaleTo?: number; haptic?: "light" | "select" | "none"; opacity?: number }) {
+export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", opacity = 1, disabled, onPressIn, onPressOut, hitSlop, onLayout, reach: reaches = true, ...rest }: Omit<PressableProps, "style" | "children"> & { children: ReactNode; style?: StyleProp<ViewStyle>; scaleTo?: number; haptic?: "light" | "select" | "none"; opacity?: number; /** False for cells packed edge to edge (a calendar's days), where reaching past itself would take a neighbour's taps. */ reach?: boolean }) {
   const s = useRef(new Animated.Value(1)).current;
+  // Smaller than a finger (44 points): it reaches as far around itself as it lacks (or as it was given, if that is more), so a
+  // small chip or link is as easy to hit as a full button. Measured, so it is only ever what is missing.
+  const [reach, setReach] = useState<Insets | undefined>(undefined);
   const to = (v: number) => {
     if (skips()) return s.setValue(v);
     Animated.spring(s, { toValue: v, useNativeDriver: true, speed: 60, bounciness: v === 1 ? 14 : 0 }).start();
@@ -192,6 +204,15 @@ export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", 
   return (
     <APressable
       {...rest}
+      hitSlop={reaches ? widen(hitSlop, reach) : hitSlop}
+      onLayout={(e) => {
+        onLayout?.(e);
+        if (!reaches) return;
+        const { width, height } = e.nativeEvent.layout;
+        const v = Math.max(0, Math.ceil((MIN_TARGET - height) / 2));
+        const h = Math.max(0, Math.ceil((MIN_TARGET - width) / 2));
+        setReach((r) => (r?.top === v && r?.left === h ? r : v || h ? { top: v, bottom: v, left: h, right: h } : undefined));
+      }}
       disabled={disabled}
       onPressIn={(e) => {
         to(scaleTo);

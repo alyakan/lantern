@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Keyboard, Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Keyboard, Platform, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent, type StyleProp, type ViewStyle } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 /** The room under the chat bar with the keyboard down (above the home indicator), and the gap between the bar and the keyboard when it is up. */
@@ -19,6 +19,36 @@ export function useKeyboardUp() {
     };
   }, []);
   return up;
+}
+
+/** How far a finger may move, and for how long it may stay down, and still be a tap. */
+const TAP_SLOP = 10;
+const TAP_MS = 350;
+
+/**
+ * A tap anywhere in what these are put on closes the keyboard, as iOS's Messages does: on a message too, not only in the space
+ * between them. What the tap lands on still gets it (a button, a link: the list's taps aren't held for the keyboard). A drag (a
+ * scroll) or a hold (a message's actions) leaves the keyboard up. They only listen: nothing here takes the touch.
+ */
+export function useTapAway() {
+  const start = useRef<{ x: number; y: number; at: number; field: unknown } | null>(null);
+  return {
+    onTouchStart: (e: GestureResponderEvent) => {
+      const n = e.nativeEvent;
+      start.current = n.touches.length > 1 ? null : { x: n.pageX, y: n.pageY, at: n.timestamp, field: TextInput.State.currentlyFocusedInput() };
+    },
+    onTouchEnd: (e: GestureResponderEvent) => {
+      const s = start.current;
+      start.current = null;
+      const n = e.nativeEvent;
+      // A tap that put the keyboard on a field in the chat (a command's reply) is that field's, not one to close it.
+      const focused = TextInput.State.currentlyFocusedInput();
+      if (s && Math.abs(n.pageX - s.x) < TAP_SLOP && Math.abs(n.pageY - s.y) < TAP_SLOP && n.timestamp - s.at < TAP_MS && Keyboard.isVisible() && focused === s.field) Keyboard.dismiss();
+    },
+    onTouchCancel: () => {
+      start.current = null;
+    },
+  };
 }
 
 /**

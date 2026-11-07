@@ -121,9 +121,18 @@ describe("a chat", () => {
       await hold("First question here");
       await waitFor(() => expect(screen.getByRole("button", { name: "Quote in a reply" })).toBeTruthy());
       expect(screen.queryByRole("button", { name: "Edit and send again" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
       await hold("Second one about the login");
       await waitFor(() => expect(screen.getByRole("button", { name: "Edit and send again" })).toBeTruthy());
+    });
+
+    it("shows a message to select part of in a field that can't be edited (iOS's selectable text takes all of it or nothing)", async () => {
+      await withSession(talk);
+      await hold("First question here");
+      await waitFor(() => screen.getByRole("button", { name: "Select text" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Select text" }));
+      const field = await screen.findByTestId("select-text");
+      expect(field.props.value).toBe("First question here");
+      expect(field.props.editable).toBe(false);
     });
 
     it("quotes a message into the box, under what is already typed", async () => {
@@ -451,6 +460,17 @@ describe("a chat", () => {
     await waitFor(() => expect(screen.getByText("Not sent. That chat isn't open on your Mac.")).toBeTruthy());
   });
 
+  it("offers to send a message that didn't go again, as the same message", async () => {
+    const { lastOf } = await withSession(turn, {}, { send: new Error("Your Mac didn't answer in time.") });
+    await fireEvent.changeText(screen.getByLabelText("Message"), "hi");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy());
+    const first = lastOf("send") as { client_id: string };
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect((lastOf("send") as { client_id: string }) !== first).toBe(true));
+    expect(lastOf("send")).toMatchObject({ text: "hi", client_id: first.client_id });
+  });
+
   it("stops Claude while it works, and only then offers to", async () => {
     const quiet = await withSession(turn);
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
@@ -678,6 +698,42 @@ describe("a chat", () => {
     expect(screen.getByLabelText("Message").props.editable).toBe(false);
   });
 
+  it("draws a chat that comes in pages once, when it is whole, keeping what it showed until then", async () => {
+    const { controller } = await withSession(turn);
+    const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
+    // A catch-up starts the chat over: the messages already there stay while its pages come.
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 30, page: 0, done: false, hidden: 0, events: turn.slice(0, 1) } }));
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    // Something sent from here meanwhile shows at once.
+    await act(async () => void controller.sync.send("a", "Quick one."));
+    expect(screen.getByText("Quick one.")).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 31, page: 1, done: false, hidden: 0, events: turn.slice(1) } }));
+    expect(screen.queryByText("And the changelog.")).toBeNull();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 32, page: 2, done: true, hidden: 0, events: later } }));
+    expect(screen.getByText("And the changelog.")).toBeTruthy();
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+  });
+
+  it("opens a long chat on the shape of a chat until all its pages have come", async () => {
+    const { controller } = await withSession([]);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
+    expect(screen.queryByText("412 tests passed")).toBeNull();
+    expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: true, hidden: 0, events: [] } }));
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+  });
+
+  it("doesn't pull a reader who scrolls while a long chat's pages come back down with each page, and follows the end once it is whole", async () => {
+    const { controller } = await withSession([]);
+    const threshold = () => screen.getByTestId("chat-list").props.maintainVisibleContentPosition?.autoscrollToBottomThreshold;
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
+    expect(threshold()).toBe(0.2);
+    await act(async () => fireEvent(screen.getByTestId("chat-list"), "scrollBeginDrag", { nativeEvent: {} }));
+    expect(threshold()).toBe(0);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 12, page: 1, done: true, hidden: 0, events: [] } }));
+    expect(threshold()).toBe(0.2);
+  });
+
   it("says how much a catch-up covered, for a moment", async () => {
     // Set up with real timers (the screen settles on one), then take the clock over for the banner's four seconds.
     const { controller } = await withSession(turn);
@@ -686,6 +742,9 @@ describe("a chat", () => {
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 24, page: 0, done: true, hidden: 0, events: turn } }));
       expect(screen.getByText("Caught up on 15 events from while you were away")).toBeTruthy();
       await act(async () => void jest.advanceTimersByTime(4500));
+      expect(screen.queryByText(/Caught up on/)).toBeNull();
+      // What streams in after it doesn't bring it back.
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 25, event: { kind: "text_delta", block_id: "late", text: "more" } } }));
       expect(screen.queryByText(/Caught up on/)).toBeNull();
     } finally {
       jest.useRealTimers();

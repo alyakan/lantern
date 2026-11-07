@@ -6,7 +6,7 @@
 import { generateKeypair, keypairFrom, type Keypair } from "../noise/noise";
 import { fromBase64Url, toBase64Url, type PairingOffer } from "../pairing";
 import { MacKeyMismatch } from "../noise/noise";
-import { comeIn, NoAnswer, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
+import { comeIn, NoAnswer, NoReply, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
 import type { Link, Transport } from "./transport";
 
 /** The Mac this phone is paired with, as kept (its own key in the Keychain or Keystore, see storage). */
@@ -60,6 +60,9 @@ export interface ConnectionDeps {
   newKey?: () => Keypair;
   /** Tests only: replays a recorded handshake. */
   fixedEphemeral?: Uint8Array;
+  /** How long the Mac gets to answer when the app comes back to the foreground on a connection that looks up. */
+  probeWait?: number;
+  now?: () => number;
 }
 
 /** The pauses between tries after the link drops. */
@@ -69,6 +72,11 @@ const OPEN_WAIT = 1500;
 /** A Tailscale address gets longer: from cold its tunnel may take a few seconds to find a way through to the Mac. */
 const TAILNET_WAIT = 6000;
 const FIND_WAIT = 1500;
+/** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second; it is given more,
+ * since a big catch-up going the other way can hold its answer up on a slow link. */
+const PROBE_WAIT = 8000;
+/** A connection that lasted less than this before it dropped counts as a failed try: the next one waits its turn. */
+const STEADY_MS = 10_000;
 
 /** Tailscale's addresses (100.64.0.0/10): the ones that reach the Mac from anywhere, not only on its own network. */
 export function isTailnetHost(host: string): boolean {
@@ -198,9 +206,23 @@ export class Connection {
     void this.loop(paired, my);
   }
 
-  /** The app came back to the foreground: a phone's connections don't survive being away, so try again now. */
+  /**
+   * The app came back to the foreground: a phone's connections don't survive being away, so try again now. One that still
+   * looks up may have died meanwhile without either side hearing (the phone slept, or went from Wi-Fi to cellular): it is
+   * asked something small, and dialled again if the Mac doesn't answer, rather than letting every action wait and fail.
+   */
   resume() {
-    if (this.session) return;
+    const session = this.session;
+    if (session) {
+      void session.ask({ op: "list_waiting" }, this.d.probeWait ?? PROBE_WAIT).catch((e) => {
+        if (!(e instanceof NoReply) || this.session !== session) return;
+        this.hangUp();
+        // It was up until now: the dialling that follows starts from the shortest pause.
+        this.tries = 0;
+        void this.start();
+      });
+      return;
+    }
     if (this.looping) this.wakeUp?.();
     else void this.start();
   }
@@ -243,15 +265,31 @@ export class Connection {
     this.hangUp();
     this.lastHost = host;
     this.session = session;
-    this.tries = 0;
     this.d.onState({ kind: "connected", welcome: session.welcome, host });
     this.d.onSession?.(session);
     const my = this.gen;
-    void session.done.then(() => {
+    const since = this.now();
+    void session.done.then(async () => {
       if (this.session !== session) return;
       this.session = null;
-      if (my === this.gen) void this.start();
+      if (my !== this.gen) return;
+      // A Mac that lets the phone in and shuts it out again at once (it was removed, or refuses something) mustn't be dialled
+      // in a tight loop, each round asking for everything again: a drop that soon waits like a failed try.
+      if (this.now() - since < STEADY_MS) {
+        const wait = BACKOFF_MS[Math.min(this.tries, BACKOFF_MS.length - 1)];
+        this.tries += 1;
+        this.d.onState({ kind: "offline", reason: "Your Mac closed the connection.", retryInMs: wait });
+        await this.pause(wait);
+        if (my !== this.gen) return;
+      } else {
+        this.tries = 0;
+      }
+      void this.start();
     });
+  }
+
+  private now() {
+    return (this.d.now ?? Date.now)();
   }
 
   private async candidates(macKey: string, hosts: string[], port: number): Promise<[string, number][]> {

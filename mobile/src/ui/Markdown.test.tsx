@@ -259,3 +259,35 @@ describe("what a chat search looks for, marked in the words", () => {
     expect(screen.queryByText(/\]\(/)).toBeNull();
   });
 });
+
+describe("what scrolls sideways", () => {
+  const sized = async (box: number, inner: number) => {
+    const scroller = screen.getByTestId("side-scroll");
+    await fireEvent(scroller, "layout", { nativeEvent: { layout: { width: box, height: 40, x: 0, y: 0 } } });
+    await fireEvent(scroller, "contentSizeChange", inner, 40);
+    return scroller;
+  };
+
+  it("fades its right edge while there is more of it to see, and not once it is scrolled to the end", async () => {
+    await render(<Markdown text={"```ts\nconst aVeryLongLineThatRunsWellPastTheEdgeOfAPhone = 1;\n```"} />);
+    await sized(300, 700);
+    expect(screen.getByTestId("side-fade")).toBeTruthy();
+    await fireEvent.scroll(screen.getByTestId("side-scroll"), { nativeEvent: { contentOffset: { x: 400, y: 0 } } });
+    expect(screen.queryByTestId("side-fade")).toBeNull();
+  });
+
+  it("has no fade when it all fits", async () => {
+    await render(<Markdown text={"```ts\nconst a = 1;\n```"} />);
+    await sized(300, 200);
+    expect(screen.queryByTestId("side-fade")).toBeNull();
+  });
+});
+
+describe("a quote in your own message", () => {
+  it("is in the bubble's own colour, not grey on the dark bubble", async () => {
+    await render(<Markdown tone="on-ink" text={"> what you said before"} />);
+    const words = screen.getByText("what you said before");
+    const color = StyleSheet.flatten(words.props.style)?.color ?? StyleSheet.flatten(words.parent?.props.style)?.color;
+    expect(color).toBe(lightColors.onInk);
+  });
+});

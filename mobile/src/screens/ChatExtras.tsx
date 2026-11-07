@@ -13,9 +13,10 @@ import { Chevron } from "../ui/Chevron";
 import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetBar } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { fonts, radius, space, useBody, useColors } from "../ui/theme";
+import { fonts, MIN_TARGET, radius, space, useBody, useColors } from "../ui/theme";
+import { useAccent } from "../ui/accent";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
@@ -50,15 +51,12 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
         <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }]}>
           {selecting ? (
             <>
-              <Txt variant="heading" accessibilityRole="header">
-                Select text
-              </Txt>
+              <SheetBar title="Select text" close={{ label: "Close", onPress: close }} inset={0} />
+              {/* iOS's selectable text takes all of it or nothing: a field that can't be edited has the handles that pick just a part
+                  (and its own Copy), without a keyboard. */}
               <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
-                <Text selectable accessibilityLabel="The message's text" style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink }}>
-                  {text}
-                </Text>
+                <TextInput testID="select-text" value={text} editable={false} multiline scrollEnabled={false} style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, padding: 0 }} />
               </ScrollView>
-              <Button label="Done" kind="ghost" onPress={close} />
             </>
           ) : (
             <>
@@ -111,7 +109,6 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                   }}
                 />
               )}
-              <Button label="Cancel" kind="ghost" onPress={close} />
             </>
           )}
         </View>
@@ -145,24 +142,28 @@ export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; on
 
 /**
  * What Claude's last message asks for, one press each: Yes and No under a yes-or-no question, or the exact words it asked to
- * be said ("Say "admin merge""). They go as a message and are gone; longer ones wrap to a second line.
+ * be said ("Say "admin merge""). They float over the end of the chat at its right, as a Step by step page's buttons do, in the
+ * same glass: the message box keeps its place (they used to sit on top of it, which pushed it and a page's buttons up). They
+ * go as a message and are gone; longer ones wrap to a second line.
  */
-export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (text: string) => void }) {
-  const colors = useColors();
+export function QuickReplies({ replies, onSend, lift = 0, onHeight, hidden = false }: { replies: string[]; onSend: (text: string) => void; /** How far above the bottom of its box it sits, where the message box floats over the chat. */ lift?: number; onHeight?: (h: number) => void; /** Out of sight and reach, keeping its room (the chat is scrolled away from its end). */ hidden?: boolean }) {
+  const accent = useAccent();
+  // Gone, they leave no room behind them.
+  useEffect(() => () => onHeight?.(0), []);
   return (
-    <View accessibilityLabel="Quick replies" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16, paddingBottom: 6 }}>
-      {replies.map((r, i) => (
-        <FadeSlideIn key={r} from={8} delay={i * 50} ms={180}>
-          <PressScale accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.94}>
-            <Glass solid lift={0.06} style={{ borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 18, paddingVertical: 9 }}>
-              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift, pointerEvents: "box-none" }}>
+      <View pointerEvents={hidden ? "none" : "box-none"} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? "no-hide-descendants" : "auto"} accessibilityLabel="Quick replies" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, opacity: hidden ? 0 : 1 }}>
+        {replies.map((r) => (
+          <PressScale key={r} accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.95}>
+            <Glass lift={0.16} style={{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center" }}>
+              <Txt variant="body" numberOfLines={2} style={{ fontWeight: "700", color: accent }}>
                 {r}
               </Txt>
             </Glass>
           </PressScale>
-        </FadeSlideIn>
-      ))}
-    </View>
+        ))}
+      </View>
+    </FadeSlideIn>
   );
 }
 
@@ -446,7 +447,9 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
   return (
     <Sheet onClose={onClose}>
       {(close, scroll) => (
-        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }]}>
+        <View style={[{ padding: space.xl, paddingTop: space.md, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }]}>
+          {/* What was run is too long for the bar's middle: it heads the sheet under it. */}
+          <SheetBar close={{ label: "Close", onPress: close }} inset={0} />
           <Txt variant="heading" accessibilityRole="header" numberOfLines={2}>
             {title}
           </Txt>
@@ -465,7 +468,6 @@ export function StepOutputSheet({ title, load, onClose }: { title: string; load:
               </Text>
             </ScrollView>
           )}
-          <Button label="Done" kind="ghost" onPress={close} />
         </View>
       )}
     </Sheet>

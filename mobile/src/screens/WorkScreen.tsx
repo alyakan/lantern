@@ -4,11 +4,14 @@ import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type Vi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
+import { useAccent } from "../ui/accent";
+import { finished } from "../view/desk";
+import { JustFinished } from "./JustFinished";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { BAR_TEXT_SCALE, ProjectTag, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
-import { Sheet } from "../ui/Sheet";
+import { Sheet, SheetPill } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { Magnifier, RoundButton, SearchContents, type BarSearch } from "./SearchBar";
 import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
@@ -171,7 +174,13 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
-  const { work, chats } = useSyncState();
+  const { work, chats, desk, single } = useSyncState();
+  // The app's accent (a regular's Ember) for what is chosen or counts.
+  const accent = useAccent();
+  // What finished on the Mac lately (the Desk's answers, across its desks, newest first): here, beside where things stand,
+  // not on the chats.
+  const done = desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
+  const justFinished = done.length > 0 && onOpenChat ? <JustFinished list={done} onOpen={onOpenChat} /> : null;
   const colorOf = projectColors(chats);
   // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
   const [page, setPage] = useState<string | null>(null);
@@ -184,11 +193,16 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // "5 min ago" moves on by itself, a minute at a time, while the tab is open.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   // Searching the page (a tablet's bar): the field is open, and what is typed narrows the list to what says it.
   const [finding, setFinding] = useState(false);
   const [query, setQuery] = useState("");
   const findInput = useRef<ComponentRef<typeof TextInput>>(null);
-  const now = Date.now();
   const items = work?.items ?? [];
   // What is found by what is typed, over every piece of work (shipped included: it is the one way to look one up).
   const found = query.trim() ? items.filter((i) => says(i, query)) : [];
@@ -224,6 +238,11 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   // One group needs no card to open: its page is the screen.
   const alone = groups.length === 1;
   const open: WorkGroup | undefined = alone ? groups[0] : page !== null ? groups.find((g) => g.key === page) : undefined;
+  // A feature whose page was open and is gone (all of it shipped) is let go: the list shows, and the page doesn't come back by
+  // itself if the feature does.
+  useEffect(() => {
+    if (page !== null && !groups.some((g) => g.key === page)) setPage(null);
+  }, [page, groups.map((g) => g.key).join("\n")]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -362,7 +381,9 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
 
   /** The tabs of a feature: what needs you (with how many), what is moving, what isn't started, and what shipped. One with nothing in it is dimmed, not gone, so the row never moves. */
   const tabs = (g: WorkGroup, on: Bucket) => (
-    <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 16, borderBottomWidth: 1, borderBottomColor: colors.rule, marginTop: 16 }}>
+    // At the larger text sizes the four don't fit across: they scroll sideways rather than run off the screen.
+    <View style={{ borderBottomWidth: 1, borderBottomColor: colors.rule, marginTop: 16 }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" contentContainerStyle={{ flexDirection: "row", gap: 16 }}>
       {BUCKETS.map(({ bucket, label }) => {
         const n = g.items.filter((i) => bucketOf(i) === bucket).length;
         const selected = bucket === on;
@@ -372,13 +393,14 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
               {label}
             </Txt>
             {bucket === "attn" && n > 0 && (
-              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+              <Txt variant="small" style={{ fontWeight: "700", color: accent }}>
                 {n}
               </Txt>
             )}
           </PressScale>
         );
       })}
+    </ScrollView>
     </View>
   );
 
@@ -455,6 +477,14 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   };
 
   /** The Work screen: how many things need you, and a card for each feature. */
+  // A refresh says it is going where its link was (the list's own pull spinner is hidden; a tap on the link showed nothing).
+  const refreshLink = refreshing ? (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel="Refreshing" style={{ minHeight: 22, justifyContent: "center" }}>
+      <Dots />
+    </View>
+  ) : (
+    <Link label="Refresh" onPress={refresh} />
+  );
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
@@ -478,7 +508,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
           {!top && (
             <View style={{ marginLeft: "auto" }}>
-              <Link label="Refresh" onPress={refresh} />
+              {refreshLink}
             </View>
           )}
         </View>
@@ -489,6 +519,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           </Txt>
         )}
       </View>
+      {justFinished}
       {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map(featureCard)}</View>}
     </View>
   );
@@ -503,7 +534,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
       {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
       {!top && (
         <View style={{ marginLeft: "auto" }}>
-          <Link label="Refresh" onPress={refresh} />
+          {refreshLink}
         </View>
       )}
     </View>
@@ -609,6 +640,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           ) : alone && open ? (
             <>
               <View style={{ marginBottom: 4 }}>{overviewNote()}</View>
+              {justFinished && <View style={{ marginVertical: 12 }}>{justFinished}</View>}
               {featurePage(open)}
             </>
           ) : (
@@ -665,7 +697,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                     {shown.number !== null ? `#${shown.number} ` : ""}
                     {shown.title}
                   </Txt>
-                  <Link label="Done" onPress={close} />
+                  <SheetPill label="Close" onPress={close} />
                 </View>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                   <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: `${hueOf(shown, colors)}22` }}>
@@ -729,7 +761,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                   {next.length}
                 </Txt>
                 <View style={{ marginLeft: "auto" }}>
-                  <Link label="Done" onPress={close} />
+                  <SheetPill label="Close" onPress={close} />
                 </View>
               </View>
               <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: colors.rule, overflow: "hidden" }}>{next.map(nextRow)}</View>

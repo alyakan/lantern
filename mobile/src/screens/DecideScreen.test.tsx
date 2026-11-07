@@ -241,6 +241,17 @@ describe("deciding", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("opened before the phone knows what waits (from a notification, as the app starts), waits for that instead of saying it was answered", async () => {
+    const { controller } = makeController();
+    await renderWith(<DecideScreen slot="a" requestId="p1" onClose={jest.fn()} />, {}, controller);
+    expect(screen.queryByText("This was answered already")).toBeNull();
+    expect(screen.getByLabelText("Loading the decision")).toBeTruthy();
+    // It can be closed while it waits.
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
+    expect(screen.getByText("This was answered already")).toBeTruthy();
+  });
+
   it("an approval says what it approves, and is approved with a swipe", async () => {
     const approval = waiting({ request_id: "ap", tool_name: "mcp__lantern__request_approval", input: { action: "merge PR 12", reason: "CI is green" } });
     const { lastOf } = await decide(approval);

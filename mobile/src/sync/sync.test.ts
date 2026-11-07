@@ -69,6 +69,65 @@ describe("the phone's sync", () => {
     expect(second.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
   });
 
+  it("keeps the last few closed chats' messages and lets older ones go, so a long session doesn't hold every chat", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7).session);
+    const slots = ["a", "b", "c", "d", "e", "f"];
+    for (const s of slots) {
+      sync.follow(s);
+      sync.onPushed({ type: "event", slot: s, seq: 1, event: { kind: "text_delta", block_id: "b", text: s } });
+    }
+    frame();
+    for (const s of slots) sync.unfollow(s);
+    frame();
+    expect(Object.keys(sync.getState().views).sort()).toEqual(["c", "d", "e", "f"]);
+    // One opened again asks from the start.
+    const again = fakeSession(7);
+    sync.onSession(again.session);
+    sync.follow("a");
+    await settle();
+    expect(again.asked).toContainEqual({ op: "subscribe", slot: "a", after: 0, epoch: 7 });
+  });
+
+  it("sends a message that didn't go again under its own id, in its own place", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7, {}, { send: "Your Mac didn't answer in time." });
+    sync.onSession(s.session);
+    await sync.send("a", "ship it");
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ failed: "Your Mac didn't answer in time." });
+    const ok = fakeSession(7);
+    sync.onSession(ok.session);
+    await sync.retry("a", "local-m-1");
+    frame();
+    expect(ok.asked).toContainEqual({ op: "send", slot: "a", text: "ship it", client_id: "m-1" });
+    expect(sync.getState().views.a.items).toHaveLength(1);
+    expect(sync.getState().views.a.items[0]).not.toHaveProperty("failed");
+  });
+
+  it("never lets go of a closed chat's message that didn't go", () => {
+    const { sync, frame } = rig();
+    sync.apply({ type: "sending", slot: "a", clientId: "m-1", text: "hi", at: 1 });
+    sync.apply({ type: "send_failed", slot: "a", clientId: "m-1", error: "No" });
+    sync.apply({ type: "forget", slot: "a" });
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ text: "hi", failed: "No" });
+  });
+
+  it("a chat whose pages stopped coming part way (the link dropped) is asked for from the start, not from the number its first page gave", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7).session);
+    sync.follow("a");
+    await settle();
+    // The first of several pages: it carries the chat's latest number, and the rest are still to come.
+    sync.onPushed({ type: "reset", slot: "a", seq: 900, page: 0, done: false, hidden: 0, events: [{ kind: "user_text", text: "first", at: 1, sent_by: "desktop" }] });
+    frame();
+    const again = fakeSession(7);
+    sync.onSession(again.session);
+    await settle();
+    expect(again.asked).toContainEqual({ op: "subscribe", slot: "a", after: 0, epoch: 7 });
+  });
+
   it("after the Mac restarted (another epoch) it follows from the start", async () => {
     const { sync, frame } = rig();
     sync.onSession(fakeSession(7).session);

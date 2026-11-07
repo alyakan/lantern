@@ -29,11 +29,56 @@ describe("what a chat search looks for, in a page and a summary", () => {
     expect(screen.getByText("Show less")).toBeTruthy();
   });
 
+  it("a page opened whole is cut short again when the list draws its cell for another page", async () => {
+    const other = timeline([said("a2", `# Plan step 2 — Billing\n\n${filler}\n\nThe last line says yak.`)]).find((r): r is Extract<Row, { kind: "page" }> => r.kind === "page")!;
+    await render(<PageRow row={page} answered={false} onAction={() => {}} />);
+    await fireEvent.press(screen.getByText("Show the whole page"));
+    expect(screen.getByText(/zebra/)).toBeTruthy();
+    await screen.rerender(<PageRow row={other} answered={false} onAction={() => {}} />);
+    expect(screen.queryByText(/yak/)).toBeNull();
+    expect(screen.getByText("Show the whole page")).toBeTruthy();
+  });
+
   it("marks a summary's words", async () => {
     const item = { kind: "assistant", id: "a1", text: "Fixed the login bug in auth.ts.", streaming: false } as const;
     const summary: Extract<Row, { kind: "summary" }> = { key: "a-a1", kind: "summary", item, chips: [], durationMs: null, files: [] };
     await render(<SummaryRow row={summary} onFiles={() => {}} mark="login" />);
     expect(washed("login")).toHaveLength(1);
+  });
+});
+
+describe("a summary card's height, as the list draws it", () => {
+  const summaryOf = (id: string, text: string): Extract<Row, { kind: "summary" }> => ({ key: `a-${id}`, kind: "summary", item: { kind: "assistant", id, text, streaming: false }, chips: [], durationMs: null, files: [] });
+  // The box its words are clipped by (the one that holds what onLayout measures).
+  const clip = () => StyleSheet.flatten(screen.getByTestId("summary-words").parent!.props.style)?.maxHeight;
+  const measure = async (h: number) => fireEvent(screen.getByTestId("summary-words"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: h } } });
+
+  it("is held at the clipped height until its words are measured, not laid out whole and then cut (scrolling up jumped)", async () => {
+    await render(<SummaryRow row={summaryOf("h1", "Fresh words, never measured.")} onFiles={() => {}} />);
+    expect(clip()).toBe(230);
+    expect(screen.queryByText("Show all")).toBeNull();
+    await measure(120);
+    expect(clip()).toBeUndefined();
+  });
+
+  it("a long one not measured yet has its Show all from the first drawing", async () => {
+    await render(<SummaryRow row={summaryOf("h4", "Words that go on and on. ".repeat(40))} onFiles={() => {}} />);
+    expect(clip()).toBe(230);
+    expect(screen.getByText("Show all")).toBeTruthy();
+  });
+
+  it("a cell drawn again for a summary already measured starts at that summary's size", async () => {
+    const long = summaryOf("h2", "A long one. ".repeat(40));
+    const other = summaryOf("h3", "Another, short.");
+    await render(<SummaryRow row={long} onFiles={() => {}} />);
+    await measure(900);
+    expect(screen.getByText("Show all")).toBeTruthy();
+    await screen.rerender(<SummaryRow row={other} onFiles={() => {}} />);
+    await measure(60);
+    await screen.rerender(<SummaryRow row={long} onFiles={() => {}} />);
+    // Before any layout of this drawing: already clipped, with its Show all.
+    expect(clip()).toBe(230);
+    expect(screen.getByText("Show all")).toBeTruthy();
   });
 });
 
@@ -51,6 +96,14 @@ describe("what the agent said between its steps, on their row", () => {
   it("is shown open, with what a chat search looks for marked", async () => {
     await render(<StepsRow chips={[]} notes={notes} onFiles={() => {}} mark="stale" />);
     expect(washed("stale")).toHaveLength(1);
+  });
+
+  it("starts closed again when the list draws its cell for another row (it was open for the one before)", async () => {
+    await render(<StepsRow rowKey="s-1" chips={[]} notes={notes} onFiles={() => {}} />);
+    await fireEvent.press(screen.getByText("2 messages"));
+    expect(screen.getByText("Now the tests.")).toBeTruthy();
+    await screen.rerender(<StepsRow rowKey="s-2" chips={[]} notes={notes} onFiles={() => {}} />);
+    expect(screen.queryByText("Now the tests.")).toBeNull();
   });
 
   it("has no chip when nothing was said", async () => {

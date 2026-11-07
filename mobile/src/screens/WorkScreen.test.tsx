@@ -1,11 +1,13 @@
 import { Linking, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
-import { act, fireEvent, screen, within } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { attachSession } from "../test/fakeSession";
 import { chat, connectedWith, makeController, NOW, renderWith } from "../test/render";
 import { BAR_TEXT_SCALE, Txt } from "../ui/components";
 import { PhoneTabs } from "./PhoneTabs";
+import { resetWorkBadge, setWorkBadge } from "../workBadge";
+import { resetKnown } from "../prefsKnown";
 import { WorkScreen } from "./WorkScreen";
 
 let mockTab: "chats" | "work" | "insights" = "work";
@@ -26,6 +28,8 @@ jest.mock("../deskLog", () => ({ loadDeskLog: jest.fn(async () => []), saveDeskL
 
 beforeEach(() => {
   mockTab = "work";
+  resetWorkBadge();
+  resetKnown();
 });
 
 const item = (key: string, over: Partial<RemoteWorkItem> = {}): RemoteWorkItem => ({ key, repo: "lantern", title: `Work ${key}`, stage: "checks", tone: "wait", word: "Checks running", meta: "lantern · b", at: null, number: null, feature: null, issue: null, url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null, ...over });
@@ -113,10 +117,24 @@ describe("Your work on a tablet", () => {
 });
 
 describe("Your work on the phone", () => {
-  it("is a tab beside the chats for a Mac that has it, with how many steps wait", async () => {
+  it("is a tab beside the chats for a Mac that has it, with how many steps wait until it is looked at", async () => {
+    mockTab = "chats";
     await open();
-    expect(screen.getByRole("tab", { name: "Work, 3 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work, 3 waiting" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("tab", { name: "Work, 3 waiting" }));
+    expect(screen.getByRole("tab", { name: "Work" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(screen.getByLabelText("Your work")).toBeTruthy();
+    // Seen: going back to the chats, it doesn't count them again.
+    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy());
+  });
+
+  it("counts every step waiting, looked at or not, when the phone is set to Always, and none when set to Never", async () => {
+    setWorkBadge("always");
+    await open();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Work, 3 waiting" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await act(async () => setWorkBadge("never"));
+    expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy();
   });
 
   it("is its own headline, with no bar over the list", async () => {
@@ -179,6 +197,31 @@ describe("Your work on the phone", () => {
     expect(page.getByText(/Cache settings/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
     expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
+  });
+
+  it("lists what just finished on the Mac above the cards, and a line opens its chat; the chats tab doesn't", async () => {
+    const onOpenChat = jest.fn();
+    const { controller } = await open({}, ["desk", "work"], onOpenChat);
+    const deskNow = { desks: [{ id: "home", name: "Desk", slots: ["a"], projects: [] }], cards: [{ key: "a:t1", desk: "home", slot: "a", title: "Release 0.1.53", project: "lantern", at: NOW - 60_000, asked: "Ship it", auto: false, said: "Shipped. All green.", outcome: "done" as const }] };
+    await act(async () => controller.sync.apply({ type: "desk", desk: deskNow as never }));
+    expect(screen.getByRole("header", { name: "Just finished" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: /^Release 0.1.53: Shipped/ }));
+    expect(onOpenChat).toHaveBeenCalledWith("a");
+    await fireEvent.press(screen.getByRole("tab", { name: /^Chats/ }));
+    expect(screen.queryByRole("header", { name: "Just finished" })).toBeNull();
+  });
+
+  it("lets go of a feature's page once the feature is gone, and doesn't open it again by itself when it comes back", async () => {
+    const { controller } = await open();
+    await openCard("Reliability");
+    const without = { ...work, items: work.items.filter((i) => i.feature !== "Reliability") };
+    await act(async () => controller.sync.apply({ type: "work", work: without }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
+    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
+    await act(async () => controller.sync.apply({ type: "work", work }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
+    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Reliability, / })).toBeTruthy();
   });
 
   it("puts the way back beside the bar, as a chat's is: a glass circle with a finger's worth of a target", async () => {
@@ -332,7 +375,7 @@ describe("Your work on the phone", () => {
     const details = within(screen.getByLabelText("Details"));
     await fireEvent.press(details.getByRole("button", { name: "GitHub" }));
     expect(open_).toHaveBeenCalledWith("https://github.com/aly/lantern/pull/7");
-    await fireEvent.press(details.getByRole("button", { name: "Done" }));
+    await fireEvent.press(details.getByRole("button", { name: "Close" }));
     await fireEvent.press(page.getByRole("button", { name: /^Sneaky/ }));
     const sneaky = within(screen.getByLabelText("Details"));
     expect(sneaky.queryByRole("button", { name: "GitHub" })).toBeNull();
