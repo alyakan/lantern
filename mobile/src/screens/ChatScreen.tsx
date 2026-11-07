@@ -808,7 +808,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
         // a command still goes to Run, which says it couldn't).
-        <Composer draftKey={slot} placeholder={online ? undefined : "Your Mac is out of reach. Write, and it goes when it's back"} canAttach={canImages && online} onSend={(text, images) => {
+        <Composer draftKey={slot} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
             // What you send is what you follow, even from far up the chat.
             setAway(null);
             list.current?.scrollToEnd({ animated: true });
