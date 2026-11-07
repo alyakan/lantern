@@ -148,6 +148,8 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <WorkScreen
       wide
       onOpenChat={onOpenChat}
+      // Without it, Work had no way back to the chats once they went away but the edge swipe, which VoiceOver and a pointer can't make.
+      onShowChats={layout === "overlay" && !chatsOpen ? onShowChats : undefined}
       // The bar's glass (and its Refresh) is the Work screen's: this says only where you are.
       top={<Txt variant="title">Work</Txt>}
     />

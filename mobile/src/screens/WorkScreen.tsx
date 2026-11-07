@@ -13,7 +13,7 @@ import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet, SheetPill } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { Magnifier, RoundButton, SearchContents, type BarSearch } from "./SearchBar";
+import { Magnifier, RoundButton, SearchContents, SidebarIcon, type BarSearch } from "./SearchBar";
 import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
@@ -21,6 +21,8 @@ import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnd
 export interface WorkProps {
   /** What a tablet's bar says where you are ("Work"); the bar's glass and its Refresh are the screen's own. A phone has no bar: its headline says where it is. */
   top?: ReactNode;
+  /** A tablet whose chats are put away: the bar's button that brings them back (none when they are beside it, or slid in). */
+  onShowChats?: () => void;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
   /** A tablet's main area: the page is held to a column that reads well. */
@@ -170,7 +172,7 @@ function Pieces({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: WorkProps) {
+export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onShowChats }: WorkProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -569,6 +571,11 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+          {onShowChats && (
+            <RoundButton label="Show chats" onPress={onShowChats}>
+              <SidebarIcon />
+            </RoundButton>
+          )}
           {top}
           {/* Search filters the list; a feature's page has no list to filter, so its bar doesn't offer it. */}
           {searchable && (

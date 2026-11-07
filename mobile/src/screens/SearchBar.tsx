@@ -87,6 +87,16 @@ export function Magnifier({ color }: { color?: string }) {
   );
 }
 
+/** A window with its side panel: the chats, shown by the button that brings them back on a tablet. */
+export function SidebarIcon() {
+  const colors = useColors();
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
+      <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
+    </View>
+  );
+}
+
 /**
  * 0 and 1 for something being off and on. With `spring`, on the way to 1 it springs, passing 1 a little, and on the way back to
  * 0 it doesn't pass 0. Without, it eases into place both ways and passes neither.

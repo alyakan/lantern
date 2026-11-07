@@ -418,6 +418,20 @@ describe("a tablet with the chats not pinned", () => {
     mockPinned = false;
   });
 
+  it("brings the chats back from Work's own bar, which had no way back but the edge swipe", async () => {
+    const { controller } = makeController();
+    seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+    attachSession(controller, { list_waiting: [], work: { items: [] } }, ["desk", "work"]);
+    await render(<Root controller={controller} />);
+    await settle();
+    // The chats slid in at first: Work's button would only open what is open already.
+    expect(column().props.pointerEvents).toBe("auto");
+    await press("Close chats");
+    expect(column().props.pointerEvents).toBe("none");
+    await press("Show chats");
+    expect(column().props.pointerEvents).toBe("auto");
+  });
+
   it("is not pinned until it is chosen, whichever way the tablet is held: the chat has the whole width", async () => {
     await openInAChat();
     expect(column().props.pointerEvents).toBe("none");

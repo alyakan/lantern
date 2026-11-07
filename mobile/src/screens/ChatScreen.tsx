@@ -37,7 +37,7 @@ import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, typ
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
-import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
+import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
@@ -645,10 +645,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           <PopIn glass animate={sidebarLeadLate}>
             <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} scaleTo={0.88}>
               <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-                {/* A window with its side panel: the chats. */}
-                <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
-                  <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
-                </View>
+                <SidebarIcon />
               </Glass>
             </PressScale>
           </PopIn>
