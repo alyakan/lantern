@@ -60,6 +60,32 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
   return rows;
 }
 
+/** One turn's rows from `groupItems`, kept with the items they came from. */
+export type TurnCache = WeakMap<ChatItem, { items: ChatItem[]; live: boolean; rows: Row[] }>;
+
+/**
+ * `groupItems`, a turn at a time (a turn starts at each user message, and is grouped on its own the same either way), with
+ * each turn's rows kept in `cache` while its items stay the same objects. While a reply streams only the last turn
+ * changes, so only it is grouped again: the rest of a long chat isn't, for every word.
+ */
+export function groupTurns(items: ChatItem[], live: boolean, cache: TurnCache): Row[] {
+  const starts = items.flatMap((it, i) => (it.type === "user" || i === 0 ? [i] : []));
+  const rows: Row[] = [];
+  starts.forEach((start, n) => {
+    const turn = items.slice(start, starts[n + 1] ?? items.length);
+    const last = n === starts.length - 1;
+    const kept = cache.get(turn[0]);
+    if (kept && kept.live === (live && last) && kept.items.length === turn.length && kept.items.every((it, i) => it === turn[i])) {
+      rows.push(...kept.rows);
+      return;
+    }
+    const grouped = groupItems(turn, live && last);
+    cache.set(turn[0], { items: turn, live: live && last, rows: grouped });
+    rows.push(...grouped);
+  });
+  return rows;
+}
+
 /**
  * Whether a row shows the same as before, so it needn't be drawn again. The store keeps an item that hasn't changed as
  * the same object, so most rows are the same object; a turn's activity row is made afresh by each `groupItems`, and is

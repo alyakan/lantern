@@ -21,6 +21,12 @@ export interface RestoreEvents {
   onUndone: (id: number, text: string) => void;
 }
 
+/** The last item that is `wanted`, looked for from the end (a long chat isn't copied for it on every render). */
+function lastOf(items: State["items"], wanted: (it: State["items"][number]) => boolean) {
+  for (let i = items.length - 1; i >= 0; i--) if (wanted(items[i])) return items[i];
+  return undefined;
+}
+
 /** Loads the turns before the first one shown ("Show earlier messages"); resolves when they are in the chat. */
 export type LoadEarlier = () => Promise<void>;
 
@@ -89,7 +95,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
   };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
-  const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
+  const lastSent = (items: State["items"]) => lastOf(items, (it) => it.type === "user" && !it.auto)?.id;
   const sent = useRef(lastSent(state.items));
   // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
   // Before the frame is drawn: the height it reads is the layout the frame needs anyway. Read after the frame (an effect),
@@ -162,7 +168,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   };
   // For the whole turn, until Claude is fully done: a line at the bottom with the turn's word, like Claude Code's
   // spinner under its output.
-  const prompt = [...state.items].reverse().find((it) => it.type === "user");
+  const prompt = lastOf(state.items, (it) => it.type === "user");
   // A worker whose worktree is being set up hasn't started: nothing is thinking yet.
   const thinkingLine = state.status === "running" && !state.setup;
   const jump = () => {

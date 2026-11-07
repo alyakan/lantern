@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem, ToolItem } from "../store";
-import { describeStep, editsIn, failedCount, groupItems, important, runningStep, sameRow, stepLabel, summarize, type Row } from "./activity";
+import { describeStep, editsIn, failedCount, groupItems, groupTurns, important, runningStep, sameRow, stepLabel, summarize, type Row } from "./activity";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
   type: "tool", id, name, summary: "/p/src/a.ts", status: "done", output: null, edit: null, children: [], ...extra,
@@ -278,5 +278,40 @@ describe("step helpers", () => {
     const sub = tool("s1", "Edit", { edit: { ...edit, path: "/p/b.ts" } });
     const steps = [tool("1", "Edit", { edit }), tool("2", "Task", { children: [sub] })];
     expect(editsIn(steps).map((e) => e.id)).toEqual(["1", "s1"]);
+  });
+});
+
+describe("groupTurns", () => {
+  const chat: ChatItem[] = [
+    say("pre", "Hello before anything"),
+    { type: "user", id: "u1", text: "Fix it" },
+    say("a1", "Looking."),
+    tool("t1", "Read"),
+    tool("t2", "Edit", { edit }),
+    say("a2", "Fixed."),
+    { ...done, id: "e1" },
+    { type: "hook", id: "h1", text: "Update the brain", at: 1 },
+    tool("t3", "Bash"),
+    say("a3", "Noted."),
+    { ...done, id: "e2" },
+    { type: "user", id: "u2", text: "And the tests?" },
+    { type: "permission", id: "p1", toolName: "Bash", input: {}, decision: null },
+    tool("t4", "Bash", { status: "running" }),
+    say("a4", "Runn"),
+  ];
+
+  it("groups as groupItems does, live or not", () => {
+    for (const live of [false, true]) expect(groupTurns(chat, live, new WeakMap())).toEqual(groupItems(chat, live));
+  });
+
+  it("groups only the turn that changed again, keeping the rows of the others", () => {
+    const cache = new WeakMap();
+    const before = groupTurns(chat, true, cache);
+    const after = groupTurns([...chat.slice(0, -1), say("a4", "Running the tests")], true, cache);
+    expect(after).toEqual(groupItems([...chat.slice(0, -1), say("a4", "Running the tests")], true));
+    const firstTurnRows = before.findIndex((r) => r.id === "u2");
+    for (let i = 0; i < firstTurnRows; i++) expect(after[i]).toBe(before[i]);
+    // The chat stops: the last turn is no longer live, and is grouped again for it.
+    expect(groupTurns(chat, false, cache)).toEqual(groupItems(chat, false));
   });
 });

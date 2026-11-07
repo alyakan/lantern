@@ -4,7 +4,7 @@ import { MdStream } from "./Md";
 import { MessageActions, type MessageAction } from "./MessageActions";
 import type { ChatItem, TestRunItem } from "../store";
 import type { NewRule } from "../types";
-import { groupItems, sameRow, type HookRow, type Row } from "../lib/activity";
+import { groupTurns, sameRow, type HookRow, type Row, type TurnCache } from "../lib/activity";
 import { draftOf } from "../lib/paste";
 import { workingVerb } from "../lib/verbs";
 import { friendlyNotes } from "../lib/wakeNote";
@@ -112,7 +112,8 @@ const RESTORE_TITLE = "Put the project's files back to how they were just before
 const REGENERATE_TITLE = "Sends the last prompt again. Files it changes and commands it runs happen again.";
 
 export function ChatStream({ items, folder, sections, live = false, resend, restore, ...handlers }: Props) {
-  const rows = groupItems(items, live);
+  const turns = useRef<TurnCache>(new WeakMap());
+  const rows = groupTurns(items, live, turns.current);
   // Each turn's word ("Pondering…") comes from its prompt, so the live line and the thinking line agree.
   const verbFor = new Map<string, string>();
   // The prompt each reply (and its turn's note) answers: none for a reply Claude started on its own.
@@ -139,14 +140,14 @@ export function ChatStream({ items, folder, sections, live = false, resend, rest
 
   // Like section headers in an iOS list: each prompt stays pinned while its reply scrolls,
   // and the next prompt pushes it away because each sticky header only lives inside its own section.
-  const turns: Row[][] = [];
+  const sectionRows: Row[][] = [];
   for (const row of rows) {
-    if (row.type === "user" || turns.length === 0) turns.push([row]);
-    else turns[turns.length - 1].push(row);
+    if (row.type === "user" || sectionRows.length === 0) sectionRows.push([row]);
+    else sectionRows[sectionRows.length - 1].push(row);
   }
   return (
     <>
-      {turns.map(([first, ...rest]) => (
+      {sectionRows.map(([first, ...rest]) => (
         <section key={first.id} className="turn-section" data-turn={first.id}>
           {first.type === "user" && !first.auto ? <div className="turn-head">{render(first)}</div> : render(first)}
           {rest.map(render)}
