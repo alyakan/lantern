@@ -118,7 +118,7 @@ impl Server {
             // A read-only agent's git: run by the app, which checks that this chat is one (the helper's word is not taken).
             READ_ONLY_GIT_TOOL if self.offer.git => app_result(tool, ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: false, git: true })),
             READ_ONLY_GIT_TOOL => result_json("git is only available to a read-only agent, which has no shell; use your shell for git.".into(), true),
-            // Answered by the app (it reads Network Monitor on loopback, or the Storage scan), for any chat: the storage
+            // Answered by the app (it reads the capture's recorded traffic, or the Storage scan), for any chat: the storage
             // tools use the same call, told apart by name, and a scan waits at most a few seconds for itself.
             t if crate::network::TOOLS.contains(&t) || crate::storage::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             // Running a dashboard form: the app works out what it would do, the user is asked with a card, and only on a yes does

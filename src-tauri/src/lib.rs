@@ -25,6 +25,7 @@ pub mod dashboard;
 pub mod dashboard_run;
 pub mod dashboard_tools;
 pub mod todos;
+pub mod capture;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -89,8 +90,10 @@ pub struct AppState {
     relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
-    /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
+    /// The captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// The capture itself: its proxy and WireGuard endpoint, started from the Network tab (see capture/).
+    capture: Arc<capture::Capture>,
     /// Which dashboards are trusted, the runs of their forms, and what is running now (see dashboard_run.rs).
     dashboards: Arc<dashboard_run::Runner>,
     /// The user's to-do lists, one per project (see todos.rs).
@@ -1497,14 +1500,14 @@ fn dashboard_clear_runs(state: State<'_, AppState>, folder: String, file: String
     state.dashboards.clear_runs(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form);
 }
 
-/// The Network tab's rows for a folder, with its watches and whether Network Monitor is running.
+/// The Network tab's rows for a folder, with its watches and whether the capture is on.
 #[tauri::command]
 async fn network_state(state: State<'_, AppState>, folder: String) -> Result<network::View, String> {
     let monitor = state.network.clone();
     tauri::async_runtime::spawn_blocking(move || monitor.view(&permission::rules::folder_key(std::path::Path::new(&folder)))).await.map_err(|e| e.to_string())
 }
 
-/// One request's headers and bodies, for the Network tab: the copy Lantern kept, else Network Monitor's.
+/// One request's headers and bodies, for the Network tab: the copy Lantern kept for the folder, else the capture's.
 #[tauri::command]
 async fn network_response(state: State<'_, AppState>, folder: String, id: String) -> Result<network::Detail, String> {
     let monitor = state.network.clone();
@@ -1525,6 +1528,28 @@ fn network_rewatch(state: State<'_, AppState>, folder: String, label: String, me
 #[tauri::command]
 fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) -> bool {
     state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
+}
+
+/// Whether the capture is on, and how the phone connects to it.
+#[tauri::command]
+fn capture_status(state: State<'_, AppState>) -> capture::Status {
+    state.capture.status()
+}
+
+/// Starts the capture's proxy and WireGuard endpoint on this Mac's local network.
+#[tauri::command]
+async fn capture_start(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<capture::Status, String> {
+    let capture = state.capture.clone();
+    let status = capture.start().await;
+    let _ = app.emit("network-changed", ());
+    Ok(status)
+}
+
+#[tauri::command]
+fn capture_stop(app: tauri::AppHandle, state: State<'_, AppState>) -> capture::Status {
+    let status = state.capture.stop();
+    let _ = app.emit("network-changed", ());
+    status
 }
 
 /// The Storage tab's data: the last scan, Claude's suggestions on it, and the disk's free space.
@@ -4305,9 +4330,10 @@ pub fn run() {
             let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
             let relocations = relocate::Relocations::load(app.path().app_data_dir().ok().map(|d| d.join("relocations.json")));
             let orchestra = orchestra::Orchestra::new(Arc::new(AppHost { app: app.handle().clone() }));
+            let capture = Arc::new(capture::Capture::new(app.path().app_data_dir().ok().map(|d| d.join("capture"))));
             let network = Arc::new(network::Monitor::new(
                 network::Store::load(app.path().app_data_dir().ok().map(|d| d.join("network.json"))),
-                Box::new(network::Api::new(network::Api::default_info().unwrap_or_default())),
+                Box::new(capture.recorder.clone()),
             ));
             let handle = app.handle().clone();
             network.set_on_change(move || {
@@ -4334,13 +4360,13 @@ pub fn run() {
                 // Asked at every scan and every delete: the folders chats and agents are running in right now.
                 move || for_in_use.try_state::<AppState>().map(|s| s.slots.running_folders()).unwrap_or_default(),
             ));
-            // Follows Network Monitor while any folder has a watch (a poll with none reads nothing).
+            // Follows the capture while any folder has a watch (a poll with none reads nothing).
             let following = network.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, capture, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -4474,6 +4500,9 @@ pub fn run() {
             network_state,
             network_response,
             network_unwatch,
+            capture_status,
+            capture_start,
+            capture_stop,
             network_rewatch,
             storage_state,
             storage_scan,

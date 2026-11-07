@@ -44,9 +44,19 @@ getrandom = "0.3"
 if-addrs = "0.13"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake", "connect"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "http2", "gzip", "brotli", "deflate"] }
 ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# The capture proxy (capture/): HTTP/1.1 served to the phone's apps, TLS ended with a certificate per host minted from
+# Lantern's root, and a WireGuard endpoint whose TCP/IP is run in userspace.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem", "x509-parser"] }
+boringtun = { version = "0.7", default-features = false }
+smoltcp = { version = "0.14", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp"] }
+time = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # To switch WebRTC and preconnect off in the window's WebKit, which artifacts' scripts could otherwise reach servers with (see artifacts.rs).

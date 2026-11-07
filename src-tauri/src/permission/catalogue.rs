@@ -43,7 +43,7 @@ pub fn instructions(offer: Offer) -> String {
         "These are Lantern's tools, the desktop app this chat runs in. A message or block that starts with \"[Lantern: \" is a note from Lantern, not the user's words.
 - steps_guide: the Step by step workflow's page rules, and a flavour's headings and formats. Read it when you are unsure of one, or when Lantern says it couldn't read a page.
 - review_target: tell Lantern what you are reviewing (a pull request, or the checked-out branch and its base), so its Changes tab compares that. Call it when a review starts and whenever the target changes.
-- network_requests, network_request: the HTTP traffic the user captured with their Network Monitor app. List or search first, then read one request. Use them when the user asks about requests or API responses.
+- network_requests, network_request: the HTTP(S) traffic Lantern's capture recorded from the user's phone (its WireGuard tunnel or Wi-Fi proxy, started in the Network tab). List or search first, then read one request. Use them when the user asks about requests or API responses.
 - network_watch, network_unwatch, network_watches: the requests the user says matter, kept for this folder and shown live in the Network tab.
 - network_summarize: put your summary of a response on its request in the Network tab. Read the request first.
 - enter_worktree: put this chat in one of the project's git worktrees, so its Changes tab shows that worktree's Git and Branch diffs at once. Use it when the user asks you to enter or show a worktree, in place of the built-in EnterWorktree.
