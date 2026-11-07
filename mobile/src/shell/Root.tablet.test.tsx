@@ -649,12 +649,14 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(column().props.pointerEvents).toBe("none");
   });
 
-  it("takes a drag from the list under the finger only once it is plainly going left", async () => {
+  it("takes a drag left that nothing under the finger took, only once it is plainly going left", async () => {
     await openInAChat();
     await press("Show chats");
+    // Asked on the way out, not on the way in: a row's own left swipe (Close, Read) comes first.
+    expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
     const steal = (x: number, y: number) => {
       column().props.onStartShouldSetResponderCapture(touch(300, 0, 300));
-      return column().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+      return column().props.onMoveShouldSetResponder(touch(x, 0, y));
     };
     expect(steal(250, 305)).toBe(true);
     // Scrolling up and down, a tap that wobbles, and a pull to the right are the list's own.
@@ -668,5 +670,6 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     await open({ chats: two });
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
     expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
+    expect(column().props.onMoveShouldSetResponder).toBeUndefined();
   });
 });

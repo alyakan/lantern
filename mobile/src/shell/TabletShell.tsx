@@ -149,6 +149,13 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
     onResponderRelease: release,
     onResponderTerminate: release,
   };
+  // On the column itself a row gets the left swipe first (its Close and Read), as it does on a phone's Home: the column takes
+  // it only when nothing under the finger did (asked last, on the way out, rather than first, on the way in).
+  const onColumn = {
+    ...toEdge,
+    onMoveShouldSetResponder: toEdge.onMoveShouldSetResponderCapture,
+    onMoveShouldSetResponderCapture: undefined,
+  };
 
   const over = !split && open;
   return (
@@ -168,7 +175,7 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
         accessibilityElementsHidden={!shown}
         importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
         style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: columnWidth, backgroundColor: colors.paper, transform: [{ translateX: p.interpolate({ inputRange: [0, 1], outputRange: [-travel, 0] }) }] }}
-        {...(split ? {} : toEdge)}
+        {...(split ? {} : onColumn)}
       >
         {/* Its shadow while it floats, and its hairline while it is pinned: one gives way to the other. */}
         <Animated.View testID="chats-column-shadow" pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.paper, opacity: float, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 4, height: 0 } }]} />
