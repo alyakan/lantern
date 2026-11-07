@@ -113,6 +113,15 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
+/** How long the chat's last message is (0 when it ends in something else). */
+const saidOf = (rows: Row[]) => {
+  const last = rows[rows.length - 1];
+  return last && (last.kind === "assistant" || last.kind === "summary" || last.kind === "page") ? last.item.text.length : 0;
+};
+
+/** The widest the chat's column gets (its rows' own margins inside it): about 80 characters of body text a line. */
+const READABLE = 760;
+
 /** How near the end, as a share of the chat's height, the list follows new words in (and so where Jump to latest starts). */
 const FOLLOW_END = 0.2;
 
@@ -295,7 +304,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A message being read aloud: reading stops when the chat is left.
   const [reading, setReading] = useState(false);
   useEffect(() => () => platformSpeech.stop(), []);
-  const [away, setAway] = useState<{ since: number } | null>(null);
+  // `said`: how long the last message was then, so a reply that grows below the reader counts as something new too.
+  const [away, setAway] = useState<{ since: number; said: number } | null>(null);
+  // On a wide iPad the chat is a readable column in the middle, not lines running the width of the screen.
+  const [width, setWidth] = useState(0);
+  const side = Math.max(0, (width - READABLE) / 2);
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);
@@ -542,9 +555,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
     const far = distanceFromEnd(e) > e.nativeEvent.layoutMeasurement.height * FOLLOW_END;
     keep.remember(!far);
-    setAway((a) => (far ? (a ?? { since: rows.length }) : null));
+    setAway((a) => (far ? (a ?? { since: rows.length, said: saidOf(rows) }) : null));
   };
-  const unseen = away ? Math.max(0, rows.length - away.since) : 0;
+  const grew = !!away && rows.length === away.since && saidOf(rows) > away.said;
+  const unseen = away ? Math.max(0, rows.length - away.since) + (grew ? 1 : 0) : 0;
   // A long chat comes in several pages as it opens, each landing at the end, and the list follows the end while the reader is
   // near it: one who started scrolling up was pulled back down with every page. Once they have moved, it is left where they took
   // it until the chat has come whole (then the end is followed again as before).
@@ -821,7 +835,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         // A tap on the status bar would jump to the oldest message loaded, which in a chat is never where the reader wants to be,
         // and on a tablet the header's buttons are right under it.
         scrollsToTop={false}
-        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : undefined}
+        contentContainerStyle={{ paddingHorizontal: side, ...(glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : {}) }}
         ref={list}
         onScroll={onScroll}
         scrollEventThrottle={64}
@@ -914,7 +928,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
+          <View style={StyleSheet.absoluteFill} onLayout={(e) => {
+            keep.widthChanged(e.nativeEvent.layout.width);
+            setWidth(e.nativeEvent.layout.width);
+          }} {...tapAway}>
             {body}
           </View>
           {riding(jump)}
@@ -938,7 +955,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         <>
           {head}
-          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
+          <View style={{ flex: 1 }} onLayout={(e) => {
+            keep.widthChanged(e.nativeEvent.layout.width);
+            setWidth(e.nativeEvent.layout.width);
+          }} {...tapAway}>
             {body}
             {riding(jump)}
             {riding(pageBar)}
