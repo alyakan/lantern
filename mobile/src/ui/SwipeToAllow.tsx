@@ -125,7 +125,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
             {completed && (
               <FadeSlideIn from={6} ms={200} delay={120} style={{ position: "absolute" }}>
                 <Animated.View style={{ opacity: shrink.interpolate({ inputRange: [0, 0.35], outputRange: [1, 0], extrapolate: "clamp" }) }}>
-                  <Txt variant="body" tone="white" style={{ fontWeight: "700" }}>
+                  <Txt variant="body" tone="on-go" style={{ fontWeight: "700" }}>
                     {doneLabel}
                   </Txt>
                 </Animated.View>

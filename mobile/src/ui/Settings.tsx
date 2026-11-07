@@ -302,6 +302,7 @@ export const LOOKS = {
   pair: { symbol: "qrcode", glyph: "⧉", tint: "#1f8a8a" },
   lock: { symbol: "faceid", glyph: "☺", tint: "#1f9d55" },
   voice: { symbol: "waveform", glyph: "♪", tint: "#7c4fd0" },
+  theme: { symbol: "paintpalette.fill", glyph: "◐", tint: "#d14d7a" },
   whatsNew: { symbol: "sparkles", glyph: "✦", tint: "#d4693f" },
   support: { symbol: "heart.fill", glyph: "♥", tint: "#d14d7a" },
   badge: { symbol: "app.badge", glyph: "●", tint: "#d93b3b" },

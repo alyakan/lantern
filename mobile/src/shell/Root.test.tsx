@@ -5,6 +5,7 @@ import { toBase64Url } from "../pairing";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, seed, waiting } from "../test/render";
 import { motion } from "../ui/motion";
+import { getThemeChoice, setThemeChoice } from "../ui/theme";
 import { Root, type RootProps } from "./Root";
 
 jest.mock("expo-camera", () => ({ CameraView: () => null, useCameraPermissions: () => [{ granted: false, canAskAgain: true }, jest.fn()] }));
@@ -257,6 +258,20 @@ describe("the Mac's sheet", () => {
     expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
     expect(screen.getByRole("header", { name: "Voice typing" })).toBeTruthy();
     expect(screen.getAllByRole("radio")).toHaveLength(2);
+  });
+
+  it("picks this phone's theme from a menu in Settings, and the phone is drawn in it at once", async () => {
+    try {
+      await open({ chats: [chat()] });
+      await press(/^Aly's MacBook Pro, connected/);
+      await waitFor(() => expect(screen.getByRole("menu", { name: "Theme, Follow system" })).toBeTruthy());
+      expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Follow system", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]));
+      await act(async () => void fireEvent.press(screen.getByRole("menuitem", { name: "Tokyo Night" })));
+      expect(getThemeChoice()).toBe("tokyo");
+      expect(screen.getByRole("menu", { name: "Theme, Tokyo Night" })).toBeTruthy();
+    } finally {
+      await act(async () => setThemeChoice("system"));
+    }
   });
 
   it("has no What's new when this build carries no notes (a development run)", async () => {

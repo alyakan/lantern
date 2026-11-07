@@ -50,6 +50,14 @@ const SOLARIZED: Syntax = { keyword: "#9cc41e", string: "#2aa198", number: "#e07
 // Paper: Xcode's light colours, warmed and deepened so they read on its sepia code blocks as well as on the page.
 const PAPER: Syntax = { keyword: "#8a2f7a", string: "#a3281f", number: "#1f4fb0", comment: "#6f6354", type: "#0b5675", tag: "#8a2f7a", attrName: "#7a5600", attrValue: "#a3281f", regexp: "#a3281f" };
 const NORD: Syntax = { keyword: "#81a1c1", string: "#a3be8c", number: "#bd97b6", comment: "#8e9ab0", type: "#8fbcbb", tag: "#81a1c1", attrName: "#8fbcbb", attrValue: "#a3be8c", regexp: "#ebcb8b" };
+// Gruvbox: its own warm family — salmon keywords, olive strings, purple numbers, mustard types. Catppuccin: Mocha's and
+// Latte's pastels, the light one darkened until the editor and code blocks read. Tokyo Night: violet keywords, green
+// strings, orange numbers. Rosé Pine: iris keywords, gold strings, foam types.
+const GRUVBOX: Syntax = { keyword: "#ff8a93", string: "#b8bb26", number: "#d3869b", comment: "#928374", type: "#fabd2f", tag: "#8ec07c", attrName: "#fabd2f", attrValue: "#b8bb26", regexp: "#fe8019" };
+const MOCHA: Syntax = { keyword: "#cba6f7", string: "#a6e3a1", number: "#fab387", comment: "#7f849c", type: "#89dceb", tag: "#f38ba8", attrName: "#f9e2af", attrValue: "#a6e3a1", regexp: "#f5c2e7" };
+const LATTE: Syntax = { keyword: "#6d28c4", string: "#1f5a14", number: "#9c3c05", comment: "#62657c", type: "#0b5f63", tag: "#a80b2c", attrName: "#6d4700", attrValue: "#1f5a14", regexp: "#a80b2c" };
+const TOKYO: Syntax = { keyword: "#bb9af7", string: "#9ece6a", number: "#ff9e64", comment: "#7d86ab", type: "#2ac3de", tag: "#f7768e", attrName: "#e0af68", attrValue: "#9ece6a", regexp: "#b4f9f8" };
+const ROSE: Syntax = { keyword: "#c4a7e7", string: "#f6c177", number: "#ebbcba", comment: "#8d89a8", type: "#9ccfd8", tag: "#eb6f92", attrName: "#c4a7e7", attrValue: "#f6c177", regexp: "#eb6f92" };
 
 /** The source colours for a theme: its own where it has some, otherwise Xcode's for its light or dark. */
 export function syntaxFor(theme: ThemeId | undefined, dark: boolean): Syntax {
@@ -57,7 +65,12 @@ export function syntaxFor(theme: ThemeId | undefined, dark: boolean): Syntax {
   if (theme === "fallout") return FALLOUT;
   if (theme === "solarized") return SOLARIZED;
   if (theme === "nord") return NORD;
+  if (theme === "gruvbox") return GRUVBOX;
+  if (theme === "mocha") return MOCHA;
+  if (theme === "tokyo") return TOKYO;
+  if (theme === "rose") return ROSE;
   if (theme === "paper") return PAPER;
+  if (theme === "latte") return LATTE;
   return dark ? XCODE_DARK : XCODE_LIGHT;
 }
 

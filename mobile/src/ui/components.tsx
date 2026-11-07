@@ -20,13 +20,13 @@ export const MAX_TEXT_SCALE = 2.5;
  */
 export const BAR_TEXT_SCALE = 1.8;
 
-export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
+export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "on-go" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();
   const colors = useColors();
   // The body is the one size the device decides: 16 on a phone, 17 on a tablet.
   const body = useBody();
-  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
+  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, "on-go": colors.onGo, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
   // The phone's text size is followed (Dynamic Type), up to a limit past which fixed-size things (a swipe bar, a tile) would break.
   return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} {...rest} style={[variant === "body" ? body : scale[variant], { color }, style]} />;
 }
@@ -49,7 +49,7 @@ export function Button({ label, onPress, kind = "ink", link = false, disabled, s
   const night = kind.startsWith("night");
   const bg = link ? "transparent" : off ? (night ? colors.nightRaised : colors.shapeStrong) : { ink: regular ? EMBER : colors.ink, ghost: colors.wash, go: colors.go, hi: colors.hi, "night-stop": colors.nightRaised, "night-ghost": colors.nightRaised }[kind];
   // On "hi" the words are dark in either appearance: they are on yellow. A link has no fill, so its words are the page's.
-  const fg = off ? (night ? "night" : "ink2") : link ? (kind === "night-stop" ? "night-stop" : night ? "white" : "ink") : kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
+  const fg = off ? (night ? "night" : "ink2") : link ? (kind === "night-stop" ? "night-stop" : night ? "white" : "ink") : kind === "go" ? "on-go" : kind === "ink" && regular ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (
     <PressScale
       accessibilityRole="button"

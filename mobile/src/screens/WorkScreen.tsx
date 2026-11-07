@@ -1,6 +1,6 @@
 import { tabBarRoom } from "../ui/TabBar";
-import { useEffect, useState, type ReactNode } from "react";
-import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
@@ -13,12 +13,13 @@ import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet, SheetPill } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
+import { Magnifier, RoundButton, SearchContents, type BarSearch } from "./SearchBar";
+import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
 import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
-  /** The bar over the list, for a tablet (the page's own header, with the chats' button); a phone has none, its headline says where it is. */
+  /** What a tablet's bar says where you are ("Work"); the bar's glass and its Refresh are the screen's own. A phone has no bar: its headline says where it is. */
   top?: ReactNode;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
@@ -145,6 +146,12 @@ const Link = ({ label, onPress, hint }: { label: string; onPress: () => void; hi
   </PressScale>
 );
 
+/** Whether a piece of work says what is typed: its name, its number, its issue, its feature, its repo, its state or its branch. */
+const says = (i: RemoteWorkItem, typed: string) => {
+  const q = typed.trim().toLowerCase();
+  return [i.number === null ? "" : `#${i.number}`, i.title, i.issue ?? "", i.feature ?? "", i.repo, i.word, i.branch ?? ""].some((f) => f.toLowerCase().includes(q));
+};
+
 /** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
 const ASK_ORDER: Tone[] = ["you", "bad", "move"];
 const askOf = (items: RemoteWorkItem[]): RemoteWorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(toneOf(a)) - ASK_ORDER.indexOf(toneOf(b)));
@@ -192,7 +199,33 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
+  // Searching the page (a tablet's bar): the field is open, and what is typed narrows the list to what says it.
+  const [finding, setFinding] = useState(false);
+  const [query, setQuery] = useState("");
+  const findInput = useRef<ComponentRef<typeof TextInput>>(null);
   const items = work?.items ?? [];
+  // What is found by what is typed, over every piece of work (shipped included: it is the one way to look one up).
+  const found = query.trim() ? items.filter((i) => says(i, query)) : [];
+  const barSearch: BarSearch = {
+    active: finding,
+    query,
+    count: found.length,
+    position: 0,
+    onOpen: () => {},
+    onChange: setQuery,
+    onStep: () => {},
+    onCancel: () => {
+      setFinding(false);
+      setQuery("");
+      Keyboard.dismiss();
+    },
+    placeholder: "Search your work",
+    list: true,
+    noun: "item",
+  };
+  useEffect(() => {
+    if (finding) findInput.current?.focus();
+  }, [finding]);
   const issues = work?.issues === true;
   const looked = work?.looked === true;
   const blind = work?.blind ?? [];
@@ -455,9 +488,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
-        <Txt variant="title" accessibilityRole="header">
-          Work
-        </Txt>
+        {/* A phone's list is its own big "Work" headline; a tablet's bar says it, and a second one under the bar is just the same word twice. */}
+        {!top && (
+          <Txt variant="title" accessibilityRole="header">
+            Work
+          </Txt>
+        )}
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
           <Txt variant="body" tone="ink2" style={{ flexShrink: 1 }}>
             {!looked
@@ -469,9 +505,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
                   : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
           </Txt>
           {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-          <View style={{ marginLeft: "auto" }}>
-            {refreshLink}
-          </View>
+          {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
+          {!top && (
+            <View style={{ marginLeft: "auto" }}>
+              {refreshLink}
+            </View>
+          )}
         </View>
         {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
         {blind.length > 0 && (
@@ -492,9 +531,12 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {needing === 0 ? "Nothing needs you right now." : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
       </Txt>
       {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-      <View style={{ marginLeft: "auto" }}>
-        {refreshLink}
-      </View>
+      {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
+      {!top && (
+        <View style={{ marginLeft: "auto" }}>
+          {refreshLink}
+        </View>
+      )}
     </View>
   );
 
@@ -511,16 +553,48 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   );
 
   /**
+   * The column a bar keeps on a tablet: the page's own, so the bar starts where the content does. A bar as wide as the window over
+   * content held to 640 points reads as a second, wider screen.
+   */
+  const barColumn: ViewStyle = wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", paddingHorizontal: space.xl } : {};
+
+  /**
+   * A tablet's bar: where you are, and the two things the page does — Search, which opens the field in the bar, and Refresh. The
+   * glass is as wide as what is in it, not the column, so it reads as a pill rather than an empty band; the open field takes the
+   * column's width, as a search field does.
+   */
+  const tabletBar = (searchable: boolean) => (
+    <TopBar style={{ marginHorizontal: 0, alignSelf: searchable && finding ? "stretch" : "flex-start" }}>
+      {searchable && finding ? (
+        <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
+      ) : (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+          {top}
+          {/* Search filters the list; a feature's page has no list to filter, so its bar doesn't offer it. */}
+          {searchable && (
+            <RoundButton label="Search your work" onPress={() => setFinding(true)}>
+              <Magnifier />
+            </RoundButton>
+          )}
+          <Link label="Refresh" onPress={refresh} />
+        </View>
+      )}
+    </TopBar>
+  );
+
+  /**
    * A feature's page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
-   * bar does. The way back leads, and the page's name sits where a chat's title does — the tablet brings its own header
-   * (`top`) instead.
+   * bar does. The way back leads, and the page's name sits where a chat's title does — a tablet's bar (`top`) says "Work" there
+   * instead.
    */
   const pageBar = (g: WorkGroup) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: top ? 0 : space.lg }}>
-        <View style={top ? { marginLeft: space.lg } : undefined}>{backCircle}</View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, ...(top ? barColumn : { paddingHorizontal: space.lg }) }}>
+        {backCircle}
         <View style={{ flex: 1 }}>
-          {top ?? (
+          {top ? (
+            tabletBar(false)
+          ) : (
             <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
               <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
                 {g.label}
@@ -548,7 +622,18 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
           contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
         >
-          {work === null ? (
+          {finding ? (
+            // What says what is typed, wherever it sits: a name, a number, an issue, a feature, a repo, a branch.
+            <View accessibilityLabel="Found work">
+              {found.length === 0 ? (
+                <Txt variant="body" tone="ink3">
+                  {query.trim() ? `Nothing says “${query.trim()}”.` : "Search your work: a name, a #number, a ticket, a feature or a repo."}
+                </Txt>
+              ) : (
+                found.map((i, n) => row(i, null, n))
+              )}
+            </View>
+          ) : work === null ? (
             <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
               <Dots />
             </View>
@@ -566,7 +651,10 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         {!top && <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />}
         {top && (
           <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
-            {top}
+            {/* The bar starts where the list's column does, and is as wide as what it says. */}
+            <View pointerEvents="box-none" style={barColumn}>
+              {tabletBar(true)}
+            </View>
           </View>
         )}
       </View>

@@ -15,8 +15,8 @@ import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
 import { setWorkBadge, useWorkBadge, type WorkBadge } from "../workBadge";
-import { radius, space, useBody, useColors } from "../ui/theme";
-import { loadVoiceEngine, type VoiceEngine } from "../prefs";
+import { radius, setThemeChoice, space, THEME_CHOICES, useBody, useColors, useThemeChoice, type ThemeChoice } from "../ui/theme";
+import { loadVoiceEngine, saveTheme, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
 import { ProviderStrip } from "./ChatExtras";
 
@@ -279,7 +279,18 @@ function LockRow() {
   );
 }
 
-/** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
+/** The colours this phone is drawn in, as a row of "This phone" with its list in a menu over it: the change is seen at once, behind the sheet. */
+function ThemeRow() {
+  const theme = useThemeChoice();
+  const choices = THEME_CHOICES.map((t) => ({ value: t.id, label: t.label }));
+  const pick = (id: string) => {
+    const next = id as ThemeChoice;
+    setThemeChoice(next);
+    void saveTheme(next);
+  };
+  return <MenuRow look={LOOKS.theme} title="Theme" value={THEME_CHOICES.find((t) => t.id === theme)?.label ?? ""} choices={choices} selected={theme} onPick={pick} />;
+}
+
 const BADGES: { value: WorkBadge; label: string; hint: string }[] = [
   { value: "opened", label: "Until opened", hint: "Counts the steps that came since you last looked at Work." },
   { value: "always", label: "Always", hint: "Counts every step waiting, looked at or not." },
@@ -293,6 +304,7 @@ function WorkBadgeRow() {
   return <MenuRow look={LOOKS.badge} title="Work badge" value={chosen.label} detail={chosen.hint} choices={BADGES} selected={mode} onPick={(v) => setWorkBadge(v as WorkBadge)} />;
 }
 
+/** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
 function VoiceRow({ onPress }: { onPress: () => void }) {
   const [engine, setEngine] = useState<VoiceEngine | null>(null);
   useEffect(() => {
@@ -362,6 +374,7 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
                 {canPair && <SettingsRow look={LOOKS.pair} title="Pair another device" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
               </SettingsSection>
               <SettingsSection label="This phone">
+                <ThemeRow />
                 <LockRow />
                 {onVoice && <VoiceRow onPress={then(onVoice)} />}
                 {canWork && <WorkBadgeRow />}
