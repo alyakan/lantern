@@ -722,6 +722,13 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const colors = useColors();
   // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
   const body = useBody();
+  // How tall it grows before it scrolls: five lines of its own type at least (so more points at larger text sizes), and up to
+  // eight on a tall screen while that is under a fifth of it (a phone has the keyboard to share it with). A fixed 120 showed
+  // under three lines at large text.
+  const { height: screenHeight, fontScale } = useWindowDimensions();
+  // The type is drawn at the system's text size, so its lines are that much taller than `lineHeight` says.
+  const line = (body.lineHeight ?? 22) * fontScale;
+  const tallest = Math.round(Math.max(5 * line + 12, Math.min(8 * line + 12, screenHeight * 0.18)));
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
@@ -982,7 +989,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+          style={{ maxHeight: tallest, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(tallest, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
         <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
