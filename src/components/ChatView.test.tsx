@@ -53,6 +53,22 @@ describe("ChatView", () => {
     expect(chat.scrollTop).toBe(2100);
   });
 
+  it("lets what arrives while you watch settle in, but not what it was first drawn with or a load of many at once", async () => {
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const base = { ...initialState, status: "running" as const, folder: "/p" };
+    const { container, rerender } = render(<ChatView state={{ ...base, items }} {...props} />);
+    await Promise.resolve();
+    expect(container.querySelectorAll(".enter")).toHaveLength(0);
+    const more: ChatItem[] = [...items, { type: "user", id: "u2", text: "And the tests?" }];
+    rerender(<ChatView state={{ ...base, items: more }} {...props} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector(".turn-section[data-turn='u2']")?.classList.contains("enter")).toBe(true);
+    const many: ChatItem[] = [...more, ...[3, 4, 5, 6, 7, 8].map((n): ChatItem => ({ type: "user", id: `u${n}`, text: `Question ${n}` }))];
+    rerender(<ChatView state={{ ...base, items: many }} {...props} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector(".turn-section[data-turn='u5']")?.classList.contains("enter")).toBe(false);
+  });
+
   describe("a card waiting for an answer", () => {
     const waiting: ChatItem[] = [...items, { type: "permission", id: "p1", toolName: "Bash", input: { command: "rm -rf build" }, decision: null }];
     const running = { ...initialState, status: "running" as const, folder: "/p", items: waiting };

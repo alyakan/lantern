@@ -15,6 +15,10 @@ import { sinceLabel } from "../lib/revert";
 /** How long after the reader's last wheel, touch or key a scroll still counts as theirs (a trackpad's glide goes on after the fingers lift). */
 const READER_WINDOW_MS = 600;
 const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+/** More than this many arriving at once is a load (history, earlier turns), not something happening: it doesn't animate. */
+const ENTER_AT_ONCE = 4;
+/** What a row opens to, anywhere in a turn: it settles in as a new row does. */
+const ENTERS = ".steps, .step-output, .file-changes, .step-children, .hook-card-body, .always-menu, .plan-body";
 
 /** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
 export interface RestoreEvents {
@@ -124,6 +128,8 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
   // Older turns put in above what is on screen: the turn that was at the top stays there (the browser doesn't hold the
   // place by itself when content appears above it).
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const loadingEarlierRef = useRef(false);
+  loadingEarlierRef.current = loadingEarlier;
   const earlierTurns = useRef(state.earlierTurns);
   // With no turn to hold on to (the view above the first one), the distance from the end is kept instead.
   const fromEnd = useRef<number | null>(null);
@@ -169,6 +175,23 @@ export function ChatView({ state, resend, restore, loadEarlier, front = false, .
       observer.disconnect();
       added?.disconnect();
     };
+  }, []);
+  // What arrives while you watch settles in (`.chat .enter` in styles.css): a turn, a row of one, a card answered into its
+  // line, what a step opens to. Marked here as it lands, never what the chat was first drawn with, nor a load of many at once
+  // (a chat's history coming in, earlier turns shown): those would all move together.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof MutationObserver === "undefined") return;
+    const arrivals = new MutationObserver((records) => {
+      const added = records.flatMap((r) => Array.from(r.addedNodes)).filter((n): n is HTMLElement => n instanceof HTMLElement);
+      if (added.length === 0 || added.length > ENTER_AT_ONCE || loadingEarlierRef.current) return;
+      for (const node of added) {
+        const parent = node.parentElement;
+        if (parent === el ? node.classList.contains("turn-section") : parent?.classList.contains("turn-section") || node.matches(ENTERS)) node.classList.add("enter");
+      }
+    });
+    arrivals.observe(el, { childList: true, subtree: true });
+    return () => arrivals.disconnect();
   }, []);
   // Scrolled up from the end: the pill to get back.
   const [away, setAway] = useState(false);
