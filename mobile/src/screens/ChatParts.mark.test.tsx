@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { Item } from "../sync/reducer";
 import { lightColors } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
-import { PageRow, StepsRow, SummaryRow, withCaret } from "./ChatParts";
+import { PageRow, StepsRow, SUMMARY_HEIGHTS_KEPT, SummaryRow, withCaret } from "./ChatParts";
 import { fileNamed } from "../ui/Markdown";
 
 const said = (id: string, text: string): Item => ({ kind: "assistant", id, text, streaming: false });
@@ -79,6 +79,22 @@ describe("a summary card's height, as the list draws it", () => {
     // Before any layout of this drawing: already clipped, with its Show all.
     expect(clip()).toBe(230);
     expect(screen.getByText("Show all")).toBeTruthy();
+  });
+
+  it("keeps only the latest sizes it measured: the oldest is forgotten and starts held again", async () => {
+    const first = summaryOf("e0", "The first, short.");
+    await render(<SummaryRow row={first} onFiles={() => {}} />);
+    await measure(60);
+    await screen.rerender(<SummaryRow row={summaryOf("e-gap", "Between.")} onFiles={() => {}} />);
+    await screen.rerender(<SummaryRow row={first} onFiles={() => {}} />);
+    // Remembered as short: shown whole from the first drawing.
+    expect(clip()).toBeUndefined();
+    for (let i = 1; i <= SUMMARY_HEIGHTS_KEPT; i++) {
+      await screen.rerender(<SummaryRow row={summaryOf(`e${i}`, `Summary number ${i}.`)} onFiles={() => {}} />);
+      await measure(60);
+    }
+    await screen.rerender(<SummaryRow row={first} onFiles={() => {}} />);
+    expect(clip()).toBe(230);
   });
 });
 
