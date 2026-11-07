@@ -5,7 +5,7 @@ import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
-import { ChatScreen } from "./ChatScreen";
+import { ChatScreen, PAGES_STALL_MS } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
@@ -721,6 +721,25 @@ describe("a chat", () => {
     expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: true, hidden: 0, events: [] } }));
     expect(screen.getByText("412 tests passed")).toBeTruthy();
+  });
+
+  it("stops holding a chat back when its pages stop coming on a link that stays up, and holds it again with the next page", async () => {
+    const { controller } = await withSession([]);
+    jest.useFakeTimers();
+    try {
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
+      expect(screen.queryByText("412 tests passed")).toBeNull();
+      await act(async () => void jest.advanceTimersByTime(PAGES_STALL_MS + 100));
+      expect(screen.getByText("412 tests passed")).toBeTruthy();
+      // A page that does come after that is held until the chat is whole, as before.
+      const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: false, hidden: 0, events: later } }));
+      expect(screen.queryByText("And the changelog.")).toBeNull();
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 11, page: 2, done: true, hidden: 0, events: [] } }));
+      expect(screen.getByText("And the changelog.")).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("doesn't pull a reader who scrolls while a long chat's pages come back down with each page, and follows the end once it is whole", async () => {

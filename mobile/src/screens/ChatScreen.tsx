@@ -79,6 +79,8 @@ const NO_ITEMS: Item[] = [];
 const BANNER_MS = 4000;
 /** How long what went wrong is said over the chat. */
 const PROBLEM_MS = 8000;
+/** How long a chat's pages may stop coming (on a link that is still up) before what has come is drawn without them. */
+export const PAGES_STALL_MS = 15_000;
 /** How much has to have happened while away for "Caught up on…" to be said: a few events is just the chat going on. */
 export const BANNER_AT = 10;
 
@@ -154,15 +156,23 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A chat that comes in pages (a long one opened, or one caught up on after a long time away) is drawn once, when it is whole:
   // until then what was shown stays (the shape of a chat, breathing, when there was nothing). Drawn page by page it was laid out
   // again with each one, too busy to draw what a finger scrolled into view, and a chat caught up on was cut back to its oldest
-  // page before it grew again. What this phone sends meanwhile shows at once.
-  const settled = useRef<Item[]>(view.resetting ? NO_ITEMS : view.items);
-  if (!view.resetting) settled.current = view.items;
+  // page before it grew again. What this phone sends meanwhile shows at once. A link that stays up while the pages stop coming
+  // (no page for PAGES_STALL_MS) doesn't hold the chat back for ever: what has come is drawn, and the next page holds it again.
+  const [stalledOn, setStalledOn] = useState<Item[] | null>(null);
+  useEffect(() => {
+    if (!view.resetting) return;
+    const t = setTimeout(() => setStalledOn(view.items), PAGES_STALL_MS);
+    return () => clearTimeout(t);
+  }, [view.resetting, view.items]);
+  const holding = view.resetting && stalledOn !== view.items;
+  const settled = useRef<Item[]>(holding ? NO_ITEMS : view.items);
+  if (!holding) settled.current = view.items;
   const items = useMemo(() => {
-    if (!view.resetting) return view.items;
+    if (!holding) return view.items;
     const held = settled.current;
     const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
     return mine.length ? [...held, ...mine] : held;
-  }, [view.resetting, view.items]);
+  }, [holding, view.items]);
   const rows = useMemo(() => timeline(items, Date.now(), working), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(items, working), [items, working]);
@@ -843,7 +853,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               </Txt>
               <Button label="Try again" kind="ghost" onPress={() => sync.retryLoad(slot)} />
             </View>
-          ) : !view.loaded || view.resetting || !online ? (
+          ) : !view.loaded || holding || !online ? (
             // The shape of a chat in grey, breathing (the banner above already says when the Mac can't be reached).
             <ChatSkeleton label={online ? "Loading this chat" : "Waiting for your Mac"} />
           ) : (
