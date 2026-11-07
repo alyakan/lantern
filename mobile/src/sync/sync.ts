@@ -146,7 +146,10 @@ export class Sync {
   private subscribeTo(slot: string) {
     this.apply({ type: "load_started", slot });
     this.flush();
-    const after = this.state.views[slot]?.seq ?? 0;
+    // A chat whose pages stopped coming part way (the link dropped between them) starts over: its first page already gave the
+    // chat's latest number, and asking from there would skip the pages that never came (hours of a long chat went missing).
+    const view = this.state.views[slot];
+    const after = view && !view.resetting ? view.seq : 0;
     // A failure is the chat's to show (it has nothing else to show), not swallowed.
     return this.ask({ op: "subscribe", slot, after, epoch: this.state.epoch ?? 0 }).catch((e: Error) => this.apply({ type: "load_failed", slot, why: e.message || "Couldn't load this chat." }));
   }

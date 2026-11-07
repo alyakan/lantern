@@ -114,6 +114,20 @@ describe("the phone's sync", () => {
     expect(sync.getState().views.a.items[0]).toMatchObject({ text: "hi", failed: "No" });
   });
 
+  it("a chat whose pages stopped coming part way (the link dropped) is asked for from the start, not from the number its first page gave", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7).session);
+    sync.follow("a");
+    await settle();
+    // The first of several pages: it carries the chat's latest number, and the rest are still to come.
+    sync.onPushed({ type: "reset", slot: "a", seq: 900, page: 0, done: false, hidden: 0, events: [{ kind: "user_text", text: "first", at: 1, sent_by: "desktop" }] });
+    frame();
+    const again = fakeSession(7);
+    sync.onSession(again.session);
+    await settle();
+    expect(again.asked).toContainEqual({ op: "subscribe", slot: "a", after: 0, epoch: 7 });
+  });
+
   it("after the Mac restarted (another epoch) it follows from the start", async () => {
     const { sync, frame } = rig();
     sync.onSession(fakeSession(7).session);
