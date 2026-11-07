@@ -7,7 +7,7 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
-import { emptyView } from "../sync/reducer";
+import { emptyView, type Item } from "../sync/reducer";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP, useTapAway } from "../ui/keyboard";
@@ -73,6 +73,7 @@ export interface ChatProps {
 
 /** The header's buttons take a touch a little way around them, but not above: that is the status bar, whose tap scrolls a list to its top. */
 const HEADER_SLOP = { top: 0, left: 8, right: 8, bottom: 8 };
+const NO_ITEMS: Item[] = [];
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
@@ -150,9 +151,21 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [bottom, setBottom] = useState(0);
   const view = views[slot] ?? emptyView;
   const working = chat?.status === "working";
-  const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
+  // A chat that comes in pages (a long one opened, or one caught up on after a long time away) is drawn once, when it is whole:
+  // until then what was shown stays (the shape of a chat, breathing, when there was nothing). Drawn page by page it was laid out
+  // again with each one, too busy to draw what a finger scrolled into view, and a chat caught up on was cut back to its oldest
+  // page before it grew again. What this phone sends meanwhile shows at once.
+  const settled = useRef<Item[]>(view.resetting ? NO_ITEMS : view.items);
+  if (!view.resetting) settled.current = view.items;
+  const items = useMemo(() => {
+    if (!view.resetting) return view.items;
+    const held = settled.current;
+    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
+    return mine.length ? [...held, ...mine] : held;
+  }, [view.resetting, view.items]);
+  const rows = useMemo(() => timeline(items, Date.now(), working), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
-  const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
+  const queued = useMemo(() => queuedIds(items, working), [items, working]);
   const canCruise = useMacCan("cruise");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
@@ -160,7 +173,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [reviewed, setReviewed] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
   // Every file the chat changed, each with its diff: the tablet's Changes pane, as a sheet.
-  const changed = useMemo(() => changedFiles(view.items), [view.items]);
+  const changed = useMemo(() => changedFiles(items), [items]);
   const [changesOpen, setChangesOpen] = useState(false);
   // What the sheet shows: the chat's changes, (a Mac that lists "artifacts") the artifacts of its folder, or (one that lists
   // "todos") its project's to-do list.

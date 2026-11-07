@@ -698,6 +698,31 @@ describe("a chat", () => {
     expect(screen.getByLabelText("Message").props.editable).toBe(false);
   });
 
+  it("draws a chat that comes in pages once, when it is whole, keeping what it showed until then", async () => {
+    const { controller } = await withSession(turn);
+    const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
+    // A catch-up starts the chat over: the messages already there stay while its pages come.
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 30, page: 0, done: false, hidden: 0, events: turn.slice(0, 1) } }));
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    // Something sent from here meanwhile shows at once.
+    await act(async () => void controller.sync.send("a", "Quick one."));
+    expect(screen.getByText("Quick one.")).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 31, page: 1, done: false, hidden: 0, events: turn.slice(1) } }));
+    expect(screen.queryByText("And the changelog.")).toBeNull();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 32, page: 2, done: true, hidden: 0, events: later } }));
+    expect(screen.getByText("And the changelog.")).toBeTruthy();
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+  });
+
+  it("opens a long chat on the shape of a chat until all its pages have come", async () => {
+    const { controller } = await withSession([]);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
+    expect(screen.queryByText("412 tests passed")).toBeNull();
+    expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: true, hidden: 0, events: [] } }));
+    expect(screen.getByText("412 tests passed")).toBeTruthy();
+  });
+
   it("doesn't pull a reader who scrolls while a long chat's pages come back down with each page, and follows the end once it is whole", async () => {
     const { controller } = await withSession([]);
     const threshold = () => screen.getByTestId("chat-list").props.maintainVisibleContentPosition?.autoscrollToBottomThreshold;
