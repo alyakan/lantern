@@ -65,7 +65,9 @@ function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }
             Always allow…
           </button>
         )}
-        <button onClick={() => onDecide(item.id, false)}>Deny</button>
+        <button title="Deny (Esc)" onClick={() => onDecide(item.id, false)}>
+          Deny
+        </button>
       </div>
       {menuOpen && (
         <div className="always-menu">

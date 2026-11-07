@@ -1468,8 +1468,24 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .permission-done.allowed .decision { color: var(--add); }
 .permission-done.denied .decision { color: var(--del); }
 .permission-done-detail { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
-.turn-note { font-size: calc(12px * var(--font-scale)); }
+.turn-note { font-size: calc(12px * var(--font-scale)); display: flex; flex-direction: column; gap: 4px; }
 .turn-note .error { color: var(--del); }
+.turn-stopped { display: flex; align-items: center; gap: 6px; }
+.stop-mark { width: 7px; height: 7px; border-radius: 1.5px; background: currentColor; opacity: 0.7; flex: none; }
+/* A turn that failed: a card, as a waiting prompt is, with what went wrong and Retry beside it. */
+.turn-error { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--del) 40%, var(--line)); border-left: 3px solid var(--del); border-radius: var(--radius-md); background: color-mix(in srgb, var(--del) 6%, var(--bg-subtle)); color: var(--text); }
+.turn-error-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-retry { flex: none; height: 22px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+.turn-stopped .turn-retry { margin-left: 4px; }
+/* A card waiting for the user stands out from the work around it, in the amber that marks waiting everywhere else. */
+.permission { border-color: color-mix(in srgb, var(--attn) 55%, var(--line-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--attn) 13%, transparent); }
+/* The line under the chat while a card waits: no spinner, Claude isn't working. */
+.waiting-line .activity-line { cursor: default; }
+.waiting-line .activity-line:hover { background: none; }
+.waiting-line .activity-text { color: var(--muted); }
+.waiting-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--attn); flex: none; animation: waiting-pulse 1.8s var(--ease-out) infinite; }
+@keyframes waiting-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } }
 
 /* Composer. Docked under the chat once a conversation exists; floated in the middle (.hero-wrap) while empty. */
 .hero-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 24px 12vh; }

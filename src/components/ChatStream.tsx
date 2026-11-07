@@ -131,9 +131,12 @@ export function ChatStream({ items, folder, sections, live = false, resend, rest
     else if (row.type === "assistant") latest = row.id;
     if (row.type === "assistant" || row.type === "turn") answering.set(row.id, current);
   }
+  // The reply still coming in: the last row, while the chat runs. It has nothing to copy or regenerate yet.
+  const last = rows[rows.length - 1];
+  const streaming = live && last?.type === "assistant" ? last.id : null;
   // Each row gets what it shows, not closures made here, so one that hasn't changed isn't drawn again while another streams.
   const render = (row: Row): ReactNode => (
-    <RowView key={row.id} row={row} folder={folder} verb={verbFor.get(row.id)} latest={row.id === latest} answers={answering.get(row.id)} resend={resend} restore={restore} {...handlers} />
+    <RowView key={row.id} row={row} folder={folder} verb={verbFor.get(row.id)} latest={row.id === latest} streaming={row.id === streaming} answers={answering.get(row.id)} resend={resend} restore={restore} {...handlers} />
   );
 
   if (!sections) return <>{rows.map(render)}</>;
@@ -164,6 +167,8 @@ interface RowProps extends StreamHandlers {
   verb?: string;
   /** A reply that is the latest answer, so it can be regenerated. */
   latest: boolean;
+  /** The reply still streaming in: no actions under it until it is whole. */
+  streaming?: boolean;
   /** The prompt a reply or a turn's note answers (null: none, for one Claude started on its own). */
   answers?: UserRow | null;
   resend?: ResendHandlers;
@@ -177,7 +182,7 @@ function sameRowProps(a: RowProps, b: RowProps): boolean {
 }
 
 /** One row of the stream. A message streaming in redraws its own row; the hundreds before it stay as they are. */
-const RowView = memo(function RowView({ row, folder, verb, latest, answers, resend, restore, ...handlers }: RowProps) {
+const RowView = memo(function RowView({ row, folder, verb, latest, streaming = false, answers, resend, restore, ...handlers }: RowProps) {
   const resendOf = (p: UserRow | null | undefined) => (resend && p ? () => resend.onResend({ text: p.text, draft: p.draft }) : undefined);
   switch (row.type) {
     case "user": {
@@ -217,7 +222,7 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
           <div className="msg assistant">
             <MdStream>{row.text}</MdStream>
           </div>
-          <MessageActions text={row.text} align="start" actions={actions} />
+          {!streaming && <MessageActions text={row.text} align="start" actions={actions} />}
         </>
       );
     }

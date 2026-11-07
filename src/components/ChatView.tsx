@@ -3,7 +3,7 @@ import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { anchorOf, scrollToAnchor, type ChatAnchor } from "../lib/scrollAnchor";
-import type { State } from "../store";
+import { hasPendingPrompt, type State } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { agentName } from "../lib/provider";
 import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
@@ -31,7 +31,8 @@ function lastOf(items: State["items"], wanted: (it: State["items"][number]) => b
 /** Loads the turns before the first one shown ("Show earlier messages"); resolves when they are in the chat. */
 export type LoadEarlier = () => Promise<void>;
 
-export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents; loadEarlier?: LoadEarlier } & StreamHandlers) {
+/** `front`: the chat in front of the window (not a card on the canvas): Escape answers its waiting card. */
+export function ChatView({ state, resend, restore, loadEarlier, front = false, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents; loadEarlier?: LoadEarlier; front?: boolean } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new). Kept as a place in the chat, not
   // pixels, since the same chat shows at other widths (its card on the canvas, the chat itself, a resized pane).
@@ -190,6 +191,25 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   const prompt = lastOf(state.items, (it) => it.type === "user");
   // A worker whose worktree is being set up hasn't started: nothing is thinking yet.
   const thinkingLine = state.status === "running" && !state.setup;
+  // A card waiting for your answer: Claude isn't working, it's waiting for you, and the line under the chat says so.
+  const waiting = thinkingLine && hasPendingPrompt(state.items);
+  // Escape answers No to the one card waiting, as Deny does: never Allow, which only a click or a key on the card itself
+  // gives. Not while typing (a word in the box, an open menu), nor in a dialog, nor once something else took the key.
+  const denyNow = useRef<(() => void) | null>(null);
+  const pending = state.items.filter((it) => it.type === "permission" && it.decision === null);
+  denyNow.current = front && pending.length === 1 ? () => handlers.onDecide(pending[0].id, false) : null;
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !denyNow.current) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|SELECT)$/.test(t.tagName) || (t.tagName === "TEXTAREA" && (t as HTMLTextAreaElement).value !== ""))) return;
+      if (document.querySelector('[role="dialog"], [aria-modal="true"], [role="menu"]')) return;
+      e.preventDefault();
+      denyNow.current();
+    };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
   const jump = () => {
     nearBottom.current = true;
     anchor.current = null;
@@ -229,7 +249,14 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
         )}
         {state.items.length === 0 && !state.thinking && <div className="empty">{`What should ${agentName(state.provider)} work on?`}</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
-        {thinkingLine && (
+        {waiting ? (
+          <div className="activity waiting-line" role="status">
+            <span className="activity-line">
+              <span className="waiting-dot" aria-hidden />
+              <span className="activity-text">Waiting for your answer</span>
+            </span>
+          </div>
+        ) : thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label={`${agentName(state.provider)} is thinking`}>
             <span className="activity-line">
               <span className="spinner" aria-hidden />

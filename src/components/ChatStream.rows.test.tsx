@@ -54,7 +54,8 @@ describe("ChatStream rows", () => {
     expect(drawn.get("First question")).toBe(1);
     expect(drawn.get("First answer")).toBe(1);
     expect(drawn.get("work:t1")).toBe(1);
-    expect(drawn.get("Streaming")).toBe(1);
+    // The reply still coming in has no Copy or Regenerate under it until it is whole.
+    expect(drawn.get("Streaming")).toBeUndefined();
   });
 
   it("draws a turn's work line again when a step changes or the turn stops", () => {

@@ -86,6 +86,8 @@ interface Props {
   onOpenSettings?: () => void;
   /** The chat's unsent text, kept while another chat is on screen. */
   /** `images`: the pictures pasted into the draft, by their `[Image #n]`, kept with it so switching chats doesn't lose them. */
+  /** A card in the chat waits for the user's answer: Claude isn't working meanwhile, so the box doesn't look like it is. */
+  waiting?: boolean;
   draft?: { initial: string; save: (text: string) => void; images?: Record<number, PastedImage>; saveImages?: (images: Record<number, PastedImage>) => void };
   /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
@@ -100,7 +102,7 @@ interface Props {
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
+export function MessageInput({ status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
   // What the provider hasn't got isn't offered: its box has no effort, preset or "/" menu to show.
@@ -489,7 +491,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           <SideChat onClose={closeAside} />
         </div>
       )}
-      <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
+      <div className={`composer-box${running && !waiting ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu
             kind={open.kind}

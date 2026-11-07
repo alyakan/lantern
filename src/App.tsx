@@ -3262,6 +3262,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
       status={state.status}
+      waiting={state.status === "running" && hasPendingPrompt(state.items)}
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
@@ -3511,7 +3512,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
+                        <ChatView key={`chat-${active}`} front state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>

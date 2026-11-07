@@ -53,6 +53,50 @@ describe("ChatView", () => {
     expect(chat.scrollTop).toBe(2100);
   });
 
+  describe("a card waiting for an answer", () => {
+    const waiting: ChatItem[] = [...items, { type: "permission", id: "p1", toolName: "Bash", input: { command: "rm -rf build" }, decision: null }];
+    const running = { ...initialState, status: "running" as const, folder: "/p", items: waiting };
+
+    it("says the chat waits for you, with no spinner, instead of that Claude is thinking", () => {
+      const { container } = render(<ChatView front state={running} onDecide={() => {}} onOpenFile={() => {}} />);
+      expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
+      expect(container.querySelector(".spinner")).toBeNull();
+    });
+
+    it("is denied by Escape in the chat in front, never allowed, and not while typing or in a dialog", () => {
+      const onDecide = vi.fn();
+      render(<ChatView front state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      const box = document.createElement("textarea");
+      document.body.appendChild(box);
+      box.value = "half a sentence";
+      fireEvent.keyDown(box, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      document.body.appendChild(dialog);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      dialog.remove();
+      box.value = "";
+      fireEvent.keyDown(box, { key: "Escape" });
+      expect(onDecide).toHaveBeenCalledWith("p1", false);
+      fireEvent.keyDown(window, { key: "Enter" });
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      box.remove();
+    });
+
+    it("isn't answered by Escape from a chat on the canvas, or when two cards wait", () => {
+      const onDecide = vi.fn();
+      const { unmount } = render(<ChatView state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.keyDown(window, { key: "Escape" });
+      unmount();
+      const two = { ...running, items: [...waiting, { type: "permission" as const, id: "p2", toolName: "Bash", input: {}, decision: null }] };
+      render(<ChatView front state={two} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+    });
+  });
+
   it("follows new messages by scrolling only the chat, never the page around it", () => {
     // scrollIntoView scrolls every scrollable ancestor too, the page included: message by message, the whole app
     // slid up and out of the window.
