@@ -34,6 +34,7 @@ import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEven
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
+import { useSteady } from "./lib/steady";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
@@ -2429,22 +2430,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [lastTurn?.id]);
   // What the window is, or null when nothing says: the meter then shows the tokens, not a percent against a guess.
   const contextWindow = windowOf(state, windows);
-  // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs.
-  const streamHandlers = {
+  // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs. Steady (lib/steady.ts), so
+  // while a reply streams the rows that haven't changed aren't drawn again.
+  const steadyHandlers = useSteady({
     onDecide: decide,
     onOpenFile: openFile,
     onStopShell: (id: string) => api.stopShell(active, id).catch(() => {}),
     // A reply that couldn't be typed says so in the command's block (the command most likely just ended).
     onShellInput: (id: string, text: string) => api.shellInput(active, id, text).catch((e) => dispatch({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
-    testRunFor: (id: string) => state.testRuns.find((r) => r.id === id),
     onOpenTestRun: (id: string) => {
       setFocusRun({ id, key: Date.now() });
       setReviewCollapsed(false);
     },
-  };
+  });
+  // New when the runs change, so a step whose test run just came is drawn again with it.
+  const testRuns = state.testRuns;
+  const testRunFor = useCallback((id: string) => testRuns.find((r) => r.id === id), [testRuns]);
+  const streamHandlers = useMemo(() => ({ ...steadyHandlers, testRunFor }), [steadyHandlers, testRunFor]);
   // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
   // have their own flow.
-  const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
+  const resendSteady = useSteady({ onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) });
+  const resendHandlers = state.status === "idle" && !stepsMode ? resendSteady : undefined;
   // "Restore files to here" on a sent message: what it did is said in the chat and told to Claude with the next message.
   const restoreEvents = state.folder && !stepsMode
     ? {
