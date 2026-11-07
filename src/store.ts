@@ -535,6 +535,9 @@ function mapAssistant(items: ChatItem[], id: string, fn: (text: string) => strin
 }
 
 function upsertText(items: ChatItem[], parent: string | null, blockId: string, fn: (text: string) => string): ChatItem[] {
+  // The message streaming in is almost always the last one: no look through the whole chat (and no copy of it) per word.
+  const last = items[items.length - 1];
+  if (parent === null && last?.type === "assistant" && last.id === blockId) return [...items.slice(0, -1), { ...last, text: fn(last.text) }];
   if (containsAssistant(items, blockId)) return mapAssistant(items, blockId, fn);
   return insert(items, parent, { type: "assistant", id: blockId, text: fn("") });
 }
