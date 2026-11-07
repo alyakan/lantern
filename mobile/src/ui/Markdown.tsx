@@ -268,16 +268,18 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
 
 /** A column no wider than this (a cell wraps past it): on a phone the next column still shows the start of itself. */
 const COLUMN_MAX = 180;
+/** How wide a heading's letter is, in bold: wider than a cell's, or a heading as long as its column broke mid-word ("Remove / d"). */
+const HEAD_CHAR = 8.6;
 
 /** What a column of a table needs, from what is longest in it: wide enough to read, narrow enough to leave room for the next. */
-const columnWidth = (cells: Span[][]) => Math.round(Math.min(COLUMN_MAX, Math.max(72, Math.max(...cells.map((c) => plainText(c).length)) * 7.6 + 26)));
+const columnWidth = (head: Span[], cells: Span[][]) => Math.round(Math.min(COLUMN_MAX, Math.max(72, plainText(head).length * HEAD_CHAR + 30, Math.max(0, ...cells.map((c) => plainText(c).length)) * 7.6 + 26)));
 
 /**
  * A table in a box of its own: the header on a tint, a line between rows, columns as wide as their content (up to a
  * limit, past which a cell wraps), aligned as the table says. It scrolls sideways in there when it can't fit, not the page.
  */
 function Table({ block, tone, mark, surface }: { block: Extract<Block, { kind: "table" }>; tone: Tone; mark?: string; surface: string }) {
-  const widths = block.head.map((h, c) => columnWidth([h, ...block.rows.map((r) => r[c] ?? [])]));
+  const widths = block.head.map((h, c) => columnWidth(h, block.rows.map((r) => r[c] ?? [])));
   const textAlign = (a: Align) => a;
   const colors = useColors();
   const { raised, line } = look(tone, colors);
