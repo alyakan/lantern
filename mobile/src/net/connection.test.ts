@@ -312,10 +312,14 @@ describe("what goes wrong around a connection", () => {
     (r.conn as unknown as { d: { probeWait: number } }).d.probeWait = 20;
     await r.conn.start();
     for (let i = 0; i < 10; i++) await flush();
+    const stillUp: unknown[] = [];
+    (r.conn as unknown as { d: { onStillUp: (s: unknown) => void } }).d.onStillUp = (s) => stillUp.push(s);
     r.conn.resume();
     await new Promise((res) => setTimeout(res, 40));
     expect(r.mac.opened).toHaveLength(1);
     expect(r.mac.requests.map((q) => q.op)).toContain("list_waiting");
+    // The sync store is told, so it follows its chats again over it.
+    expect(stillUp).toHaveLength(1);
     r.conn.stop();
   });
 

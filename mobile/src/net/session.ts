@@ -161,6 +161,11 @@ export class Session {
     });
   }
 
+  /** Whether the connection is still open (it closes for good, never opening again). */
+  get isOpen() {
+    return !this.closed;
+  }
+
   close() {
     this.link.close();
   }

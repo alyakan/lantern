@@ -69,6 +69,38 @@ describe("the phone's sync", () => {
     expect(second.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
   });
 
+  it("lets go of the open chats while the app is in the back, so the Mac pushes about them, and follows them again from where they were", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7);
+    sync.onSession(s.session);
+    sync.follow("a");
+    await settle();
+    sync.onPushed(delta(12, "hi"));
+    frame();
+    sync.setAway(true);
+    await settle();
+    expect(s.asked).toContainEqual({ op: "unsubscribe", slot: "a" });
+    // A connection that comes up while away follows nothing; one opened while away waits too.
+    const away = fakeSession(7);
+    sync.onSession(away.session);
+    sync.follow("b");
+    await settle();
+    expect(away.asked.filter((r) => r.op === "subscribe")).toEqual([]);
+    // Back in front: nothing until the link is known to work, then both, the first from where it was.
+    sync.setAway(false);
+    await settle();
+    expect(away.asked.filter((r) => r.op === "subscribe")).toEqual([]);
+    sync.onStillUp(away.session);
+    await settle();
+    expect(away.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
+    expect(away.asked).toContainEqual({ op: "subscribe", slot: "b", after: 0, epoch: 7 });
+    // A link that was dialled again in the meantime is the new one's to follow: the old one's word is ignored.
+    const before = away.asked.length;
+    sync.onStillUp(s.session);
+    await settle();
+    expect(away.asked).toHaveLength(before);
+  });
+
   it("keeps the last few closed chats' messages and lets older ones go, so a long session doesn't hold every chat", async () => {
     const { sync, frame } = rig();
     sync.onSession(fakeSession(7).session);

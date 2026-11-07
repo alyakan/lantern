@@ -56,6 +56,8 @@ export interface ConnectionDeps {
   onState: (s: ConnectionState) => void;
   /** A connection came up (the sync store subscribes again from where it was). */
   onSession?: (s: Session) => void;
+  /** The app came back to the foreground and the connection it had still works (see `resume`). */
+  onStillUp?: (s: Session) => void;
   wait?: (ms: number) => Promise<void>;
   newKey?: () => Keypair;
   /** Tests only: replays a recorded handshake. */
@@ -215,7 +217,9 @@ export class Connection {
     const session = this.session;
     if (session) {
       void session.alive(this.d.probeWait ?? PROBE_WAIT).then((up) => {
-        if (up || this.session !== session) return;
+        if (this.session !== session) return;
+        // One that closed while it was asked is the dialling loop's to replace, not one to follow chats over.
+        if (up) return void (session.isOpen && this.d.onStillUp?.(session));
         this.hangUp();
         // It was up until now: the dialling that follows starts from the shortest pause.
         this.tries = 0;

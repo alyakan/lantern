@@ -66,6 +66,7 @@ export class Controller {
       appVersion: d.appVersion,
       onPushed: this.sync.onPushed,
       onSession: this.sync.onSession,
+      onStillUp: this.sync.onStillUp,
       onState: (s) => this.setConnection(s),
     });
   }
@@ -128,8 +129,14 @@ export class Controller {
     return this.connection.start();
   }
 
+  /** The app went to the back (true), or came to the front: what it follows is let go of meanwhile (see Sync.setAway). */
+  setAway(away: boolean) {
+    this.sync.setAway(away);
+  }
+
   /** The app came back to the foreground. */
   resume() {
+    this.sync.setAway(false);
     this.connection.resume();
   }
 
