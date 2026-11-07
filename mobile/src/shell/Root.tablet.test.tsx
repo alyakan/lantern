@@ -616,6 +616,22 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
   });
 
+  it("leaves a tap or a scroll that begins at the edge to the chat, and takes only a pull to the right that began there", async () => {
+    await openInAChat();
+    const takes = (fromX: number, x: number, y: number) => {
+      edge().props.onStartShouldSetResponderCapture(touch(fromX, 0, 400));
+      return edge().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+    };
+    // Nothing is taken on the way in: a tap there is the chat's.
+    expect(edge().props.onStartShouldSetResponderCapture(touch(4, 0))).toBe(false);
+    expect(takes(4, 60, 405)).toBe(true);
+    // Up and down, or to the left, from the edge: the chat's own scroll.
+    expect(takes(4, 6, 480)).toBe(false);
+    expect(takes(10, 2, 400)).toBe(false);
+    // A pull to the right that began away from the edge is the chat's too.
+    expect(takes(200, 300, 400)).toBe(false);
+  });
+
   it("lets them stay away when the pull was short and slow, and brings them in on a flick however short", async () => {
     await openInAChat();
     await fireEvent(edge(), "responderGrant", touch(4, 0));
