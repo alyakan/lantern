@@ -59,9 +59,9 @@ describe("the palettes", () => {
 describe("the themes", () => {
   const presets = THEME_CHOICES.filter((t) => t.palette).map((t) => t.palette!);
 
-  it("are Follow iPhone, Daylight, Night and the Mac's five new ones, each known by id", () => {
+  it("are Follow system, Daylight, Night and the Mac's five new ones, each known by id", () => {
     expect(THEME_CHOICES.map((t) => t.id)).toEqual(["system", "light", "dark", "gruvbox", "mocha", "tokyo", "rose", "latte"]);
-    expect(THEME_CHOICES.map((t) => t.label)).toEqual(["Follow iPhone", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]);
+    expect(THEME_CHOICES.map((t) => t.label)).toEqual(["Follow system", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]);
     expect(isThemeChoice("tokyo")).toBe(true);
     expect(isThemeChoice("fallout")).toBe(false);
     expect(isThemeChoice(null)).toBe(false);
@@ -90,6 +90,8 @@ describe("the themes", () => {
       }
       need(`${t.id} on ink`, p.onInk, p.ink, 7);
       need(`${t.id} on the highlighter`, p.onHi, p.hi, 7);
+      // (Daylight's and Night's white on their green is as it was, 3.5 and 2.6: only the new themes are held to this.)
+      if (t.id !== "light" && t.id !== "dark") need(`${t.id} on go`, p.onGo, p.go, 4.5);
       need(`${t.id} ink on the highlighter's wash`, p.ink, p.hiSoft, 7);
       need(`${t.id} night text`, p.nightText, p.night, 7);
       need(`${t.id} night stop`, p.nightStop, p.night, 4.5);
@@ -142,6 +144,21 @@ describe("choosing a theme", () => {
     const { result } = await renderHook(() => useColors());
     await act(async () => setThemeChoice("rose"));
     expect(result.current).toBe(THEME_CHOICES.find((t) => t.id === "rose")!.palette);
+  });
+});
+
+describe("a green button in a theme with a pale green", () => {
+  it("is written on in the theme's dark, and in white where the green is deep", async () => {
+    await act(async () => setThemeChoice("mocha"));
+    const mocha = THEME_CHOICES.find((t) => t.id === "mocha")!.palette!;
+    const { unmount } = await render(<Button label="Allow" kind="go" onPress={() => {}} />);
+    expect(style(screen.getByRole("button", { name: "Allow" })).backgroundColor).toBe(mocha.go);
+    expect(style(screen.getByText("Allow")).color).toBe(mocha.onGo);
+    expect(style(screen.getByText("Allow")).color).not.toBe("#ffffff");
+    await unmount();
+    await act(async () => setThemeChoice("system"));
+    await render(<Button label="Allow" kind="go" onPress={() => {}} />);
+    expect(style(screen.getByText("Allow")).color).toBe(lightColors.white);
   });
 });
 

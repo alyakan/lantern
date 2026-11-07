@@ -26,6 +26,8 @@ export interface Palette {
   onInk: string;
   /** What is written on the highlighter: dark in both. */
   onHi: string;
+  /** What is written on a `go` fill (the green button, the swipe's done): white, except on a theme whose green is pale. */
+  onGo: string;
   rule: string;
   /** The highlighter: only ever for what waits on the user. */
   hi: string;
@@ -66,6 +68,7 @@ export const lightColors: Palette = {
   ink3: "#8a94a1",
   onInk: "#ffffff",
   onHi: "#15212e",
+  onGo: "#ffffff",
   rule: "#dce2e8",
   hi: "#ffc21a",
   hiSoft: "#fff3cc",
@@ -96,6 +99,7 @@ export const darkColors: Palette = {
   ink3: "#76828f",
   onInk: "#0b1016",
   onHi: "#15212e",
+  onGo: "#ffffff",
   rule: "#27313c",
   hi: "#ffc21a",
   hiSoft: "#3b3010",
@@ -123,7 +127,7 @@ function blend(fg: string, bg: string, alpha: number): string {
 }
 
 /** What a theme says for itself; the rest (white, the lines on night, the scrim, the wash) is Daylight's or Night's. */
-type Own = Pick<Palette, "paper" | "card" | "ink" | "ink2" | "ink3" | "onInk" | "onHi" | "rule" | "hi" | "cobalt" | "go" | "stop" | "working" | "night" | "nightText" | "nightStop" | "shape" | "shapeStrong">;
+type Own = Pick<Palette, "paper" | "card" | "ink" | "ink2" | "ink3" | "onInk" | "onHi" | "onGo" | "rule" | "hi" | "cobalt" | "go" | "stop" | "working" | "night" | "nightText" | "nightStop" | "shape" | "shapeStrong">;
 
 /** A theme's palette: its own colours over Daylight's or Night's, the highlighter's wash made from its own highlighter and page. */
 function preset(isDark: boolean, own: Own): Palette {
@@ -133,17 +137,17 @@ function preset(isDark: boolean, own: Own): Palette {
 // The Mac's themes, from their token blocks in src/styles.css: paper is --pane, card the surface a step off it, ink --text, the
 // highlighter --attn, cobalt --unread, go and stop --add and --del. Rosé Pine's "working" is its rose rather than the Mac's gold,
 // as gold is already the highlighter here.
-const GRUVBOX = preset(true, { paper: "#282828", card: "#3c3836", ink: "#ebdbb2", ink2: "#d5c4a1", ink3: "#b3a181", onInk: "#282828", onHi: "#282828", rule: "#504945", hi: "#fabd2f", cobalt: "#8ec0d0", go: "#8ec07c", stop: "#ff8a93", working: "#fe8019", night: "#1d2021", nightText: "#d5c4a1", nightStop: "#ff8a93", shape: "#504945", shapeStrong: "#665c54" });
-const MOCHA = preset(true, { paper: "#1e1e2e", card: "#313244", ink: "#cdd6f4", ink2: "#bac2de", ink3: "#9399b2", onInk: "#1e1e2e", onHi: "#1e1e2e", rule: "#45475a", hi: "#f9e2af", cobalt: "#89b4fa", go: "#a6e3a1", stop: "#f38ba8", working: "#fab387", night: "#181825", nightText: "#bac2de", nightStop: "#f38ba8", shape: "#45475a", shapeStrong: "#585b70" });
-const TOKYO = preset(true, { paper: "#1a1b26", card: "#24283b", ink: "#c0caf5", ink2: "#a9b1d6", ink3: "#8089b3", onInk: "#1a1b26", onHi: "#1a1b26", rule: "#3b4261", hi: "#e0af68", cobalt: "#7aa2f7", go: "#9ece6a", stop: "#f7768e", working: "#ff9e64", night: "#16161e", nightText: "#a9b1d6", nightStop: "#f7768e", shape: "#3b4261", shapeStrong: "#545c7e" });
-const ROSE = preset(true, { paper: "#191724", card: "#26233a", ink: "#e0def4", ink2: "#c9c6e0", ink3: "#908caa", onInk: "#191724", onHi: "#191724", rule: "#403d52", hi: "#f6c177", cobalt: "#9ccfd8", go: "#7fb69a", stop: "#eb6f92", working: "#ea9a97", night: "#14121f", nightText: "#c9c6e0", nightStop: "#eb6f92", shape: "#403d52", shapeStrong: "#524f67" });
-const LATTE = preset(false, { paper: "#eff1f5", card: "#ffffff", ink: "#3f4259", ink2: "#545770", ink3: "#74778c", onInk: "#ffffff", onHi: "#1f2133", rule: "#ccd0da", hi: "#f2b83a", cobalt: "#1452c4", go: "#1f6514", stop: "#b80c30", working: "#a34307", night: "#2c2f45", nightText: "#c3c8e0", nightStop: "#ff8b8b", shape: "#c9ceda", shapeStrong: "#a9afc0" });
+const GRUVBOX = preset(true, { paper: "#282828", card: "#3c3836", ink: "#ebdbb2", ink2: "#d5c4a1", ink3: "#b3a181", onInk: "#282828", onHi: "#282828", onGo: "#282828", rule: "#504945", hi: "#fabd2f", cobalt: "#8ec0d0", go: "#8ec07c", stop: "#ff8a93", working: "#fe8019", night: "#1d2021", nightText: "#d5c4a1", nightStop: "#ff8a93", shape: "#504945", shapeStrong: "#665c54" });
+const MOCHA = preset(true, { paper: "#1e1e2e", card: "#313244", ink: "#cdd6f4", ink2: "#bac2de", ink3: "#9399b2", onInk: "#1e1e2e", onHi: "#1e1e2e", onGo: "#1e1e2e", rule: "#45475a", hi: "#f9e2af", cobalt: "#89b4fa", go: "#a6e3a1", stop: "#f38ba8", working: "#fab387", night: "#181825", nightText: "#bac2de", nightStop: "#f38ba8", shape: "#45475a", shapeStrong: "#585b70" });
+const TOKYO = preset(true, { paper: "#1a1b26", card: "#24283b", ink: "#c0caf5", ink2: "#a9b1d6", ink3: "#8089b3", onInk: "#1a1b26", onHi: "#1a1b26", onGo: "#1a1b26", rule: "#3b4261", hi: "#e0af68", cobalt: "#7aa2f7", go: "#9ece6a", stop: "#f7768e", working: "#ff9e64", night: "#16161e", nightText: "#a9b1d6", nightStop: "#f7768e", shape: "#3b4261", shapeStrong: "#545c7e" });
+const ROSE = preset(true, { paper: "#191724", card: "#26233a", ink: "#e0def4", ink2: "#c9c6e0", ink3: "#908caa", onInk: "#191724", onHi: "#191724", onGo: "#191724", rule: "#403d52", hi: "#f6c177", cobalt: "#9ccfd8", go: "#7fb69a", stop: "#eb6f92", working: "#ea9a97", night: "#14121f", nightText: "#c9c6e0", nightStop: "#eb6f92", shape: "#403d52", shapeStrong: "#524f67" });
+const LATTE = preset(false, { paper: "#eff1f5", card: "#ffffff", ink: "#3f4259", ink2: "#545770", ink3: "#74778c", onInk: "#ffffff", onHi: "#1f2133", onGo: "#ffffff", rule: "#ccd0da", hi: "#f2b83a", cobalt: "#1452c4", go: "#1f6514", stop: "#b80c30", working: "#a34307", night: "#2c2f45", nightText: "#c3c8e0", nightStop: "#ff8b8b", shape: "#c9ceda", shapeStrong: "#a9afc0" });
 
 /** What Settings offers: "system" follows the iPhone's appearance; the rest are fixed (their `scheme` is what iOS is told, so its own parts match). */
 export type ThemeChoice = "system" | "light" | "dark" | "gruvbox" | "mocha" | "tokyo" | "rose" | "latte";
 
 export const THEME_CHOICES: { id: ThemeChoice; label: string; scheme: "light" | "dark" | null; palette: Palette | null }[] = [
-  { id: "system", label: "Follow iPhone", scheme: null, palette: null },
+  { id: "system", label: "Follow system", scheme: null, palette: null },
   { id: "light", label: "Daylight", scheme: "light", palette: lightColors },
   { id: "dark", label: "Night", scheme: "dark", palette: darkColors },
   { id: "gruvbox", label: "Gruvbox Dark", scheme: "dark", palette: GRUVBOX },

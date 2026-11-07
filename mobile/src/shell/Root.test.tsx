@@ -263,8 +263,8 @@ describe("the Mac's sheet", () => {
     try {
       await open({ chats: [chat()] });
       await press(/^Aly's MacBook Pro, connected/);
-      await waitFor(() => expect(screen.getByRole("menu", { name: "Theme, Follow iPhone" })).toBeTruthy());
-      expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Follow iPhone", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]));
+      await waitFor(() => expect(screen.getByRole("menu", { name: "Theme, Follow system" })).toBeTruthy());
+      expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Follow system", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]));
       await act(async () => void fireEvent.press(screen.getByRole("menuitem", { name: "Tokyo Night" })));
       expect(getThemeChoice()).toBe("tokyo");
       expect(screen.getByRole("menu", { name: "Theme, Tokyo Night" })).toBeTruthy();
