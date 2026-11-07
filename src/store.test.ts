@@ -334,6 +334,13 @@ describe("reducer", () => {
     expect(reducer(s, failed!).status).toBe("ended");
   });
 
+  it("a card allowed here just as Stop withdrew it says it wasn't allowed", () => {
+    let s: State = { ...ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} }), status: "running" };
+    s = reducer(s, { type: "permission_decided", id: "p1", allow: true });
+    s = ev(s, { kind: "permission_withdrawn", request_id: "p1" });
+    expect(s.items[0]).toMatchObject({ id: "p1", decision: "denied" });
+  });
+
   it("a Stop that lands after the turn ended leaves the chat as it was, so a later crash still says so", () => {
     const idle: State = { ...initialState, status: "idle" };
     expect(reducer(idle, { type: "stop_requested" })).toBe(idle);

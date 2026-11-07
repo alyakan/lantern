@@ -773,10 +773,12 @@ function applyEvent(state: State, ev: UiEvent): State {
         ...state,
         items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: "allowed", autoRule: { scope: ev.scope, rule: ev.rule } }],
       };
+    // Withdrawn while still pending (only those are: one answered in time never is), so the card says it wasn't allowed,
+    // even one this window allowed a moment too late: that answer was refused, and nothing ran.
     case "permission_withdrawn":
       return {
         ...state,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: "denied" } : it)),
+        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision !== "denied" ? { ...it, decision: "denied" } : it)),
       };
     case "permission_resolved": {
       // Answered (here, or on a paired phone first): the card closes with that answer, the one that counted. A card this
