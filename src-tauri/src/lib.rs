@@ -4315,6 +4315,8 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
     for s in state.slots.drain() {
         s.shut_down().await;
     }
+    // A restart doesn't pass through RunEvent::Exit: the chats' last saves go to disk here.
+    state.conversations.flush();
     app.restart()
 }
 

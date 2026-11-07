@@ -215,12 +215,13 @@ export function languageName(className: string | undefined): string | null {
 const LIST_OR_INDENT = /^(?:\s|[-*+] |\d+[.)] )/;
 
 /**
- * Where the settled part of a message streaming in ends: the start of its last block that a blank line, outside any code
- * fence and away from any list, cuts off from the rest. The text before it can be drawn once and kept, and only what
- * follows is parsed again as more arrives; both parts read as the whole would. 0 when there is no such place.
+ * Where a message streaming in can be cut into blocks that read as the whole does: at each blank line outside any code
+ * fence and away from any list, so each finished block can be drawn once and kept, and only the last is parsed again as
+ * more arrives. None for text with a link or footnote definition, which reaches back into the blocks before it.
  */
-export function settledEnd(text: string): number {
-  let end = 0;
+export function settledCuts(text: string): number[] {
+  if (/^ {0,3}\[[^\]]+\]:/m.test(text)) return [];
+  const cuts: number[] = [];
   let fence: string | null = null;
   let at = 0;
   let prev = "";
@@ -232,12 +233,12 @@ export function settledEnd(text: string): number {
     } else if (line.trim() === "") {
       blank = true;
     } else {
-      if (blank && prev && !LIST_OR_INDENT.test(prev) && !LIST_OR_INDENT.test(line) && !line.startsWith("[")) end = at;
+      if (blank && prev && !LIST_OR_INDENT.test(prev) && !LIST_OR_INDENT.test(line)) cuts.push(at);
       blank = false;
       prev = line;
       if (opens) fence = opens[1];
     }
     at += line.length + 1;
   }
-  return end;
+  return cuts;
 }

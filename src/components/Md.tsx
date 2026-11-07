@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useEffect, useMemo, useState, type Com
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents, pathBreaks, splitMention, useFileLinks } from "../lib/fileLinks";
-import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, settledEnd, type CalloutKind, type PlanStep } from "../lib/markdown";
+import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, settledCuts, type CalloutKind, type PlanStep } from "../lib/markdown";
 import { lineKind } from "../lib/diff";
 import { usePrefersDark, useThemeVersion } from "../lib/theme";
 import { DocIcon } from "./icons";
@@ -249,17 +249,22 @@ export const Md = memo(function Md({ children, inline = false, images, hint: giv
 });
 
 /**
- * A message as it streams in: its settled blocks drawn once and kept, and only the block still being written parsed again
- * for each word (see settledEnd). Drawn the same as one Md of the whole, so nothing moves when the message ends.
+ * A message as it streams in: its finished blocks drawn once and kept, and only the block still being written parsed again
+ * for each word (see settledCuts). Each block is keyed by where it starts, so one that finishes stays the same element (its
+ * code keeps its colours, a diagram isn't drawn again) and only the half-written rest moves on. Draws the same as one Md
+ * of the whole, so nothing moves when the message ends.
  */
 export const MdStream = memo(function MdStream({ children }: { children: string }) {
-  const cut = settledEnd(children);
-  // One hint for both parts: what the whole message names, as one Md would have it.
+  // One hint for all the blocks: what the whole message names, as one Md would have it.
   const hint = useMemo(() => languageHint(children), [children]);
+  const starts = [0, ...settledCuts(children)];
   return (
     <>
-      {cut > 0 && <Md hint={hint}>{children.slice(0, cut)}</Md>}
-      <Md hint={hint}>{children.slice(cut)}</Md>
+      {starts.map((start, i) => (
+        <Md key={start} hint={hint}>
+          {children.slice(start, starts[i + 1] ?? children.length)}
+        </Md>
+      ))}
     </>
   );
 });
