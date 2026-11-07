@@ -515,6 +515,17 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     setAway((a) => (far ? (a ?? { since: rows.length }) : null));
   };
   const unseen = away ? Math.max(0, rows.length - away.since) : 0;
+  // A long chat comes in several pages as it opens, each landing at the end, and the list follows the end while the reader is
+  // near it: one who started scrolling up was pulled back down with every page. Once they have moved, it is left where they took
+  // it until the chat has come whole (then the end is followed again as before).
+  const [movedWhileLoading, setMovedWhileLoading] = useState(false);
+  const resetting = view.resetting;
+  useEffect(() => {
+    if (!resetting) setMovedWhileLoading(false);
+  }, [resetting]);
+  const followEnd = !(resetting && movedWhileLoading);
+  // (0, not none: with none the list stops looking, and a pull it had already decided on, from before the finger moved, still came.)
+  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? 0.2 : 0, startRenderingFromBottom: true }), [followEnd]);
 
   // A row's handlers stay the same function from one drawing of the chat to the next (each calls the latest of what it does), so
   // the rows, which are memoised, aren't all drawn again with every word streamed.
@@ -784,7 +795,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         // An answer that becomes the turn's summary when the turn ends keeps its cell (another type would swap the cell and play its
         // entrance again: a blink as the turn ended).
         getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind === "summary" ? "assistant" : r.kind)}
-        maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
+        onScrollBeginDrag={resetting ? () => setMovedWhileLoading(true) : undefined}
+        maintainVisibleContentPosition={keepPosition}
         ListHeaderComponent={
           loadingEarlier ? (
             <ChatSkeleton label="Loading earlier messages" />

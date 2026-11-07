@@ -698,6 +698,17 @@ describe("a chat", () => {
     expect(screen.getByLabelText("Message").props.editable).toBe(false);
   });
 
+  it("doesn't pull a reader who scrolls while a long chat's pages come back down with each page, and follows the end once it is whole", async () => {
+    const { controller } = await withSession([]);
+    const threshold = () => screen.getByTestId("chat-list").props.maintainVisibleContentPosition?.autoscrollToBottomThreshold;
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
+    expect(threshold()).toBe(0.2);
+    await act(async () => fireEvent(screen.getByTestId("chat-list"), "scrollBeginDrag", { nativeEvent: {} }));
+    expect(threshold()).toBe(0);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 12, page: 1, done: true, hidden: 0, events: [] } }));
+    expect(threshold()).toBe(0.2);
+  });
+
   it("says how much a catch-up covered, for a moment", async () => {
     // Set up with real timers (the screen settles on one), then take the clock over for the banner's four seconds.
     const { controller } = await withSession(turn);

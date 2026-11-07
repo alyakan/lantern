@@ -107,6 +107,8 @@ const SUMMARY_COLLAPSED = 230;
  * under the reader's finger, one summary after another, as if the chat pulled them back down.
  */
 const summaryHeights = new Map<string, number>();
+/** About how many characters fill a clipped summary on a phone: a summary not measured yet that is longer is taken as long. */
+const SUMMARY_LONG_CHARS = 600;
 
 /**
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
@@ -124,7 +126,8 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
     summaryHeights.set(row.item.text, h);
     setHeight(h);
   };
-  const long = height !== null && height > SUMMARY_COLLAPSED + 50;
+  // Until it is measured, its length says: its Show all is there from the first drawing, not added under it a moment later.
+  const long = height !== null ? height > SUMMARY_COLLAPSED + 50 : row.item.text.length > SUMMARY_LONG_CHARS;
   // Until its words are measured it is held at the clipped height: one that turns out short grows a little, where one laid out
   // whole and then clipped shrank by a screen or more.
   const clipped = (long || height === null) && !full && !mark;
@@ -158,7 +161,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
               <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
-            {clipped && long && (
+            {long && clipped && (
               <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44 }}>
                 {[0.25, 0.5, 0.75, 0.95].map((a) => (
                   <View key={a} style={{ flex: 1, backgroundColor: `${colors.card}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />

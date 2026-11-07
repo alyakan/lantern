@@ -61,6 +61,12 @@ describe("a summary card's height, as the list draws it", () => {
     expect(clip()).toBeUndefined();
   });
 
+  it("a long one not measured yet has its Show all from the first drawing", async () => {
+    await render(<SummaryRow row={summaryOf("h4", "Words that go on and on. ".repeat(40))} onFiles={() => {}} />);
+    expect(clip()).toBe(230);
+    expect(screen.getByText("Show all")).toBeTruthy();
+  });
+
   it("a cell drawn again for a summary already measured starts at that summary's size", async () => {
     const long = summaryOf("h2", "A long one. ".repeat(40));
     const other = summaryOf("h3", "Another, short.");
