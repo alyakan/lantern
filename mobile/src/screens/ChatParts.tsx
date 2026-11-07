@@ -101,6 +101,12 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
 
 /** How tall a summary card's text is before "Show all" (a long one is clipped to this). */
 const SUMMARY_COLLAPSED = 230;
+/**
+ * How tall each summary's words came out, by the words: a cell the list draws again for a summary already seen starts at its
+ * size. Scrolling up through a chat draws its cells anew, and a long summary laid out whole and then clipped moved everything
+ * under the reader's finger, one summary after another, as if the chat pulled them back down.
+ */
+const summaryHeights = new Map<string, number>();
 
 /**
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
@@ -110,12 +116,18 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
   const colors = useColors();
   // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
   const [full, setFull] = useRecyclingState(false, [row.key]);
-  const [height, setHeight] = useRecyclingState<number | null>(null, [row.key]);
+  const [height, setHeight] = useRecyclingState<number | null>(() => summaryHeights.get(row.item.text) ?? null, [row.key]);
   const [copied, setCopied] = useRecyclingState(false, [row.key]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  const measured = (h: number) => {
+    summaryHeights.set(row.item.text, h);
+    setHeight(h);
+  };
   const long = height !== null && height > SUMMARY_COLLAPSED + 50;
-  const clipped = long && !full && !mark;
+  // Until its words are measured it is held at the clipped height: one that turns out short grows a little, where one laid out
+  // whole and then clipped shrank by a screen or more.
+  const clipped = (long || height === null) && !full && !mark;
   const took = row.durationMs ? turnLine({ kind: "turn", id: "", isError: false, result: null, durationMs: row.durationMs }).text.replace("Finished in ", "") : null;
   const copy = () => {
     void Promise.resolve(Clipboard.setStringAsync(row.item.text)).catch(() => {});
@@ -142,11 +154,11 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
             )}
           </View>
           <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
-            <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
+            <View testID="summary-words" onLayout={(e) => measured(e.nativeEvent.layout.height)}>
               <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
-            {clipped && (
+            {clipped && long && (
               <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44 }}>
                 {[0.25, 0.5, 0.75, 0.95].map((a) => (
                   <View key={a} style={{ flex: 1, backgroundColor: `${colors.card}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />

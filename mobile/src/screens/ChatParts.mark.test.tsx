@@ -47,6 +47,35 @@ describe("what a chat search looks for, in a page and a summary", () => {
   });
 });
 
+describe("a summary card's height, as the list draws it", () => {
+  const summaryOf = (id: string, text: string): Extract<Row, { kind: "summary" }> => ({ key: `a-${id}`, kind: "summary", item: { kind: "assistant", id, text, streaming: false }, chips: [], durationMs: null, files: [] });
+  // The box its words are clipped by (the one that holds what onLayout measures).
+  const clip = () => StyleSheet.flatten(screen.getByTestId("summary-words").parent!.props.style)?.maxHeight;
+  const measure = async (h: number) => fireEvent(screen.getByTestId("summary-words"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: h } } });
+
+  it("is held at the clipped height until its words are measured, not laid out whole and then cut (scrolling up jumped)", async () => {
+    await render(<SummaryRow row={summaryOf("h1", "Fresh words, never measured.")} onFiles={() => {}} />);
+    expect(clip()).toBe(230);
+    expect(screen.queryByText("Show all")).toBeNull();
+    await measure(120);
+    expect(clip()).toBeUndefined();
+  });
+
+  it("a cell drawn again for a summary already measured starts at that summary's size", async () => {
+    const long = summaryOf("h2", "A long one. ".repeat(40));
+    const other = summaryOf("h3", "Another, short.");
+    await render(<SummaryRow row={long} onFiles={() => {}} />);
+    await measure(900);
+    expect(screen.getByText("Show all")).toBeTruthy();
+    await screen.rerender(<SummaryRow row={other} onFiles={() => {}} />);
+    await measure(60);
+    await screen.rerender(<SummaryRow row={long} onFiles={() => {}} />);
+    // Before any layout of this drawing: already clipped, with its Show all.
+    expect(clip()).toBe(230);
+    expect(screen.getByText("Show all")).toBeTruthy();
+  });
+});
+
 describe("what the agent said between its steps, on their row", () => {
   const notes = ["Now the tests.", "The cache is stale."];
 
