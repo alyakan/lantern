@@ -532,7 +532,23 @@ export type UpdateState =
   | { kind: "restarting" }
   | { kind: "failed"; error: string };
 
-/** One request Network Monitor captured, without its headers or bodies (see network.rs). */
+/** Lantern's capture (the backend's `capture::Status`): whether it's on, and how a phone connects to it. */
+export interface CaptureStatus {
+  running: boolean;
+  /** The phone's Wi-Fi proxy: this Mac's address and port, e.g. "192.168.1.20:8888". */
+  proxy: string | null;
+  /** The page that hands out Lantern's root certificate. */
+  setupUrl: string | null;
+  /** The phone's WireGuard config, and it as an SVG QR code for the WireGuard app to scan. */
+  wireguardConfig: string | null;
+  wireguardQr: string | null;
+  /** Why it couldn't start, or why the phone can't reach it. */
+  error: string | null;
+  /** Requests it has now. */
+  captured: number;
+}
+
+/** One request Lantern's capture recorded, without its headers or bodies (see network.rs). */
 export interface NetworkTx {
   id: string;
   revision: number;
@@ -559,7 +575,7 @@ export interface NetworkWatch {
   url: string;
 }
 
-/** Claude's summary of one response (markdown), with enough of the request to show after Network Monitor forgets it. */
+/** Claude's summary of one response (markdown), with enough of the request to show after the capture forgets it. */
 export interface NetworkSummary {
   id: string;
   method: string;

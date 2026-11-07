@@ -9,7 +9,7 @@ import type { RevertControls } from "../lib/revert";
 import type { CommentControls, DiffComment } from "../lib/diffComments";
 import { freshLoop, type LoopState } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
-import type { PrCheck } from "../types";
+import type { CaptureStatus, PrCheck } from "../types";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
 
@@ -352,8 +352,7 @@ describe("ReviewPanel's tabs", () => {
     openTab("Tests");
     expect(screen.getByText("Test runs show here when Claude runs your tests.")).toBeInTheDocument();
     openTab("Network");
-    expect(screen.getByText(/Network Monitor is a Mac app/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "github.com/alyakan/network-monitor" })).toHaveAttribute("href", "https://github.com/alyakan/network-monitor");
+    expect(screen.getByText(/Lantern can capture a phone's HTTP and HTTPS traffic/)).toBeInTheDocument();
     localStorage.clear();
   });
 
@@ -697,15 +696,41 @@ describe("ReviewPanel review comments", () => {
 });
 
 describe("NetworkEmpty", () => {
-  it("explains Network Monitor when it isn't running", () => {
-    render(<NetworkEmpty link={{ status: "not_running" } as never} />);
-    expect(screen.getByText(/Route your app's traffic through it/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /network-monitor/ })).toBeInTheDocument();
+  const capture = (running: boolean): CaptureStatus => ({
+    running,
+    proxy: running ? "192.168.1.20:8888" : null,
+    setupUrl: running ? "http://192.168.1.20:8888/" : null,
+    wireguardConfig: running ? "[Interface]\n" : null,
+    wireguardQr: running ? "<svg/>" : null,
+    error: null,
+    captured: 0,
   });
 
-  it("says how to add a watch when Network Monitor is running but nothing is watched", () => {
-    render(<NetworkEmpty link={{ status: "connected" } as never} />);
-    expect(screen.getByText(/Network Monitor is running, but nothing is watched yet/)).toBeInTheDocument();
-    expect(screen.getByText(/Tell Claude which requests matter/)).toBeInTheDocument();
+  it("offers to start the capture when it's off, and starts it", async () => {
+    vi.spyOn(api, "captureStatus").mockResolvedValue(capture(false));
+    const start = vi.spyOn(api, "captureStart").mockResolvedValue(capture(true));
+    render(<NetworkEmpty />);
+    expect(screen.getByText(/Lantern can capture a phone's HTTP and HTTPS traffic/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Start capturing" }));
+    expect(start).toHaveBeenCalled();
+    expect(await screen.findByText("Capturing")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "WireGuard tunnel for the phone" })).toBeInTheDocument();
+    expect(screen.getByText(/Configure Proxy → Manual/)).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("says how to add a watch while capturing with nothing watched", async () => {
+    vi.spyOn(api, "captureStatus").mockResolvedValue(capture(true));
+    render(<NetworkEmpty />);
+    expect(await screen.findByText(/Lantern is capturing\. Tell Claude which requests matter/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("shows why the capture couldn't start", async () => {
+    vi.spyOn(api, "captureStatus").mockResolvedValue({ ...capture(false), error: "Couldn't listen on port 8888." });
+    render(<NetworkEmpty />);
+    expect(await screen.findByText("Couldn't listen on port 8888.")).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 });

@@ -211,7 +211,7 @@ impl PermissionBridge {
             }
             return;
         }
-        // A network call reads Network Monitor for this chat's folder: no card either.
+        // A network call reads the captured traffic for this chat's folder: no card either.
         if req.network {
             let handler = self.network.lock().unwrap().clone();
             let resp = match handler {

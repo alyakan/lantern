@@ -1334,6 +1334,18 @@ const MOCK_CHECKLISTS = {
   meta: { page: 1, per_page: 3, total: 41, next_cursor: "eyJpZCI6NDgxNX0" },
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
+// The capture's state: off until Start, then a made-up tunnel config and a placeholder QR.
+let mockCapturing = false;
+const mockQr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><path d="M1 1h7v7H1zM13 1h7v7h-7zM1 13h7v7H1zM10 10h2v2h-2zM14 14h3v3h-3z" fill="#000"/></svg>`;
+const mockCapture = () => ({
+  running: mockCapturing,
+  proxy: mockCapturing ? "192.168.1.20:8888" : null,
+  setupUrl: mockCapturing ? "http://192.168.1.20:8888/" : null,
+  wireguardConfig: mockCapturing ? "[Interface]\nPrivateKey = (mock)\nAddress = 10.233.0.2/32\n" : null,
+  wireguardQr: mockCapturing ? mockQr : null,
+  error: null,
+  captured: mockCapturing ? 42 : 0,
+});
 
 // The Dashboard tab: which mock dashboards are trusted, the runs kept, and whether the form is running.
 let dashTrusted: string[] = [];
@@ -2165,6 +2177,13 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return undefined;
         case "network_state":
           return mockNetwork();
+        case "capture_status":
+          return mockCapture();
+        case "capture_start":
+        case "capture_stop":
+          mockCapturing = cmd === "capture_start";
+          void emit("network-changed");
+          return mockCapture();
         case "network_response":
           return mockResponse(a.id as string);
         case "network_rewatch":
