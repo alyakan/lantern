@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CollapsibleText } from "./CollapsibleText";
-import { Md } from "./Md";
+import { MdStream } from "./Md";
 import { MessageActions, type MessageAction } from "./MessageActions";
 import type { ChatItem, TestRunItem } from "../store";
 import type { NewRule } from "../types";
@@ -214,9 +214,7 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
       return (
         <>
           <div className="msg assistant">
-            <Md>
-              {row.text}
-            </Md>
+            <MdStream>{row.text}</MdStream>
           </div>
           <MessageActions text={row.text} align="start" actions={actions} />
         </>

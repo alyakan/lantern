@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
-import { blockLanguage, filePaths, inferLanguage, isMarkdownPath, languageHint, languageName, monacoLanguage, parsePlanStep, withFrontMatterAsCode } from "./markdown";
-import { Md } from "../components/Md";
+import { blockLanguage, filePaths, inferLanguage, isMarkdownPath, languageHint, languageName, monacoLanguage, parsePlanStep, settledEnd, withFrontMatterAsCode } from "./markdown";
+import { Md, MdStream } from "../components/Md";
 
 describe("isMarkdownPath", () => {
   it("is true for markdown files, whatever the case, and false for the rest", () => {
@@ -198,5 +199,34 @@ describe("pictures", () => {
   it("load when the caller allows them", () => {
     const { container } = render(<Md images>{text}</Md>);
     expect(container.querySelector("img")).toHaveAttribute("src", "https://tracker.example/p.png");
+  });
+});
+
+describe("settledEnd", () => {
+  const head = (t: string) => t.slice(0, settledEnd(t));
+  it("cuts before the last paragraph a blank line starts", () => {
+    expect(head("One.\n\nTwo.\n\nThree is still com")).toBe("One.\n\nTwo.\n\n");
+    expect(settledEnd("Only one paragraph so far")).toBe(0);
+  });
+
+  it("never cuts inside a code fence, even at its blank lines", () => {
+    const t = "Here:\n\n```ts\nconst a = 1;\n\nconst b = 2;\n";
+    expect(head(t)).toBe("Here:\n\n");
+    expect(head(t + "```\n\nAfter.")).toBe(t + "```\n\n");
+  });
+
+  it("keeps a list in one piece, loose items and all, and cuts again after the next paragraph", () => {
+    expect(head("Steps:\n\n1. one\n\n2. two\n\n3. thr")).toBe("");
+    expect(head("- a\n\n  more of a\n\n- b")).toBe("");
+    expect(head("- a\n- b\n\nAfter the list.\n\nAnd on")).toBe("- a\n- b\n\nAfter the list.\n\n");
+  });
+});
+
+describe("MdStream", () => {
+  it("reads as the whole text would", () => {
+    const text = "# Plan\n\nFirst paragraph with `code`.\n\n- one\n- two\n\n```ts\nconst a = 1;\n```\n\nLast words";
+    // The same elements; only the line break between two blocks, which draws nothing, may differ.
+    const html = (el: ReactElement) => render(<div className="msg">{el}</div>).container.innerHTML.replace(/>\s+</g, "><");
+    expect(html(<MdStream>{text}</MdStream>)).toBe(html(<Md>{text}</Md>));
   });
 });

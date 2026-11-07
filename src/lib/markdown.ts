@@ -210,3 +210,34 @@ export function languageName(className: string | undefined): string | null {
   if (!lang) return null;
   return LANGUAGES[lang.toLowerCase()] ?? lang;
 }
+
+/** A line that carries on a list or code above it, or starts a list: a block boundary isn't safe next to it. */
+const LIST_OR_INDENT = /^(?:\s|[-*+] |\d+[.)] )/;
+
+/**
+ * Where the settled part of a message streaming in ends: the start of its last block that a blank line, outside any code
+ * fence and away from any list, cuts off from the rest. The text before it can be drawn once and kept, and only what
+ * follows is parsed again as more arrives; both parts read as the whole would. 0 when there is no such place.
+ */
+export function settledEnd(text: string): number {
+  let end = 0;
+  let fence: string | null = null;
+  let at = 0;
+  let prev = "";
+  let blank = false;
+  for (const line of text.split("\n")) {
+    const opens = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (opens && opens[1][0] === fence[0] && opens[1].length >= fence.length && line.trim() === opens[1]) fence = null;
+    } else if (line.trim() === "") {
+      blank = true;
+    } else {
+      if (blank && prev && !LIST_OR_INDENT.test(prev) && !LIST_OR_INDENT.test(line) && !line.startsWith("[")) end = at;
+      blank = false;
+      prev = line;
+      if (opens) fence = opens[1];
+    }
+    at += line.length + 1;
+  }
+  return end;
+}

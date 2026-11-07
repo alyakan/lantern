@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useEffect, useMemo, useState, type Com
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents, pathBreaks, splitMention, useFileLinks } from "../lib/fileLinks";
-import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, type CalloutKind, type PlanStep } from "../lib/markdown";
+import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, settledEnd, type CalloutKind, type PlanStep } from "../lib/markdown";
 import { lineKind } from "../lib/diff";
 import { usePrefersDark, useThemeVersion } from "../lib/theme";
 import { DocIcon } from "./icons";
@@ -232,8 +232,9 @@ const ImagesAllowed = createContext(false);
  * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. Pictures aren't loaded unless
  * `images` is set, so a picture shows as its description, whatever text it's in.
  */
-export const Md = memo(function Md({ children, inline = false, images }: { children: string; inline?: boolean; images?: boolean }) {
-  const hint = useMemo(() => languageHint(children), [children]);
+export const Md = memo(function Md({ children, inline = false, images, hint: given }: { children: string; inline?: boolean; images?: boolean; hint?: string | null }) {
+  const own = useMemo(() => (given === undefined ? languageHint(children) : null), [children, given]);
+  const hint = given === undefined ? own : given;
   const inherited = useContext(ImagesAllowed);
   const loadImages = images ?? inherited;
   return (
@@ -244,5 +245,21 @@ export const Md = memo(function Md({ children, inline = false, images }: { child
         </Markdown>
       </LanguageHint.Provider>
     </ImagesAllowed.Provider>
+  );
+});
+
+/**
+ * A message as it streams in: its settled blocks drawn once and kept, and only the block still being written parsed again
+ * for each word (see settledEnd). Drawn the same as one Md of the whole, so nothing moves when the message ends.
+ */
+export const MdStream = memo(function MdStream({ children }: { children: string }) {
+  const cut = settledEnd(children);
+  // One hint for both parts: what the whole message names, as one Md would have it.
+  const hint = useMemo(() => languageHint(children), [children]);
+  return (
+    <>
+      {cut > 0 && <Md hint={hint}>{children.slice(0, cut)}</Md>}
+      <Md hint={hint}>{children.slice(cut)}</Md>
+    </>
   );
 });
