@@ -48,7 +48,10 @@ export interface SyncDeps {
 const NO_STORE: OutboxStore = { load: async () => ({ held: [], epoch: null }), save: async () => {} };
 
 /** What a message that waited says when the Mac came back as another run: its chats are named afresh, so where it was for is unknown. */
-export const RESTARTED = "Your Mac restarted while this waited, so the chat may be another one now. Copy it into the chat you meant.";
+export const RESTARTED = "Your Mac restarted or this chat changed while it waited, so it wasn't sent. Copy it into the chat you meant.";
+
+/** How long held messages wait for a new connection's chat list before they are checked against what is known. */
+const CHATS_WAIT = 4000;
 
 const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => fn()) : setTimeout(fn, 16));
 let ids = 0;
@@ -120,6 +123,14 @@ export class Sync {
     if (msg.type === "chats") {
       const statuses = (cs: State["chats"]) => cs.map((c) => `${c.slot}:${c.status}`).join(",");
       if (statuses(msg.chats) !== statuses(this.state.chats)) void this.refreshWaiting();
+      // Messages that waited for the Mac are checked against it: in the state before they are looked at.
+      if (this.chatsCame) {
+        this.apply({ type: "pushed", msg });
+        this.flush();
+        this.chatsCame();
+        this.chatsCame = null;
+        return;
+      }
     }
     this.apply({ type: "pushed", msg });
     if (msg.type === "reset" && msg.done) void this.refreshWaiting();
@@ -142,6 +153,9 @@ export class Sync {
     this.session = session;
     this.apply({ type: "welcome", epoch: session.welcome.epoch });
     this.flush();
+    // The chat list this connection starts with is what held messages are checked against.
+    this.chatsCame?.();
+    this.freshChats = new Promise((r) => (this.chatsCame = r));
     if (this.lastEpoch !== session.welcome.epoch) {
       this.lastEpoch = session.welcome.epoch;
       this.keep();
@@ -306,42 +320,64 @@ export class Sync {
   private sendingHeld = false;
   /** The Mac run this phone last spoke to, kept between launches: a message written before any connection this launch is for it. */
   private lastEpoch: number | null = null;
+  /** Done once what waited when the app last closed has been read back: nothing is saved or sent before it, or it would be lost. */
+  private restored: Promise<void> = Promise.resolve();
+  /** The chat list a new connection starts with (the Mac sends it first): what waited is checked against it before it goes. */
+  private freshChats: Promise<void> = Promise.resolve();
+  private chatsCame: (() => void) | null = null;
   private keep() {
-    void this.store.save({ held: this.outbox, epoch: this.lastEpoch });
+    void this.restored.then(() => this.store.save({ held: this.outbox, epoch: this.lastEpoch }));
   }
 
   /** A message written while the Mac can't be reached: it shows as waiting, kept on the phone, and goes once a connection is up. */
   hold(slot: string, text: string) {
-    const held: Held = { slot, text, clientId: this.newId(), epoch: this.state.epoch ?? this.lastEpoch, at: this.now() };
+    const project = this.state.chats.find((c) => c.slot === slot)?.project ?? null;
+    const held: Held = { slot, text, clientId: this.newId(), epoch: this.state.epoch ?? this.lastEpoch, at: this.now(), project };
     this.apply({ type: "held", slot, clientId: held.clientId, text, at: held.at });
     this.outbox.push(held);
     this.keep();
   }
 
-  /** At launch: what waited when the app last closed shows again, waiting as it was. */
-  async restoreHeld() {
-    const kept = await this.store.load();
-    this.lastEpoch ??= kept.epoch;
-    for (const held of kept.held) {
-      if (this.outbox.some((h) => h.clientId === held.clientId)) continue;
-      this.outbox.push(held);
-      this.apply({ type: "held", slot: held.slot, clientId: held.clientId, text: held.text, at: held.at });
-    }
+  /** At launch: what waited when the app last closed shows again, waiting as it was, before anything written since. */
+  restoreHeld() {
+    this.restored = (async () => {
+      const kept = await this.store.load();
+      this.lastEpoch ??= kept.epoch;
+      const back = kept.held.filter((held) => !this.outbox.some((h) => h.clientId === held.clientId));
+      for (const held of back) this.apply({ type: "held", slot: held.slot, clientId: held.clientId, text: held.text, at: held.at });
+      this.outbox = [...back, ...this.outbox].sort((a, b) => a.at - b.at);
+    })();
     // Connected before they were read back: they go now.
-    if (this.session && this.outbox.length > 0) void this.sendHeld();
+    void this.restored.then(() => {
+      if (this.session && this.outbox.length > 0) void this.sendHeld();
+    });
+    return this.restored;
   }
 
   /**
-   * Sends what waited for the Mac, one after another so they arrive in the order they were written: only to the Mac run it
-   * was written for. A chat's slot is only that run's (they are named afresh each launch), so after a restart the same slot
-   * can be another project's chat: then it isn't sent, and says why, with no Try again.
+   * Sends what waited for the Mac, one after another so they arrive in the order they were written, and only to the chat it
+   * was written for. A chat's slot is only that Mac run's (they are named afresh each launch), and an empty chat's slot can
+   * take another project's chat: one written for another run, or whose chat is now another project's (or gone), isn't sent,
+   * and says why, with no Try again.
    */
   private async sendHeld() {
     if (this.sendingHeld) return;
     this.sendingHeld = true;
     try {
+      await this.restored;
+      if (this.outbox.length === 0) return;
+      // The latest connection's list: one that came up meanwhile has its own (see onSession).
+      let waited: Promise<void> | null = null;
+      while (waited !== this.freshChats) {
+        waited = this.freshChats;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([waited, new Promise((r) => (timer = setTimeout(r, CHATS_WAIT)))]);
+        clearTimeout(timer);
+      }
       for (const held of [...this.outbox]) {
-        if (held.epoch !== null && held.epoch === this.state.epoch) await this.send(held.slot, held.text, [], held.clientId);
+        const chat = this.state.chats.find((c) => c.slot === held.slot);
+        const same = held.epoch !== null && held.epoch === this.state.epoch && !!chat && (held.project === undefined || (chat.project ?? null) === held.project);
+        if (same) await this.send(held.slot, held.text, [], held.clientId);
         else this.apply({ type: "send_failed", slot: held.slot, clientId: held.clientId, error: RESTARTED, stale: true });
         this.outbox = this.outbox.filter((h) => h !== held);
         this.keep();

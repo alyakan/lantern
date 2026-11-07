@@ -704,7 +704,12 @@ describe("a chat", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Send" }));
     await act(async () => controller.sync.flush());
     expect(screen.getByText("Waiting for your Mac · sends when it's back")).toBeTruthy();
-    await act(async () => controller.sync.onSession(session));
+    await act(async () => {
+      controller.sync.onSession(session);
+      // The Mac's chat list comes first on a connection: what waited is checked against it.
+      controller.sync.onPushed({ type: "chats", chats: [chat()] });
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    });
     await act(async () => controller.sync.flush());
     expect(asked).toContainEqual(expect.objectContaining({ op: "send", slot: "a", text: "Carry on when you can" }));
     expect(screen.queryByText("Waiting for your Mac · sends when it's back")).toBeNull();

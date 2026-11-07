@@ -19,7 +19,7 @@ import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
 import { projectColorOf, projectTint } from "../view/home";
-import { hasHiddenChars, tellClaude } from "../view/shell";
+import { hasHiddenChars, isTerminal, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { steadyRows, timeline, type Row } from "../view/timeline";
 import { CruiseBar } from "./Cruise";
@@ -792,14 +792,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </Glass>
         </View>
       ) : (
-        // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now).
+        // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
+        // a command still goes to Run, which says it couldn't).
         <Composer draftKey={slot} placeholder={online ? undefined : "Your Mac is out of reach. Write, and it goes when it's back"} canAttach={canImages && online} onSend={(text, images) => {
             // What you send is what you follow, even from far up the chat.
             setAway(null);
             list.current?.scrollToEnd({ animated: true });
-            if (online || images?.length) void sync.send(slot, text, images);
+            // A command (it may hold a secret) is never kept on the phone to go later: it says it didn't go, as before.
+            if (online || images?.length || isTerminal(text)) void sync.send(slot, text, images);
             else sync.hold(slot, text);
-          }} onRun={canShell && online ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+          }} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );

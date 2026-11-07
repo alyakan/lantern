@@ -18,6 +18,9 @@ export interface Held {
   clientId: string;
   epoch: number | null;
   at: number;
+  /** The chat's project when it was written (null: none known): an empty chat's slot can take another project's chat. Absent in
+   * what an older build kept. */
+  project?: string | null;
 }
 
 /** What waits, and the Mac run this phone last spoke to (what a message written before any connection this launch is for). */
