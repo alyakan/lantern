@@ -106,6 +106,12 @@ describe("the themes", () => {
     expect(same).toEqual([]);
   });
 
+  // Mocha, Tokyo Night and Rosé Pine are one dark blue-violet family and looked alike on a phone: each has its own page, card and accent.
+  it("keep Mocha, Tokyo Night and Rosé Pine apart: no two share a page, a card, or an accent", () => {
+    const three = ["mocha", "tokyo", "rose"].map((id) => THEME_CHOICES.find((t) => t.id === id)!.palette!);
+    for (const field of ["paper", "card", "cobalt", "hi"] as const) expect(new Set(three.map((p) => p[field])).size).toBe(3);
+  });
+
   it("follow the iPhone only when told to, and otherwise ignore its appearance", () => {
     expect(paletteFor("dark", "system")).toBe(darkColors);
     expect(paletteFor("light")).toBe(lightColors);
