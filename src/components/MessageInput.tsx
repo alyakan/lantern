@@ -85,7 +85,8 @@ interface Props {
   mcpIssues?: McpIssue[];
   onOpenSettings?: () => void;
   /** The chat's unsent text, kept while another chat is on screen. */
-  draft?: { initial: string; save: (text: string) => void };
+  /** `images`: the pictures pasted into the draft, by their `[Image #n]`, kept with it so switching chats doesn't lose them. */
+  draft?: { initial: string; save: (text: string) => void; images?: Record<number, PastedImage>; saveImages?: (images: Record<number, PastedImage>) => void };
   /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
   /** The folder's sent prompts, oldest first, as encoded drafts: ↑ and ↓ recall them. `remember` adds one when sent. */
@@ -135,7 +136,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const terminal = !!onRun && text.startsWith("!");
   const shown = terminal ? text.slice(1) : text;
   // Pictures pasted into the box, by their number in `[Image #n]`; one whose token is deleted isn't sent.
-  const images = useRef<Record<number, PastedImage>>({});
+  const images = useRef<Record<number, PastedImage>>(draft?.images ?? {});
+  const keepImages = (next: Record<number, PastedImage>) => {
+    images.current = next;
+    draft?.saveImages?.(next);
+  };
   const attached = terminal ? [] : imagesIn(text, images.current);
   // A message with pictures goes when Claude is free: the queue carries text only.
   const waitsForImages = running && attached.length > 0;
@@ -248,7 +253,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       const draft = encodeDraft(t, inUse(t, pastes.current));
       if (sent.length > 0) onSend(full, draft, sent);
       else onSend(full, draft);
-      images.current = {};
+      keepImages({});
     }
   };
 
@@ -533,7 +538,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
                   if (!image) return;
                   const box = latestText.current;
                   const n = nextImage(box, images.current);
-                  images.current = { ...images.current, [n]: image };
+                  keepImages({ ...images.current, [n]: image });
                   const token = imageToken(n);
                   const at = Math.min(from, box.length);
                   caretTo.current = at + token.length;

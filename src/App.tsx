@@ -309,6 +309,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
   const drafts = useRef<Record<string, string>>({});
+  // And the pictures pasted into it, by their `[Image #n]`: in memory only (a draft saved for a restart keeps its text).
+  const draftImages = useRef<Record<string, Record<number, PastedImage>>>({});
   // How to start a chat again when its start failed: claude never got far enough to be restarted (see the banner).
   const relaunch = useRef<Record<string, () => void>>({});
   // Counts each chat's starts, so one that was cancelled can tell its late answer is stale.
@@ -566,6 +568,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const forget = (slot: string, agent = false) => {
     dispatchChats({ type: agent ? "close_agent" : "remove", slot });
     delete drafts.current[slot];
+    delete draftImages.current[slot];
     delete relaunch.current[slot];
     api.closeSession(slot).catch(() => {});
   };
@@ -595,6 +598,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     dispatchChats({ type: "close", slots, fresh: `s${++slotSeq.current}` });
     for (const slot of slots) {
       delete drafts.current[slot];
+      delete draftImages.current[slot];
       delete relaunch.current[slot];
       api.closeSession(slot).catch(() => {});
     }
@@ -3317,6 +3321,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         save: (text) => {
           drafts.current[active] = text;
           saveOpen();
+        },
+        images: draftImages.current[active],
+        saveImages: (images) => {
+          draftImages.current[active] = images;
         },
       }}
       update={updateOffer}
