@@ -1,4 +1,4 @@
-import { CHANGES_MIN, CHANGES_SHARE, CHANGES_WIDTH, CHAT_MIN, changesWidth, floatFrame, gutterFor, hasRoomForChanges, layoutFor, shareOf } from "./layout";
+import { CHANGES_MIN, CHANGES_SHARE, CHANGES_WIDTH, CHAT_MIN, changesWidth, floatFrame, gutterFor, hasRoomForChanges, layoutAfter, layoutFor, shareOf, WIDE_MIN, WIDE_SLACK } from "./layout";
 
 describe("layoutFor", () => {
   it("keeps the phone's layout on a phone, and in a narrow Split View or Slide Over pane", () => {
@@ -77,5 +77,23 @@ describe("the floating Changes", () => {
 
   it("don't spread across a very wide window", () => {
     expect(floatFrame(2000, 1000).w).toBe(1100);
+  });
+});
+
+describe("layoutAfter, for a window resized by hand", () => {
+  it("is layoutFor at first, and away from the line between a phone's and a tablet's", () => {
+    expect(layoutAfter(null, 393, 852)).toBe("phone");
+    expect(layoutAfter(null, 820, 1180)).toBe("overlay");
+    expect(layoutAfter("overlay", 1180, 820)).toBe("split");
+    expect(layoutAfter("split", 400, 820)).toBe("phone");
+  });
+
+  it("doesn't flip between a phone's and a tablet's at every step of a drag across the line", () => {
+    // A tablet narrowed to just under the line stays one, until it is plainly narrower.
+    expect(layoutAfter("overlay", WIDE_MIN - 5, 900)).toBe("overlay");
+    expect(layoutAfter("overlay", WIDE_MIN - WIDE_SLACK - 1, 900)).toBe("phone");
+    // And a phone's window widened just past it stays a phone's, until it is plainly wider.
+    expect(layoutAfter("phone", WIDE_MIN + 5, 900)).toBe("phone");
+    expect(layoutAfter("phone", WIDE_MIN + WIDE_SLACK, 900)).toBe("overlay");
   });
 });

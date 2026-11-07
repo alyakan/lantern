@@ -23,6 +23,22 @@ export function layoutFor(width: number, height: number): Layout {
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
 }
 
+/** How far past `WIDE_MIN` a window resized by hand must go before the app changes between a phone's and a tablet's. */
+export const WIDE_SLACK = 24;
+
+/**
+ * The layout for a window that had `before`: as `layoutFor`, except that between a phone's and a tablet's it changes only once
+ * the window is `WIDE_SLACK` past the line. The two are different screens, built again from nothing (the chat's place, the open
+ * pane, the folded projects), and a Stage Manager window dragged to about 700 points wide flipped between them at every step.
+ */
+export function layoutAfter(before: Layout | null, width: number, height: number): Layout {
+  const now = layoutFor(width, height);
+  if (before === null) return now;
+  if (before === "phone" && now !== "phone" && width < WIDE_MIN + WIDE_SLACK) return "phone";
+  if (before !== "phone" && now === "phone" && width >= WIDE_MIN - WIDE_SLACK) return layoutFor(WIDE_MIN, height);
+  return now;
+}
+
 /**
  * The margin a page keeps from the window's sides: Apple lays a compact width out with 16 points and a wider one with 20.
  * Cards sit at their own 16 either way, so on a wide screen the list's text lines up inside them.
