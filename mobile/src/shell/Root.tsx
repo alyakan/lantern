@@ -246,6 +246,24 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     await controller.unpair();
   };
 
+  // A tablet's chat closed from the chats beside it (or on the Mac) goes, as it went from the list: what is left is Work, not a
+  // chat that can no longer be sent to. Only a chat that was listed and now isn't: one just started, or shown from what was cached
+  // at launch, may not be listed yet. Only a change in the list decides it, not a chat opened since.
+  const listedBefore = useRef<Set<string> | null>(null);
+  const shownNow = useRef<string | null>(null);
+  shownNow.current = shownSlot(stack);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    const listed = new Set(chats.map((c) => c.slot));
+    const was = listedBefore.current;
+    listedBefore.current = listed;
+    const slot = shownNow.current;
+    if (tablet && was && slot && was.has(slot) && !listed.has(slot)) {
+      movePanes();
+      go({ type: "home" });
+    }
+  }, [chats, chatsLoaded, tablet]);
+
   // A chat that finishes or needs you, while the chats' own list isn't there to say so: a toast.
   const [toast, setToast] = useState<ToastShown | null>(null);
   const seenStatus = useRef<StatusMap | null>(null);

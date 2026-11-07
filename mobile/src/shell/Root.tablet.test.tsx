@@ -123,6 +123,35 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.getByLabelText("Your work")).toBeTruthy();
     });
 
+    it("goes back to Work when the chat shown is closed (from the chats beside it, or on the Mac), instead of keeping a dead chat", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      // Another chat going changes nothing.
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: two }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+    });
+
+    it("keeps a chat shown that the list doesn't have yet (one just started), rather than throwing it away", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} openSlot="new" onOpened={jest.fn()} />);
+      await settle();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [...two] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
     it("asks to pick a chat, with no Desk to open, for a Mac with a Desk and no work", async () => {
       await withFeatures(["desk"]);
       expect(screen.getByTestId("pick-a-chat")).toBeTruthy();
