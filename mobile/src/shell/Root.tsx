@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { BackHandler, Pressable, ScrollView, View } from "react-native";
+import { BackHandler, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
@@ -27,6 +27,7 @@ import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
+import { CHAT_MIN, SIDEBAR_WIDTH } from "../view/layout";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
@@ -103,7 +104,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Whether the tablet was asked yet (a null pin is "never chosen", which is a decision too).
   const [pinRead, setPinRead] = useState(false);
   // Until the pin is read the chats are away: a tablet that took them away would otherwise open on them and slide them off.
-  const shellLayout: "overlay" | "split" = tablet && pinRead && (pinned ?? layout === "split") ? "split" : "overlay";
+  // A pin is kept, but a window too narrow for the chats and a readable chat side by side (an upright 11-inch, a Stage Manager
+  // window) has them slide in instead, as an unpinned one does: pinned there, the chat was squeezed under 500 points.
+  const win = useWindowDimensions();
+  const pinRoom = win.width - SIDEBAR_WIDTH >= CHAT_MIN;
+  const shellLayout: "overlay" | "split" = tablet && pinRead && pinRoom && (pinned ?? layout === "split") ? "split" : "overlay";
   const listedOnce = useRef(false);
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
@@ -316,7 +321,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {

@@ -159,6 +159,18 @@ describe("a tablet with the chats pinned", () => {
     });
   });
 
+  it("slides them in instead, keeping the pin, in a window too narrow for them and a readable chat (an upright 11-inch)", async () => {
+    mockLayout = "overlay";
+    mockWidth = 820;
+    await openInAChat();
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    await press("Show chats");
+    // No pin offered where it couldn't sit beside the chat, and the one chosen is not forgotten.
+    expect(screen.queryByRole("button", { name: /^(Pin|Unpin) the chats/ })).toBeNull();
+    expect(saveSidebarPinned).not.toHaveBeenCalled();
+  });
+
   it("keeps them beside the chat upright too: pinned is the user's choice, not the window's", async () => {
     mockLayout = "overlay";
     await open({ chats: two });
