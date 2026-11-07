@@ -72,8 +72,9 @@ const OPEN_WAIT = 1500;
 /** A Tailscale address gets longer: from cold its tunnel may take a few seconds to find a way through to the Mac. */
 const TAILNET_WAIT = 6000;
 const FIND_WAIT = 1500;
-/** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second. */
-const PROBE_WAIT = 4000;
+/** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second; it is given more,
+ * since a big catch-up going the other way can hold its answer up on a slow link. */
+const PROBE_WAIT = 8000;
 /** A connection that lasted less than this before it dropped counts as a failed try: the next one waits its turn. */
 const STEADY_MS = 10_000;
 
@@ -216,6 +217,8 @@ export class Connection {
       void session.ask({ op: "list_waiting" }, this.d.probeWait ?? PROBE_WAIT).catch((e) => {
         if (!(e instanceof NoReply) || this.session !== session) return;
         this.hangUp();
+        // It was up until now: the dialling that follows starts from the shortest pause.
+        this.tries = 0;
         void this.start();
       });
       return;

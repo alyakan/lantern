@@ -76,6 +76,17 @@ describe("Insights on the phone", () => {
     expect(session.asked.filter((r) => r.op === "insights")).toHaveLength(2);
   });
 
+  it("asks again on coming back to the tab once its figures are a minute old", async () => {
+    const session = await open(["insights"]);
+    await fireEvent.press(screen.getByRole("tab", { name: "Insights" }));
+    await waitFor(() => expect(screen.getByText("lantern takes 71% week.")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("tab", { name: "Chats" }));
+    const later = jest.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+    await fireEvent.press(screen.getByRole("tab", { name: "Insights" }));
+    later.mockRestore();
+    expect(session.asked.filter((r) => r.op === "insights")).toHaveLength(2);
+  });
+
   it("has no tab on a Mac that can't work them out", async () => {
     await open([]);
     expect(screen.queryByRole("tab", { name: "Insights" })).toBeNull();

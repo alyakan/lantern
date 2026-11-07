@@ -38,7 +38,11 @@ export function ChatToast({ toast, onOpen, onDone }: { toast: ToastShown | null;
   const drag = useRef(new Animated.Value(0)).current;
   const done = useRef(onDone);
   done.current = onDone;
+  // Once going it goes once: a swipe and the timer both ending it would otherwise end the next toast too.
+  const leaving = useRef<number | undefined>(undefined);
   const leave = () => {
+    if (leaving.current === id) return;
+    leaving.current = id;
     if (skips()) return done.current();
     Animated.timing(at, { toValue: -1, duration: 200, useNativeDriver: true }).start(() => done.current());
   };

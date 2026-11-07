@@ -310,7 +310,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A catch-up that covered a stretch away says so for a moment: once for each catch-up, not again with every event after it.
   const announced = useRef(0);
   useEffect(() => {
-    if (view.caughtUp < BANNER_AT || view.caughtUp === announced.current) return;
+    if (view.caughtUp < BANNER_AT) {
+      // A later catch-up of the same size is a new one.
+      announced.current = 0;
+      return;
+    }
+    if (view.caughtUp === announced.current) return;
     announced.current = view.caughtUp;
     setBanner(true);
   }, [view.caughtUp]);
@@ -847,7 +852,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     ) : null;
   // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
   // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
-  const replyBar = replies.length > 0 && !pageBar && !away ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} /> : null;
+  // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
+  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (

@@ -72,6 +72,8 @@ export function setWorkBadge(next: WorkBadge) {
 
 /** Work was looked at with these steps waiting: they are not new any more (what is no longer waiting is let go). */
 export function markWorkSeen(steps: string[]) {
+  // Nothing waiting (or the Mac's list for a moment empty) sees nothing: what was seen stays seen when the steps come back.
+  if (steps.length === 0) return;
   void ensureLoaded().then(() => {
     if (steps.length === seen.size && steps.every((s) => seen.has(s))) return;
     seen = new Set(steps.slice(0, SEEN_KEPT));
@@ -87,4 +89,15 @@ export function resetWorkBadge() {
   loaded = false;
   loading = null;
   snapshot = { mode, seen, loaded };
+}
+
+/** This phone was unpaired: the steps it saw were that Mac's (their words with them), and go; the setting stays. */
+export async function forgetWorkSeen() {
+  seen = new Set();
+  emit();
+  try {
+    await SecureStore.deleteItemAsync(SEEN_KEY, OPTIONS);
+  } catch {
+    // Nothing more to do.
+  }
 }

@@ -246,6 +246,8 @@ describe("deciding", () => {
     await renderWith(<DecideScreen slot="a" requestId="p1" onClose={jest.fn()} />, {}, controller);
     expect(screen.queryByText("This was answered already")).toBeNull();
     expect(screen.getByLabelText("Loading the decision")).toBeTruthy();
+    // It can be closed while it waits.
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
     expect(screen.getByText("This was answered already")).toBeTruthy();
   });

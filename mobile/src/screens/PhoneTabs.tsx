@@ -3,7 +3,7 @@
  * beside it. A chat opened from any of them is pushed over all of this, tab bar included.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { StyleSheet, View } from "react-native";
+import { Keyboard, StyleSheet, View } from "react-native";
 import { loadTab, saveTab, type Tab } from "../prefs";
 import { known } from "../prefsKnown";
 import { useSyncState } from "../shell/hooks";
@@ -68,6 +68,8 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
   const [opened, setOpened] = useState<Set<Tab>>(() => new Set([tab]));
   if (!opened.has(tab)) setOpened(new Set([...opened, tab]));
   const pick = (t: Tab) => {
+    // A keyboard up in the tab being left (Home's search) goes with it.
+    Keyboard.dismiss();
     setChosen(t);
     void saveTab(t);
   };
@@ -95,7 +97,7 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
       )}
       {canInsights && opened.has("insights") && (
         <Kept shown={tab === "insights"}>
-          <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} />
+          <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} visible={tab === "insights"} />
         </Kept>
       )}
       <TabBar tabs={tabs} value={tab} onChange={pick} onCompose={() => onComposeNew(false)} onComposeVoice={() => onComposeNew(true)} />

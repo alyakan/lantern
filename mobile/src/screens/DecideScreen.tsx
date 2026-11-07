@@ -140,6 +140,8 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The decision on its own, full screen: what is asked, where it runs, and a swipe to allow or a tap to deny. */
+/** How long a decision opened before the phone knows what waits gives the Mac to say, before it is taken as gone. */
+const LOAD_WAIT_MS = 8000;
 /** How far its top is dragged down before it is put away when let go. */
 const PULL_AWAY = 120;
 /** The page fading out under the buttons' tray: strips from clear to the page's own colour. */
@@ -181,6 +183,12 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }, [outcome, onClose]);
 
   const glass = useGlass();
+  const [gaveUp, setGaveUp] = useState(false);
+  useEffect(() => {
+    if (waitingLoaded) return;
+    const t = setTimeout(() => setGaveUp(true), LOAD_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [waitingLoaded]);
   // Dragged down by its top it follows the finger, and past a little way (or flicked) it is put away; short of that it goes back.
   const pulled = useRef(new Animated.Value(0)).current;
   const close = useRef(onClose);
@@ -197,12 +205,14 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     }),
   ).current;
 
-  // Opened from a notification as the app starts, what waits isn't known yet: that isn't "answered already".
-  if (!asked && !waitingLoaded) {
+  // Opened from a notification as the app starts, what waits isn't known yet: that isn't "answered already". The Mac gets a few
+  // seconds to say; then it is taken as gone (which has its Close), and it can be closed meanwhile.
+  if (!asked && !waitingLoaded && !gaveUp) {
     return (
       <View accessibilityLabel="Loading the decision" style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
         <StatusBar style="light" />
         <Dots color={colors.nightText} />
+        <Button label="Close" kind="night-ghost" onPress={onClose} />
       </View>
     );
   }

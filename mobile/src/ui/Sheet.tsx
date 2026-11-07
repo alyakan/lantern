@@ -63,7 +63,10 @@ export function Sheet({ onClose, children, size = "content", wide = false }: { o
   return (
     <TrueSheet ref={sheet} style={size === "large" ? { flex: 1 } : undefined} detents={[size === "large" ? MOST : "auto"]} initialDetentIndex={0} maxContentHeight={height * MOST} maxContentWidth={wide ? wideSheet(width) : SHEET_MAX} grabber scrollableRef={scroll as never} onDidPresent={() => coveredNow.current && void sheet.current?.dismiss(false)} onDidDismiss={done}>
       {/* The sheet already sits above the home indicator: what is in it keeps only a little room at its bottom. */}
-      <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
+      {/* VoiceOver's two-finger scrub puts any sheet away: a menu (a message's actions) has no Cancel of its own. */}
+      <View style={size === "large" ? { flex: 1 } : { flexShrink: 1 }} accessibilityActions={[{ name: "escape" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "escape" && close()}>
+        <SafeAreaInsetsContext.Provider value={{ ...insets, bottom: SHEET_INSET }}>{children(close, scroll)}</SafeAreaInsetsContext.Provider>
+      </View>
       {covered && (
         <View style={StyleSheet.absoluteFill}>
           <LockCover />

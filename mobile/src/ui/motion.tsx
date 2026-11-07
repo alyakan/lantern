@@ -192,7 +192,7 @@ export function widen(given: PressableProps["hitSlop"], needed: Insets | undefin
  * A pressable that gives under the finger: it shrinks a little while pressed and springs back, with a tap on the phone.
  * `opacity` is the resting opacity (a disabled one is dimmer); it dims a touch more while pressed.
  */
-export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", opacity = 1, disabled, onPressIn, onPressOut, hitSlop, onLayout, ...rest }: Omit<PressableProps, "style" | "children"> & { children: ReactNode; style?: StyleProp<ViewStyle>; scaleTo?: number; haptic?: "light" | "select" | "none"; opacity?: number }) {
+export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", opacity = 1, disabled, onPressIn, onPressOut, hitSlop, onLayout, reach: reaches = true, ...rest }: Omit<PressableProps, "style" | "children"> & { children: ReactNode; style?: StyleProp<ViewStyle>; scaleTo?: number; haptic?: "light" | "select" | "none"; opacity?: number; /** False for cells packed edge to edge (a calendar's days), where reaching past itself would take a neighbour's taps. */ reach?: boolean }) {
   const s = useRef(new Animated.Value(1)).current;
   // Smaller than a finger (44 points): it reaches as far around itself as it lacks (or as it was given, if that is more), so a
   // small chip or link is as easy to hit as a full button. Measured, so it is only ever what is missing.
@@ -204,9 +204,10 @@ export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", 
   return (
     <APressable
       {...rest}
-      hitSlop={widen(hitSlop, reach)}
+      hitSlop={reaches ? widen(hitSlop, reach) : hitSlop}
       onLayout={(e) => {
         onLayout?.(e);
+        if (!reaches) return;
         const { width, height } = e.nativeEvent.layout;
         const v = Math.max(0, Math.ceil((MIN_TARGET - height) / 2));
         const h = Math.max(0, Math.ceil((MIN_TARGET - width) / 2));

@@ -21,6 +21,9 @@ import { radius, shadow, space, useColors } from "../ui/theme";
 import { projectColorOf, projectTint } from "../view/home";
 import { change, kept, percent, tokens, wait } from "../view/insights";
 
+/** How old the figures can be when the tab comes back into view before they are asked for again. */
+const STALE_MS = 60_000;
+
 const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "today", label: "Today" },
   { id: "week", label: "Week" },
@@ -121,7 +124,7 @@ function Shares({ list, colorOf }: { list: InsightsShare[]; colorOf: (name: stri
   );
 }
 
-export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: string) => void }) {
+export function InsightsScreen({ top, visible = true }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are a minute old. */ visible?: boolean }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
@@ -140,6 +143,7 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
       (i) => {
         kept.set(r, i);
         if (n !== asked.current) return;
+        loadedAt.current = Date.now();
         setShown(i);
         setLoading(false);
       },
@@ -151,6 +155,13 @@ export function InsightsScreen({ top }: { top: ReactNode; onOpenChat?: (slot: st
     );
   };
   useEffect(() => load(range), [range]);
+  const loadedAt = useRef(Date.now());
+  useEffect(() => {
+    if (!visible) return;
+    if (Date.now() - loadedAt.current > STALE_MS || error) load(range);
+    // Only on coming back into view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
   const pick = (r: InsightsRange) => {
     setShown(kept.get(r) ?? null);
     setRange(r);

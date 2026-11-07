@@ -146,13 +146,13 @@ export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; on
  * same glass: the message box keeps its place (they used to sit on top of it, which pushed it and a page's buttons up). They
  * go as a message and are gone; longer ones wrap to a second line.
  */
-export function QuickReplies({ replies, onSend, lift = 0, onHeight }: { replies: string[]; onSend: (text: string) => void; /** How far above the bottom of its box it sits, where the message box floats over the chat. */ lift?: number; onHeight?: (h: number) => void }) {
+export function QuickReplies({ replies, onSend, lift = 0, onHeight, hidden = false }: { replies: string[]; onSend: (text: string) => void; /** How far above the bottom of its box it sits, where the message box floats over the chat. */ lift?: number; onHeight?: (h: number) => void; /** Out of sight and reach, keeping its room (the chat is scrolled away from its end). */ hidden?: boolean }) {
   const accent = useAccent();
   // Gone, they leave no room behind them.
   useEffect(() => () => onHeight?.(0), []);
   return (
     <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift, pointerEvents: "box-none" }}>
-      <View pointerEvents="box-none" accessibilityLabel="Quick replies" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8 }}>
+      <View pointerEvents={hidden ? "none" : "box-none"} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? "no-hide-descendants" : "auto"} accessibilityLabel="Quick replies" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, opacity: hidden ? 0 : 1 }}>
         {replies.map((r) => (
           <PressScale key={r} accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.95}>
             <Glass lift={0.16} style={{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center" }}>

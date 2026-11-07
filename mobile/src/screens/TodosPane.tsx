@@ -413,7 +413,7 @@ function NewTodo({ busy, now, bottom, onAdd }: { busy: boolean; now: number; /**
                 const on = !!d && d === date;
                 const past = !!d && d < todayKey;
                 return (
-                  <PressScale key={i} accessibilityRole="button" accessibilityLabel={d ? dueText(d, null, now) : undefined} accessibilityState={{ selected: on, disabled: !d || past }} disabled={!d || past} onPress={() => d && (pickDay(d), setMonth(null))} style={{ flex: 1, alignItems: "center", paddingVertical: 1 }}>
+                  <PressScale key={i} reach={false} accessibilityRole="button" accessibilityLabel={d ? dueText(d, null, now) : undefined} accessibilityState={{ selected: on, disabled: !d || past }} disabled={!d || past} onPress={() => d && (pickDay(d), setMonth(null))} style={{ flex: 1, alignItems: "center", paddingVertical: 1 }}>
                     <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: on ? accent : "transparent" }}>
                       {d && (
                         <Txt variant="small" style={{ color: on ? colors.white : past ? colors.shape : d === todayKey ? accent : colors.ink, fontWeight: d === todayKey || on ? "800" : "400" }}>
