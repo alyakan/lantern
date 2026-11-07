@@ -151,6 +151,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     let live = true;
     void loadSidebarPinned().then((p) => {
       if (!live) return;
+      // Pinned, the chats slide in beside a chat that may already be drawn: its room moves on their curve, rather than jumping.
+      movePanes();
       setPinned(p);
       setPinRead(true);
     });
