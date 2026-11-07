@@ -691,11 +691,20 @@ describe("a chat", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy());
   });
 
-  it("won't take a message when it isn't connected (the app's pill says why)", async () => {
+  it("takes a message while the Mac is out of reach, shows it waiting, and sends it once a connection is up", async () => {
     const { controller } = makeController();
     await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: { kind: "offline", reason: "x", retryInMs: 1000 } }, controller);
     expect(screen.queryByText(/Not connected to your Mac/)).toBeNull();
-    expect(screen.getByLabelText("Message").props.editable).toBe(false);
+    expect(screen.getByLabelText("Message").props.editable).not.toBe(false);
+    await fireEvent.changeText(screen.getByLabelText("Message"), "Carry on when you can");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await act(async () => controller.sync.flush());
+    expect(screen.getByText("Waiting for your Mac · sends when it's back")).toBeTruthy();
+    const asked: unknown[] = [];
+    await act(async () => controller.sync.onSession({ welcome: { epoch: 0 }, ask: async (r: unknown) => (asked.push(r), null) } as never));
+    await act(async () => controller.sync.flush());
+    expect(asked).toContainEqual(expect.objectContaining({ op: "send", slot: "a", text: "Carry on when you can" }));
+    expect(screen.queryByText("Waiting for your Mac · sends when it's back")).toBeNull();
   });
 
   it("draws a chat that comes in pages once, when it is whole, keeping what it showed until then", async () => {

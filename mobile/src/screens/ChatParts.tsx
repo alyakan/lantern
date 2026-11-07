@@ -35,6 +35,7 @@ import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import { markRanges } from "../view/mark";
+import { settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -59,7 +60,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
@@ -89,6 +90,11 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
             </PressScale>
           )}
         </View>
+      )}
+      {item.held && (
+        <Txt variant="tiny" tone="ink3" accessibilityLabel="Waiting for your Mac: it's sent once your Mac is back" style={{ marginTop: 4, marginRight: 2 }}>
+          Waiting for your Mac · sends when it's back
+        </Txt>
       )}
       {queued && !item.failed && (
         <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
@@ -212,10 +218,27 @@ export function withCaret(text: string): string {
 export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <Markdown text={item.streaming ? withCaret(item.text) : item.text} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
+      <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
     </Pressable>
   );
 });
+
+/**
+ * A reply cut into its blocks (see settledCuts), each its own Markdown keyed by where it starts: while it streams, the ones
+ * that are done are parsed and laid out once, and only the last is again for each word. Spaced as one Markdown spaces its
+ * blocks, and drawn this way when done too, so nothing moves when the reply ends.
+ */
+function Blocks({ text, streaming, ...rest }: { text: string; streaming: boolean; selectable: boolean; mark?: string; files?: string[]; onFile?: (path: string) => void }) {
+  const starts = [0, ...settledCuts(text)];
+  return (
+    <View style={{ gap: 8 }}>
+      {starts.map((start, i) => {
+        const part = text.slice(start, starts[i + 1] ?? text.length);
+        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} {...rest} />;
+      })}
+    </View>
+  );
+}
 
 /** Where a new day starts in the chat: its name, small, between two hairlines. */
 export const DayRow = memo(function DayRow({ label }: { label: string }) {

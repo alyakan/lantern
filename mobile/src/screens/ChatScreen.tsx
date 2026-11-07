@@ -6,7 +6,7 @@ import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboar
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
-import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
+import { useConnectionState, useController, useDeviceId, useSyncPick } from "../shell/hooks";
 import { emptyView, type Item } from "../sync/reducer";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
@@ -21,7 +21,7 @@ import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/
 import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
-import { timeline, type Row } from "../view/timeline";
+import { steadyRows, timeline, type Row } from "../view/timeline";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -117,8 +117,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
-  const { chats, views, plan, providerUsage, workingSince } = useSyncState();
-  const chat = chats.find((c) => c.slot === slot);
+  // Only this chat's part: another chat streaming doesn't draw this one again.
+  const { chat, slotView, plan, providerUsage, since } = useSyncPick(slot, (s) => ({ chat: s.chats.find((c) => c.slot === slot), slotView: s.views[slot], plan: s.plan, providerUsage: s.providerUsage, since: s.workingSince[slot] ?? null }));
   const canOutput = useMacCan("output");
   // A Mac that can read a reviewed file's diff from the PR or branch under review; an older one only has the chat's own edits.
   const canReviewDiff = useMacCan("reviewdiff");
@@ -151,7 +151,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const glass = useGlass();
   const [top, setTop] = useState(0);
   const [bottom, setBottom] = useState(0);
-  const view = views[slot] ?? emptyView;
+  const view = slotView ?? emptyView;
   const working = chat?.status === "working";
   // A chat that comes in pages (a long one opened, or one caught up on after a long time away) is drawn once, when it is whole:
   // until then what was shown stays (the shape of a chat, breathing, when there was nothing). Drawn page by page it was laid out
@@ -173,7 +173,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
     return mine.length ? [...held, ...mine] : held;
   }, [holding, view.items]);
-  const rows = useMemo(() => timeline(items, Date.now(), working), [items, working]);
+  // The rows that read as they did keep their objects, so a streamed word draws only the row it changed (see steadyRows).
+  const lastRows = useRef<Row[]>([]);
+  const rows = useMemo(() => (lastRows.current = steadyRows(lastRows.current, timeline(items, Date.now(), working))), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(items, working), [items, working]);
   const canCruise = useMacCan("cruise");
@@ -587,7 +589,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <StepsRow rowKey={row.key} chips={row.chips} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
+            // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so
+            // play the closing settle on a card decided long ago.
             <PromptRow
+              key={row.item.id}
               item={row.item}
               me={me}
               onReview={() => onReview(row.item.id)}
@@ -782,7 +787,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </Glass>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} placeholder={online ? undefined : "Waiting for your Mac…"} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+        // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now).
+        <Composer draftKey={slot} placeholder={online ? undefined : "Your Mac is out of reach. Write, and it goes when it's back"} canAttach={canImages && online} onSend={(text, images) => (online || images?.length ? void sync.send(slot, text, images) : sync.hold(slot, text))} onRun={canShell && online ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );
@@ -838,7 +844,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         }
         ListFooterComponent={
           working ? (
-            <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} />
+            <WorkingFooter activity={activityOf(view.items, view.thinking)} since={since} />
           ) : (
             <View style={{ height: 8 }} />
           )
@@ -875,7 +881,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={since} /> : null} /> : listEl;
   // A tap on the chat (a message too) puts the keyboard away.
   const tapAway = useTapAway();
   // What floats over the list rides the keyboard with the bar.

@@ -119,6 +119,7 @@ export class Sync {
   /** Forgets everything (the phone was unpaired): the next Mac starts from nothing. */
   reset() {
     this.queue = [];
+    this.outbox = [];
     this.session = null;
     this.followed.clear();
     this.closed = [];
@@ -126,12 +127,13 @@ export class Sync {
     for (const l of this.listeners) l();
   }
 
-  /** A connection came up (Connection's onSession): follow the same chats from where they were. */
+  /** A connection came up (Connection's onSession): follow the same chats from where they were, and send what waited for it. */
   onSession = (session: Session) => {
     this.session = session;
     this.apply({ type: "welcome", epoch: session.welcome.epoch });
     this.flush();
     for (const slot of this.followed) void this.subscribeTo(slot);
+    void this.sendHeld();
     void this.refreshWaiting();
     void this.refreshDesk();
     void this.refreshWork();
@@ -278,6 +280,25 @@ export class Sync {
     const item = this.state.views[slot]?.items.find((it) => it.kind === "user" && it.id === itemId);
     if (item?.kind !== "user" || !item.failed || !item.id.startsWith("local-")) return Promise.resolve();
     return this.send(slot, item.text, [], item.id.slice("local-".length));
+  }
+
+  /**
+   * Messages written while the Mac couldn't be reached (see `hold`), in the order they were written. Only those: one that was
+   * already on its way when the link went says it didn't go, since the Mac may have it, and sending it again could send it
+   * twice.
+   */
+  private outbox: { slot: string; text: string; clientId: string }[] = [];
+
+  /** A message written while the Mac can't be reached: it shows as waiting, and goes once a connection is up. */
+  hold(slot: string, text: string) {
+    const clientId = this.newId();
+    this.apply({ type: "held", slot, clientId, text, at: this.now() });
+    this.outbox.push({ slot, text, clientId });
+  }
+
+  /** Sends what waited for the Mac, one after another so they arrive in the order they were written. */
+  private async sendHeld() {
+    for (const held of this.outbox.splice(0)) await this.send(held.slot, held.text, [], held.clientId);
   }
 
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */
