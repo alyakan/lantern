@@ -27,6 +27,8 @@ import { AppLock } from "./src/lock";
 import { lockPlatform, secureLockMemory } from "./src/platformLock";
 import { LockContext } from "./src/shell/lockContext";
 import { LockGate } from "./src/shell/LockGate";
+import { loadTheme } from "./src/prefs";
+import { setThemeChoice } from "./src/ui/theme";
 
 // The splash stays up until the headings' font is in (see below), instead of a blank screen.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -38,6 +40,14 @@ export default function App() {
   const [fontsLoaded, fontError] = useFonts({ BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold });
   // A font that failed to load shows the system font instead of keeping the app on its splash for good.
   const fontsReady = fontsLoaded || fontError !== null;
+  // The theme chosen is in before the first screen draws, so it never opens in one theme and turns into another.
+  const [themeReady, setThemeReady] = useState(false);
+  useEffect(() => {
+    void loadTheme().then((theme) => {
+      setThemeChoice(theme);
+      setThemeReady(true);
+    });
+  }, []);
   const controller = useMemo(
     () =>
       new Controller({
@@ -138,10 +148,10 @@ export default function App() {
   const clearSlot = useCallback(() => setOpenSlot(null), []);
   const clearTodos = useCallback(() => setOpenTodos(null), []);
   useEffect(() => {
-    if (fontsReady) void SplashScreen.hideAsync().catch(() => {});
-  }, [fontsReady]);
-  // Until the headings' font is in, the splash: showing the system font for a moment and then swapping is worse.
-  if (!fontsReady) return null;
+    if (fontsReady && themeReady) void SplashScreen.hideAsync().catch(() => {});
+  }, [fontsReady, themeReady]);
+  // Until the headings' font and the theme are in, the splash: showing the system font for a moment and then swapping is worse.
+  if (!fontsReady || !themeReady) return null;
   // The provider follows the keyboard on the native side, so what rides above it (a chat's message box) keeps pace with it.
   return (
     <KeyboardProvider>

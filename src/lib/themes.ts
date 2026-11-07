@@ -1,11 +1,12 @@
 /**
- * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Fallout, Solarized, Nord, Paper and PostHog are
- * token sets in styles.css (data-theme on <html>); "custom" is computed here from the few colours the user picks and set
- * on <html> as inline custom properties (see applyTheme).
+ * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Fallout, Solarized, Nord, Gruvbox
+ * Dark, Catppuccin Mocha, Tokyo Night, Rosé Pine, Paper, Catppuccin Latte and PostHog are token sets in styles.css
+ * (data-theme on <html>); "custom" is computed here from the few colours the user picks and set on <html> as inline custom
+ * properties (see applyTheme).
  */
 import { alpha, contrast, ensureContrast, isDark, mix, normalizeHex, readableOn } from "./color";
 
-export type ThemeId = "system" | "light" | "dark" | "terminal" | "fallout" | "solarized" | "nord" | "paper" | "posthog" | "custom";
+export type ThemeId = "system" | "light" | "dark" | "terminal" | "fallout" | "solarized" | "nord" | "gruvbox" | "mocha" | "tokyo" | "rose" | "paper" | "latte" | "posthog" | "custom";
 export type Scheme = "light" | "dark";
 
 /** The six colours a custom theme is made from; every other colour is derived from them. */
@@ -50,7 +51,12 @@ export const THEMES: ThemeInfo[] = [
   { id: "fallout", label: "Fallout", scheme: "dark", picks: pick("#020a04", "#09180e", "#2adb5f", "#24a54f", "#c4ffd8", "#11401f") },
   { id: "solarized", label: "Solarized Dark", scheme: "dark", picks: pick("#002b36", "#073642", "#b5c3c3", "#9fb0b0", "#2aa198", "#0f3f4c") },
   { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#444c5f") },
+  { id: "gruvbox", label: "Gruvbox Dark", scheme: "dark", picks: pick("#282828", "#3c3836", "#ebdbb2", "#d5c4a1", "#fabd2f", "#504945") },
+  { id: "mocha", label: "Catppuccin Mocha", scheme: "dark", picks: pick("#1e1e2e", "#313244", "#cdd6f4", "#bac2de", "#cba6f7", "#45475a") },
+  { id: "tokyo", label: "Tokyo Night", scheme: "dark", picks: pick("#1a1b26", "#292e42", "#c0caf5", "#a9b1d6", "#7aa2f7", "#3b4261") },
+  { id: "rose", label: "Rosé Pine", scheme: "dark", picks: pick("#191724", "#221f33", "#e0def4", "#c9c6e0", "#c4a7e7", "#403d52") },
   { id: "paper", label: "Paper", scheme: "light", picks: pick("#fbf6ec", "#f3ecdc", "#2b2620", "#52483d", "#6b3f1d", "#e4dac6") },
+  { id: "latte", label: "Catppuccin Latte", scheme: "light", picks: pick("#eff1f5", "#e3e7ee", "#3f4259", "#545770", "#8839ef", "#ccd0da") },
   { id: "posthog", label: "PostHog", scheme: "light", picks: pick("#eeefe9", "#ffffff", "#151515", "#4d4f46", "#f54e00", "#d0d1c9") },
   { id: "custom", label: "Custom", scheme: null, picks: null },
 ];
