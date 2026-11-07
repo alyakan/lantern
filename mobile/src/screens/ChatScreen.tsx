@@ -170,7 +170,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const items = useMemo(() => {
     if (!holding) return view.items;
     const held = settled.current;
-    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
+    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || it.held || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
     return mine.length ? [...held, ...mine] : held;
   }, [holding, view.items]);
   // The rows that read as they did keep their objects, so a streamed word draws only the row it changed (see steadyRows).
@@ -571,7 +571,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":

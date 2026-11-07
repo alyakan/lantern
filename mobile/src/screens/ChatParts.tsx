@@ -96,7 +96,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           Waiting for your Mac · sends when it's back
         </Txt>
       )}
-      {queued && !item.failed && (
+      {queued && !item.failed && !item.held && (
         <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
           Queued · Claude reads it after this step
         </Txt>

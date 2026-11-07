@@ -3,6 +3,7 @@
  * re-render on every piece), the chats the user follows are subscribed again from where they were whenever a connection
  * comes up, and the user's sends and answers go to the Mac. React reads it with useSyncExternalStore.
  */
+import type { Held, OutboxStore } from "../outbox";
 import type { Request } from "../protocol/generated/Request";
 import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
@@ -40,7 +41,14 @@ export interface SyncDeps {
   schedule?: (fn: () => void) => void;
   now?: () => number;
   newId?: () => string;
+  /** Where messages written offline are kept until they go (the Keychain in the app; nowhere but memory unless given). */
+  outbox?: OutboxStore;
 }
+
+const NO_STORE: OutboxStore = { load: async () => ({ held: [], epoch: null }), save: async () => {} };
+
+/** What a message that waited says when the Mac came back as another run: its chats are named afresh, so where it was for is unknown. */
+export const RESTARTED = "Your Mac restarted while this waited, so the chat may be another one now. Copy it into the chat you meant.";
 
 const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => fn()) : setTimeout(fn, 16));
 let ids = 0;
@@ -80,6 +88,7 @@ export class Sync {
     this.schedule = d.schedule ?? defaultSchedule;
     this.now = d.now ?? Date.now;
     this.newId = d.newId ?? defaultId;
+    this.store = d.outbox ?? NO_STORE;
   }
 
   getState = () => this.state;
@@ -120,6 +129,7 @@ export class Sync {
   reset() {
     this.queue = [];
     this.outbox = [];
+    this.lastEpoch = null;
     this.session = null;
     this.followed.clear();
     this.closed = [];
@@ -132,6 +142,10 @@ export class Sync {
     this.session = session;
     this.apply({ type: "welcome", epoch: session.welcome.epoch });
     this.flush();
+    if (this.lastEpoch !== session.welcome.epoch) {
+      this.lastEpoch = session.welcome.epoch;
+      this.keep();
+    }
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.sendHeld();
     void this.refreshWaiting();
@@ -287,18 +301,54 @@ export class Sync {
    * already on its way when the link went says it didn't go, since the Mac may have it, and sending it again could send it
    * twice.
    */
-  private outbox: { slot: string; text: string; clientId: string }[] = [];
-
-  /** A message written while the Mac can't be reached: it shows as waiting, and goes once a connection is up. */
-  hold(slot: string, text: string) {
-    const clientId = this.newId();
-    this.apply({ type: "held", slot, clientId, text, at: this.now() });
-    this.outbox.push({ slot, text, clientId });
+  private outbox: Held[] = [];
+  private store: OutboxStore;
+  private sendingHeld = false;
+  /** The Mac run this phone last spoke to, kept between launches: a message written before any connection this launch is for it. */
+  private lastEpoch: number | null = null;
+  private keep() {
+    void this.store.save({ held: this.outbox, epoch: this.lastEpoch });
   }
 
-  /** Sends what waited for the Mac, one after another so they arrive in the order they were written. */
+  /** A message written while the Mac can't be reached: it shows as waiting, kept on the phone, and goes once a connection is up. */
+  hold(slot: string, text: string) {
+    const held: Held = { slot, text, clientId: this.newId(), epoch: this.state.epoch ?? this.lastEpoch, at: this.now() };
+    this.apply({ type: "held", slot, clientId: held.clientId, text, at: held.at });
+    this.outbox.push(held);
+    this.keep();
+  }
+
+  /** At launch: what waited when the app last closed shows again, waiting as it was. */
+  async restoreHeld() {
+    const kept = await this.store.load();
+    this.lastEpoch ??= kept.epoch;
+    for (const held of kept.held) {
+      if (this.outbox.some((h) => h.clientId === held.clientId)) continue;
+      this.outbox.push(held);
+      this.apply({ type: "held", slot: held.slot, clientId: held.clientId, text: held.text, at: held.at });
+    }
+    // Connected before they were read back: they go now.
+    if (this.session && this.outbox.length > 0) void this.sendHeld();
+  }
+
+  /**
+   * Sends what waited for the Mac, one after another so they arrive in the order they were written: only to the Mac run it
+   * was written for. A chat's slot is only that run's (they are named afresh each launch), so after a restart the same slot
+   * can be another project's chat: then it isn't sent, and says why, with no Try again.
+   */
   private async sendHeld() {
-    for (const held of this.outbox.splice(0)) await this.send(held.slot, held.text, [], held.clientId);
+    if (this.sendingHeld) return;
+    this.sendingHeld = true;
+    try {
+      for (const held of [...this.outbox]) {
+        if (held.epoch !== null && held.epoch === this.state.epoch) await this.send(held.slot, held.text, [], held.clientId);
+        else this.apply({ type: "send_failed", slot: held.slot, clientId: held.clientId, error: RESTARTED, stale: true });
+        this.outbox = this.outbox.filter((h) => h !== held);
+        this.keep();
+      }
+    } finally {
+      this.sendingHeld = false;
+    }
   }
 
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */

@@ -26,7 +26,7 @@ export interface FileEdit {
 }
 
 export type Item =
-  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** Written while the Mac couldn't be reached: it goes once the Mac is back. */ held?: boolean; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
+  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** Written while the Mac couldn't be reached: it goes once the Mac is back. */ held?: boolean; /** It waited, and the Mac came back as another run: not sent, and not to be sent again from here. */ stale?: boolean; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
   | { kind: "assistant"; id: string; text: string; streaming: boolean }
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
@@ -124,7 +124,7 @@ export type Action =
   | { type: "work"; work: RemoteWork }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
   | { type: "held"; slot: string; clientId: string; text: string; at: number }
-  | { type: "send_failed"; slot: string; clientId: string; error: string }
+  | { type: "send_failed"; slot: string; clientId: string; error: string; /** See the item's `stale`. */ stale?: boolean }
   /** The chat's history was asked for (again), or the asking failed. */
   | { type: "load_started"; slot: string }
   | { type: "load_failed"; slot: string; why: string }
@@ -311,7 +311,7 @@ export function reducer(state: State, action: Action): State {
     case "send_failed": {
       const view = state.views[action.slot];
       if (!view) return state;
-      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, failed: action.error })) } } };
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, held: false, failed: action.error, ...(action.stale ? { stale: true } : {}) })) } } };
     }
     case "forget": {
       const view = state.views[action.slot];

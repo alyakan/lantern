@@ -1,6 +1,7 @@
 import type { Request } from "../protocol/generated/Request";
 import { ANSWER_WAIT, UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
-import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import { RESTARTED, Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import type { Held, OutboxStore } from "../outbox";
 
 /** A session that records what it was asked and answers from a table. */
 function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}, features: string[] = []) {
@@ -481,5 +482,69 @@ describe("what a phone may choose for a chat", () => {
       { op: "new_chat", project: "/p", text: "hi", permissions: "ask", preset: null, workflow: null, provider: "gateway:ollama" },
     ]);
     expect("provider" in (asked.filter((r) => r.op === "new_chat")[1] as object)).toBe(false);
+  });
+
+  describe("messages written while the Mac was out of reach", () => {
+    const memoryStore = (start: Held[] = [], epoch: number | null = null) => {
+      let kept = { held: start, epoch };
+      const store: OutboxStore = { load: async () => kept, save: async (k) => void (kept = { held: [...k.held], epoch: k.epoch }) };
+      return { store, kept: () => kept.held, epoch: () => kept.epoch };
+    };
+    const held = (sync: Sync) => sync.getState().views.a.items.find((it) => it.kind === "user");
+
+    it("go in the order written once the same Mac run is back, and are kept on the phone until then", async () => {
+      const { store, kept } = memoryStore();
+      let n = 0;
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => `m-${++n}`, outbox: store });
+      sync.onSession(fakeSession(7).session);
+      await settle();
+      sync.hold("a", "first");
+      sync.hold("a", "second");
+      expect(kept().map((h) => [h.text, h.epoch])).toEqual([["first", 7], ["second", 7]]);
+      expect(held(sync)).toMatchObject({ held: true });
+      const back = fakeSession(7);
+      sync.onSession(back.session);
+      await settle();
+      expect(back.asked.filter((r) => r.op === "send").map((r) => (r as { text: string }).text)).toEqual(["first", "second"]);
+      expect(kept()).toEqual([]);
+    });
+
+    it("aren't sent when the Mac came back as another run (its chats are named afresh), and say why with no Try again", async () => {
+      const { store, kept } = memoryStore();
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-1", outbox: store });
+      sync.onSession(fakeSession(7).session);
+      await settle();
+      sync.hold("a", "for project A");
+      const restarted = fakeSession(8);
+      sync.onSession(restarted.session);
+      await settle();
+      expect(restarted.asked.some((r) => r.op === "send")).toBe(false);
+      expect(held(sync)).toMatchObject({ failed: RESTARTED, stale: true, held: false });
+      expect(kept()).toEqual([]);
+    });
+
+    it("written before any connection this launch, are for the Mac run the phone last spoke to", async () => {
+      const { store, epoch } = memoryStore([], 7);
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-1", outbox: store });
+      await sync.restoreHeld();
+      sync.hold("a", "on the train");
+      const back = fakeSession(7);
+      sync.onSession(back.session);
+      await settle();
+      expect(back.asked).toContainEqual(expect.objectContaining({ op: "send", text: "on the train" }));
+      sync.onSession(fakeSession(9).session);
+      expect(epoch()).toBe(9);
+    });
+
+    it("show again waiting after the app was closed, and go to the run they were written for", async () => {
+      const { store } = memoryStore([{ slot: "a", text: "kept", clientId: "m-9", epoch: 7, at: 50 }]);
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, outbox: store });
+      await sync.restoreHeld();
+      expect(held(sync)).toMatchObject({ id: "local-m-9", text: "kept", held: true });
+      const back = fakeSession(7);
+      sync.onSession(back.session);
+      await settle();
+      expect(back.asked).toContainEqual(expect.objectContaining({ op: "send", text: "kept", client_id: "m-9" }));
+    });
   });
 });
