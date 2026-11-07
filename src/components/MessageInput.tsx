@@ -472,7 +472,10 @@ export function MessageInput({ status, waiting = false, idlePlaceholder, sendAnd
           )}
           {queued.map((q, i) => (
             <li key={i} className="queue-item">
-              <span className="queue-label">Queued</span>
+              {/* After a crash nothing is sent until the chat restarts: it says so, rather than look like it's next. */}
+              <span className="queue-label" title={status === "ended" ? `Sent once ${agent} is restarted` : undefined}>
+                {status === "ended" ? "Held until restart" : "Queued"}
+              </span>
               <button className="queue-text" title="Edit: takes it back to the box" onClick={() => editQueued(i)}>
                 {queuedBox.current.get(q)?.box ?? q}
               </button>
