@@ -16,7 +16,7 @@ const washOf = (kind: RowKind, colors: Palette, strong: boolean) => (kind === "a
 const KIND_WORDS: Partial<Record<RowKind, string>> = { add: "Added", del: "Removed", ctx: "Unchanged" };
 
 /** How many rows are drawn at first: the Mac sends up to 512 KB, and a lock file's change would be thousands of native views. The rest waits behind a button. */
-export const MAX_ROWS = 800;
+export const MAX_ROWS = 300;
 
 /** A markdown line's words with their marks (bold, code, links…) drawn rather than written. Links are only coloured: the words are a file's, not a message's. */
 function Inline({ spans, colors }: { spans: Span[]; colors: Palette }): ReactNode {
@@ -121,8 +121,9 @@ export function DiffView({ path, text }: { path: string; text: string }) {
   const tokens = useMemo(() => (markdown ? null : tokensOf(rows, lang)), [rows, markdown, lang]);
   const lines = useMemo(() => (markdown ? markdownOf(rows) : null), [rows, markdown]);
   const widest = useMemo(() => rows.reduce((n, r) => Math.max(n, r.oldNo ?? 0, r.newNo ?? 0), 0), [rows]);
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, MAX_ROWS);
+  // A big diff is drawn a page at a time (every line is a view of its own, and a few thousand of them stalled the sheet).
+  const [pages, setPages] = useState(1);
+  const shown = rows.slice(0, pages * MAX_ROWS);
   if (rows.length === 0) {
     return (
       <Txt variant="small" tone="ink2" style={{ padding: space.lg }}>
@@ -189,7 +190,7 @@ export function DiffView({ path, text }: { path: string; text: string }) {
       })}
       {shown.length < rows.length && (
         <View style={{ paddingHorizontal: space.lg, paddingTop: 8 }}>
-          <Button label={`Show the other ${rows.length - shown.length} lines`} kind="ghost" onPress={() => setAll(true)} />
+          <Button label={rows.length - shown.length > MAX_ROWS ? `Show ${MAX_ROWS} more lines (of ${rows.length - shown.length})` : `Show the other ${rows.length - shown.length} lines`} kind="ghost" onPress={() => setPages((n) => n + 1)} />
         </View>
       )}
     </View>

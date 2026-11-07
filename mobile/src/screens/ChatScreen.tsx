@@ -420,13 +420,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   };
 
   // Your last message can be edited and sent again; what Claude's last message asks, if it is a yes or no, can be answered at once.
-  const lastUser = [...rows].reverse().find((r) => r.kind === "user")?.key;
-  const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
+  // (Looked for from the end, without copying the rows: this runs with every word streamed.)
+  const lastUserText = rows.findLast((r) => r.kind === "user");
+  const lastUser = lastUserText?.key;
+  const lastWords = rows.findLast((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
-  const lastTurn = [...rows].reverse().find((r) => r.kind === "turn" || r.kind === "user");
+  const lastTurn = rows.findLast((r) => r.kind === "turn" || r.kind === "user");
   // The turn Cruise asks about: the last one Claude finished (a message you just sent is no turn yet).
   const turnKey = lastTurn?.kind === "turn" ? lastTurn.key : "";
-  const lastUserText = [...rows].reverse().find((r) => r.kind === "user");
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
   // again would do it all over.
   const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
@@ -510,17 +511,30 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   };
   const unseen = away ? Math.max(0, rows.length - away.since) : 0;
 
+  // A row's handlers stay the same function from one drawing of the chat to the next (each calls the latest of what it does), so
+  // the rows, which are memoised, aren't all drawn again with every word streamed.
+  const handlers = useRef(new Map<string, () => void>());
+  const stable = useRef(new Map<string, () => void>());
+  const steady = (key: string, fn: () => void) => {
+    handlers.current.set(key, fn);
+    let s = stable.current.get(key);
+    if (!s) {
+      s = () => handlers.current.get(key)?.();
+      stable.current.set(key, s);
+    }
+    return s;
+  };
   const renderRow = ({ item: row }: { item: Row }) => {
     // What is searched for, given only to the messages that say it: the rest are not drawn again as it is typed.
     const term = marks.all.has(row.key) ? find?.query : undefined;
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })} onRetry={online && !row.item.thumbs?.length ? () => void sync.retry(slot, row.item.id) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
+          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
           // On a page of its own, a Review file page is laid out as the Mac's: its file a link to its change, and its findings.
           const file = paged ? reviewOf(row) : null;
