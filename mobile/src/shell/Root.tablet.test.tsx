@@ -322,6 +322,19 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.getByTestId("changes-divider")).toBeTruthy();
   });
 
+  it("are beside the next chat again, not floated over it as the last chat's were", async () => {
+    const { view, controller } = await open({ chats: two, events: { a: edited, b: edited.map((e) => ({ ...e, tool_use_id: "tb" })) } });
+    await press(/Release 0.1.53/);
+    await settle();
+    await press("Float the changes over the chat");
+    expect(screen.queryByTestId("changes-divider")).toBeNull();
+    // Another chat opened while the card floats (here from a notification; a pinned list or the edge swipe do the same).
+    await view.rerender(<Root controller={controller} openSlot="b" onOpened={jest.fn()} />);
+    await settle();
+    expect(screen.getByTestId("changes-divider")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Put the changes beside the chat" })).toBeNull();
+  });
+
   it("go away with a tap around the floating card, and the Changes button brings them back floating", async () => {
     await openEdited();
     await press("Float the changes over the chat");

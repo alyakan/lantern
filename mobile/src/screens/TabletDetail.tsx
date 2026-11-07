@@ -111,7 +111,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   // A file link tapped in the chat is shown in the pane (brought back if it was put away), whether or not the chat changed it,
   // never in a sheet over the chat with the pane right beside it.
   const [focus, setFocus] = useState<{ path: string; n: number } | undefined>(undefined);
-  useEffect(() => setFocus(undefined), [slot]);
+  // Another chat starts with its pane beside it, not floated over it as the last one's was (open or put away stays the person's).
+  useEffect(() => {
+    setFocus(undefined);
+    setFloating(false);
+  }, [slot]);
   const showFile = (link: string) => {
     if (!wide) return false;
     const path = changedFileOf(changed, link) ?? link;
