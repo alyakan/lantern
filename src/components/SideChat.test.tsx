@@ -43,6 +43,24 @@ function open() {
 }
 
 describe("SideChat", () => {
+  it("keeps the newest words in view, but leaves a reader who scrolled up to read where they are", async () => {
+    const { container, type } = open();
+    const body = container.querySelector(".aside-body") as HTMLElement;
+    let height = 1000;
+    Object.defineProperty(body, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(body, "clientHeight", { value: 300, configurable: true });
+    type("What does this do?");
+    await waitFor(() => expect(ask).toHaveBeenCalled());
+    say(idOf(), text("It reads the"));
+    expect(body.scrollTop).toBe(1000);
+    // Scrolled up to read.
+    body.scrollTop = 200;
+    fireEvent.scroll(body);
+    height = 1200;
+    say(idOf(), text("It reads the file and"));
+    expect(body.scrollTop).toBe(200);
+  });
+
   it("says it isn't added to the chat and can only read, and starts with the cursor in its box", () => {
     const { box } = open();
     expect(screen.getByRole("dialog", { name: "Side chat" })).toBeInTheDocument();

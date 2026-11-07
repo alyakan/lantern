@@ -37,6 +37,22 @@ describe("ChatView", () => {
     expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
   });
 
+  it("follows the end for as long as the pill back to it isn't showing, with no stretch where neither does", () => {
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const { container, rerender } = render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} {...props} />);
+    const chat = container.querySelector(".chat") as HTMLElement;
+    let height = 2000;
+    Object.defineProperty(chat, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+    // Nudged up 120px: less than the pill's distance, so still following.
+    chat.scrollTop = 1380;
+    byHand(chat);
+    expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
+    height = 2100;
+    rerender(<ChatView state={{ ...initialState, status: "running", folder: "/p", items: [...items, { type: "assistant", id: "a2", text: "More." }] }} {...props} />);
+    expect(chat.scrollTop).toBe(2100);
+  });
+
   it("follows new messages by scrolling only the chat, never the page around it", () => {
     // scrollIntoView scrolls every scrollable ancestor too, the page included: message by message, the whole app
     // slid up and out of the window.

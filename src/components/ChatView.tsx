@@ -14,6 +14,7 @@ import { sinceLabel } from "../lib/revert";
 
 /** How long after the reader's last wheel, touch or key a scroll still counts as theirs (a trackpad's glide goes on after the fingers lift). */
 const READER_WINDOW_MS = 600;
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
 
 /** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
 export interface RestoreEvents {
@@ -82,11 +83,21 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   };
   useEffect(() => {
     const release = () => (dragging.current = false);
+    // The keys that scroll the chat (Page Up, Home, the arrows) go to the page, not to the chat, which has no focus of its own:
+    // heard here, so a reader paging up isn't pulled back down by the next word. Not while typing, where they move the caret.
+    const keys = (e: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(e.key)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      byHand();
+    };
     window.addEventListener("pointerup", release);
     window.addEventListener("pointercancel", release);
+    window.addEventListener("keydown", keys);
     return () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
+      window.removeEventListener("keydown", keys);
     };
   }, []);
   // Following the end: the chat is put there, and that is what is remembered for coming back (never an older place).
@@ -113,9 +124,14 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   // place by itself when content appears above it).
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const earlierTurns = useRef(state.earlierTurns);
+  // With no turn to hold on to (the view above the first one), the distance from the end is kept instead.
+  const fromEnd = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (state.earlierTurns < earlierTurns.current && el && anchor.current) scrollToAnchor(el, anchor.current);
+    if (state.earlierTurns < earlierTurns.current && el) {
+      if (anchor.current) scrollToAnchor(el, anchor.current);
+      else if (fromEnd.current !== null) el.scrollTop = el.scrollHeight - fromEnd.current;
+    }
     earlierTurns.current = state.earlierTurns;
   }, [state.earlierTurns]);
   const showEarlier = () => {
@@ -124,6 +140,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     // Where it is now is what is kept, whether or not it was scrolled away from the end.
     nearBottom.current = false;
     anchor.current = anchorOf(el);
+    fromEnd.current = el.scrollHeight - el.scrollTop;
     setLoadingEarlier(true);
     loadEarlier().finally(() => setLoadingEarlier(false));
   };
@@ -161,10 +178,12 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     if (restoring.current) return;
     // Not the reader's (see byHand): the pill still tells how far from the end it is, and nothing else changes.
     if (!dragging.current && performance.now() - lastInput.current > READER_WINDOW_MS) return;
-    nearBottom.current = fromEnd < 80;
+    // The same line as the pill's: following stops exactly where the way back shows, with no stretch where neither does.
+    nearBottom.current = fromEnd <= AWAY_FROM_END;
     anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
-    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, anchor.current ?? -1);
+    // Kept for coming back, without the row itself (it is gone by then, and held would keep the old page alive).
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, anchor.current ? { ...anchor.current, el: undefined } : -1);
   };
   // For the whole turn, until Claude is fully done: a line at the bottom with the turn's word, like Claude Code's
   // spinner under its output.
