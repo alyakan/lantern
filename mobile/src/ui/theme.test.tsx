@@ -1,7 +1,7 @@
-import { StyleSheet, View } from "react-native";
-import { render, screen } from "@testing-library/react-native";
+import { Appearance, StyleSheet, View } from "react-native";
+import { act, render, renderHook, screen } from "@testing-library/react-native";
 import { Button, Tag, Txt } from "./components";
-import { darkColors, lightColors, MIN_TARGET, paletteFor, radius } from "./theme";
+import { darkColors, getThemeChoice, isThemeChoice, lightColors, MIN_TARGET, paletteFor, radius, setThemeChoice, THEME_CHOICES, useColors } from "./theme";
 
 /** A colour as the style gives it, for a node found by its label or text. */
 const style = (node: { props: { style?: unknown } }) => StyleSheet.flatten(node.props.style as never) as { color?: string; backgroundColor?: string };
@@ -53,6 +53,95 @@ describe("the palettes", () => {
   it("lift a card off the page on Night, where a shadow can't", () => {
     expect(darkColors.card).not.toBe(darkColors.paper);
     expect(contrast(darkColors.card, darkColors.paper)).toBeGreaterThan(1.1);
+  });
+});
+
+describe("the themes", () => {
+  const presets = THEME_CHOICES.filter((t) => t.palette).map((t) => t.palette!);
+
+  it("are Follow iPhone, Daylight, Night and the Mac's five new ones, each known by id", () => {
+    expect(THEME_CHOICES.map((t) => t.id)).toEqual(["system", "light", "dark", "gruvbox", "mocha", "tokyo", "rose", "latte"]);
+    expect(THEME_CHOICES.map((t) => t.label)).toEqual(["Follow iPhone", "Daylight", "Night", "Gruvbox Dark", "Catppuccin Mocha", "Tokyo Night", "Rosé Pine", "Catppuccin Latte"]);
+    expect(isThemeChoice("tokyo")).toBe(true);
+    expect(isThemeChoice("fallout")).toBe(false);
+    expect(isThemeChoice(null)).toBe(false);
+  });
+
+  it("each have a palette of their own, dark or light as they say", () => {
+    expect(new Set(presets).size).toBe(presets.length);
+    expect(THEME_CHOICES.filter((t) => t.palette && t.palette.isDark !== (t.scheme === "dark")).map((t) => t.id)).toEqual([]);
+  });
+
+  // Every pair that falls short, by name (an empty list is a pass), so a failure says which colour of which theme.
+  it("keep their words readable on their grounds, like Daylight and Night", () => {
+    const short: string[] = [];
+    const need = (name: string, a: string, b: string, min: number) => {
+      if (contrast(a, b) < min) short.push(`${name} ${a} on ${b}: ${contrast(a, b).toFixed(2)} < ${min}`);
+    };
+    for (const t of THEME_CHOICES.filter((c) => c.palette)) {
+      const p = t.palette!;
+      for (const ground of [p.paper, p.card]) {
+        need(`${t.id} ink`, p.ink, ground, 7);
+        need(`${t.id} ink2`, p.ink2, ground, 4.5);
+        need(`${t.id} cobalt`, p.cobalt, ground, 4.5);
+        need(`${t.id} go`, p.go, ground, 3);
+        need(`${t.id} stop`, p.stop, ground, 3);
+        need(`${t.id} working`, p.working, ground, 3);
+      }
+      need(`${t.id} on ink`, p.onInk, p.ink, 7);
+      need(`${t.id} on the highlighter`, p.onHi, p.hi, 7);
+      need(`${t.id} ink on the highlighter's wash`, p.ink, p.hiSoft, 7);
+      need(`${t.id} night text`, p.nightText, p.night, 7);
+      need(`${t.id} night stop`, p.nightStop, p.night, 4.5);
+    }
+    expect(short).toEqual([]);
+  });
+
+  it("lift a card off the page on a dark one, and keep the highlighter apart from Claude's working orange", () => {
+    const flat = THEME_CHOICES.filter((t) => t.palette?.isDark && contrast(t.palette.card, t.palette.paper) <= 1.1).map((t) => t.id);
+    const same = THEME_CHOICES.filter((t) => t.palette && t.palette.hi === t.palette.working).map((t) => t.id);
+    expect(flat).toEqual([]);
+    expect(same).toEqual([]);
+  });
+
+  it("follow the iPhone only when told to, and otherwise ignore its appearance", () => {
+    expect(paletteFor("dark", "system")).toBe(darkColors);
+    expect(paletteFor("light")).toBe(lightColors);
+    expect(paletteFor("light", "tokyo")).toBe(THEME_CHOICES.find((t) => t.id === "tokyo")!.palette);
+    expect(paletteFor("dark", "latte")).toBe(THEME_CHOICES.find((t) => t.id === "latte")!.palette);
+    expect(paletteFor("dark", "light")).toBe(lightColors);
+    expect(paletteFor("light", "dark")).toBe(darkColors);
+  });
+});
+
+describe("choosing a theme", () => {
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await act(async () => setThemeChoice("system"));
+  });
+
+  it("redraws what reads the colours, and tells iOS whether it is light or dark", async () => {
+    const set = jest.spyOn(Appearance, "setColorScheme").mockImplementation(() => {});
+    const { result } = await renderHook(() => useColors());
+    expect(result.current).toBe(lightColors);
+    await act(async () => setThemeChoice("mocha"));
+    expect(getThemeChoice()).toBe("mocha");
+    expect(result.current).toBe(THEME_CHOICES.find((t) => t.id === "mocha")!.palette);
+    expect(set).toHaveBeenLastCalledWith("dark");
+    await act(async () => setThemeChoice("latte"));
+    expect(set).toHaveBeenLastCalledWith("light");
+    await act(async () => setThemeChoice("system"));
+    expect(set).toHaveBeenLastCalledWith("unspecified");
+    expect(result.current).toBe(lightColors);
+  });
+
+  it("still takes effect where iOS can't be told", async () => {
+    jest.spyOn(Appearance, "setColorScheme").mockImplementation(() => {
+      throw new Error("no native module");
+    });
+    const { result } = await renderHook(() => useColors());
+    await act(async () => setThemeChoice("rose"));
+    expect(result.current).toBe(THEME_CHOICES.find((t) => t.id === "rose")!.palette);
   });
 });
 

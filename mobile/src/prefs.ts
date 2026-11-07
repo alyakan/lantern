@@ -1,6 +1,7 @@
 /** What the phone remembers about how Home looks, on this phone only (the Keychain or Keystore, like everything else it keeps). */
 import * as SecureStore from "expo-secure-store";
 import type { RemotePermissions } from "./protocol/generated/RemotePermissions";
+import { isThemeChoice, type ThemeChoice } from "./ui/theme";
 import type { Grouping } from "./view/home";
 import { NOTES_UNREADABLE } from "./whatsNew";
 
@@ -233,6 +234,26 @@ export async function saveVoiceEngine(engine: VoiceEngine): Promise<void> {
 
 /** For tests: forgets the choice made while the app is open. */
 export const resetVoiceChoice = () => void (voiceChosen = null);
+
+const THEME_KEY = "lantern.theme";
+
+/** The theme this phone draws in; it follows the iPhone's appearance when none was chosen, or it can't be read. */
+export async function loadTheme(): Promise<ThemeChoice> {
+  try {
+    const saved = await SecureStore.getItemAsync(THEME_KEY, OPTIONS);
+    return isThemeChoice(saved) ? saved : "system";
+  } catch {
+    return "system";
+  }
+}
+
+export async function saveTheme(theme: ThemeChoice): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(THEME_KEY, theme, OPTIONS);
+  } catch {
+    // Not remembered: the theme holds until the app closes.
+  }
+}
 
 const LAST_PROJECT_KEY = "lantern.last-project";
 

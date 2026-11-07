@@ -12,9 +12,9 @@ import { DarkLantern } from "../ui/lanterns";
 import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { DangerButton, LOOKS, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
-import { radius, space, useColors } from "../ui/theme";
-import { loadVoiceEngine, type VoiceEngine } from "../prefs";
+import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
+import { radius, setThemeChoice, space, THEME_CHOICES, useColors, useThemeChoice, type ThemeChoice } from "../ui/theme";
+import { loadVoiceEngine, saveTheme, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
 import { ProviderStrip } from "./ChatExtras";
 
@@ -262,6 +262,18 @@ function LockRow() {
   );
 }
 
+/** The colours this phone is drawn in, as a row of "This phone" with its list in a menu over it: the change is seen at once, behind the sheet. */
+function ThemeRow() {
+  const theme = useThemeChoice();
+  const choices = THEME_CHOICES.map((t) => ({ value: t.id, label: t.label }));
+  const pick = (id: string) => {
+    const next = id as ThemeChoice;
+    setThemeChoice(next);
+    void saveTheme(next);
+  };
+  return <MenuRow look={LOOKS.theme} title="Theme" value={THEME_CHOICES.find((t) => t.id === theme)?.label ?? ""} choices={choices} selected={theme} onPick={pick} />;
+}
+
 /** What turns speech into text on this phone, as a row of "This phone" that opens its sheet. */
 function VoiceRow({ onPress }: { onPress: () => void }) {
   const [engine, setEngine] = useState<VoiceEngine | null>(null);
@@ -331,8 +343,9 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
                 {canPair && <SettingsRow look={LOOKS.pair} title="Pair another device" onPress={then(onPairDevice)} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
               </SettingsSection>
               <SettingsSection label="This phone">
+                <ThemeRow />
                 <LockRow />
-                {onVoice && <VoiceRow onPress={then(onVoice)} />}
+                {onVoice &&<VoiceRow onPress={then(onVoice)} />}
               </SettingsSection>
               <SettingsSection label="Lantern">
                 {onWhatsNew && <SettingsRow look={LOOKS.whatsNew} title="What's new" onPress={then(onWhatsNew)} />}

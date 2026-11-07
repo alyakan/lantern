@@ -1,7 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { render, screen } from "@testing-library/react-native";
 import { Bar, ChatSkeleton, DiffSkeleton, Dots, HomeSkeleton, ProjectsSkeleton, Pulse, PULSE_MIN } from "./skeleton";
-import { darkColors, lightColors } from "./theme";
+import { darkColors, lightColors, THEME_CHOICES } from "./theme";
 
 /** WCAG's contrast ratio between two #rrggbb colours (1: the same, 21: black on white). */
 function contrast(a: string, b: string) {
@@ -21,7 +21,7 @@ function over(fg: string, bg: string, alpha: number) {
 
 describe("the loading shapes can be seen", () => {
   it("against the page and a white card, even at the faintest of their breathing", () => {
-    for (const palette of [lightColors, darkColors]) {
+    for (const palette of [lightColors, darkColors, ...THEME_CHOICES.flatMap((t) => (t.palette ? [t.palette] : []))]) {
       for (const ground of [palette.paper, palette.card]) {
         expect(contrast(over(palette.shape, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(1.12);
         expect(contrast(over(palette.shapeStrong, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(1.3);
