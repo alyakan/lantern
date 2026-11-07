@@ -34,6 +34,7 @@ import { ControllerContext, useConnectionState, useController, useSyncState } fr
 import { atRoot, decision, home, navigate, shownSlot } from "./nav";
 import { TabletShell } from "./TabletShell";
 import { useLayout } from "./useLayout";
+import { useShortcut } from "../ui/useShortcut";
 
 export interface RootProps {
   controller: Controller;
@@ -202,27 +203,47 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     void saveNotesSeen(notesId(releaseNotes));
   }, [notesDue, homeUp, nothingOpen]);
 
+  // What is over the screen, the top one first: the system's back button (Android) and Escape on a keyboard close it.
+  const closeTop = () => {
+    if (notesOpen) return setNotesOpen(false), true;
+    if (pairingDevice) return setPairingDevice(false), true;
+    if (storageOpen) return setStorageOpen(false), true;
+    if (usageOpen) return setUsageOpen(false), true;
+    if (voiceOpen) return setVoiceOpen(false), true;
+    if (todos) return setTodos(null), true;
+    if (supporting) return setSupporting(false), true;
+    if (newChat) return setNewChat(null), true;
+    if (picking) return setPicking(false), true;
+    if (macSheet) return setMacSheet(false), true;
+    if (chatsOpen) return setChatsOpen(false), true;
+    return false;
+  };
+  // An iPad's keyboard: Escape closes what is over the screen (a decision too, which rises over the chat), Command-N starts a
+  // chat, and Command-\ shows or hides the chats.
+  useShortcut("escape", () => {
+    if (!closeTop() && decision(stack)) go({ type: "back" });
+  });
+  useShortcut("newChat", () => setNewChat({ text: "" }), homeUp);
+  useShortcut(
+    "toggleChats",
+    () => {
+      if (shellLayout === "split") return togglePin();
+      if (!chatsOpen) movePanes();
+      setChatsOpen((o) => !o);
+    },
+    tablet && homeUp,
+  );
+
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (notesOpen) return setNotesOpen(false), true;
-      if (pairingDevice) return setPairingDevice(false), true;
-      if (storageOpen) return setStorageOpen(false), true;
-      if (usageOpen) return setUsageOpen(false), true;
-      if (voiceOpen) return setVoiceOpen(false), true;
-      if (todos) return setTodos(null), true;
-      if (supporting) return setSupporting(false), true;
-      if (newChat) return setNewChat(null), true;
-      if (picking) return setPicking(false), true;
-      if (macSheet) return setMacSheet(false), true;
-      if (chatsOpen) return setChatsOpen(false), true;
+      if (closeTop()) return true;
       if (atRoot(stack)) return false;
       go({ type: "back" });
       return true;
     });
     return () => sub.remove();
   }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, usageOpen, voiceOpen, todos, notesOpen]);
-
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
   // instead of stacking on it (and, slid in, the column goes away).

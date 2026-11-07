@@ -24,6 +24,7 @@ import { queuedIds } from "../view/queue";
 import { keepSame, timeline, type Row } from "../view/timeline";
 import { gutterFor } from "../view/layout";
 import { useLayout } from "../shell/useLayout";
+import { useShortcut } from "../ui/useShortcut";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -220,6 +221,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
+  // Command-F on an iPad's keyboard opens the chat's search, as the bar's Search does.
+  useShortcut("find", () => setFind((f) => f ?? { query: "", cursor: null }));
   // Step by step reads a page at a time, side by side, as on the Mac (or as one list, if asked). The page on screen: none
   // means the newest, followed as pages come; `of` is how many there were when another was picked, so a new one is said.
   const stepsChat = chat?.workflow === "steps";
