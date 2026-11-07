@@ -205,6 +205,8 @@ describe("a tablet with the chats pinned", () => {
     await press("Review");
     expect(screen.getByTestId("decision-pane")).toBeTruthy();
     expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    // The chat and its pane under it are out of the screen reader's reach until it is done.
+    expect(screen.getByTestId("detail-under", { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
     await press("Deny");
     await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     await press("Done");
