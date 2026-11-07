@@ -6,7 +6,7 @@
 import { generateKeypair, keypairFrom, type Keypair } from "../noise/noise";
 import { fromBase64Url, toBase64Url, type PairingOffer } from "../pairing";
 import { MacKeyMismatch } from "../noise/noise";
-import { comeIn, NoAnswer, NoReply, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
+import { comeIn, NoAnswer, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
 import type { Link, Transport } from "./transport";
 
 /** The Mac this phone is paired with, as kept (its own key in the Keychain or Keystore, see storage). */
@@ -72,9 +72,9 @@ const OPEN_WAIT = 1500;
 /** A Tailscale address gets longer: from cold its tunnel may take a few seconds to find a way through to the Mac. */
 const TAILNET_WAIT = 6000;
 const FIND_WAIT = 1500;
-/** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second; it is given more,
- * since a big catch-up going the other way can hold its answer up on a slow link. */
-const PROBE_WAIT = 8000;
+/** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second. A big catch-up
+ * going the other way can hold the answer up on a slow link, but anything heard from the Mac meanwhile counts (see Session.alive). */
+const PROBE_WAIT = 3000;
 /** A connection that lasted less than this before it dropped counts as a failed try: the next one waits its turn. */
 const STEADY_MS = 10_000;
 
@@ -209,13 +209,13 @@ export class Connection {
   /**
    * The app came back to the foreground: a phone's connections don't survive being away, so try again now. One that still
    * looks up may have died meanwhile without either side hearing (the phone slept, or went from Wi-Fi to cellular): it is
-   * asked something small, and dialled again if the Mac doesn't answer, rather than letting every action wait and fail.
+   * asked something small, and dialled again if nothing comes from the Mac, rather than letting every action wait and fail.
    */
   resume() {
     const session = this.session;
     if (session) {
-      void session.ask({ op: "list_waiting" }, this.d.probeWait ?? PROBE_WAIT).catch((e) => {
-        if (!(e instanceof NoReply) || this.session !== session) return;
+      void session.alive(this.d.probeWait ?? PROBE_WAIT).then((up) => {
+        if (up || this.session !== session) return;
         this.hangUp();
         // It was up until now: the dialling that follows starts from the shortest pause.
         this.tries = 0;

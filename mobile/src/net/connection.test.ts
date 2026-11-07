@@ -319,6 +319,40 @@ describe("what goes wrong around a connection", () => {
     r.conn.stop();
   });
 
+  it("coming back to the foreground on a link busy catching up waits while it keeps coming, instead of dialling again", async () => {
+    const r = rig(connectCase);
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    (r.conn as unknown as { d: { probeWait: number } }).d.probeWait = 30;
+    await r.conn.start();
+    for (let i = 0; i < 10; i++) await flush();
+    // The answer is held up behind a catch-up, but the catch-up keeps coming: well past the wait, the link is kept.
+    r.mac.silent = true;
+    r.conn.resume();
+    for (let i = 0; i < 8; i++) {
+      r.mac.push({ type: "chats", chats: [] });
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    expect(r.mac.opened).toHaveLength(1);
+    r.conn.stop();
+  });
+
+  it("coming back to the foreground to a few frames that were already on their way, then nothing, dials again", async () => {
+    const r = rig(connectCase);
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    (r.conn as unknown as { d: { probeWait: number } }).d.probeWait = 20;
+    await r.conn.start();
+    for (let i = 0; i < 10; i++) await flush();
+    r.mac.silent = true;
+    r.conn.resume();
+    r.mac.push({ type: "chats", chats: [] });
+    r.mac.push({ type: "chats", chats: [] });
+    await new Promise((res) => setTimeout(res, 60));
+    r.mac.silent = false;
+    for (let i = 0; i < 20 && r.mac.opened.length < 2; i++) await flush();
+    expect(r.mac.opened).toHaveLength(2);
+    r.conn.stop();
+  });
+
   it("a Mac that lets the phone in and then drops it at once is tried again after a pause, not in a tight loop", async () => {
     const r = rig(connectCase, { dropAfterWelcome: true });
     r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
