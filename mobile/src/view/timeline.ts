@@ -366,3 +366,29 @@ export function turnLine(t: Extract<Item, { kind: "turn" }>): { text: string; ba
   if (!t.durationMs) return { text: "Finished", bad: false };
   return { text: s < 60 ? `Finished in ${s} s` : `Finished in ${Math.floor(s / 60)} min ${s % 60} s`, bad: false };
 }
+
+/** Whether two rows (or anything in them) say the same: the same object, or the same plain fields all the way down. */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((x, i) => same(x, b[i]));
+  if (Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+/** The rows, with each one that says what it said last time kept as last time's object: the rows are memoised, so only those that
+ * changed (the answer growing as its words stream in) are drawn again, not every summary, page and row of steps above it. */
+export function keepSame(before: Row[], rows: Row[]): Row[] {
+  if (before.length === 0) return rows;
+  const old = new Map(before.map((r) => [r.key, r]));
+  let changed = rows.length !== before.length;
+  const out = rows.map((r, i) => {
+    const was = old.get(r.key);
+    const kept = was && same(was, r) ? was : r;
+    if (kept !== before[i]) changed = true;
+    return kept;
+  });
+  // Nothing changed at all: the same list, so the list isn't told it has new rows.
+  return changed ? out : before;
+}

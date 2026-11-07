@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { dayLabel, lastLine, stepChips, summaryOf, timeline, turnLine } from "./timeline";
+import { dayLabel, keepSame, lastLine, stepChips, summaryOf, timeline, turnLine } from "./timeline";
 
 type Step = Extract<Item, { kind: "step" }>;
 const step = (id: string, name: string, over: Partial<Step> = {}): Step => ({ kind: "step", id, name, summary: "", done: true, isError: false, edits: [], tests: null, ...over });
@@ -313,5 +313,31 @@ describe("an edit still going", () => {
     expect(stepChips([step("1", "Edit", { done: false, summary: "a.ts" })])).toEqual([{ key: "edits", label: "Editing 1 file", tone: "plain", running: true }]);
     // One that failed with no change made is still said as a tool that was used.
     expect(stepChips([step("1", "Edit", { isError: true })]).map((c) => c.label)).toEqual(["Used 1 other tool", "1 step failed"]);
+  });
+});
+
+describe("rows kept from one drawing to the next", () => {
+  it("keeps every row that says the same as the same object, and gives a new one only to the row that changed", () => {
+    const turn: Item = { kind: "turn", id: "t1", isError: false, result: null, durationMs: 4000 };
+    const first = [you("u1", "fix it"), step("s1", "Read"), said("a1", "Done, the build is green."), turn, you("u2", "now ship it"), step("s2", "Bash"), said("a2", "Ship", true)];
+    const before = timeline(first);
+    const next = [...first.slice(0, 6), said("a2", "Shipping it now", true)];
+    const after = keepSame(before, timeline(next));
+    const byKey = (rows: typeof before, key: string) => rows.find((r) => r.key === key);
+    expect(byKey(after, "a-a1")).toBe(byKey(before, "a-a1"));
+    expect(byKey(after, "steps-s1")).toBe(byKey(before, "steps-s1"));
+    expect(byKey(after, "steps-s2")).toBe(byKey(before, "steps-s2"));
+    expect(byKey(after, "a-a2")).not.toBe(byKey(before, "a-a2"));
+    expect(after).toEqual(timeline(next));
+  });
+
+  it("is the same list when nothing changed, and a new one when a row comes or goes", () => {
+    const items = [you("u1", "hi"), said("a1", "Hello")];
+    const before = timeline(items);
+    expect(keepSame(before, timeline(items))).toBe(before);
+    const more = keepSame(before, timeline([...items, you("u2", "again")]));
+    expect(more).not.toBe(before);
+    expect(more[0]).toBe(before[0]);
+    expect(keepSame([], before)).toBe(before);
   });
 });
