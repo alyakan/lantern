@@ -27,16 +27,13 @@ import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
-import { CHAT_MIN, SIDEBAR_WIDTH } from "../view/layout";
+import { CHAT_MIN, NARROW_MAX, SIDEBAR_WIDTH } from "../view/layout";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
 import { atRoot, decision, home, navigate, shownSlot } from "./nav";
 import { TabletShell } from "./TabletShell";
 import { useLayout } from "./useLayout";
-
-/** How wide the screens that are words on paper (confirming a link, can't reach the Mac) are on a tablet. */
-const NARROW_MAX = 560;
 
 export interface RootProps {
   controller: Controller;

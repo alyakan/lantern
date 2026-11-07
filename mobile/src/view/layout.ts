@@ -12,6 +12,9 @@ export const SIDEBAR_WIDTH = 340;
 /** The widest a chat reads: its header, messages and message box line up in one column. */
 export const COLUMN_MAX = 860;
 
+/** The widest a tablet's words-on-paper screens go (offline, a link to confirm, the pairing card): one readable column. */
+export const NARROW_MAX = 560;
+
 /** The widest a bottom sheet goes, so one does not stretch across a tablet. */
 export const SHEET_MAX = 640;
 
