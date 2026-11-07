@@ -121,6 +121,8 @@ const saidOf = (rows: Row[]) => {
 
 /** The widest the chat's column gets (its rows' own margins inside it): about 80 characters of body text a line. */
 const READABLE = 760;
+/** The room either side of the chat's column in a chat `width` wide: none on a phone. */
+export const readableSide = (width: number) => Math.max(0, (width - READABLE) / 2);
 
 /** How near the end, as a share of the chat's height, the list follows new words in (and so where Jump to latest starts). */
 const FOLLOW_END = 0.2;
@@ -308,7 +310,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [away, setAway] = useState<{ since: number; said: number } | null>(null);
   // On a wide iPad the chat is a readable column in the middle, not lines running the width of the screen.
   const [width, setWidth] = useState(0);
-  const side = Math.max(0, (width - READABLE) / 2);
+  const side = readableSide(width);
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);

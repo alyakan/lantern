@@ -5,7 +5,7 @@ import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
-import { ChatScreen, PAGES_STALL_MS } from "./ChatScreen";
+import { ChatScreen, PAGES_STALL_MS, readableSide } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
@@ -50,6 +50,13 @@ const withSession = async (events: RemoteEvent[], over = {}, answers = {}, chatO
 };
 
 describe("a chat", () => {
+  it("on a wide screen, is a readable column in the middle: 760 points, with the rest either side", () => {
+    expect(readableSide(1024)).toBe(132);
+    expect(readableSide(760)).toBe(0);
+    // A phone is narrower than the column: nothing changes.
+    expect(readableSide(402)).toBe(0);
+  });
+
   it("reads as a timeline: your message with its time, Claude's text, a row of chips, and how long it took", async () => {
     await withSession(turn);
     expect(screen.getByText("Release 0.1.53")).toBeTruthy();
