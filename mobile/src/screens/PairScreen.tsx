@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { TextInput, View } from "react-native";
+import { ScrollView, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
@@ -9,7 +9,7 @@ import { useLayout } from "../shell/useLayout";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { Dots } from "../ui/skeleton";
-import { lightColors, space, useColors } from "../ui/theme";
+import { lightColors, radius, space, useBody, useColors } from "../ui/theme";
 
 /** How long a code the camera has seen and refused is ignored, so one bad code isn't refused thirty times a second. */
 const IGNORE_MS = 3000;
@@ -28,6 +28,7 @@ const Corner = ({ style }: { style: object }) => <View style={[{ position: "abso
  */
 export function PairScreen({ initialPaste = false }: { initialPaste?: boolean }) {
   const colors = useColors();
+  const body = useBody();
   const controller = useController();
   const insets = useSafeAreaInsets();
   const frame = useLayout() === "phone" ? FRAME_PHONE : FRAME_TABLET;
@@ -97,7 +98,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
               <Txt variant="body" tone="ink2">
                 On your Mac, open Settings, then Remote control, and copy the pairing link. Paste it here.
               </Txt>
-              <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline returnKeyType="done" submitBehavior="blurAndSubmit" style={{ backgroundColor: colors.card, borderRadius: 14, padding: 12, minHeight: 72, color: colors.ink, fontSize: 14 }} />
+              <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline returnKeyType="done" submitBehavior="blurAndSubmit" style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, minHeight: 72, color: colors.ink, fontSize: body.fontSize }} />
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <Button label="Paste" kind="ghost" style={{ flex: 1 }} onPress={() => void Clipboard.getStringAsync().then(setText)} />
                 <Button label="Pair" style={{ flex: 1 }} disabled={busy || !text.trim()} onPress={() => void pair(text)} />
@@ -141,7 +142,8 @@ export function ConfirmLink({ link, onCancel, onDone }: { link: string; onCancel
   const [error, setError] = useState<string | null>(null);
   const p = controller.preview(link);
   return (
-    <View style={{ flex: 1, backgroundColor: colors.paper, padding: 24, paddingTop: insets.top + 60, gap: 14 }}>
+    // It scrolls: its words and two buttons are taller than a small phone at the larger text sizes.
+    <ScrollView style={{ flex: 1, backgroundColor: colors.paper }} contentContainerStyle={{ padding: space.xl, paddingTop: insets.top + 60, paddingBottom: insets.bottom + space.xl, gap: 14 }}>
       {"error" in p ? (
         <>
           <Txt variant="title">{p.error}</Txt>
@@ -175,6 +177,6 @@ export function ConfirmLink({ link, onCancel, onDone }: { link: string; onCancel
           <Button label="Cancel" kind="ghost" link onPress={onCancel} />
         </>
       )}
-    </View>
+    </ScrollView>
   );
 }

@@ -141,7 +141,8 @@ export const control = 44;
 /** The round buttons inside the chat bar (send, dictate, attach, Stop): a little inside its capsule. */
 export const barButton = control - 8;
 
-export const radius = { card: 24, inner: 14, pill: 999, sheet: 22 } as const;
+/** `block`: a card in a chat that holds words (a summary, a page, a prompt, a review): one size for all of them. */
+export const radius = { card: 24, inner: 14, pill: 999, sheet: 22, block: 18 } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 } as const;
 

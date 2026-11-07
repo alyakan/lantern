@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, View, type DimensionValue, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Easing, useWindowDimensions, View, type DimensionValue, type StyleProp, type ViewStyle } from "react-native";
+import { gutterFor, layoutFor } from "../view/layout";
 import { skips } from "./motion";
 import { radius, space, useColors } from "./theme";
 
@@ -130,9 +131,12 @@ export function DiffSkeleton({ label = "Loading the changes" }: { label?: string
 /** Home before the Mac has sent its chats and what waits: the headline, a card, and chat rows. */
 export function HomeSkeleton({ label = "Loading your chats" }: { label?: string }) {
   const colors = useColors();
+  // At Home's own side margin, so nothing shifts sideways when Home comes in its place.
+  const { width, height } = useWindowDimensions();
+  const gutter = gutterFor(layoutFor(width, height));
   return (
     <Pulse label={label}>
-      <View style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 18, gap: 12 }}>
+      <View style={{ paddingHorizontal: gutter, paddingTop: 14, paddingBottom: 18, gap: 12 }}>
         <Bar w="58%" h={34} r={10} dark />
         <Bar w="82%" h={34} r={10} />
       </View>
@@ -145,7 +149,7 @@ export function HomeSkeleton({ label = "Loading your chats" }: { label?: string 
           <Bar w="48%" h={44} r={22} />
         </View>
       </View>
-      <View style={{ paddingHorizontal: space.xl, paddingTop: 26, gap: 18 }}>
+      <View style={{ paddingHorizontal: gutter, paddingTop: 26, gap: 18 }}>
         <Bar w={84} h={14} />
         {[0, 1, 2].map((i) => (
           <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>

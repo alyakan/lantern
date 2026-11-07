@@ -484,6 +484,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
       <Animated.ScrollView
         keyboardShouldPersistTaps="handled"
+        // Searching, a drag through the results puts the keyboard away, so the end of a long list can be reached.
+        keyboardDismissMode="on-drag"
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         // Buttons a swipe laid out go back in when the list moves.
@@ -530,7 +532,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </>
         )}
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: gutter, paddingTop: asked ? 14 : 22, paddingBottom: 6 }}>
+        {/* At the larger text sizes the switch goes under the title rather than off the screen. */}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", rowGap: 8, columnGap: 10, paddingHorizontal: gutter, paddingTop: asked ? 14 : 22, paddingBottom: 6 }}>
           <Txt variant="small" style={{ fontWeight: "700" }}>
             {asked ? "Results" : "All chats"}
           </Txt>

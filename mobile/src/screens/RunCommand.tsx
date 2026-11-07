@@ -16,7 +16,7 @@ export function RunCommandCard({ command, project, onRun, onCancel, onSwiping }:
   const colors = useColors();
   const [swiped, setSwiped] = useState(false);
   return (
-    <View style={[{ marginHorizontal: space.lg, marginBottom: 8, backgroundColor: colors.card, borderRadius: radius.card - 6, padding: space.lg, gap: 10 }, shadow.card]}>
+    <View style={[{ marginHorizontal: space.lg, marginBottom: 8, backgroundColor: colors.card, borderRadius: radius.block, padding: space.lg, gap: 10 }, shadow.card]}>
       <Txt variant="heading" accessibilityRole="header">
         Run on your Mac?
       </Txt>

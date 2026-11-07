@@ -15,7 +15,7 @@ import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
 import { setWorkBadge, useWorkBadge, type WorkBadge } from "../workBadge";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, space, useBody, useColors } from "../ui/theme";
 import { loadVoiceEngine, type VoiceEngine } from "../prefs";
 import { currentUsageWindows, readingOf, USAGE_PROVIDERS } from "../view/providerUsage";
 import { ProviderStrip } from "./ChatExtras";
@@ -55,6 +55,7 @@ function LitLantern() {
  */
 function AddressField({ onAddress }: { onAddress: (text: string) => Promise<string | null> }) {
   const colors = useColors();
+  const body = useBody();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -85,7 +86,7 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
         keyboardType="numbers-and-punctuation"
         // Done closes the keyboard (a one-line field does that on its own); Connect is the button under it.
         returnKeyType="done"
-        style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: 16 }}
+        style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: body.fontSize }}
       />
       {problem && (
         <Txt variant="small" tone="stop" accessibilityRole="alert">
@@ -156,7 +157,10 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
   const [lastReason, setLastReason] = useState<string | null>(state.kind === "offline" ? state.reason : null);
   if (state.kind === "offline" && state.reason !== lastReason) setLastReason(state.reason);
   return (
-    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
+    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.paper, paddingTop: insets.top }}>
+      {/* It scrolls when it is taller than the screen (a small phone, the larger text sizes, the keyboard up for the address), so
+          Unpair at its end can always be reached; otherwise it sits in the middle. */}
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", padding: space.xl }}>
       {connecting && lastReason === null ? (
         <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
           <LitLantern />
@@ -183,6 +187,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
           <Button label="Unpair this phone" kind="ghost" onPress={() => askUnpair(onUnpair)} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}
+      </ScrollView>
     </AboveKeyboard>
   );
 }

@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Txt } from "../ui/components";
 import { Markdown } from "../ui/Markdown";
 import { PressScale } from "../ui/motion";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import type { Finding, ReviewFile, Severity, Verdict } from "../view/review";
 
 const SEVERITY: Record<Severity, string> = { blocker: "Blocker", "should-fix": "Should fix", nit: "Nit" };
@@ -86,7 +86,7 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
   const path = file.path;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, gap: 16 }}>
-      <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 14, gap: 6 }}>
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.block, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
           {kicker}
         </Txt>

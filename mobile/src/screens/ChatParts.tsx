@@ -125,7 +125,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
   };
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View accessibilityLabel="Summary of the work" style={[{ backgroundColor: colors.card, borderRadius: 20, overflow: "hidden", flexDirection: "row" }, shadow.card, { shadowOpacity: 0.07 }]}>
+      <View accessibilityLabel="Summary of the work" style={[{ backgroundColor: colors.card, borderRadius: radius.block, overflow: "hidden", flexDirection: "row" }, shadow.card, { shadowOpacity: 0.06 }]}>
         <View accessibilityElementsHidden style={{ width: 4, backgroundColor: colors.go }} />
         <View style={{ flex: 1, padding: 14, gap: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -321,7 +321,7 @@ export const PageRow = memo(function PageRow({ row, answered, onAction, mark, pa
   const body = cut ? `${page.body.slice(0, 240).trimEnd()}…` : page.body;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View style={[{ backgroundColor: colors.card, borderRadius: 18, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.block, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
         <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
           <Marked text={page.kicker} mark={mark} />
         </Txt>
@@ -421,7 +421,7 @@ function DecisionCard({ title, status, mark, details }: { title: string; status:
     </View>
   );
   return (
-    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
+    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, paddingVertical: 10, paddingHorizontal: 12, gap: 10 }}>
       {details ? (
         <PressScale accessibilityRole="button" accessibilityLabel={`${title}, ${status}`} accessibilityHint={open ? "Hides what was asked" : "Shows what was asked"} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} hitSlop={4}>
           {head}
@@ -546,7 +546,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
   const readHere = !preview || fitsInline(preview);
   const swipe = view.kind === "allow" && !!onAllow && readHere;
   const openCard = (
-    <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
+    <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: radius.block, padding: 14, gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Tag>{view.tag}</Tag>
         {swipe && (
@@ -620,7 +620,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
         </Txt>
         {/* A long answer wraps inside the screen: the chip is never wider than the chat, and its words may shrink to fit beside the check. */}
         <PopIn style={{ maxWidth: "100%" }}>
-          <View testID="answer-chip" style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" }}>
+          <View testID="answer-chip" style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: radius.inner, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" }}>
             <View accessibilityElementsHidden style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.go, transform: [{ rotate: "-45deg" }] }} />
             <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1 }}>
               {item.answer}
@@ -639,7 +639,7 @@ export const DesktopRow = memo(function DesktopRow({ item }: { item: Extract<Ite
   const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, padding: 12, gap: 2 }}>
+      <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 12, gap: 2 }}>
         <Txt variant="small" style={{ fontWeight: "700" }}>
           Answer this on your Mac
         </Txt>

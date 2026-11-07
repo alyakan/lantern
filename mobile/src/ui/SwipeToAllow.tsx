@@ -134,6 +134,8 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
             <Animated.View
               testID="swipe-knob"
               {...pan.panHandlers}
+              // The knob takes a thumb that lands a little beside it too (the small one in a card is 38 points).
+              hitSlop={{ top: INSET + 2, bottom: INSET + 2, left: INSET + 2, right: 16 }}
               style={{ position: "absolute", left: INSET, top: INSET, width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: x.interpolate({ inputRange: [0, 14], outputRange: [colors.go, "#ffffff"], extrapolate: "clamp" }), alignItems: "center", justifyContent: "center", transform: [{ translateX: x }] }}
             >
               {completed ? (

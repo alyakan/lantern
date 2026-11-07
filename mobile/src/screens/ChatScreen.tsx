@@ -729,7 +729,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </Glass>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+        <Composer draftKey={slot} disabled={!online} placeholder={online ? undefined : "Waiting for your Mac…"} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );

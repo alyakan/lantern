@@ -4,6 +4,7 @@ import { Linking, RefreshControl, ScrollView, View, type ViewStyle } from "react
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
+import { useAccent } from "../ui/accent";
 import { finished } from "../view/desk";
 import { JustFinished } from "./JustFinished";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
@@ -167,6 +168,8 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const insets = useSafeAreaInsets();
   const controller = useController();
   const { work, chats, desk, single } = useSyncState();
+  // The app's accent (a regular's Ember) for what is chosen or counts.
+  const accent = useAccent();
   // What finished on the Mac lately (the Desk's answers, across its desks, newest first): here, beside where things stand,
   // not on the chats.
   const done = desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
@@ -345,7 +348,9 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
 
   /** The tabs of a feature: what needs you (with how many), what is moving, what isn't started, and what shipped. One with nothing in it is dimmed, not gone, so the row never moves. */
   const tabs = (g: WorkGroup, on: Bucket) => (
-    <View accessibilityRole="tablist" style={{ flexDirection: "row", gap: 16, borderBottomWidth: 1, borderBottomColor: colors.rule, marginTop: 16 }}>
+    // At the larger text sizes the four don't fit across: they scroll sideways rather than run off the screen.
+    <View style={{ borderBottomWidth: 1, borderBottomColor: colors.rule, marginTop: 16 }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" contentContainerStyle={{ flexDirection: "row", gap: 16 }}>
       {BUCKETS.map(({ bucket, label }) => {
         const n = g.items.filter((i) => bucketOf(i) === bucket).length;
         const selected = bucket === on;
@@ -355,13 +360,14 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
               {label}
             </Txt>
             {bucket === "attn" && n > 0 && (
-              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+              <Txt variant="small" style={{ fontWeight: "700", color: accent }}>
                 {n}
               </Txt>
             )}
           </PressScale>
         );
       })}
+    </ScrollView>
     </View>
   );
 

@@ -8,8 +8,8 @@ import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
-import { radius, space, useColors } from "../ui/theme";
-import { projectColorOf } from "../view/home";
+import { lightColors, radius, space, useColors } from "../ui/theme";
+import { luminance, projectColorOf } from "../view/home";
 
 /** A target: one project at a time. Drawn as a ring with a dot, in `color`. */
 export function FocusGlyph({ color, size = 16 }: { color: string; size?: number }) {
@@ -24,14 +24,16 @@ export function FocusGlyph({ color, size = 16 }: { color: string; size?: number 
 export function SingleBanner({ single, onShowAll }: { single: RemoteSingle; onShowAll: () => void }) {
   const colors = useColors();
   const fill = projectColorOf(single.color) ?? colors.ink;
+  // Its words are white on its colour, or dark on a light one (a yellow), so they can be read.
+  const on = luminance(fill) > 0.45 ? lightColors.ink : "#ffffff";
   return (
     <View accessibilityRole="summary" accessibilityLabel={`Only ${single.name}`} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingLeft: 14, paddingRight: 6, paddingVertical: 6, minHeight: 44, borderRadius: radius.inner, backgroundColor: fill }}>
-      <FocusGlyph color="#ffffff" size={14} />
-      <Txt variant="body" numberOfLines={1} style={{ flex: 1, color: "#ffffff", fontWeight: "700" }}>
+      <FocusGlyph color={on} size={14} />
+      <Txt variant="body" numberOfLines={1} style={{ flex: 1, color: on, fontWeight: "700" }}>
         {single.name}
       </Txt>
       <PressScale accessibilityRole="button" accessibilityLabel="Show all projects" onPress={onShowAll} hitSlop={8} haptic="select" scaleTo={0.9} style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 18 }}>
-        <Txt variant="heading" style={{ color: "#ffffff", fontWeight: "500" }}>
+        <Txt variant="heading" style={{ color: on, fontWeight: "500" }}>
           ×
         </Txt>
       </PressScale>

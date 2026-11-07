@@ -1,6 +1,6 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { Waiting } from "../protocol/generated/Waiting";
-import { ago, groups, cards, headline, projectColorOf, projectTint, rows } from "./home";
+import { ago, groups, cards, headline, luminance, projectColorOf, projectTint, rows } from "./home";
 import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
 import { approvalOf, fieldsOf, promptView, questionsOf } from "./prompts";
@@ -163,6 +163,11 @@ describe("the Home screen", () => {
     for (const bad of [null, undefined, "", "red", "#12345", "#12345g", "5b5bd6", "#5b5bd6aa", 5]) expect(projectColorOf(bad)).toBeNull();
     expect(projectTint("#5b5bd6")).toEqual({ bg: "#5b5bd626", fg: "#5b5bd6" });
     expect(projectTint(null).fg).toBe("#566272");
+    // A light colour's words are darkened on the light page, and a very dark one's lightened on the night one; the tint behind stays.
+    expect(projectTint("#f5d90a")).toEqual({ bg: "#f5d90a26", fg: expect.not.stringMatching(/^#f5d90a$/) });
+    expect(luminance(projectTint("#f5d90a").fg)).toBeLessThan(0.3);
+    expect(projectTint("#f5d90a", { bg: "#27313c", fg: "#a7b2bf" }).fg).toBe("#f5d90a");
+    expect(luminance(projectTint("#101820", { bg: "#27313c", fg: "#a7b2bf" }).fg)).toBeGreaterThan(luminance("#101820"));
     const r = rows([chat({ slot: "a", project: "lantern", project_color: "#0f8a7e" }), chat({ slot: "b", project: "site", project_color: "javascript:1" })], 5000);
     expect(r.map((x) => [x.slot, x.projectColor]).sort()).toEqual([["a", "#0f8a7e"], ["b", null]]);
   });
