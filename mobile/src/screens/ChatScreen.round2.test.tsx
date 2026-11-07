@@ -80,6 +80,18 @@ describe("the post-hook", () => {
     expect(screen.getByText("Checked the notes.")).toBeTruthy();
     // The quick replies still answer the answer, not the hook.
   });
+
+  it("says what it has done so far while it runs, and is done when its own turn ends after the answer's", async () => {
+    const hook: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    await withSession([asked, { kind: "assistant_text", block_id: "b1", text: "All fixed." }, done, hook, ...edited], { status: "working" });
+    expect(screen.getByRole("button", { name: /^Post-hook: Update the brain if needed\. Edited 1 file \+3 −1/ })).toBeTruthy();
+  });
+
+  it("is done once its own turn ends, though the answer's turn ended before it", async () => {
+    const hook: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    await withSession([asked, { kind: "assistant_text", block_id: "b1", text: "All fixed." }, done, hook, { kind: "assistant_text", block_id: "h1", text: "The brain is updated." }, done], { status: "working" });
+    expect(screen.getByRole("button", { name: /^Post-hook: Update the brain if needed\. The brain is updated\./ })).toBeTruthy();
+  });
 });
 
 describe("a turn that failed", () => {

@@ -238,7 +238,8 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
 export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: Extract<Row, { kind: "hook" }>; onFiles: (files: string[]) => void; onOutput?: (step: { id: string; text: string }) => void }) {
   const colors = useColors();
   const [open, setOpen] = useRecyclingState(false, [row.key]);
-  const line = row.going ? "Running…" : lastLine(row.said) || "Done";
+  // While it runs, what it has done so far (or said last), so a long one doesn't look stuck.
+  const line = row.going ? lastLine(row.said) || row.chips.map((c) => c.label).join(", ") || "Running…" : lastLine(row.said) || "Done";
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
       <PressScale accessibilityRole="button" accessibilityLabel={`Post-hook: ${row.text}. ${line}`} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", maxWidth: "100%", paddingVertical: 4 }}>
