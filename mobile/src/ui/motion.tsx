@@ -223,6 +223,15 @@ export function PressScale({ children, style, scaleTo = 0.96, haptic = "light", 
         to(1);
         onPressOut?.(e);
       }}
+      // A trackpad's pointer over it lifts it a little, as iPadOS's own buttons do, and lets it settle when it leaves.
+      onPointerEnter={(e) => {
+        if (!disabled) to(1 + (1 - scaleTo) / 2);
+        rest.onPointerEnter?.(e);
+      }}
+      onPointerLeave={(e) => {
+        to(1);
+        rest.onPointerLeave?.(e);
+      }}
       style={[style, { opacity: s.interpolate({ inputRange: [scaleTo, 1], outputRange: [opacity * 0.86, opacity], extrapolate: "clamp" }), transform: [{ scale: s }] }]}
     >
       {children}
