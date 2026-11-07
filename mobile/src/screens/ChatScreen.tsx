@@ -113,6 +113,9 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
+/** How near the end, as a share of the chat's height, the list follows new words in (and so where Jump to latest starts). */
+const FOLLOW_END = 0.2;
+
 export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onTodos, onStartNew, resizing = false }: ChatProps) {
   const colors = useColors();
   const controller = useController();
@@ -534,8 +537,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       : []),
   ];
   // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
+  // Away is where the list stops following the end (FOLLOW_END of the view from it): the button shows from the moment new words
+  // would no longer bring the chat along, never a stretch later.
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
-    const far = distanceFromEnd(e) > 260;
+    const far = distanceFromEnd(e) > e.nativeEvent.layoutMeasurement.height * FOLLOW_END;
     keep.remember(!far);
     setAway((a) => (far ? (a ?? { since: rows.length }) : null));
   };
@@ -550,7 +555,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   }, [resetting]);
   const followEnd = !(resetting && movedWhileLoading);
   // (0, not none: with none the list stops looking, and a pull it had already decided on, from before the finger moved, still came.)
-  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? 0.2 : 0, startRenderingFromBottom: true }), [followEnd]);
+  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? FOLLOW_END : 0, startRenderingFromBottom: true }), [followEnd]);
 
   // A row's handlers stay the same function from one drawing of the chat to the next (each calls the latest of what it does), so
   // the rows, which are memoised, aren't all drawn again with every word streamed.
@@ -788,7 +793,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </View>
       ) : (
         // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now).
-        <Composer draftKey={slot} placeholder={online ? undefined : "Your Mac is out of reach. Write, and it goes when it's back"} canAttach={canImages && online} onSend={(text, images) => (online || images?.length ? void sync.send(slot, text, images) : sync.hold(slot, text))} onRun={canShell && online ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+        <Composer draftKey={slot} placeholder={online ? undefined : "Your Mac is out of reach. Write, and it goes when it's back"} canAttach={canImages && online} onSend={(text, images) => {
+            // What you send is what you follow, even from far up the chat.
+            setAway(null);
+            list.current?.scrollToEnd({ animated: true });
+            if (online || images?.length) void sync.send(slot, text, images);
+            else sync.hold(slot, text);
+          }} onRun={canShell && online ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );
