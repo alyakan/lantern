@@ -313,7 +313,12 @@ pub struct Gateway {
     cruiser: super::suggest::Cruiser,
     /// Which phone started each command, so only that phone answers or stops it.
     shells: Mutex<ShellOwners>,
+    /// The ids of each phone's latest messages, so one sent again (its answer was lost on the way) isn't sent twice.
+    sent: Mutex<HashMap<String, std::collections::VecDeque<String>>>,
 }
+
+/// How many of a phone's latest message ids are remembered: a retry comes moments after the message it repeats.
+const SENT_IDS_MAX: usize = 64;
 
 /// How many commands' owners are remembered: the oldest is forgotten first, and its command ended long ago.
 const SHELL_OWNERS_MAX: usize = 512;
@@ -375,6 +380,7 @@ impl Gateway {
             suggester: Default::default(),
             cruiser: Default::default(),
             shells: Mutex::default(),
+            sent: Mutex::default(),
         })
     }
 
@@ -685,6 +691,27 @@ impl Gateway {
         }
         recent.push(now);
         Ok(())
+    }
+
+    /// Notes a message `device` sends, or false when it sent this one already.
+    fn first_send(&self, device: &str, client_id: &str) -> bool {
+        let mut sent = self.sent.lock().unwrap();
+        let ids = sent.entry(device.to_string()).or_default();
+        if ids.iter().any(|id| id == client_id) {
+            return false;
+        }
+        ids.push_back(client_id.to_string());
+        if ids.len() > SENT_IDS_MAX {
+            ids.pop_front();
+        }
+        true
+    }
+
+    /// Forgets a message that didn't go, so sending it again does.
+    fn unsent(&self, device: &str, client_id: &str) {
+        if let Some(ids) = self.sent.lock().unwrap().get_mut(device) {
+            ids.retain(|id| id != client_id);
+        }
     }
 
     /// Whether a phone follows the chat right now.
@@ -1225,7 +1252,15 @@ impl<'a> Session<'a> {
                     return Err("That message has no proper id.".into());
                 }
                 protocol::check_images(&images)?;
-                host.send(slot, text, format!("{}:{client_id}", self.device), images).await.map(|()| serde_json::Value::Null)
+                // Sent already: the phone asks again when the answer to the first didn't reach it.
+                if !self.gw.first_send(&self.device, &client_id) {
+                    return Ok(serde_json::Value::Null);
+                }
+                let sent = host.send(slot, text, format!("{}:{client_id}", self.device), images).await;
+                if sent.is_err() {
+                    self.gw.unsent(&self.device, &client_id);
+                }
+                sent.map(|()| serde_json::Value::Null)
             }
             Request::Interrupt { slot } => {
                 self.chat_known(&slot)?;
@@ -2138,6 +2173,30 @@ pub(crate) mod tests {
             p.link.to_peer.try_send(f).unwrap();
         }
         assert!(p.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_message_sent_again_is_not_sent_twice() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        let send = |text: &str, id: &str| Request::Send { slot: "a".into(), text: text.into(), client_id: id.into(), images: None };
+        assert!(p.ask(send("ship it", "m-1")).await.1.is_none());
+        // Its answer was lost, so the phone sends it again: it is answered as sent, and Claude gets it once.
+        assert!(p.ask(send("ship it", "m-1")).await.1.is_none());
+        assert!(p.ask(send("and tag it", "m-2")).await.1.is_none());
+        let sent = r.host.sent.lock().unwrap().clone();
+        assert_eq!(sent.iter().map(|s| s.1.as_str()).collect::<Vec<_>>(), vec!["ship it", "and tag it"]);
+
+        // Another phone's id is its own; one that didn't go can be sent again; only the latest ids are kept.
+        assert!(r.gw.first_send("phone-b", "m-1"));
+        r.gw.unsent("phone-b", "m-1");
+        assert!(r.gw.first_send("phone-b", "m-1"));
+        for i in 0..SENT_IDS_MAX {
+            assert!(r.gw.first_send("phone-b", &format!("x-{i}")));
+        }
+        assert!(r.gw.first_send("phone-b", "m-1"), "the oldest id is forgotten");
+        assert!(!r.gw.first_send("phone-b", &format!("x-{}", SENT_IDS_MAX - 1)));
     }
 
     #[tokio::test]
