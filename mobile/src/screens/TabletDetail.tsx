@@ -111,7 +111,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   // A file link tapped in the chat is shown in the pane (brought back if it was put away), whether or not the chat changed it,
   // never in a sheet over the chat with the pane right beside it.
   const [focus, setFocus] = useState<{ path: string; n: number } | undefined>(undefined);
-  useEffect(() => setFocus(undefined), [slot]);
+  // Another chat starts with its pane beside it, not floated over it as the last one's was (open or put away stays the person's).
+  useEffect(() => {
+    setFocus(undefined);
+    setFloating(false);
+  }, [slot]);
   const showFile = (link: string) => {
     if (!wide) return false;
     const path = changedFileOf(changed, link) ?? link;
@@ -148,6 +152,8 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <WorkScreen
       wide
       onOpenChat={onOpenChat}
+      // Without it, Work had no way back to the chats once they went away but the edge swipe, which VoiceOver and a pointer can't make.
+      onShowChats={layout === "overlay" && !chatsOpen ? onShowChats : undefined}
       // The bar's glass (and its Refresh) is the Work screen's: this says only where you are.
       top={<Txt variant="title">Work</Txt>}
     />
@@ -162,46 +168,50 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   );
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }} onLayout={(e) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
-      <View style={{ flex: 1, marginRight: mode === "dock" ? paneWidth : 0 }}>
-        {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
-        <CrossFade id={slot ?? ""}>
-          <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
-        </CrossFade>
-      </View>
-      <ChangesDock
-        mode={mode}
-        width={paneWidth}
-        room={{ ...size, top: insets.top, bottom: insets.bottom }}
-        onScrim={() => toggleChanges(false)}
-        onResizeStart={() => setResizing(true)}
-        onResize={resizeTo}
-        onResizeEnd={() => {
-          setResizing(false);
-          void saveChangesShare(shareOf(paneWidth, size.width));
-        }}
-        onStep={(dir) => {
-          const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
-          touched.current = true;
-          movePanes();
-          setShare(next);
-          void saveChangesShare(next);
-        }}
-        share={`${Math.round((paneWidth / size.width) * 100)}%`}
-      >
-        {slot && (
-          <CrossFade id={slot}>
-            <View style={{ flex: 1, backgroundColor: colors.card }}>
-              {showing === "artifacts" ? (
-                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
-              ) : showing === "todos" ? (
-                <TodosPane key={slot} projectName={project} onHide={() => toggleChanges(false)} title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
-              ) : (
-                <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts || canTodos ? <PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
-              )}
-            </View>
+      {/* Under a decision, the chat and its pane are out of the screen reader's reach, as they are out of sight. */}
+      <View testID="detail-under" style={{ flex: 1 }} accessibilityElementsHidden={!!decide} importantForAccessibility={decide ? "no-hide-descendants" : "auto"}>
+        <View style={{ flex: 1, marginRight: mode === "dock" ? paneWidth : 0 }}>
+          {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
+          <CrossFade id={slot ?? ""}>
+            <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
           </CrossFade>
-        )}
-      </ChangesDock>
+        </View>
+        <ChangesDock
+          mode={mode}
+          width={paneWidth}
+          room={{ ...size, top: insets.top, bottom: insets.bottom }}
+          onScrim={() => toggleChanges(false)}
+          onResizeStart={() => setResizing(true)}
+          onResize={resizeTo}
+          onResizeEnd={(w) => {
+            setResizing(false);
+            void saveChangesShare(shareOf(w, size.width));
+          }}
+          fit={(w) => changesWidth(shareOf(w, size.width), size.width)}
+          onStep={(dir) => {
+            const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
+            touched.current = true;
+            movePanes();
+            setShare(next);
+            void saveChangesShare(next);
+          }}
+          share={`${Math.round((paneWidth / size.width) * 100)}%`}
+        >
+          {slot && (
+            <CrossFade id={slot}>
+              <View style={{ flex: 1, backgroundColor: colors.card }}>
+                {showing === "artifacts" ? (
+                  <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+                ) : showing === "todos" ? (
+                  <TodosPane key={slot} projectName={project} onHide={() => toggleChanges(false)} title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+                ) : (
+                  <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts || canTodos ? <PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+                )}
+              </View>
+            </CrossFade>
+          )}
+        </ChangesDock>
+      </View>
       <Rise testID="decision-pane" shown={!!decide} style={{ backgroundColor: colors.night }}>
         {decide && (
           <View style={{ flex: 1, width: "100%", maxWidth: DECISION_MAX, alignSelf: "center" }}>

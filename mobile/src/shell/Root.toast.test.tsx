@@ -14,6 +14,8 @@ let mockLayout: Layout = "phone";
 // Whether a tablet keeps the chats pinned beside the chat.
 let mockPinned = false;
 jest.mock("./useLayout", () => ({ useLayout: () => mockLayout }));
+// A tablet's window: wide enough for the chats pinned beside a chat.
+jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => ({ __esModule: true, default: () => ({ width: 1366, height: 1024, scale: 2, fontScale: 1 }) }));
 jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadSidebarPinned: jest.fn(async () => mockPinned), saveSidebarPinned: jest.fn(async () => {}) }));
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));

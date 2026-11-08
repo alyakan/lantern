@@ -123,11 +123,69 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.getByLabelText("Your work")).toBeTruthy();
     });
 
+    it("goes back to Work when the chat shown is closed (from the chats beside it, or on the Mac), instead of keeping a dead chat", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      // Another chat going changes nothing.
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: two }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+    });
+
+    it("keeps the chat shown through a Mac that started again, whose first list may not have it back yet", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      await act(async () => {
+        controller.sync.apply({ type: "welcome", epoch: 999 });
+        controller.sync.flush();
+      });
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
+    it("keeps a chat shown that the list doesn't have yet (one just started), rather than throwing it away", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} openSlot="new" onOpened={jest.fn()} />);
+      await settle();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [...two] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
     it("asks to pick a chat, with no Desk to open, for a Mac with a Desk and no work", async () => {
       await withFeatures(["desk"]);
       expect(screen.getByTestId("pick-a-chat")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^(Desk|Work)/ })).toBeNull();
     });
+  });
+
+  it("slides them in instead, keeping the pin, in a window too narrow for them and a readable chat (an upright 11-inch)", async () => {
+    mockLayout = "overlay";
+    mockWidth = 820;
+    await openInAChat();
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    await press("Show chats");
+    // No pin offered where it couldn't sit beside the chat, and the one chosen is not forgotten.
+    expect(screen.queryByRole("button", { name: /^(Pin|Unpin) the chats/ })).toBeNull();
+    expect(saveSidebarPinned).not.toHaveBeenCalled();
   });
 
   it("keeps them beside the chat upright too: pinned is the user's choice, not the window's", async () => {
@@ -164,6 +222,8 @@ describe("a tablet with the chats pinned", () => {
     await press("Review");
     expect(screen.getByTestId("decision-pane")).toBeTruthy();
     expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    // The chat and its pane under it are out of the screen reader's reach until it is done.
+    expect(screen.getByTestId("detail-under", { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
     await press("Deny");
     await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     await press("Done");
@@ -293,6 +353,19 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.getByTestId("changes-divider")).toBeTruthy();
   });
 
+  it("are beside the next chat again, not floated over it as the last chat's were", async () => {
+    const { view, controller } = await open({ chats: two, events: { a: edited, b: edited.map((e) => ({ ...e, tool_use_id: "tb" })) } });
+    await press(/Release 0.1.53/);
+    await settle();
+    await press("Float the changes over the chat");
+    expect(screen.queryByTestId("changes-divider")).toBeNull();
+    // Another chat opened while the card floats (here from a notification; a pinned list or the edge swipe do the same).
+    await view.rerender(<Root controller={controller} openSlot="b" onOpened={jest.fn()} />);
+    await settle();
+    expect(screen.getByTestId("changes-divider")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Put the changes beside the chat" })).toBeNull();
+  });
+
   it("go away with a tap around the floating card, and the Changes button brings them back floating", async () => {
     await openEdited();
     await press("Float the changes over the chat");
@@ -416,6 +489,20 @@ describe("a tablet with the chats not pinned", () => {
   beforeEach(() => {
     mockLayout = "split";
     mockPinned = false;
+  });
+
+  it("brings the chats back from Work's own bar, which had no way back but the edge swipe", async () => {
+    const { controller } = makeController();
+    seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+    attachSession(controller, { list_waiting: [], work: { items: [] } }, ["desk", "work"]);
+    await render(<Root controller={controller} />);
+    await settle();
+    // The chats slid in at first: Work's button would only open what is open already.
+    expect(column().props.pointerEvents).toBe("auto");
+    await press("Close chats");
+    expect(column().props.pointerEvents).toBe("none");
+    await press("Show chats");
+    expect(column().props.pointerEvents).toBe("auto");
   });
 
   it("is not pinned until it is chosen, whichever way the tablet is held: the chat has the whole width", async () => {
@@ -546,6 +633,22 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
   });
 
+  it("leaves a tap or a scroll that begins at the edge to the chat, and takes only a pull to the right that began there", async () => {
+    await openInAChat();
+    const takes = (fromX: number, x: number, y: number) => {
+      edge().props.onStartShouldSetResponderCapture(touch(fromX, 0, 400));
+      return edge().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+    };
+    // Nothing is taken on the way in: a tap there is the chat's.
+    expect(edge().props.onStartShouldSetResponderCapture(touch(4, 0))).toBe(false);
+    expect(takes(4, 60, 405)).toBe(true);
+    // Up and down, or to the left, from the edge: the chat's own scroll.
+    expect(takes(4, 6, 480)).toBe(false);
+    expect(takes(10, 2, 400)).toBe(false);
+    // A pull to the right that began away from the edge is the chat's too.
+    expect(takes(200, 300, 400)).toBe(false);
+  });
+
   it("lets them stay away when the pull was short and slow, and brings them in on a flick however short", async () => {
     await openInAChat();
     await fireEvent(edge(), "responderGrant", touch(4, 0));
@@ -581,12 +684,14 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(column().props.pointerEvents).toBe("none");
   });
 
-  it("takes a drag from the list under the finger only once it is plainly going left", async () => {
+  it("takes a drag left that nothing under the finger took, only once it is plainly going left", async () => {
     await openInAChat();
     await press("Show chats");
+    // Asked on the way out, not on the way in: a row's own left swipe (Close, Read) comes first.
+    expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
     const steal = (x: number, y: number) => {
       column().props.onStartShouldSetResponderCapture(touch(300, 0, 300));
-      return column().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+      return column().props.onMoveShouldSetResponder(touch(x, 0, y));
     };
     expect(steal(250, 305)).toBe(true);
     // Scrolling up and down, a tap that wobbles, and a pull to the right are the list's own.
@@ -600,5 +705,6 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     await open({ chats: two });
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
     expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
+    expect(column().props.onMoveShouldSetResponder).toBeUndefined();
   });
 });

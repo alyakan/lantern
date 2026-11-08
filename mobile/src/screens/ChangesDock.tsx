@@ -7,8 +7,10 @@ import { floatFrame } from "../view/layout";
 /** Where the Changes are: away, beside the chat at the right, or floating over it as a big card. */
 export type DockMode = "hidden" | "dock" | "float";
 
-/** How wide the divider takes a finger, either side of the line between the chat and the pane. */
-const GRAB = 22;
+/** How wide the divider takes a finger: a full 44 points, most of it over the pane, so the chat's own buttons at its edge (send) stay clear. */
+const GRAB = 44;
+/** How much of that is over the chat. */
+const GRAB_CHAT = 14;
 
 export interface ChangesDockProps {
   mode: DockMode;
@@ -18,10 +20,15 @@ export interface ChangesDockProps {
   room: { width: number; height: number; top: number; bottom: number };
   /** A tap on the dimmed chat around the floating card. */
   onScrim: () => void;
-  /** The divider: a drag begins, the pane is dragged to `width` (what the finger asks for: the caller keeps it in bounds), it ends. */
+  /**
+   * The divider: a drag begins, and once it ends the pane is to be `width` wide (`fit` kept it in bounds). While the finger moves
+   * only the divider follows it: laying the chat and the pane out again at every step re-drew both, and lagged.
+   */
   onResizeStart: () => void;
   onResize: (width: number) => void;
-  onResizeEnd: () => void;
+  onResizeEnd: (width: number) => void;
+  /** The width the pane may be nearest to `width`. */
+  fit: (width: number) => number;
   /** The screen reader's swipe up or down on the divider: a step wider (1) or narrower (-1). */
   onStep: (dir: 1 | -1) => void;
   /** What the divider says it is at, for the screen reader ("50%"). */
@@ -41,7 +48,7 @@ type Frame = { x: number; y: number; w: number; h: number };
  * translate and a scale carry it there from the frame it had. Moving the frame itself (as it once did) laid the diff out
  * again at every step, in JavaScript, and stuttered.
  */
-export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResize, onResizeEnd, onStep, share, children }: ChangesDockProps) {
+export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResize, onResizeEnd, fit, onStep, share, children }: ChangesDockProps) {
   const colors = useColors();
   // How far it floats (0 beside the chat, 1 the card: the dimming, the shadow), how far in it is (0 away, 1 in), and how far it
   // has come from the frame it had (0) to the one it is laid out at (1).
@@ -98,27 +105,39 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
   const kept = useRef(children);
   if (mode !== "hidden") kept.current = children;
 
-  const drag = useRef<{ x: number; from: number } | null>(null);
+  // Where the dragged divider is, from the pane's edge (left is negative: a wider pane), and the width it asks for. Set straight on
+  // the view as the finger moves, with nothing drawn again; the pane takes the width when the finger lifts.
+  const edge = useRef(new Animated.Value(0)).current;
+  const drag = useRef<{ x: number; from: number; to: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // The new width is laid out: the divider is at the pane's edge again (not before, or it would jump back for a frame).
+  useEffect(() => edge.setValue(0), [width, edge]);
+  const end = () => {
+    const d = drag.current;
+    drag.current = null;
+    setDragging(false);
+    if (!d) return;
+    if (d.to === width) edge.setValue(0);
+    else onResize(d.to);
+    onResizeEnd(d.to);
+  };
   const grab = {
     onStartShouldSetResponder: () => true,
     // Nothing under it (the chat's list) takes a drag that began on the divider.
     onResponderTerminationRequest: () => false,
     onResponderGrant: (e: GestureResponderEvent) => {
-      drag.current = { x: e.nativeEvent.pageX, from: width };
+      drag.current = { x: e.nativeEvent.pageX, from: width, to: width };
+      setDragging(true);
       onResizeStart();
     },
     onResponderMove: (e: GestureResponderEvent) => {
       const d = drag.current;
-      if (d) onResize(d.from - (e.nativeEvent.pageX - d.x));
+      if (!d) return;
+      d.to = fit(d.from - (e.nativeEvent.pageX - d.x));
+      edge.setValue(width - d.to);
     },
-    onResponderRelease: () => {
-      drag.current = null;
-      onResizeEnd();
-    },
-    onResponderTerminate: () => {
-      drag.current = null;
-      onResizeEnd();
-    },
+    onResponderRelease: end,
+    onResponderTerminate: end,
   };
 
   if (!mounted && mode === "hidden") return null;
@@ -163,7 +182,7 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
         <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.rule, opacity: f.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
       </Animated.View>
       {mode === "dock" && (
-        <View
+        <Animated.View
           testID="changes-divider"
           accessible
           accessibilityRole="adjustable"
@@ -171,12 +190,14 @@ export function ChangesDock({ mode, width, room, onScrim, onResizeStart, onResiz
           accessibilityValue={{ text: share }}
           accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
           onAccessibilityAction={(e) => onStep(e.nativeEvent.actionName === "increment" ? 1 : -1)}
-          style={{ position: "absolute", top: 0, bottom: 0, left: dock.x - GRAB / 2, width: GRAB, alignItems: "center", justifyContent: "center" }}
+          style={{ position: "absolute", top: 0, bottom: 0, left: dock.x - GRAB_CHAT, width: GRAB, justifyContent: "center", transform: [{ translateX: edge }] }}
           {...grab}
         >
+          {/* While dragged, the line the pane will start at. */}
+          {dragging && <View pointerEvents="none" style={{ position: "absolute", top: 0, bottom: 0, left: GRAB_CHAT - 1, width: 2, backgroundColor: colors.hi }} />}
           {/* A grip in the middle of the line, as iPadOS draws one between two apps side by side. */}
-          <View style={{ width: 6, height: 44, borderRadius: 3, backgroundColor: colors.ink3, opacity: 0.55 }} />
-        </View>
+          <View style={{ marginLeft: GRAB_CHAT - 3, width: 6, height: 44, borderRadius: 3, backgroundColor: dragging ? colors.hi : colors.ink3, opacity: dragging ? 1 : 0.55 }} />
+        </Animated.View>
       )}
     </>
   );

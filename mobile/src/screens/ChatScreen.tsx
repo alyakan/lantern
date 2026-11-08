@@ -22,6 +22,9 @@ import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, isTerminal, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { keepSame, timeline, type Row } from "../view/timeline";
+import { gutterFor } from "../view/layout";
+import { useLayout } from "../shell/useLayout";
+import { useShortcut } from "../ui/useShortcut";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -37,7 +40,7 @@ import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, typ
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
-import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
+import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
@@ -232,6 +235,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
+  // Command-F on an iPad's keyboard opens the chat's search, as the bar's Search does.
+  useShortcut("find", () => setFind((f) => f ?? { query: "", cursor: null }));
+  useShortcut("escape", () => setFind(null), find !== null);
   // Step by step reads a page at a time, side by side, as on the Mac (or as one list, if asked). The page on screen: none
   // means the newest, followed as pages come; `of` is how many there were when another was picked, so a new one is said.
   const stepsChat = chat?.workflow === "steps";
@@ -314,6 +320,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);
+  // The bar's and the banners' side margin: a phone's 16, a tablet's 20, as the chats and Work beside it have.
+  const gutter = gutterFor(useLayout());
   // The reader's place survives the chat getting narrower or wider (the chats pinned beside it, put away, or the tablet turned).
   const keep = useKeepPlace(list);
   const { hold } = keep;
@@ -655,7 +663,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // The pieces of the screen. On iOS 26 the list runs under the header and the message box, which are glass; elsewhere they sit above and below it as before.
   const head = (
     <>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: gutter, paddingBottom: 10 }}>
         {lead === "back" && (
           <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={HEADER_SLOP} scaleTo={0.88}>
             <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
@@ -669,10 +677,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           <PopIn glass animate={sidebarLeadLate}>
             <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} scaleTo={0.88}>
               <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-                {/* A window with its side panel: the chats. */}
-                <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
-                  <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
-                </View>
+                <SidebarIcon />
               </Glass>
             </PressScale>
           </PopIn>
@@ -730,7 +735,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} />}
 
       {banner && (
-        <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View accessibilityRole="alert" style={{ marginHorizontal: gutter, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} />
           <Txt variant="small" tone="ink2">
             Caught up on {view.caughtUp} {view.caughtUp === 1 ? "event" : "events"} from while you were away
@@ -738,7 +743,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </View>
       )}
       {problem && (
-        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
+        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: gutter, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
           <Txt variant="small" tone="stop">
             {problem}
           </Txt>

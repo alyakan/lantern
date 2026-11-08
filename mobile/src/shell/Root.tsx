@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { BackHandler, Pressable, ScrollView, View } from "react-native";
+import { BackHandler, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
@@ -27,15 +27,14 @@ import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
+import { CHAT_MIN, NARROW_MAX, SIDEBAR_WIDTH } from "../view/layout";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
 import { atRoot, decision, home, navigate, shownSlot } from "./nav";
 import { TabletShell } from "./TabletShell";
 import { useLayout } from "./useLayout";
-
-/** How wide the screens that are words on paper (confirming a link, can't reach the Mac) are on a tablet. */
-const NARROW_MAX = 560;
+import { useShortcut } from "../ui/useShortcut";
 
 export interface RootProps {
   controller: Controller;
@@ -88,7 +87,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
 function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTodosOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
-  const { chats, chatsLoaded, plan, providerUsage } = useSyncState();
+  const { chats, chatsLoaded, plan, providerUsage, epoch } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
   // A tablet shows the chats beside the chat ("split") or slides them in over it when asked and away once a chat is chosen
   // ("overlay"); a phone has the stack alone. Which of the two the chats get is the person's pin, or the window's, unpinned.
@@ -103,7 +102,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Whether the tablet was asked yet (a null pin is "never chosen", which is a decision too).
   const [pinRead, setPinRead] = useState(false);
   // Until the pin is read the chats are away: a tablet that took them away would otherwise open on them and slide them off.
-  const shellLayout: "overlay" | "split" = tablet && pinRead && (pinned ?? layout === "split") ? "split" : "overlay";
+  // A pin is kept, but a window too narrow for the chats and a readable chat side by side (an upright 11-inch, a Stage Manager
+  // window) has them slide in instead, as an unpinned one does: pinned there, the chat was squeezed under 500 points.
+  const win = useWindowDimensions();
+  const pinRoom = win.width - SIDEBAR_WIDTH >= CHAT_MIN;
+  const shellLayout: "overlay" | "split" = tablet && pinRead && pinRoom && (pinned ?? layout === "split") ? "split" : "overlay";
   const listedOnce = useRef(false);
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
@@ -148,6 +151,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     let live = true;
     void loadSidebarPinned().then((p) => {
       if (!live) return;
+      // Pinned, the chats slide in beside a chat that may already be drawn: its room moves on their curve, rather than jumping.
+      movePanes();
       setPinned(p);
       setPinRead(true);
     });
@@ -200,27 +205,48 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     void saveNotesSeen(notesId(releaseNotes));
   }, [notesDue, homeUp, nothingOpen]);
 
+  // What is over the screen, the top one first: the system's back button (Android) and Escape on a keyboard close it.
+  const closeTop = () => {
+    if (notesOpen) return setNotesOpen(false), true;
+    if (pairingDevice) return setPairingDevice(false), true;
+    if (storageOpen) return setStorageOpen(false), true;
+    if (usageOpen) return setUsageOpen(false), true;
+    if (voiceOpen) return setVoiceOpen(false), true;
+    if (todos) return setTodos(null), true;
+    if (supporting) return setSupporting(false), true;
+    if (newChat) return setNewChat(null), true;
+    if (picking) return setPicking(false), true;
+    if (macSheet) return setMacSheet(false), true;
+    if (chatsOpen) return setChatsOpen(false), true;
+    return false;
+  };
+  // An iPad's keyboard: Escape closes what is over the screen (a decision too, which rises over the chat), Command-N starts a
+  // chat, and Command-\ shows or hides the chats.
+  useShortcut("escape", () => {
+    if (!closeTop() && decision(stack)) go({ type: "back" });
+  });
+  // A New chat already open keeps what is typed in it.
+  useShortcut("newChat", () => setNewChat((d) => d ?? { text: "" }), homeUp);
+  useShortcut(
+    "toggleChats",
+    () => {
+      if (shellLayout === "split") return togglePin();
+      if (!chatsOpen) movePanes();
+      setChatsOpen((o) => !o);
+    },
+    tablet && homeUp,
+  );
+
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (notesOpen) return setNotesOpen(false), true;
-      if (pairingDevice) return setPairingDevice(false), true;
-      if (storageOpen) return setStorageOpen(false), true;
-      if (usageOpen) return setUsageOpen(false), true;
-      if (voiceOpen) return setVoiceOpen(false), true;
-      if (todos) return setTodos(null), true;
-      if (supporting) return setSupporting(false), true;
-      if (newChat) return setNewChat(null), true;
-      if (picking) return setPicking(false), true;
-      if (macSheet) return setMacSheet(false), true;
-      if (chatsOpen) return setChatsOpen(false), true;
+      if (closeTop()) return true;
       if (atRoot(stack)) return false;
       go({ type: "back" });
       return true;
     });
     return () => sub.remove();
   }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, usageOpen, voiceOpen, todos, notesOpen]);
-
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
   // instead of stacking on it (and, slid in, the column goes away).
@@ -245,6 +271,36 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     go({ type: "home" });
     await controller.unpair();
   };
+
+  // A tablet's chat closed from the chats beside it (or on the Mac) goes, as it went from the list: what is left is Work, not a
+  // chat that can no longer be sent to. Only a chat that was listed and now isn't: one just started, or shown from what was cached
+  // at launch, may not be listed yet. Only a change in the list decides it, not a chat opened since. A Mac that started again
+  // brings its chats back one by one, so its first list after that is a first list too.
+  const listedBefore = useRef<Set<string> | null>(null);
+  const listedEpoch = useRef(epoch);
+  const listedChats = useRef<typeof chats | null>(null);
+  const shownNow = useRef<string | null>(null);
+  shownNow.current = shownSlot(stack);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    // Told of a new run before its first list: what was listed before it is no guide to that list.
+    if (listedEpoch.current !== epoch) {
+      listedEpoch.current = epoch;
+      listedBefore.current = null;
+      listedChats.current = chats;
+      return;
+    }
+    if (listedChats.current === chats) return;
+    listedChats.current = chats;
+    const listed = new Set(chats.map((c) => c.slot));
+    const was = listedBefore.current;
+    listedBefore.current = listed;
+    const slot = shownNow.current;
+    if (tablet && was && slot && was.has(slot) && !listed.has(slot)) {
+      movePanes();
+      go({ type: "home" });
+    }
+  }, [chats, chatsLoaded, tablet, epoch]);
 
   // A chat that finishes or needs you, while the chats' own list isn't there to say so: a toast.
   const [toast, setToast] = useState<ToastShown | null>(null);
@@ -298,7 +354,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {

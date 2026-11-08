@@ -10,14 +10,28 @@ import UIKit
 public class ComposerKeysModule: Module {
   fileprivate static weak var active: ComposerKeysModule?
   private var installed: (controller: UIViewController, command: UIKeyCommand)?
+  /// The app's shortcuts on a hardware keyboard (see `setShortcuts`), and where they were put.
+  private var shortcuts: (controller: UIViewController, commands: [UIKeyCommand])?
 
   public func definition() -> ModuleDefinition {
     Name("ComposerKeys")
-    Events("onReturn")
+    Events("onReturn", "onShortcut")
 
     OnCreate { Self.active = self }
     OnDestroy {
-      DispatchQueue.main.async { [weak self] in self?.remove() }
+      DispatchQueue.main.async { [weak self] in
+        self?.remove()
+        self?.removeShortcuts()
+      }
+    }
+
+    // The app's shortcuts on a hardware keyboard: Command-N, Command-F, Command-\ and Escape, each sent to JS by name
+    // (`onShortcut`). Holding Command shows the ones with a title, as iPadOS lists any app's.
+    Function("setShortcuts") { (enabled: Bool) in
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if enabled { self.installShortcuts() } else { self.removeShortcuts() }
+      }
     }
 
     // The message box has the keyboard (true) or no longer does (false).
@@ -48,6 +62,36 @@ public class ComposerKeysModule: Module {
     sendEvent("onReturn", [:])
   }
 
+  /// What each shortcut is called in JS, by its key and modifiers.
+  private static let named: [(input: String, flags: UIKeyModifierFlags, name: String, title: String?)] = [
+    ("n", .command, "newChat", "New Chat"),
+    ("f", .command, "find", "Find in Chat"),
+    ("\\", .command, "toggleChats", "Show or Hide Chats"),
+    (UIKeyCommand.inputEscape, [], "escape", nil),
+  ]
+
+  private func installShortcuts() {
+    guard shortcuts == nil, let controller = Self.rootController() else { return }
+    let commands = Self.named.map { k -> UIKeyCommand in
+      let command = UIKeyCommand(input: k.input, modifierFlags: k.flags, action: #selector(UIResponder.lanternShortcut(_:)))
+      if let title = k.title { command.discoverabilityTitle = title }
+      return command
+    }
+    commands.forEach(controller.addKeyCommand)
+    shortcuts = (controller, commands)
+  }
+
+  private func removeShortcuts() {
+    guard let shortcuts else { return }
+    shortcuts.commands.forEach(shortcuts.controller.removeKeyCommand)
+    self.shortcuts = nil
+  }
+
+  fileprivate func pressed(_ command: UIKeyCommand) {
+    guard let name = Self.named.first(where: { $0.input == command.input && $0.flags == command.modifierFlags })?.name else { return }
+    sendEvent("onShortcut", ["name": name])
+  }
+
   private static func rootController() -> UIViewController? {
     let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
     let window = scenes.flatMap { $0.windows }.first { $0.isKeyWindow } ?? scenes.flatMap { $0.windows }.first
@@ -64,5 +108,10 @@ extension UIResponder {
       return
     }
     ComposerKeysModule.active?.returned()
+  }
+
+  /// The action of the app's shortcuts: whoever has the keyboard answers it, and the module says which it was.
+  @objc fileprivate func lanternShortcut(_ sender: UIKeyCommand) {
+    ComposerKeysModule.active?.pressed(sender)
   }
 }
