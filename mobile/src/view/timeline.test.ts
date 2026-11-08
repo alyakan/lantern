@@ -37,7 +37,7 @@ describe("a run of steps as chips", () => {
       step("7", "mcp__claude_ai_Linear__get_issue"),
       step("8", "SomethingNew"),
     ]);
-    expect(chips.map((c) => c.label)).toEqual(["Ran 3 commands", "Used 1 skill", "Ran 1 helper", "Used Linear 2 times", "Used 1 other tool", "1 step failed"]);
+    expect(chips.map((c) => c.label)).toEqual(["Ran 3 commands", "Used 1 skill", "Ran 1 subagent", "Used Linear 2 times", "Used 1 other tool", "1 step failed"]);
     expect(chips[0].items).toEqual([
       { text: "git push origin release/0.1.53 --force-with-lease", bad: false, id: "1" },
       { text: "ls", bad: true, id: "4" },

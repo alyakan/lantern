@@ -78,7 +78,7 @@ export function stepChips(steps: Step[]): StepChip[] {
   const skills = rest.filter((s) => s.name === "Skill");
   group("skill", `Used ${plural(skills.length, "skill")}`, skills, (s) => s.summary || "a skill");
   const helpers = rest.filter((s) => s.name === "Agent" || s.name === "Task");
-  group("agent", `Ran ${plural(helpers.length, "helper")}`, helpers, (s) => s.summary || "a helper");
+  group("agent", `Ran ${plural(helpers.length, "subagent")}`, helpers, (s) => s.summary || "a subagent");
   const advised = rest.filter((s) => s.name === "advisor");
   group("advisor", advised.length === 1 ? "Consulted the advisor" : `Consulted the advisor ${advised.length} times`, advised, (s) => s.summary || "the advisor");
   const servers = new Map<string, Step[]>();

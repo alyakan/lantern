@@ -12,6 +12,8 @@ describe("what a step is doing, in a few words", () => {
     expect(stepActivity(step("Grep", "foo"))).toBe("Searching the code");
     expect(stepActivity(step("mcp__claude_ai_Linear__list_issues"))).toBe("Using Linear");
     expect(stepActivity(step("advisor"))).toBe("Asking the advisor");
+    expect(stepActivity(step("Agent", "check the build"))).toBe("Running a subagent: check the build");
+    expect(stepActivity(step("Task"))).toBe("Running a subagent");
     expect(stepActivity(step("Bash"))).toBe("Running a command");
   });
   it("cuts a long command short", () => {

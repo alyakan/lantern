@@ -32,7 +32,7 @@ export function stepActivity(s: Pick<Step, "name" | "summary">): string {
       return "Looking it up";
     case "Agent":
     case "Task":
-      return what ? `Running a helper: ${clip(what, 40)}` : "Running a helper";
+      return what ? `Running a subagent: ${clip(what, 40)}` : "Running a subagent";
     case "Skill":
       return what ? `Using ${clip(what, 40)}` : "Using a skill";
     case "advisor":
