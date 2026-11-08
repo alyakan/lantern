@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
-import { ActionSheetIOS, Animated, Easing, findNodeHandle, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Host, Image as SwiftImage, Menu, Button as MenuButton } from "@expo/ui/swift-ui";
+import { accessibilityLabel, disabled as disabledMod } from "@expo/ui/swift-ui/modifiers";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
@@ -770,6 +772,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const attach = useAttachments();
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
+  // Where the row of tools sits in the box (see PlusButton's `place`).
+  const [toolsAt, setToolsAt] = useState(0);
   // The photo being drawn on.
   const [marking, setMarking] = useState<PickedImage | null>(null);
   const chosen = useRef<ImageSource | null>(null);
@@ -985,7 +989,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
-        <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
+        <View testID="chat-box-tools" onLayout={(e) => setToolsAt(Math.round(e.nativeEvent.layout.y))} style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
           {tray && tools ? (
             <TrayContents
               tools={tools}
@@ -1003,6 +1007,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             <>
               {canAttach && (
                 <PlusButton
+                  place={toolsAt}
                   busy={attach.busy}
                   full={attach.full}
                   onPress={() => setChoosing(true)}
@@ -1171,22 +1176,23 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
 
 /**
  * The + beside the message box: it offers pictures to attach, and is dimmed while one is being fetched or when no more fit.
- * On iOS it opens the system's action sheet (Photo Library, Take Photo), anchored to the + on an iPad; elsewhere the sheet
- * (`onPress`). (A SwiftUI menu was tried here: its native view didn't follow the row when the box changed height, and sat
- * over the words once sent photos left the box.)
+ * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
+ * opens the sheet (`onPress`).
  */
-function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS action sheet. */ onPick: (source: ImageSource) => void }) {
+function PlusButton({ busy, full, onPress, onPick, place }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void; /** Where its row sits in the box. The SwiftUI view is drawn again whenever this changes: left alone it kept to where the row had been (seen on an iPhone: once sent photos left the box, the + sat over the words). */ place: number }) {
   const colors = useColors();
   const off = busy || full;
-  const self = useRef<ComponentRef<typeof View>>(null);
-  const open =
-    Platform.OS === "ios"
-      ? () =>
-          ActionSheetIOS.showActionSheetWithOptions(
-            { options: ["Photo Library", "Take Photo", "Cancel"], cancelButtonIndex: 2, anchor: findNodeHandle(self.current) ?? undefined },
-            (i) => (i === 0 ? onPick("library") : i === 1 ? onPick("camera") : undefined),
-          )
-      : onPress;
+  if (Platform.OS === "ios")
+    return (
+      <View style={{ width: barButton, height: barButton, opacity: off ? 0.4 : 1 }}>
+        <Host key={place} style={{ width: barButton, height: barButton }}>
+          <Menu modifiers={[accessibilityLabel("Attach photos"), ...(off ? [disabledMod(true)] : [])]} label={<SwiftImage systemName="plus.circle" size={26} color={colors.ink2} />}>
+            <MenuButton label="Photo Library" systemImage="photo.on.rectangle" onPress={() => onPick("library")} />
+            <MenuButton label="Take Photo" systemImage="camera" onPress={() => onPick("camera")} />
+          </Menu>
+        </Host>
+      </View>
+    );
   return (
     <PressScale
       accessibilityRole="button"
@@ -1194,13 +1200,13 @@ function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: bool
       accessibilityHint={full ? `A message holds ${MAX_IMAGES} photos at most` : undefined}
       accessibilityState={{ disabled: off, busy }}
       disabled={off}
-      onPress={open}
+      onPress={onPress}
       haptic="light"
       scaleTo={0.88}
       opacity={off ? 0.4 : 1}
       style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}
     >
-      <View ref={self} collapsable={false} accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
+      <View accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
         <View style={{ position: "absolute", width: 12, height: 2, borderRadius: 1, backgroundColor: colors.ink2 }} />
         <View style={{ position: "absolute", width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink2 }} />
       </View>
