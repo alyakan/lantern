@@ -135,11 +135,15 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Starting a chat from the phone: the sheet, with a draft when a suggestion made one.
   const [newChat, setNewChat] = useState<Draft | null>(null);
 
-  // A tapped notification opens its chat.
+  // A tapped notification opens its chat, out from under whatever sheet was open (it stayed over the chat it opened). A New chat
+  // with words typed in it stays: those would be lost.
   useEffect(() => {
     if (!openSlot) return;
     go({ type: "jump_to_chat", slot: openSlot });
     setChatsOpen(false);
+    for (const close of [setNotesOpen, setPairingDevice, setStorageOpen, setUsageOpen, setVoiceOpen, setSupporting, setPicking, setMacSheet]) close(false);
+    setTodos(null);
+    setNewChat((d) => (d && d.text.trim() ? d : null));
     onOpened?.();
   }, [openSlot, onOpened]);
 
