@@ -38,6 +38,10 @@ import { CommentBar } from "./DiffComments";
 const FullDiff = lazy(() => import("./FullDiff"));
 
 interface Props {
+  /** ⌘1 to ⌘9 open the strip's tabs (false while the panel is hidden behind the Desk). */
+  keys?: boolean;
+  /** One of them was pressed: the panel is to be shown, if it was put away. */
+  onReveal?: () => void;
   /** The chat on screen: each chat keeps the tab picked in it. */
   chat?: ChatKey;
   folder: string | null;
@@ -211,17 +215,25 @@ export function ReviewPanel(props: Props) {
   }, [tab]);
   // The strip: the pinned tabs, then the open one if it isn't pinned, so you always see where you are.
   const strip = pinned.includes(tab) ? pinned : [...pinned, tab];
-  // ⌘1 to ⌘9 open the strip's tabs in order, each named for its tab in the palette.
+  // ⌘1 to ⌘9 open the strip's tabs in order, each named for its tab in the palette, and the panel with them when it is put
+  // away (as Xcode's navigator does). Not while it is hidden behind the Desk.
   const label = (n: number) => TABS.find((t) => t.id === strip[n - 1])?.label;
-  useAction("pane-tab-1", () => strip[0] && setTab(strip[0]), strip.length >= 1, label(1) && `Show ${label(1)}`);
-  useAction("pane-tab-2", () => strip[1] && setTab(strip[1]), strip.length >= 2, label(2) && `Show ${label(2)}`);
-  useAction("pane-tab-3", () => strip[2] && setTab(strip[2]), strip.length >= 3, label(3) && `Show ${label(3)}`);
-  useAction("pane-tab-4", () => strip[3] && setTab(strip[3]), strip.length >= 4, label(4) && `Show ${label(4)}`);
-  useAction("pane-tab-5", () => strip[4] && setTab(strip[4]), strip.length >= 5, label(5) && `Show ${label(5)}`);
-  useAction("pane-tab-6", () => strip[5] && setTab(strip[5]), strip.length >= 6, label(6) && `Show ${label(6)}`);
-  useAction("pane-tab-7", () => strip[6] && setTab(strip[6]), strip.length >= 7, label(7) && `Show ${label(7)}`);
-  useAction("pane-tab-8", () => strip[7] && setTab(strip[7]), strip.length >= 8, label(8) && `Show ${label(8)}`);
-  useAction("pane-tab-9", () => strip[8] && setTab(strip[8]), strip.length >= 9, label(9) && `Show ${label(9)}`);
+  const openTab = (n: number) => {
+    const id = strip[n - 1];
+    if (!id) return;
+    setTab(id);
+    props.onReveal?.();
+  };
+  const can = (n: number) => props.keys !== false && strip.length >= n;
+  useAction("pane-tab-1", () => openTab(1), can(1), label(1) && `Show ${label(1)}`);
+  useAction("pane-tab-2", () => openTab(2), can(2), label(2) && `Show ${label(2)}`);
+  useAction("pane-tab-3", () => openTab(3), can(3), label(3) && `Show ${label(3)}`);
+  useAction("pane-tab-4", () => openTab(4), can(4), label(4) && `Show ${label(4)}`);
+  useAction("pane-tab-5", () => openTab(5), can(5), label(5) && `Show ${label(5)}`);
+  useAction("pane-tab-6", () => openTab(6), can(6), label(6) && `Show ${label(6)}`);
+  useAction("pane-tab-7", () => openTab(7), can(7), label(7) && `Show ${label(7)}`);
+  useAction("pane-tab-8", () => openTab(8), can(8), label(8) && `Show ${label(8)}`);
+  useAction("pane-tab-9", () => openTab(9), can(9), label(9) && `Show ${label(9)}`);
   return (
     <aside className="review">
       <div className="pane-tabs">

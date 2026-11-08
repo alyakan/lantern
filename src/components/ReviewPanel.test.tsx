@@ -750,4 +750,16 @@ describe("the side panel's tabs from the keyboard", () => {
     fireEvent.keyDown(window, { key: "9", metaKey: true });
     expect(selected()).toMatch(/^Changes/);
   });
+
+  it("shows the panel put away with the tab, and does nothing while it is behind the Desk", () => {
+    const onReveal = vi.fn();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow onReveal={onReveal} />);
+    fireEvent.keyDown(window, { key: "2", metaKey: true });
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    rerender(<ReviewPanel {...base} selected={null} follow onReveal={onReveal} keys={false} />);
+    fireEvent.keyDown(window, { key: "1", metaKey: true });
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    const selected = screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+    expect(selected).toMatch(/^Files/);
+  });
 });

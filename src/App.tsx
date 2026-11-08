@@ -3515,6 +3515,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
               <ReviewPanel
+                keys={!deskShown}
+                onReveal={() => reviewCollapsed && setReviewCollapsed(false)}
                 chat={{ slot: active, session: state.sessionId }}
                 architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox, onUpdate: state.status === "idle" ? () => sendIn(active, UPDATE_MAP) : undefined } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
