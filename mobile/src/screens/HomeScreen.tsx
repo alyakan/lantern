@@ -1,6 +1,7 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ComponentRef } from "react";
+import { useToTop } from "../ui/useToTop";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
@@ -61,6 +62,8 @@ export interface HomeProps {
   workShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
   tabbed?: boolean;
+  /** Its tab tapped again while shown (a count): back to the top of the list. */
+  toTop?: number;
 }
 
 /** The sidebar, drawn: a window with its left third set apart, filled in when the chats are pinned beside the chat. */
@@ -321,7 +324,9 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, tabbed = false }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, tabbed = false, toTop }: HomeProps) {
+  const scroller = useRef<ComponentRef<typeof Animated.ScrollView>>(null);
+  useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const controller = useController();
   const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work } = useSyncState();
@@ -483,6 +488,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
       <Animated.ScrollView
+        ref={scroller}
         keyboardShouldPersistTaps="handled"
         // Searching, a drag through the results puts the keyboard away, so the end of a long list can be reached.
         keyboardDismissMode="on-drag"
