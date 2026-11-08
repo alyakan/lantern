@@ -275,7 +275,7 @@ pub enum UiEvent {
     /// `rate_limit_event` as the five-hour one, and for the whole account too.
     WeekUsage { used: f64, resets_at: Option<u64> },
     ProviderUsage { usage: ProviderUsage },
-    /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
+    /// The agent's progress checklist, whole each time it changes. Shown by the window and phone for its chat.
     Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },
     ParseError { line: String },

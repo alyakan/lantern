@@ -8,6 +8,19 @@ const running: State = { ...initialState, status: "running", folder: "/p", claud
 const tool = (id: string, name = "Bash", parent: string | null = null): UiEvent => ({ kind: "tool_started", parent, tool_use_id: id, name, summary: "x" });
 
 describe("reducer", () => {
+  it("keeps the chat's checklist, ignores a helper's plan, and clears it with the conversation", () => {
+    const todos = [{ content: "Check the input", active_form: "Checking the input", status: "in_progress" }];
+    const s = ev(running, { kind: "todos", parent: null, items: todos });
+    expect(s.todos).toEqual(todos);
+    expect(ev(s, { kind: "todos", parent: "helper", items: [] })).toBe(s);
+    expect(ev(s, { kind: "conversation_reset" }).todos).toEqual([]);
+    expect(reducer(s, { type: "folder_opened", folder: "/other" }).todos).toEqual([]);
+    const replay = reducer(initialState, { type: "history_loaded", sessionId: "chat-a", events: [{ kind: "todos", parent: null, items: todos }] });
+    expect(replay.todos).toEqual(todos);
+    const older = reducer({ ...replay, earlierTurns: 2 }, { type: "earlier_loaded", sessionId: "chat-a", expected: 2, hidden: 0, events: [{ kind: "todos", parent: null, items: [] }] });
+    expect(older.todos).toEqual(todos);
+  });
+
   it("leaves the chat as it is for an event it doesn't know, instead of losing it", () => {
     const s = { ...initialState, status: "idle" as const };
     expect(reducer(s, { type: "ui_event", event: { kind: "offstream", tool_use_id: "x" } as unknown as UiEvent })).toBe(s);

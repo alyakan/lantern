@@ -126,6 +126,13 @@ export interface HermesStatus {
   on: boolean;
 }
 
+/** One step in the agent's own progress checklist for a chat. */
+export interface AgentTodo {
+  content: string;
+  status: string;
+  active_form: string;
+}
+
 export type UiEvent =
   | { kind: "provider_changed"; provider: ProviderInfo; key: string }
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
@@ -146,6 +153,7 @@ export type UiEvent =
   | { kind: "task_started"; task_id: string; tool_use_id: string }
   | { kind: "task_ended"; task_id: string; tool_use_id: string; status: string; summary: string }
   | { kind: "commands"; commands: SlashCommand[] }
+  | { kind: "todos"; parent: string | null; items: AgentTodo[] }
   | { kind: "models"; models: ModelOption[] }
   | { kind: "mcp_tools"; tools: string[] }
   | { kind: "agent_model"; parent: string | null; model: string }

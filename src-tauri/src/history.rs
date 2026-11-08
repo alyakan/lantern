@@ -535,7 +535,18 @@ pub fn page(mut events: Vec<UiEvent>, before: Option<usize>, count: usize) -> Pa
     // What came before the first message (the session starting) goes with the first page of turns.
     let from = if first == 0 { 0 } else { starts[first] };
     let to = if end_turn >= starts.len() { events.len() } else { starts[end_turn] };
-    Page { events: events.drain(from..to).collect(), hidden: first }
+    // A checklist can have been written before the visible turns. Restore its latest value when opening
+    // the chat, but never let loading older messages replace the current plan.
+    let plan = if before.is_none() && !events[from..to].iter().any(|e| matches!(e, UiEvent::Todos { parent: None, .. } | UiEvent::ConversationReset)) {
+        events[..from].iter().rev().take_while(|e| !matches!(e, UiEvent::ConversationReset)).find(|e| matches!(e, UiEvent::Todos { parent: None, .. })).cloned()
+    } else {
+        None
+    };
+    let mut shown: Vec<_> = events.drain(from..to).collect();
+    if let Some(plan) = plan {
+        shown.insert(0, plan);
+    }
+    Page { events: shown, hidden: first }
 }
 
 /// Rebuilds a session's UI events by feeding its transcript through the live stream parser.
@@ -686,6 +697,20 @@ mod tests {
 
     fn users(p: &Page) -> Vec<String> {
         p.events.iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_reopened_chats_checklist_survives_paging_but_an_older_page_never_brings_it_forward() {
+        let plan = UiEvent::Todos { parent: None, items: vec![crate::ui_event::Todo { content: "Check it".into(), status: "pending".into(), active_form: "Checking it".into() }] };
+        let mut events = turns(60);
+        events.insert(3, plan.clone());
+        let last = page(events.clone(), None, 25);
+        assert_eq!(last.events.first(), Some(&plan));
+        assert_eq!(last.hidden, 35);
+        let older = page(events.clone(), Some(35), 25);
+        assert!(!older.events.iter().any(|e| matches!(e, UiEvent::Todos { .. })));
+        events.insert(5, UiEvent::ConversationReset);
+        assert!(!page(events, None, 25).events.iter().any(|e| matches!(e, UiEvent::Todos { .. })));
     }
 
     #[test]

@@ -585,8 +585,8 @@ impl Remote {
 pub fn for_window(event: &UiEvent) -> bool {
     match event {
         UiEvent::UserText { sent_by: Some(by), .. } => by != SENT_BY_DESKTOP,
-        // The plan card is the phone's: the window has no use for it.
-        UiEvent::Todos { .. } => false,
+        // A helper's plan stays with that helper, rather than replacing its parent chat's.
+        UiEvent::Todos { parent, .. } => parent.is_none(),
         _ => true,
     }
 }
@@ -811,6 +811,19 @@ mod tests {
         assert_eq!(*window.lock().unwrap(), vec![user(Some("phone-1")), user(None)]);
         let Some(hub::Since::Events(kept)) = remote.hub.since("a", 0) else { panic!() };
         assert_eq!(kept.len(), 3);
+    }
+
+    #[test]
+    fn the_window_gets_each_chats_checklist_but_not_a_helpers_plan() {
+        let remote = Remote::default();
+        let window: Arc<Mutex<Vec<(String, UiEvent)>>> = Arc::default();
+        let w = window.clone();
+        remote.tap_window(move |ev| w.lock().unwrap().push((ev.slot, ev.event)));
+        let plan = UiEvent::Todos { parent: None, items: vec![crate::ui_event::Todo { content: "Check it".into(), status: "pending".into(), active_form: "Checking it".into() }] };
+        remote.publish("a", plan.clone());
+        remote.publish("b", plan.clone());
+        remote.publish("a", UiEvent::Todos { parent: Some("helper".into()), items: vec![] });
+        assert_eq!(*window.lock().unwrap(), vec![("a".into(), plan.clone()), ("b".into(), plan)]);
     }
 
     #[test]

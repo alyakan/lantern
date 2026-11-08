@@ -16,7 +16,8 @@ import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
 import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
-import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
+import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
+import { PlanCard, SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
 import { useReturnToSend } from "../ui/useReturnToSend";
 import { useDictation } from "../ui/useDictation";
@@ -762,7 +763,7 @@ const HANDOFF_MS = 300;
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ todos = [], onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { todos?: RemoteTodo[]; /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
   const body = useBody();
@@ -993,6 +994,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
         </Txt>
       )}
+      <PlanCard key={draftKey} todos={todos} />
       <View>
       <Glass testID="chat-box" lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: BOX_RADIUS, paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
         {searching.active && search && (

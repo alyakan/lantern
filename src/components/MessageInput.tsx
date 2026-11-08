@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
-import type { FoundFile, ModelOption, ProviderInfo, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import { AgentPlanSheet } from "./AgentPlanSheet";
+import type { AgentTodo, FoundFile, ModelOption, ProviderInfo, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
 import { agentName, capabilitiesOf } from "../lib/provider";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
@@ -32,6 +33,8 @@ const NO_COMMANDS: SlashCommand[] = [];
 
 interface Props {
   status: Status;
+  /** The current chat's agent checklist. */
+  todos?: AgentTodo[];
   /** Replaces the usual "Ask Claude…" when idle (e.g. on a Step-by-step page). */
   idlePlaceholder?: string;
   /** On a Step-by-step page: ⌘Enter (or the button) sends the message and approves the step, moving on. */
@@ -102,7 +105,7 @@ interface Props {
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
+export function MessageInput({ todos = [], status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
   // What the provider hasn't got isn't offered: its box has no effort, preset or "/" menu to show.
@@ -494,6 +497,7 @@ export function MessageInput({ status, waiting = false, idlePlaceholder, sendAnd
           <SideChat onClose={closeAside} />
         </div>
       )}
+      <AgentPlanSheet todos={todos} />
       <div className={`composer-box${running && !waiting ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu

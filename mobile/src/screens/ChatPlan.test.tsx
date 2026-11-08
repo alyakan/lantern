@@ -1,4 +1,5 @@
-import { fireEvent, screen } from "@testing-library/react-native";
+import { act, fireEvent, screen } from "@testing-library/react-native";
+import { PanResponder, type GestureResponderEvent, type PanResponderGestureState } from "react-native";
 import { renderWith } from "../test/render";
 import { ContextRow, PlanCard, SlashPicker, StepOutputSheet, UsageRow, UsageStrip } from "./ChatExtras";
 
@@ -9,7 +10,7 @@ describe("the plan Claude is keeping", () => {
     await renderWith(<PlanCard todos={[todo("Write tests", "completed"), todo("Fix the bug", "in_progress", "Fixing the bug"), todo("Ship it", "pending")]} />);
     const line = screen.getByRole("button", { name: "Plan, 1 of 3 done, now: Fixing the bug" });
     expect(screen.queryByLabelText("To do: Ship it")).toBeNull();
-    fireEvent.press(line);
+    await fireEvent.press(line);
     expect(await screen.findByLabelText("Done: Write tests")).toBeTruthy();
     expect(screen.getByLabelText("Doing: Fix the bug")).toBeTruthy();
     expect(screen.getByLabelText("To do: Ship it")).toBeTruthy();
@@ -20,6 +21,34 @@ describe("the plan Claude is keeping", () => {
     expect(toJSON()).toBeNull();
     await renderWith(<PlanCard todos={[todo("A", "completed")]} />);
     expect(screen.queryByLabelText(/^Plan,/)).toBeNull();
+  });
+
+  it("can be pulled open and tucked away, while horizontal movement leaves it alone", async () => {
+    const capture = jest.spyOn(PanResponder, "create");
+    try {
+      await renderWith(<PlanCard todos={[todo("Fix the bug", "in_progress"), todo("Ship it", "pending")]} />);
+      const pan = capture.mock.calls[0][0];
+      const event = {} as GestureResponderEvent;
+      const gesture = (dy: number, dx = 0) => ({ dy, dx, vy: 0 } as PanResponderGestureState);
+      expect(pan.onMoveShouldSetPanResponderCapture?.(event, gesture(2, 80))).toBe(false);
+      expect(pan.onMoveShouldSetPanResponderCapture?.(event, gesture(-80))).toBe(true);
+      await act(async () => {
+        pan.onPanResponderGrant?.(event, gesture(0));
+        pan.onPanResponderMove?.(event, gesture(-1000));
+        pan.onPanResponderRelease?.(event, gesture(-1000));
+      });
+      expect(screen.getByRole("button", { name: /^Plan,/ }).props.accessibilityState.expanded).toBe(true);
+      expect(screen.getByLabelText("To do: Ship it")).toBeTruthy();
+      await act(async () => {
+        pan.onPanResponderGrant?.(event, gesture(0));
+        pan.onPanResponderMove?.(event, gesture(1000));
+        pan.onPanResponderRelease?.(event, gesture(1000));
+      });
+      expect(screen.getByRole("button", { name: /^Plan,/ }).props.accessibilityState.expanded).toBe(false);
+      expect(screen.queryByLabelText("To do: Ship it")).toBeNull();
+    } finally {
+      capture.mockRestore();
+    }
   });
 });
 

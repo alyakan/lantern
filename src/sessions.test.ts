@@ -5,6 +5,17 @@ import { chatsReducer, chatTitle, initialChats, isBusy, queuesToSend, type Chats
 const ready: State = { ...initialState, status: "idle", claudePath: "/bin/claude", mode: "auto", folder: "/p", contextWindow: 200_000 };
 
 describe("chatsReducer", () => {
+  it("keeps each progress checklist with the chat that created it", () => {
+    let c = chatsReducer(initialChats(ready), { type: "add", slot: "s2" });
+    const items = [{ content: "Work on chat one", active_form: "Working on chat one", status: "pending" }];
+    c = chatsReducer(c, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "todos", parent: null, items } } });
+    expect(c.slots.s1.todos).toEqual(items);
+    expect(c.slots.s2.todos).toEqual([]);
+    c = chatsReducer(c, { type: "in", slot: "s2", action: { type: "ui_event", event: { kind: "todos", parent: null, items: [{ ...items[0], content: "Work on chat two" }] } } });
+    expect(c.slots.s1.todos).toEqual(items);
+    expect(c.slots.s2.todos[0].content).toBe("Work on chat two");
+  });
+
   it("routes actions and events to their own chat, even in the background", () => {
     let c: Chats = initialChats(ready);
     c = chatsReducer(c, { type: "add", slot: "s2" });

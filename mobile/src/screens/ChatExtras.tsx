@@ -5,14 +5,14 @@ import type { PlanUsage } from "../sync/reducer";
 import type { UsageWindow } from "../protocol/generated/UsageWindow";
 import { contextOf, progressOf, shortTokens, usageOf, weekOf, windowOf } from "../view/plan";
 import { tightestOf } from "../view/providerUsage";
-import { ScrollView, Share, Text, TextInput, View } from "react-native";
+import { Animated, PanResponder, ScrollView, Share, Text, TextInput, useWindowDimensions, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
 import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
-import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
+import { buzz, easeLayout, FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { fonts, MIN_TARGET, radius, space, useBody, useColors } from "../ui/theme";
@@ -202,44 +202,81 @@ export function ReplyChip({ label, lead, accessibilityLabel, onPress }: { label:
 }
 
 /**
- * The plan Claude is keeping, over the message box: one line (how far, and what it is doing now) that opens to every step.
- * Gone once every step is done.
+ * The agent's plan peeks out from behind the message box. Pull its header up to reveal the steps,
+ * or down to tuck them away; tapping offers the same action without a gesture.
  */
 export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
+  const { height: screenHeight } = useWindowDimensions();
+  const height = useRef(new Animated.Value(0)).current;
+  const position = useRef(0);
+  const from = useRef(0);
+  const limit = Math.min(260, screenHeight * 0.32, todos.length * 48 + 12);
+  const settle = (expanded: boolean) => {
+    setOpen(expanded);
+    easeLayout(height, expanded ? limit : 0, 240);
+  };
+  const live = useRef({ open, limit, settle });
+  live.current = { open, limit, settle };
+  useEffect(() => {
+    const listener = height.addListener(({ value }) => { position.current = value; });
+    return () => height.removeListener(listener);
+  }, [height]);
+  useEffect(() => {
+    easeLayout(height, open ? limit : 0, 240);
+  }, [height, open, limit]);
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, g) => Math.abs(g.dy) > 5 && Math.abs(g.dy) > Math.abs(g.dx),
+    onPanResponderGrant: () => {
+      height.stopAnimation();
+      from.current = position.current;
+    },
+    onPanResponderMove: (_, g) => {
+      height.setValue(Math.max(0, Math.min(live.current.limit, from.current - g.dy)));
+    },
+    onPanResponderRelease: (_, g) => {
+      const expanded = Math.abs(g.vy) > 0.35 ? g.vy < 0 : position.current > live.current.limit / 2;
+      live.current.settle(expanded);
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: () => live.current.settle(from.current > live.current.limit / 2),
+  })).current;
   const p = progressOf(todos);
   if (todos.length === 0 || p.finished) return null;
   return (
-    <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
-      <Glass solid style={{ borderRadius: radius.inner, overflow: "hidden" }}>
-        <PressScale accessibilityRole="button" accessibilityLabel={`Plan, ${p.done} of ${p.total} done${p.current ? `, now: ${p.current}` : ""}`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 12 }}>
-          <View style={{ backgroundColor: colors.paper, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
-            <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
-              {p.done}/{p.total}
+    <View testID="plan-sheet" style={{ marginHorizontal: 6, marginBottom: -22, paddingBottom: 28, backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderTopLeftRadius: 22, borderTopRightRadius: 22, overflow: "hidden" }}>
+      <View testID="plan-sheet-handle" {...pan.panHandlers}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`Plan, ${p.done} of ${p.total} done${p.current ? `, now: ${p.current}` : ""}`} accessibilityHint={open ? "Tap or drag down to collapse the steps" : "Tap or drag up to show the steps"} accessibilityState={{ expanded: open }} onPress={() => settle(!open)} haptic="select" scaleTo={0.99} style={{ paddingTop: 7, paddingBottom: 12, paddingHorizontal: 14, gap: 7 }}>
+          <View style={{ alignSelf: "center", width: 32, height: 4, borderRadius: 2, backgroundColor: colors.shapeStrong }} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ backgroundColor: colors.paper, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
+              <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
+                {p.done}/{p.total}
+              </Txt>
+            </View>
+            <Txt variant="small" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+              {p.current ?? "Plan"}
             </Txt>
+            <Chevron open={open} />
           </View>
-          <Txt variant="small" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
-            {p.current ?? "Plan"}
-          </Txt>
-          <Chevron open={open} />
         </PressScale>
-        {open && (
-          <ScrollView style={{ maxHeight: 220 }} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 10, gap: 6 }}>
-            {todos.map((t, i) => (
-              <View key={`${i}-${t.content}`} accessibilityLabel={`${t.status === "completed" ? "Done" : t.status === "in_progress" ? "Doing" : "To do"}: ${t.content}`} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-                <Txt variant="small" tone={t.status === "completed" ? "go" : t.status === "in_progress" ? "cobalt" : "ink3"} style={{ width: 16, fontWeight: "700" }}>
-                  {t.status === "completed" ? "✓" : t.status === "in_progress" ? "●" : "○"}
-                </Txt>
-                <Txt variant="small" tone={t.status === "completed" ? "ink3" : "ink"} style={{ flex: 1, textDecorationLine: t.status === "completed" ? "line-through" : "none" }}>
-                  {t.status === "in_progress" ? t.active_form : t.content}
-                </Txt>
-              </View>
-            ))}
-          </ScrollView>
-        )}
-      </Glass>
-    </FadeSlideIn>
+      </View>
+      <Animated.View style={{ height, overflow: "hidden" }} accessibilityElementsHidden={!open} importantForAccessibility={open ? "auto" : "no-hide-descendants"} pointerEvents={open ? "auto" : "none"}>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 12, gap: 12 }}>
+          {todos.map((t, i) => (
+            <View key={`${i}-${t.content}`} accessibilityLabel={`${t.status === "completed" ? "Done" : t.status === "in_progress" ? "Doing" : "To do"}: ${t.content}`} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+              <Txt variant="small" tone={t.status === "completed" ? "go" : t.status === "in_progress" ? "cobalt" : "ink3"} style={{ width: 16, fontWeight: "700" }}>
+                {t.status === "completed" ? "✓" : t.status === "in_progress" ? "●" : "○"}
+              </Txt>
+              <Txt variant="small" tone={t.status === "completed" ? "ink3" : "ink"} style={{ flex: 1, textDecorationLine: t.status === "completed" ? "line-through" : "none" }}>
+                {t.status === "in_progress" ? t.active_form : t.content}
+              </Txt>
+            </View>
+          ))}
+        </ScrollView>
+      </Animated.View>
+    </View>
   );
 }
 
