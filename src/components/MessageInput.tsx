@@ -497,7 +497,7 @@ export function MessageInput({ todos = [], status, waiting = false, idlePlacehol
           <SideChat onClose={closeAside} />
         </div>
       )}
-      <AgentPlanSheet todos={todos} />
+      {todos.some((t) => t.status !== "completed") && <AgentPlanSheet todos={todos} />}
       <div className={`composer-box${running && !waiting ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu
