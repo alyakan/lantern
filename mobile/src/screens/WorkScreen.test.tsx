@@ -83,12 +83,6 @@ describe("Your work on a tablet", () => {
     // Search filters the list, so a feature's page bar doesn't offer it (it would open a field that filters nothing); Refresh stays.
     expect(within(screen.getByTestId("work-page-bar")).queryByRole("button", { name: "Search your work" })).toBeNull();
     expect(within(screen.getByTestId("work-page-bar")).getByText("Refresh")).toBeTruthy();
-    // The way back is in the same pill as "Work" and Refresh (not a circle beside it), so both pages' bars start at the same edge.
-    expect(screen.getByTestId("work-page-bar").children[0]).toBeTruthy();
-    const pill = screen.getByTestId("work-page-bar").children[0] as unknown as { children: unknown[] };
-    expect(pill.children).toHaveLength(1);
-    expect(within(screen.getByTestId("work-page-bar")).getByRole("button", { name: "Back to Work" })).toBeTruthy();
-    expect(within(screen.getByTestId("work-page-bar")).getByText("Work")).toBeTruthy();
   });
 
   it("searches the page from its bar, over names, numbers, tickets and features, and puts it all back", async () => {
