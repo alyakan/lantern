@@ -1,6 +1,7 @@
 import { tabBarRoom } from "../ui/TabBar";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useToTop } from "../ui/useToTop";
+import { BackButton } from "../ui/BackButton";
 import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -552,11 +553,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
    * away (a swipe in from the edge does the same, with the list coming out from under it).
    */
   const backCircle = (
-    <PressScale accessibilityRole="button" accessibilityLabel="Back to Work" accessibilityHint="Goes back to every feature" onPress={() => setPage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} haptic="select" scaleTo={0.88} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, justifyContent: "center" }}>
-      <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-      </Glass>
-    </PressScale>
+    <BackButton label="Back to Work" hint="Goes back to every feature" onPress={() => setPage(null)} />
   );
 
   /**

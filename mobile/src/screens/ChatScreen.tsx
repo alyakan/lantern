@@ -25,6 +25,8 @@ import { keepSame, timeline, type Row } from "../view/timeline";
 import { gutterFor } from "../view/layout";
 import { useLayout } from "../shell/useLayout";
 import { useShortcut } from "../ui/useShortcut";
+import { BackButton } from "../ui/BackButton";
+import { TOP_BAR_GAP } from "../ui/TopBar";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -639,19 +641,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // The pieces of the screen. On iOS 26 the list runs under the header and the message box, which are glass; elsewhere they sit above and below it as before.
   const head = (
     <>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: gutter, paddingBottom: 10 }}>
-        {lead === "back" && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={HEADER_SLOP} scaleTo={0.88}>
-            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-              <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-            </Glass>
-          </PressScale>
-        )}
+      {/* As far below the clock as the tabs' bars, so a chat pushed over a tab doesn't shift its bar on the way. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + TOP_BAR_GAP, paddingHorizontal: gutter, paddingBottom: 10 }}>
+        {lead === "back" && <BackButton onPress={onBack} hitSlop={HEADER_SLOP} />}
         {lead === "sidebar" && (
           // It pops in when the chats are unpinned and go away (not when the chat opens with them away: then it was just there).
           // While they are slid in it stays where it is, under them, so they cover and uncover it as they move.
           <PopIn glass animate={sidebarLeadLate}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} scaleTo={0.88}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} haptic="select" scaleTo={0.88}>
               <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
                 <SidebarIcon />
               </Glass>
