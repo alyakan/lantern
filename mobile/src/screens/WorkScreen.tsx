@@ -715,14 +715,14 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
       ) : (
         <>
           {/* The page says its own feature's numbers (its tabs count what needs you in it); how many need you across them all is
-              the Work switch's count, and the steps to take across them all are one link beside the page's count. */}
+              the Work row's count, and the steps to take across them all are one link beside the page's count. What finished in
+              the chats is the column's Timeline, not this page's: it has nothing to do with the feature. */}
           {!shownFeature && (
             <Txt variant="body" tone="ink2">
               {standsLine}
             </Txt>
           )}
           {blindNote}
-          {justFinished}
           {shownFeature && featurePage(shownFeature, false, next.length > 0 ? <Link label={`Review all ${next.length} step${next.length === 1 ? "" : "s"}`} hint="Lists every step to take, in every feature" onPress={() => setNextOpen(true)} /> : undefined)}
         </>
       )}

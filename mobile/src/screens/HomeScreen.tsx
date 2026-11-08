@@ -57,11 +57,12 @@ export interface HomeProps {
   pinned?: boolean;
   onTogglePin?: () => void;
   /**
-   * A tablet's column has two sides, switched at its top: the chats, and Your work (its features, each opening its page beside
-   * the column). `work` is what the Work side lists, and `onRefresh` what pulling it down asks for. None on a phone (Work is a tab).
+   * A tablet's column goes into sections, as an iPad's sidebar does: rows at the top of the chats take it into Your work (its
+   * features, each opening its page beside the column) or the Timeline, and "‹ Chats" brings it back. `work` and `timeline` are
+   * what those sections list; `onRefresh` is what pulling Your work down asks for. None on a phone (Work is a tab).
    */
-  column?: { side: ColumnSide; onSide: (side: ColumnSide) => void; work: ReactNode; onRefresh: () => Promise<unknown> };
-  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). Its row is on the Chats side. */
+  column?: { section: ColumnSection; onSection: (section: ColumnSection) => void; work: ReactNode; timeline: ReactNode; onRefresh: () => Promise<unknown>; workShown: boolean };
+  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). Its row is at the top of the chats. */
   onOpenInsights?: () => void;
   insightsShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
@@ -247,34 +248,48 @@ function SectionLabel({ label, count, gutter }: { label: string; count: number; 
   );
 }
 
-/** Which side of a tablet's column shows: the chats, or Your work. */
-export type ColumnSide = "chats" | "work";
+/** What a tablet's column lists: the chats (its top), or a section it was taken into: Your work, or the Timeline. */
+export type ColumnSection = "chats" | "work" | "timeline";
 
 /**
- * The switch at the top of a tablet's column, between the chats and Your work, with how many steps wait on you beside Work. Each
- * side is a button that says whether it is the one shown.
+ * A row at the top of a tablet's chats that takes the column into a section of its own (Your work, the Timeline), as an iPad's
+ * sidebar goes into a folder: its name, a count when there is one, and a chevron. Insights' row has no chevron: it opens beside.
  */
-function SideSwitch({ side, onSide, waiting }: { side: ColumnSide; onSide: (s: ColumnSide) => void; waiting: number }) {
+function SectionRow({ label, count = 0, into = true, selected = false, onPress, first = false }: { label: string; count?: number; /** It goes into a list in the column (a chevron), rather than opening beside it. */ into?: boolean; selected?: boolean; onPress: () => void; first?: boolean }) {
   const colors = useColors();
-  const accent = useAccent();
-  const option = (s: ColumnSide, label: string, count = 0) => {
-    const on = side === s;
-    return (
-      <PressScale key={s} accessibilityRole="button" accessibilityLabel={count > 0 ? `${label}, ${count} waiting` : label} accessibilityState={{ selected: on }} onPress={() => onSide(s)} scaleTo={0.96} haptic="select" style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 34, borderRadius: radius.pill, backgroundColor: on ? colors.ink : "transparent" }}>
-        <Txt variant="small" tone={on ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
-          {label}
-        </Txt>
-        {count > 0 && (
-          <Txt variant="small" style={{ fontWeight: "700", color: on ? colors.onInk : accent }}>
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={count > 0 ? `${label}, ${count} waiting` : label} accessibilityState={{ selected }} onPress={onPress} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: first ? 12 : 2, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: selected ? colors.card : "transparent" }}>
+      <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
+        {label}
+      </Txt>
+      {count > 0 && (
+        <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
+          <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
             {count}
           </Txt>
-        )}
-      </PressScale>
-    );
-  };
+        </View>
+      )}
+      {into && (
+        <Txt variant="body" tone="ink3" accessibilityElementsHidden>
+          ›
+        </Txt>
+      )}
+    </PressScale>
+  );
+}
+
+/** The top of a section the column was taken into: the way back to the chats, then the section's name as its title. */
+function SectionHead({ title, onBack }: { title: string; onBack: () => void }) {
   return (
-    <View testID="side-switch" style={{ flexDirection: "row", gap: 2, padding: 3, marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
-      {[option("chats", "Chats"), option("work", "Work", waiting)]}
+    <View testID="column-section" style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 2 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Chats" accessibilityHint="Back to the chats" onPress={onBack} haptic="select" hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }} scaleTo={0.94} style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, minHeight: 36 }}>
+        <Txt variant="body" tone="cobalt" style={{ fontWeight: "600" }}>
+          ‹ Chats
+        </Txt>
+      </PressScale>
+      <Txt variant="title" accessibilityRole="header">
+        {title}
+      </Txt>
     </View>
   );
 }
@@ -463,8 +478,10 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setQuery("");
   };
 
-  // The Work side of a tablet's column lists your work instead of the chats: pulling it down asks the Mac to look at the work again.
-  const onWork = !!column && canWork && column.side === "work";
+  // A section the tablet's column was taken into lists it instead of the chats: pulling Your work down asks the Mac to look at the
+  // work again (and the Timeline, like the chats, asks for what waits).
+  const section: ColumnSection = column && (column.section !== "work" || canWork) ? column.section : "chats";
+  const onWork = section === "work";
   const refresh = async () => {
     setRefreshing(true);
     controller.resume();
@@ -539,18 +556,16 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {canWork && column && <SideSwitch side={column.side} onSide={column.onSide} waiting={toDo} />}
-        {onWork ? (
-          column?.work
+        {column && section !== "chats" ? (
+          <FadeSlideIn key={section}>
+            <SectionHead title={section === "work" ? "Work" : "Timeline"} onBack={() => column.onSection("chats")} />
+            {section === "work" ? column.work : column.timeline}
+          </FadeSlideIn>
         ) : (
           <>
-        {canInsights && onOpenInsights && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Insights" accessibilityState={{ selected: insightsShown }} onPress={onOpenInsights} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: insightsShown ? colors.card : "transparent" }}>
-            <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
-              Insights
-            </Txt>
-          </PressScale>
-        )}
+        {column && canWork && <SectionRow first label="Work" count={toDo} selected={column.workShown} onPress={() => column.onSection("work")} />}
+        {column && <SectionRow first={!canWork} label="Timeline" onPress={() => column.onSection("timeline")} />}
+        {canInsights && onOpenInsights && <SectionRow first={!column} label="Insights" into={false} selected={insightsShown} onPress={onOpenInsights} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -638,7 +653,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {banner}
       </View>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
-      {!tabbed && !onWork && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
+      {!tabbed && section === "chats" && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
       {acting && (
         <ChatActionsSheet

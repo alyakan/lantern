@@ -4,8 +4,9 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
 import { DecideScreen } from "../screens/DecideScreen";
-import { HomeScreen, type ColumnSide } from "../screens/HomeScreen";
+import { HomeScreen, type ColumnSection } from "../screens/HomeScreen";
 import { WorkColumn } from "../screens/WorkColumn";
+import { TimelineColumn } from "../screens/TimelineColumn";
 import { PhoneTabs } from "../screens/PhoneTabs";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
@@ -270,13 +271,14 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     go({ type: "home" });
     setChatsOpen(false);
   };
-  // A tablet's column is the chats, or Your work: its features, each opening its page beside the column. The feature picked last
-  // (null: none yet, and the page shows the one that needs you) stays picked across chats, so Work comes back to it.
-  const [side, setSide] = useState<ColumnSide>("chats");
+  // A tablet's column lists the chats, or a section it was taken into: Your work (its features, each opening its page beside the
+  // column) or the Timeline. The feature picked last (null: none yet, and the page shows the one that needs you) stays picked
+  // across chats, so Work comes back to it.
+  const [section, setSection] = useState<ColumnSection>("chats");
   const [workFeature, setWorkFeature] = useState<string | null>(null);
-  // Work's side shows Work beside it too (as its row did), the column staying slid in for a feature to be picked from it.
-  const pickSide = (s: ColumnSide) => {
-    setSide(s);
+  // Going into Your work shows Work beside it too (as its row did), the column staying slid in for a feature to be picked from it.
+  const pickSection = (s: ColumnSection) => {
+    setSection(s);
     if (s !== "work") return;
     setTabletPage("work");
     movePanes();
@@ -382,7 +384,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} column={tablet ? { side, onSide: pickSide, onRefresh: () => controller.sync.workRefresh(), work: <WorkColumn picked={workFeature} shown={!selectedSlot && tabletPage === "work"} onPick={pickFeature} gutter={space.lg} /> } : undefined} onOpenInsights={tablet ? openInsights : undefined} insightsShown={tablet && !selectedSlot && tabletPage === "insights"} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} column={tablet ? { section, onSection: pickSection, onRefresh: () => controller.sync.workRefresh(), workShown: !selectedSlot && tabletPage === "work", work: <WorkColumn picked={workFeature} shown={!selectedSlot && tabletPage === "work"} onPick={pickFeature} gutter={space.lg} />, timeline: <TimelineColumn onOpenChat={openChat} selectedSlot={selectedSlot} gutter={space.lg} /> } : undefined} onOpenInsights={tablet ? openInsights : undefined} insightsShown={tablet && !selectedSlot && tabletPage === "insights"} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {

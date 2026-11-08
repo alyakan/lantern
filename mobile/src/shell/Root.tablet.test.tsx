@@ -104,26 +104,28 @@ describe("a tablet with the chats pinned", () => {
       await settle();
     };
 
-    it("opens on Your work where no chat is open, for a Mac that has it, with a Chats / Work switch, not a Desk, at the top of the column", async () => {
+    it("opens on Your work where no chat is open, for a Mac that has it, with Work and Timeline rows, not a Desk, at the top of the chats", async () => {
       await withFeatures(["desk", "work"]);
       expect(screen.getByLabelText("Your work")).toBeTruthy();
       expect(screen.queryByTestId("pick-a-chat")).toBeNull();
       expect(screen.queryByRole("button", { name: /^Desk/ })).toBeNull();
-      expect(screen.getByTestId("side-switch")).toBeTruthy();
-      // The column opens on the chats; Work's side says how many steps wait.
-      expect(screen.getByRole("button", { name: "Chats" }).props.accessibilityState).toMatchObject({ selected: true });
-      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: false });
+      // Work is what is beside the column, so its row is marked; the column itself lists the chats.
+      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+      expect(screen.getByRole("button", { name: "Timeline" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Release 0.1.53/ })).toBeTruthy();
+      expect(screen.queryByTestId("column-section")).toBeNull();
     });
 
-    it("lists the features in the column on Work's side, opens one's page beside it, and gives the chats back on Chats'", async () => {
+    it("goes into Your work in the column, opens a feature's page beside it, and comes back to the chats on ‹ Chats", async () => {
       await withFeatures(["desk", "work"]);
       await press(/Release 0.1.53/);
       await settle();
       expect(screen.queryByLabelText("Your work")).toBeNull();
-      // Work's side: the column lists the work (by project, without Linear) in place of the chats, and Work is shown beside it.
+      // Into Work: the column lists the work (by project, without Linear) in place of the chats, and Work is shown beside it.
       await press("Work, 1 waiting");
       await settle();
-      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+      expect(screen.getByTestId("column-section")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Work" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /Release 0.1.53/ })).toBeNull();
       expect(screen.getByLabelText("Your work")).toBeTruthy();
       const row = screen.getByRole("button", { name: /^lantern, 1 needs you/ });
@@ -136,9 +138,29 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
       await press("Chats");
       await settle();
+      expect(screen.queryByTestId("column-section")).toBeNull();
       expect(screen.getByRole("button", { name: /Release 0.1.53/ })).toBeTruthy();
-      // Switching the column's side alone leaves the page beside it as it was.
+      // Going back to the chats leaves the page beside the column as it was.
       expect(screen.getByRole("header", { name: "lantern" })).toBeTruthy();
+    });
+
+    it("goes into the Timeline in the column, and a line opens its chat beside it", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      const desk = { desks: [{ id: "home", name: "Desk", slots: ["a", "b"], projects: [] }], cards: [{ key: "b:t1", desk: "home", slot: "b", title: "Fix the footer", project: "site", at: Date.now() - 60_000, asked: "Fix it", auto: false, said: "Fixed the footer. Tests pass.", outcome: "done" }] };
+      await act(async () => controller.sync.apply({ type: "desk", desk: desk as never }));
+      await press("Timeline");
+      await settle();
+      expect(screen.getByRole("header", { name: "Timeline" })).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Today" })).toBeTruthy();
+      await press(/^Fix the footer, finished, Fixed the footer\./);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      // Still in the Timeline, with the chat opened from it marked.
+      expect(screen.getByRole("button", { name: /^Fix the footer, finished/ }).props.accessibilityState).toMatchObject({ selected: true });
     });
 
     it("goes back to Work when the chat shown is closed (from the chats beside it, or on the Mac), instead of keeping a dead chat", async () => {
@@ -541,7 +563,7 @@ describe("a tablet with the chats not pinned", () => {
     expect(column().props.pointerEvents).toBe("auto");
   });
 
-  it("slides the column away once a feature is picked on its Work side, and brings it back from the page's header", async () => {
+  it("slides the column away once a feature is picked in its Work, and brings it back, still in Work, from the page's header", async () => {
     const { controller } = makeController();
     seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
     const work = { issues: true, looked: true, blind: [], items: [{ key: "pr7", repo: "lantern", title: "Retry fetchJson", stage: "checks", tone: "bad", word: "Checks failing", meta: "m", at: null, number: 7, feature: "Reliability", issue: "ENG-1", url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null }, { key: "e5", repo: "web", title: "ENG-5 Rate limit", stage: "issue", tone: "todo", word: "Todo", meta: "m", at: null, number: null, feature: "Dashboard", issue: "ENG-5", url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null }] };
@@ -549,7 +571,7 @@ describe("a tablet with the chats not pinned", () => {
     await render(<Root controller={controller} />);
     await settle();
     expect(column().props.pointerEvents).toBe("auto");
-    // Work's side keeps the column in, for a feature to be picked from it.
+    // Going into Work keeps the column in, for a feature to be picked from it.
     await press("Work");
     await settle();
     expect(column().props.pointerEvents).toBe("auto");
@@ -559,7 +581,7 @@ describe("a tablet with the chats not pinned", () => {
     expect(screen.getByRole("header", { name: "Dashboard" })).toBeTruthy();
     await press("Show chats");
     expect(column().props.pointerEvents).toBe("auto");
-    // Back on its Work side, with the feature shown marked.
+    // Back in its Work, with the feature shown marked.
     expect(screen.getByRole("button", { name: /^Dashboard, / }).props.accessibilityState).toMatchObject({ selected: true });
   });
 
