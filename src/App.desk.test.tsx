@@ -123,6 +123,16 @@ describe("the Desk in the app", () => {
     expect(screen.queryByRole("button", { name: "Back to the Desk" })).toBeNull();
   });
 
+  it("goes back from a project's page to every project with the title bar's back, as the page's own link does", async () => {
+    await launch(true);
+    await waitFor(() => expect(desk()).toBeInTheDocument());
+    fireEvent.click(within(within(desk()!).getByRole("region", { name: "Projects" })).getByRole("button", { name: "acme-api" }));
+    expect(screen.getByRole("region", { name: "Project acme-api" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to all projects" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Project acme-api" })).toBeNull());
+    expect(within(desk()!).getByRole("region", { name: "Projects" })).toBeInTheDocument();
+  });
+
   it("opens a project's own page, asks about that project only, and comes back to it from one of its chats", async () => {
     await launch(true);
     await waitFor(() => expect(desk()).toBeInTheDocument());
