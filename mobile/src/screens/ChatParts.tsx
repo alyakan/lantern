@@ -1,9 +1,7 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
-import { Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActionSheetIOS, Animated, Easing, findNodeHandle, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Host, Image as SwiftImage, Menu, Button as MenuButton } from "@expo/ui/swift-ui";
-import { accessibilityLabel, disabled as disabledMod } from "@expo/ui/swift-ui/modifiers";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
@@ -64,9 +62,10 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
       <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
+          // One row of small squares (four fit): the words are the message, the photos go with it.
+          <View style={{ flexDirection: "row", gap: 6, marginBottom: item.text ? 8 : 0 }}>
             {item.thumbs.map((uri, i) => (
-              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: 88, height: 88, borderRadius: 10 }} />
+              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_THUMB, height: SENT_THUMB, borderRadius: 8 }} />
             ))}
           </View>
         )}
@@ -1172,23 +1171,22 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
 
 /**
  * The + beside the message box: it offers pictures to attach, and is dimmed while one is being fetched or when no more fit.
- * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
- * opens the sheet (`onPress`).
+ * On iOS it opens the system's action sheet (Photo Library, Take Photo), anchored to the + on an iPad; elsewhere the sheet
+ * (`onPress`). (A SwiftUI menu was tried here: its native view didn't follow the row when the box changed height, and sat
+ * over the words once sent photos left the box.)
  */
-function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
+function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS action sheet. */ onPick: (source: ImageSource) => void }) {
   const colors = useColors();
   const off = busy || full;
-  if (Platform.OS === "ios")
-    return (
-      <View style={{ width: barButton, height: barButton, opacity: off ? 0.4 : 1 }}>
-        <Host style={{ width: barButton, height: barButton }}>
-          <Menu modifiers={[accessibilityLabel("Attach photos"), ...(off ? [disabledMod(true)] : [])]} label={<SwiftImage systemName="plus.circle" size={26} color={colors.ink2} />}>
-            <MenuButton label="Photo Library" systemImage="photo.on.rectangle" onPress={() => onPick("library")} />
-            <MenuButton label="Take Photo" systemImage="camera" onPress={() => onPick("camera")} />
-          </Menu>
-        </Host>
-      </View>
-    );
+  const self = useRef<ComponentRef<typeof View>>(null);
+  const open =
+    Platform.OS === "ios"
+      ? () =>
+          ActionSheetIOS.showActionSheetWithOptions(
+            { options: ["Photo Library", "Take Photo", "Cancel"], cancelButtonIndex: 2, anchor: findNodeHandle(self.current) ?? undefined },
+            (i) => (i === 0 ? onPick("library") : i === 1 ? onPick("camera") : undefined),
+          )
+      : onPress;
   return (
     <PressScale
       accessibilityRole="button"
@@ -1196,13 +1194,13 @@ function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: bool
       accessibilityHint={full ? `A message holds ${MAX_IMAGES} photos at most` : undefined}
       accessibilityState={{ disabled: off, busy }}
       disabled={off}
-      onPress={onPress}
+      onPress={open}
       haptic="light"
       scaleTo={0.88}
       opacity={off ? 0.4 : 1}
       style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}
     >
-      <View accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
+      <View ref={self} collapsable={false} accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
         <View style={{ position: "absolute", width: 12, height: 2, borderRadius: 1, backgroundColor: colors.ink2 }} />
         <View style={{ position: "absolute", width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink2 }} />
       </View>
@@ -1235,6 +1233,8 @@ export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage
 
 /** A picture's side in the message box. */
 const THUMB = 60;
+/** A sent picture's side in your message. */
+const SENT_THUMB = 56;
 
 /** Where to get the pictures from. Choosing closes the sheet; the Composer then opens the picker (see its `choosing`). */
 function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source: ImageSource) => void }) {

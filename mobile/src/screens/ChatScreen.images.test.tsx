@@ -1,5 +1,5 @@
 import "@shopify/flash-list/jestSetup";
-import { Linking } from "react-native";
+import { ActionSheetIOS, Linking } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import type { Picked } from "../platformImages";
 import { pickImages } from "../platformImages";
@@ -22,13 +22,18 @@ async function chatWith(features: string[] = ["images"]) {
   return session;
 }
 
-/** The + is the system's menu on iOS: a source picked from it, and the picker is asked for once the menu has gone. */
+/** + → the system's action sheet → a source: the picker is asked for once the sheet has gone. */
 async function attach(source: "Photo library" | "Take a photo") {
-  expect(plus()).toBeTruthy();
-  await fireEvent.press(screen.getByRole("menuitem", { name: source === "Photo library" ? "Photo Library" : "Take Photo" }));
+  const sheet = jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions").mockImplementationOnce((o, done) => {
+    expect(o.options).toEqual(["Photo Library", "Take Photo", "Cancel"]);
+    done(source === "Photo library" ? 0 : 1);
+  });
+  await fireEvent.press(plus()!);
+  expect(sheet).toHaveBeenCalledTimes(1);
+  sheet.mockRestore();
   await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
 }
-const plus = () => screen.queryByRole("menu", { name: "Attach photos" });
+const plus = () => screen.queryByRole("button", { name: "Attach photos" });
 const thumbs = () => screen.queryAllByLabelText(/^Photo \d$/);
 
 beforeEach(() => {
