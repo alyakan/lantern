@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
-import { blockLanguage, filePaths, inferLanguage, isMarkdownPath, languageHint, languageName, monacoLanguage, parsePlanStep, withFrontMatterAsCode } from "./markdown";
-import { Md } from "../components/Md";
+import { blockLanguage, filePaths, inferLanguage, isMarkdownPath, languageHint, languageName, monacoLanguage, parsePlanStep, settledCuts, withFrontMatterAsCode } from "./markdown";
+import { Md, MdStream } from "../components/Md";
 
 describe("isMarkdownPath", () => {
   it("is true for markdown files, whatever the case, and false for the rest", () => {
@@ -198,5 +199,52 @@ describe("pictures", () => {
   it("load when the caller allows them", () => {
     const { container } = render(<Md images>{text}</Md>);
     expect(container.querySelector("img")).toHaveAttribute("src", "https://tracker.example/p.png");
+  });
+});
+
+describe("settledCuts", () => {
+  const blocks = (t: string) => {
+    const starts = [0, ...settledCuts(t)];
+    return starts.map((s, i) => t.slice(s, starts[i + 1] ?? t.length));
+  };
+  it("cuts before each paragraph a blank line starts", () => {
+    expect(blocks("One.\n\nTwo.\n\nThree is still com")).toEqual(["One.\n\n", "Two.\n\n", "Three is still com"]);
+    expect(settledCuts("Only one paragraph so far")).toEqual([]);
+  });
+
+  it("never cuts inside a code fence, even at its blank lines", () => {
+    const t = "Here:\n\n```ts\nconst a = 1;\n\nconst b = 2;\n";
+    expect(blocks(t)).toEqual(["Here:\n\n", "```ts\nconst a = 1;\n\nconst b = 2;\n"]);
+    expect(blocks(t + "```\n\nAfter.").pop()).toBe("After.");
+  });
+
+  it("keeps a list in one piece, loose items and all, and cuts again after the next paragraph", () => {
+    expect(settledCuts("Steps:\n\n1. one\n\n2. two\n\n3. thr")).toEqual([]);
+    expect(settledCuts("- a\n\n  more of a\n\n- b")).toEqual([]);
+    expect(blocks("- a\n- b\n\nAfter the list.\n\nAnd on")).toEqual(["- a\n- b\n\nAfter the list.\n\n", "And on"]);
+  });
+
+  it("doesn't cut text whose links or footnotes are defined further down", () => {
+    expect(settledCuts("See [the docs][d].\n\nMore.\n\n[d]: https://example.com")).toEqual([]);
+  });
+});
+
+describe("MdStream", () => {
+  it("reads as the whole text would", () => {
+    const text = "# Plan\n\nFirst paragraph with `code`.\n\n- one\n- two\n\n```ts\nconst a = 1;\n```\n\nLast words";
+    // The same elements; only the line break between two blocks, which draws nothing, may differ.
+    const html = (el: ReactElement) => render(<div className="msg">{el}</div>).container.innerHTML.replace(/>\s+</g, "><");
+    expect(html(<MdStream>{text}</MdStream>)).toBe(html(<Md>{text}</Md>));
+  });
+
+  it("keeps a block that finished as the same element when the next one starts, and after", () => {
+    // Nothing is cut yet: the code is the last block, still being written as far as anyone knows.
+    const start = "```ts\nconst a = 1;\n```";
+    const { container, rerender } = render(<MdStream>{start}</MdStream>);
+    const code = container.querySelector("pre");
+    rerender(<MdStream>{start + "\n\nNext"}</MdStream>);
+    expect(container.querySelector("pre")).toBe(code);
+    rerender(<MdStream>{start + "\n\nNext paragraph.\n\nAnd another"}</MdStream>);
+    expect(container.querySelector("pre")).toBe(code);
   });
 });

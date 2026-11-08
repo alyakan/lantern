@@ -39,12 +39,14 @@ function sendMessage(link: Link, channel: Channel, msg: ClientMessage) {
   for (const frame of channel.seal(utf8Encode(JSON.stringify(msg)))) link.send(frame);
 }
 
-/** The Mac's next whole message (null: the link closed or went quiet for `waitMs`). */
-async function nextMessage(link: Link, channel: Channel, waitMs?: number): Promise<ServerMessage | null> {
+/** The Mac's next whole message (null: the link closed or went quiet for `waitMs`). `heard` is told of each frame on the way that
+ * the channel opened (one the Mac sealed, not anything that came down the wire). */
+async function nextMessage(link: Link, channel: Channel, waitMs?: number, heard?: () => void): Promise<ServerMessage | null> {
   for (;;) {
     const frame = await link.next(waitMs);
     if (!frame) return null;
     const plain = channel.open(frame);
+    heard?.();
     if (plain) return JSON.parse(utf8Decode(plain)) as ServerMessage;
   }
 }
@@ -100,6 +102,8 @@ export class Session {
   private answers = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   readonly done: Promise<void>;
   private closed = false;
+  /** Told when anything comes from the Mac (see `alive`). */
+  private hearing = new Set<() => void>();
 
   constructor(
     private readonly link: Link,
@@ -131,6 +135,37 @@ export class Session {
     });
   }
 
+  /**
+   * Whether the Mac is still there: true once it answers something small, false when nothing comes from it for `wait`. A big
+   * catch-up can hold the answer up on a slow link, so each frame of it gives the Mac `wait` more, up to `most` in all. Frames
+   * alone don't make it true: a phone back from sleep may be handed a few that were on their way before the link died.
+   */
+  alive(wait: number, most: number = ANSWER_WAIT): Promise<boolean> {
+    return new Promise((resolve) => {
+      let timer = setTimeout(() => settle(false), wait);
+      const heard = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => settle(false), wait);
+      };
+      const settle = (up: boolean) => {
+        clearTimeout(timer);
+        this.hearing.delete(heard);
+        resolve(up);
+      };
+      this.hearing.add(heard);
+      // An answer that is an error is still an answer; a link that closed is the dialling loop's to deal with.
+      this.ask({ op: "list_waiting" }, most).then(
+        () => settle(true),
+        (e) => settle(!(e instanceof NoReply)),
+      );
+    });
+  }
+
+  /** Whether the connection is still open (it closes for good, never opening again). */
+  get isOpen() {
+    return !this.closed;
+  }
+
   close() {
     this.link.close();
   }
@@ -138,7 +173,7 @@ export class Session {
   private async read() {
     try {
       for (;;) {
-        const msg = await nextMessage(this.link, this.channel);
+        const msg = await nextMessage(this.link, this.channel, undefined, () => this.hearing.forEach((f) => f()));
         if (!msg) break;
         if (msg.type === "response") {
           const waiting = this.answers.get(msg.id);

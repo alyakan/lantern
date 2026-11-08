@@ -41,7 +41,7 @@ describe("a chat's place", () => {
     // Halfway down t2's first row: 40 + 200 + 300 + 40 + 200.
     narrow.scrollTop = 780;
     const anchor = anchorOf(narrow)!;
-    expect(anchor).toEqual({ turn: "t2", row: 1, within: 0.5 });
+    expect(anchor).toMatchObject({ turn: "t2", row: 1, within: 0.5 });
     // Wider, every row is half as tall: the same place is 20 + 100 + 150 + 40 + 100 down, not 780.
     const wide = chat([
       { id: "t1", head: 40, rows: [100, 150] },
@@ -58,6 +58,26 @@ describe("a chat's place", () => {
     ]);
     scroller.scrollTop = 250;
     expect(anchorOf(scroller)).toEqual({ turn: "t2", row: -1, within: 10 });
+  });
+
+  it("goes back to the row it was read at when rows before it in the turn were regrouped", () => {
+    const scroller = chat([
+      { id: "t1", head: 40, rows: [200] },
+      { id: "t2", head: 40, rows: [100, 100, 200] },
+    ]);
+    // Halfway down t2's third row: 40 + 200 + 40 + 100 + 100 + 100.
+    scroller.scrollTop = 580;
+    const anchor = anchorOf(scroller)!;
+    expect(anchor).toMatchObject({ turn: "t2", row: 3, within: 0.5 });
+    // The two rows before it fold into one (a reply into the work above it): counted again, row 3 is no longer it.
+    document.body.appendChild(scroller);
+    const t2 = scroller.children[1] as HTMLElement;
+    t2.removeChild(t2.children[2]);
+    expect(scrollToAnchor(scroller, anchor)).toBe(true);
+    // This layout is drawn by hand and doesn't move: the row read at is still at 580, so the view stays there (counted, row 3
+    // would be gone, and the view would go to the turn's top).
+    expect(scroller.scrollTop).toBe(580);
+    scroller.remove();
   });
 
   it("leaves the view alone when the turn isn't there", () => {

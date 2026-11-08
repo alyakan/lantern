@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { ChatItem, ToolItem } from "../store";
+import { initialState, type ChatItem, type State, type ToolItem } from "../store";
+import { useSteady } from "../lib/steady";
 import { ChatStream } from "./ChatStream";
+import { ChatView } from "./ChatView";
 
 // Counts how often each message's row and each turn's work line are drawn.
 const drawn = vi.hoisted(() => new Map<string, number>());
@@ -52,7 +54,8 @@ describe("ChatStream rows", () => {
     expect(drawn.get("First question")).toBe(1);
     expect(drawn.get("First answer")).toBe(1);
     expect(drawn.get("work:t1")).toBe(1);
-    expect(drawn.get("Streaming")).toBe(1);
+    // The reply still coming in has no Copy or Regenerate under it until it is whole.
+    expect(drawn.get("Streaming")).toBeUndefined();
   });
 
   it("draws a turn's work line again when a step changes or the turn stops", () => {
@@ -72,5 +75,28 @@ describe("ChatStream rows", () => {
     const { rerender } = render(<ChatStream items={items} folder={null} {...handlers} testRunFor={() => undefined} />);
     rerender(<ChatStream items={items} folder={null} {...handlers} testRunFor={() => undefined} />);
     expect(drawn.get("work:t1")).toBe(2);
+  });
+
+  it("in a chat whose parent makes new handlers every render, as App does, only the message that grew is drawn again", () => {
+    drawn.clear();
+    // App's way: fresh closures each render, made steady, and Edit/Regenerate offered (an idle chat).
+    function Chat({ state }: { state: State }) {
+      const handlers = useSteady({ onDecide: () => {}, onOpenFile: () => {} });
+      const resend = useSteady({ onEdit: () => {}, onResend: () => {} });
+      return <ChatView state={state} {...handlers} resend={resend} />;
+    }
+    const before: ChatItem[] = [
+      { type: "user", id: "u1", text: "Old question" },
+      { type: "assistant", id: "a1", text: "Old answer" },
+      { type: "user", id: "u2", text: "New question" },
+      { type: "assistant", id: "a2", text: "Grow" },
+    ];
+    const state: State = { ...initialState, status: "idle", folder: "/p", items: before };
+    const { rerender } = render(<Chat state={state} />);
+    rerender(<Chat state={{ ...state, items: [...before.slice(0, -1), { type: "assistant", id: "a2", text: "Growing" }] }} />);
+    expect(drawn.get("Old question")).toBe(1);
+    expect(drawn.get("Old answer")).toBe(1);
+    expect(drawn.get("New question")).toBe(1);
+    expect(drawn.get("Growing")).toBe(1);
   });
 });

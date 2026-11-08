@@ -6,6 +6,7 @@ import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
 import { useLayout } from "../shell/useLayout";
+import { NARROW_MAX } from "../view/layout";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { Dots } from "../ui/skeleton";
@@ -17,8 +18,6 @@ const IGNORE_MS = 3000;
 /** How big the frame to point at the code is: a tablet's camera is bigger than a phone's, so the frame is bigger to match. */
 const FRAME_PHONE = 220;
 const FRAME_TABLET = 300;
-/** How wide the screen is, on a tablet: the camera and the words under it share one narrow column in the middle, not the whole width. */
-const PANEL_MAX = 480;
 
 const Corner = ({ style }: { style: object }) => <View style={[{ position: "absolute", width: 38, height: 38, borderColor: lightColors.hi, borderWidth: 4 }, style]} />;
 
@@ -31,7 +30,8 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
   const body = useBody();
   const controller = useController();
   const insets = useSafeAreaInsets();
-  const frame = useLayout() === "phone" ? FRAME_PHONE : FRAME_TABLET;
+  const tablet = useLayout() !== "phone";
+  const frame = tablet ? FRAME_TABLET : FRAME_PHONE;
   const [permission, requestPermission] = useCameraPermissions();
   const [paste, setPaste] = useState(initialPaste);
   const [text, setText] = useState("");
@@ -64,8 +64,8 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
     // Above the keyboard, so the field being typed in isn't covered by it, and a tap on the background closes it.
     <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.night }}>
       <StatusBar style="light" />
-      {/* One column in the middle: on a tablet the camera is no wider than the words under it. */}
-      <View testID="pair-screen" style={{ flex: 1, width: "100%", maxWidth: PANEL_MAX, alignSelf: "center" }}>
+      {/* The camera has the whole screen; on a tablet the words are a card over its foot, as wide as the other words-on-paper screens. */}
+      <View testID="pair-screen" style={{ flex: 1, width: "100%" }}>
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: insets.top }}>
         {camera ? (
           <CameraView style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned} />
@@ -88,8 +88,15 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
         )}
       </View>
 
-      <View style={{ backgroundColor: colors.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Math.max(insets.bottom, 24) + 8 }}>
-        <View testID="pair-column" style={{ width: "100%", maxWidth: PANEL_MAX, alignSelf: "center", gap: 12 }}>
+      <View
+        testID="pair-panel"
+        style={
+          tablet
+            ? { backgroundColor: colors.paper, borderRadius: 24, padding: 24, width: "100%", maxWidth: NARROW_MAX, alignSelf: "center", marginBottom: Math.max(insets.bottom, 24) + 8 }
+            : { backgroundColor: colors.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Math.max(insets.bottom, 24) + 8 }
+        }
+      >
+        <View testID="pair-column" style={{ width: "100%", gap: 12 }}>
           <Txt variant="title" accessibilityRole="header">
             Pair with your Mac
           </Txt>

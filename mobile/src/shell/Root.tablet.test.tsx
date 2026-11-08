@@ -104,23 +104,127 @@ describe("a tablet with the chats pinned", () => {
       await settle();
     };
 
-    it("opens on Your work where no chat is open, for a Mac that has it, and lists Work, not a Desk, above the chats", async () => {
+    it("opens on Your work where no chat is open, for a Mac that has it, with Work and Timeline rows, not a Desk, at the top of the chats", async () => {
       await withFeatures(["desk", "work"]);
       expect(screen.getByLabelText("Your work")).toBeTruthy();
       expect(screen.queryByTestId("pick-a-chat")).toBeNull();
       expect(screen.queryByRole("button", { name: /^Desk/ })).toBeNull();
+      // Work is what is beside the column, so its row is marked; the column itself lists the chats.
       expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: true });
+      expect(screen.getByRole("button", { name: "Timeline" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Release 0.1.53/ })).toBeTruthy();
+      expect(screen.queryByTestId("column-section")).toBeNull();
     });
 
-    it("shows a chat in its place when one is picked, and Work again from its row", async () => {
+    it("goes into Your work in the column, opens a feature's page beside it, and comes back to the chats on ‹ Chats", async () => {
       await withFeatures(["desk", "work"]);
       await press(/Release 0.1.53/);
       await settle();
       expect(screen.queryByLabelText("Your work")).toBeNull();
-      expect(screen.getByRole("button", { name: "Work, 1 waiting" }).props.accessibilityState).toMatchObject({ selected: false });
+      // Into Work: the column lists the work (by project, without Linear) in place of the chats, and Work is shown beside it.
+      await press("Work, 1 waiting");
+      await settle();
+      expect(screen.getByTestId("column-section")).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Work" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Release 0.1.53/ })).toBeNull();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+      const row = screen.getByRole("button", { name: /^lantern, 1 needs you/ });
+      // The one shown is marked, as the chat shown is.
+      expect(row.props.accessibilityState).toMatchObject({ selected: true });
+      await fireEvent.press(row);
+      await settle();
+      expect(screen.getByRole("header", { name: "lantern" })).toBeTruthy();
+      // The page has no way back and no cards: the column is the list.
+      expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
+      await press("Chats");
+      await settle();
+      expect(screen.queryByTestId("column-section")).toBeNull();
+      expect(screen.getByRole("button", { name: /Release 0.1.53/ })).toBeTruthy();
+      // Going back to the chats leaves the page beside the column as it was.
+      expect(screen.getByRole("header", { name: "lantern" })).toBeTruthy();
+    });
+
+    it("goes into the Timeline in the column, and a line opens its chat beside it", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      const desk = { desks: [{ id: "home", name: "Desk", slots: ["a", "b"], projects: [] }], cards: [{ key: "b:t1", desk: "home", slot: "b", title: "Fix the footer", project: "site", at: Date.now() - 60_000, asked: "Fix it", auto: false, said: "Fixed the footer. Tests pass.", outcome: "done" }] };
+      await act(async () => controller.sync.apply({ type: "desk", desk: desk as never }));
+      await press("Timeline");
+      await settle();
+      expect(screen.getByRole("header", { name: "Timeline" })).toBeTruthy();
+      expect(screen.getByRole("header", { name: "Today" })).toBeTruthy();
+      await press(/^Fix the footer, finished, Fixed the footer\./);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      // Still in the Timeline, with the chat opened from it marked.
+      expect(screen.getByRole("button", { name: /^Fix the footer, finished/ }).props.accessibilityState).toMatchObject({ selected: true });
+    });
+
+    it("goes back to Work when the chat shown is closed (from the chats beside it, or on the Mac), instead of keeping a dead chat", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      // Another chat going changes nothing.
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: two }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+    });
+
+    it("keeps the chat shown through a Mac that started again, whose first list may not have it back yet", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      await act(async () => {
+        controller.sync.apply({ type: "welcome", epoch: 999 });
+        controller.sync.flush();
+      });
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
+    it("keeps a chat shown that the list doesn't have yet (one just started), rather than throwing it away", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} openSlot="new" onOpened={jest.fn()} />);
+      await settle();
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [...two] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
+    it("opens Insights from its row under Work, where no chat is open, and Work again from Work's", async () => {
+      await withFeatures(["desk", "work", "insights"]);
+      await press("Insights");
+      await settle();
+      expect(screen.getByRole("header", { name: "Insights" })).toBeTruthy();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      expect(screen.getByRole("button", { name: "Insights" }).props.accessibilityState).toMatchObject({ selected: true });
       await press("Work, 1 waiting");
       await settle();
       expect(screen.getByLabelText("Your work")).toBeTruthy();
+      expect(screen.queryByRole("header", { name: "Insights" })).toBeNull();
+    });
+
+    it("has no Insights row for a Mac without them", async () => {
+      await withFeatures(["desk", "work"]);
+      expect(screen.queryByRole("button", { name: "Insights" })).toBeNull();
     });
 
     it("asks to pick a chat, with no Desk to open, for a Mac with a Desk and no work", async () => {
@@ -128,6 +232,18 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.getByTestId("pick-a-chat")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^(Desk|Work)/ })).toBeNull();
     });
+  });
+
+  it("slides them in instead, keeping the pin, in a window too narrow for them and a readable chat (an upright 11-inch)", async () => {
+    mockLayout = "overlay";
+    mockWidth = 820;
+    await openInAChat();
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    await press("Show chats");
+    // No pin offered where it couldn't sit beside the chat, and the one chosen is not forgotten.
+    expect(screen.queryByRole("button", { name: /^(Pin|Unpin) the chats/ })).toBeNull();
+    expect(saveSidebarPinned).not.toHaveBeenCalled();
   });
 
   it("keeps them beside the chat upright too: pinned is the user's choice, not the window's", async () => {
@@ -164,6 +280,8 @@ describe("a tablet with the chats pinned", () => {
     await press("Review");
     expect(screen.getByTestId("decision-pane")).toBeTruthy();
     expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    // The chat and its pane under it are out of the screen reader's reach until it is done.
+    expect(screen.getByTestId("detail-under", { includeHiddenElements: true }).props.accessibilityElementsHidden).toBe(true);
     await press("Deny");
     await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     await press("Done");
@@ -293,6 +411,19 @@ describe("the changed files, beside the chat or over it", () => {
     expect(screen.getByTestId("changes-divider")).toBeTruthy();
   });
 
+  it("are beside the next chat again, not floated over it as the last chat's were", async () => {
+    const { view, controller } = await open({ chats: two, events: { a: edited, b: edited.map((e) => ({ ...e, tool_use_id: "tb" })) } });
+    await press(/Release 0.1.53/);
+    await settle();
+    await press("Float the changes over the chat");
+    expect(screen.queryByTestId("changes-divider")).toBeNull();
+    // Another chat opened while the card floats (here from a notification; a pinned list or the edge swipe do the same).
+    await view.rerender(<Root controller={controller} openSlot="b" onOpened={jest.fn()} />);
+    await settle();
+    expect(screen.getByTestId("changes-divider")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Put the changes beside the chat" })).toBeNull();
+  });
+
   it("go away with a tap around the floating card, and the Changes button brings them back floating", async () => {
     await openEdited();
     await press("Float the changes over the chat");
@@ -416,6 +547,42 @@ describe("a tablet with the chats not pinned", () => {
   beforeEach(() => {
     mockLayout = "split";
     mockPinned = false;
+  });
+
+  it("brings the chats back from Work's own bar, which had no way back but the edge swipe", async () => {
+    const { controller } = makeController();
+    seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+    attachSession(controller, { list_waiting: [], work: { items: [] } }, ["desk", "work"]);
+    await render(<Root controller={controller} />);
+    await settle();
+    // The chats slid in at first: Work's button would only open what is open already.
+    expect(column().props.pointerEvents).toBe("auto");
+    await press("Close chats");
+    expect(column().props.pointerEvents).toBe("none");
+    await press("Show chats");
+    expect(column().props.pointerEvents).toBe("auto");
+  });
+
+  it("slides the column away once a feature is picked in its Work, and brings it back, still in Work, from the page's header", async () => {
+    const { controller } = makeController();
+    seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+    const work = { issues: true, looked: true, blind: [], items: [{ key: "pr7", repo: "lantern", title: "Retry fetchJson", stage: "checks", tone: "bad", word: "Checks failing", meta: "m", at: null, number: 7, feature: "Reliability", issue: "ENG-1", url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null }, { key: "e5", repo: "web", title: "ENG-5 Rate limit", stage: "issue", tone: "todo", word: "Todo", meta: "m", at: null, number: null, feature: "Dashboard", issue: "ENG-5", url: null, sig: "s", step_only: false, fold: null, next: null, issue_url: null, branch: null, stack: null, chat: null }] };
+    attachSession(controller, { list_waiting: [], work }, ["desk", "work"]);
+    await render(<Root controller={controller} />);
+    await settle();
+    expect(column().props.pointerEvents).toBe("auto");
+    // Going into Work keeps the column in, for a feature to be picked from it.
+    await press("Work");
+    await settle();
+    expect(column().props.pointerEvents).toBe("auto");
+    await press(/^Dashboard, /);
+    await settle();
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.getByRole("header", { name: "Dashboard" })).toBeTruthy();
+    await press("Show chats");
+    expect(column().props.pointerEvents).toBe("auto");
+    // Back in its Work, with the feature shown marked.
+    expect(screen.getByRole("button", { name: /^Dashboard, / }).props.accessibilityState).toMatchObject({ selected: true });
   });
 
   it("is not pinned until it is chosen, whichever way the tablet is held: the chat has the whole width", async () => {
@@ -546,6 +713,22 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
   });
 
+  it("leaves a tap or a scroll that begins at the edge to the chat, and takes only a pull to the right that began there", async () => {
+    await openInAChat();
+    const takes = (fromX: number, x: number, y: number) => {
+      edge().props.onStartShouldSetResponderCapture(touch(fromX, 0, 400));
+      return edge().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+    };
+    // Nothing is taken on the way in: a tap there is the chat's.
+    expect(edge().props.onStartShouldSetResponderCapture(touch(4, 0))).toBe(false);
+    expect(takes(4, 60, 405)).toBe(true);
+    // Up and down, or to the left, from the edge: the chat's own scroll.
+    expect(takes(4, 6, 480)).toBe(false);
+    expect(takes(10, 2, 400)).toBe(false);
+    // A pull to the right that began away from the edge is the chat's too.
+    expect(takes(200, 300, 400)).toBe(false);
+  });
+
   it("lets them stay away when the pull was short and slow, and brings them in on a flick however short", async () => {
     await openInAChat();
     await fireEvent(edge(), "responderGrant", touch(4, 0));
@@ -581,12 +764,14 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(column().props.pointerEvents).toBe("none");
   });
 
-  it("takes a drag from the list under the finger only once it is plainly going left", async () => {
+  it("takes a drag left that nothing under the finger took, only once it is plainly going left", async () => {
     await openInAChat();
     await press("Show chats");
+    // Asked on the way out, not on the way in: a row's own left swipe (Close, Read) comes first.
+    expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
     const steal = (x: number, y: number) => {
       column().props.onStartShouldSetResponderCapture(touch(300, 0, 300));
-      return column().props.onMoveShouldSetResponderCapture(touch(x, 0, y));
+      return column().props.onMoveShouldSetResponder(touch(x, 0, y));
     };
     expect(steal(250, 305)).toBe(true);
     // Scrolling up and down, a tap that wobbles, and a pull to the right are the list's own.
@@ -600,5 +785,6 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     await open({ chats: two });
     expect(screen.queryByTestId("chats-edge", { hidden: true })).toBeNull();
     expect(column().props.onMoveShouldSetResponderCapture).toBeUndefined();
+    expect(column().props.onMoveShouldSetResponder).toBeUndefined();
   });
 });

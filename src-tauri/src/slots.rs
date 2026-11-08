@@ -49,6 +49,65 @@ pub struct Slot {
     pub settings_note: Mutex<Option<String>>,
     /// Whether the chat's pre-hook is due, and where its post-hook stands (see hooks.rs).
     pub hooks: crate::hooks::SlotHooks,
+    /// A message on its way to claude, and a Stop pressed meanwhile (see `Sending`).
+    pub sending: Sending,
+}
+
+/// A message on its way to claude. Sending holds the session while the folder's restore point is taken (up to 8 seconds),
+/// and Stop needed the same session to interrupt: a Stop pressed just after Send waited for all of it, while the window
+/// already said "stopped". Now Stop says so here instead: the send stops waiting for the restore point, sends, and
+/// interrupts at once. The message still goes, so the turn ends as any stopped turn does, on every client.
+#[derive(Default)]
+pub struct Sending {
+    on: std::sync::atomic::AtomicBool,
+    stop: std::sync::atomic::AtomicBool,
+    now: tokio::sync::Notify,
+}
+
+/// While it lives, a message is on its way.
+pub struct OnItsWay<'a>(&'a Sending);
+
+impl Drop for OnItsWay<'_> {
+    fn drop(&mut self) {
+        self.0.on.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Sending {
+    /// A message starts on its way; a Stop from before it isn't its.
+    pub fn begin(&self) -> OnItsWay<'_> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.stop.store(false, SeqCst);
+        self.on.store(true, SeqCst);
+        OnItsWay(self)
+    }
+
+    /// Stop was pressed. True when a message is on its way: it will interrupt once it's in.
+    pub fn stop(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        if !self.on.load(SeqCst) {
+            return false;
+        }
+        self.stop.store(true, SeqCst);
+        self.now.notify_waiters();
+        true
+    }
+
+    /// Resolves when Stop is pressed for the message on its way (at once if it already was).
+    pub async fn stopped(&self) {
+        let notified = self.now.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if self.stop.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        notified.await;
+    }
+
+    /// Whether a Stop came for this message and hasn't been acted on: whoever takes it interrupts.
+    pub fn take(&self) -> bool {
+        self.stop.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -83,7 +142,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { control: Default::default(), models: Default::default(), session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), pin: Default::default(), settings_note: Mutex::new(None), hooks: Default::default() });
+        let slot = Arc::new(Slot { control: Default::default(), models: Default::default(), session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default(), pin: Default::default(), settings_note: Mutex::new(None), hooks: Default::default(), sending: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -166,6 +225,28 @@ impl Slot {
 mod tests {
     use super::*;
     use tokio::sync::mpsc;
+
+    /// A Stop while a message is on its way is that message's to act on, once; one with nothing on its way isn't kept.
+    #[tokio::test]
+    async fn a_stop_while_sending_is_taken_once_and_wakes_the_wait() {
+        let sending = Arc::new(Sending::default());
+        assert!(!sending.stop(), "nothing on its way");
+        let way = sending.begin();
+        assert!(!sending.take(), "the earlier Stop isn't this message's");
+        let waiting = tokio::spawn({
+            let sending = sending.clone();
+            async move { sending.stopped().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(sending.stop());
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiting).await.expect("the wait ends").unwrap();
+        // Already stopped: waiting again ends at once.
+        tokio::time::timeout(std::time::Duration::from_secs(1), sending.stopped()).await.expect("ends at once");
+        assert!(sending.take());
+        assert!(!sending.take());
+        drop(way);
+        assert!(!sending.stop(), "sent: a Stop now is the turn's");
+    }
 
     /// The test itself is what connects here, in-process.
     fn this_process(_: Arc<std::sync::atomic::AtomicU32>) -> CallerAuth {

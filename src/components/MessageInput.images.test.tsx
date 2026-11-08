@@ -49,6 +49,23 @@ describe("a picture pasted into the box", () => {
     expect(screen.getByRole("status").textContent).toBe("Pictures go once Claude is done");
   });
 
+  it("is still there after switching to another chat and back", async () => {
+    let text = "";
+    let images: Record<number, PastedImage> = {};
+    const draft = () => ({ initial: text, save: (t: string) => (text = t), images, saveImages: (i: Record<number, PastedImage>) => (images = i) });
+    const { unmount } = render(box({ draft: draft() }));
+    fireEvent.change(area(), { target: { value: "look " } });
+    await pasteScreenshot();
+    unmount();
+    // The box is drawn anew for the chat it comes back to.
+    const onSend = vi.fn();
+    render(box({ onSend, draft: draft() }));
+    expect(area().value).toBe("look [Image #1]");
+    fireEvent.keyDown(area(), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("look [Image #1]", expect.anything(), [shot]);
+    expect(images).toEqual({});
+  });
+
   it("is left to the page for a provider that can't take pictures", async () => {
     render(box({ provider: { id: "codex", capabilities: { supports_images: false } } as Parameters<typeof MessageInput>[0]["provider"] }));
     await pasteScreenshot();

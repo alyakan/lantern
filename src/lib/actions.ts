@@ -38,6 +38,16 @@ const CATALOGUE = [
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },
   { id: "find-in-file", title: "Find in File", group: "Search", key: "f", menu: true },
   { id: "toggle-changes", title: "Show/Hide Side Panel", group: "View", key: "\\", menu: true, native: true },
+  // ⌘1 to ⌘9: the side panel's tabs, in the order its strip shows them (as a browser's tabs).
+  { id: "pane-tab-1", title: "Side Panel Tab 1", group: "View", key: "1", skipInEditor: true },
+  { id: "pane-tab-2", title: "Side Panel Tab 2", group: "View", key: "2", skipInEditor: true },
+  { id: "pane-tab-3", title: "Side Panel Tab 3", group: "View", key: "3", skipInEditor: true },
+  { id: "pane-tab-4", title: "Side Panel Tab 4", group: "View", key: "4", skipInEditor: true },
+  { id: "pane-tab-5", title: "Side Panel Tab 5", group: "View", key: "5", skipInEditor: true },
+  { id: "pane-tab-6", title: "Side Panel Tab 6", group: "View", key: "6", skipInEditor: true },
+  { id: "pane-tab-7", title: "Side Panel Tab 7", group: "View", key: "7", skipInEditor: true },
+  { id: "pane-tab-8", title: "Side Panel Tab 8", group: "View", key: "8", skipInEditor: true },
+  { id: "pane-tab-9", title: "Side Panel Tab 9", group: "View", key: "9", skipInEditor: true },
   { id: "command-palette", title: "Command Palette…", group: "View", key: "p", shift: true, menu: true, native: true },
   { id: "settings", title: "Settings…", group: "View", key: ",", menu: true, native: true },
   // Ways to start work (the Work menu): Build, Debug and Design are Step by step in that flavour, Review a PR lists the

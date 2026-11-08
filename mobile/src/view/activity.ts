@@ -56,6 +56,7 @@ export function activityOf(items: Item[], thinking: boolean): string {
     if (it.kind === "step" && !it.done) return stepActivity(it);
     if (it.kind === "assistant" && it.streaming) return "Writing";
     if (it.kind === "hook") return "Running your post-hook";
+    if (it.kind === "compact" && it.state === "running") return "Compacting the chat";
   }
   return thinking ? "Thinking" : "Working";
 }

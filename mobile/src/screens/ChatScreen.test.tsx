@@ -5,7 +5,7 @@ import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
-import { ChatScreen, PAGES_STALL_MS } from "./ChatScreen";
+import { ChatScreen, PAGES_STALL_MS, readableSide } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
@@ -50,6 +50,13 @@ const withSession = async (events: RemoteEvent[], over = {}, answers = {}, chatO
 };
 
 describe("a chat", () => {
+  it("on a wide screen, is a readable column in the middle: 760 points, with the rest either side", () => {
+    expect(readableSide(1024)).toBe(132);
+    expect(readableSide(760)).toBe(0);
+    // A phone is narrower than the column: nothing changes.
+    expect(readableSide(402)).toBe(0);
+  });
+
   it("reads as a timeline: your message with its time, Claude's text, a row of chips, and how long it took", async () => {
     await withSession(turn);
     expect(screen.getByText("Release 0.1.53")).toBeTruthy();
@@ -691,11 +698,28 @@ describe("a chat", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy());
   });
 
-  it("won't take a message when it isn't connected (the app's pill says why)", async () => {
+  it("takes a message while the Mac is out of reach, shows it waiting, and sends it once a connection is up", async () => {
     const { controller } = makeController();
     await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: { kind: "offline", reason: "x", retryInMs: 1000 } }, controller);
+    // It had spoken to this run of the Mac before the link went.
+    const asked: unknown[] = [];
+    const session = { welcome: { epoch: 0 }, ask: async (r: unknown) => (asked.push(r), null) } as never;
+    await act(async () => controller.sync.onSession(session));
     expect(screen.queryByText(/Not connected to your Mac/)).toBeNull();
-    expect(screen.getByLabelText("Message").props.editable).toBe(false);
+    expect(screen.getByLabelText("Message").props.editable).not.toBe(false);
+    await fireEvent.changeText(screen.getByLabelText("Message"), "Carry on when you can");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await act(async () => controller.sync.flush());
+    expect(screen.getByText("Waiting for your Mac · sends when it's back")).toBeTruthy();
+    await act(async () => {
+      controller.sync.onSession(session);
+      // The Mac's chat list comes first on a connection: what waited is checked against it.
+      controller.sync.onPushed({ type: "chats", chats: [chat()] });
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => controller.sync.flush());
+    expect(asked).toContainEqual(expect.objectContaining({ op: "send", slot: "a", text: "Carry on when you can" }));
+    expect(screen.queryByText("Waiting for your Mac · sends when it's back")).toBeNull();
   });
 
   it("draws a chat that comes in pages once, when it is whole, keeping what it showed until then", async () => {

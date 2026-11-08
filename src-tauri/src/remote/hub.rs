@@ -167,6 +167,7 @@ impl Log {
             // The hook's own steps and words: the row goes on showing the answer the user is waiting to read.
             _ if self.hook_turn => {}
             UiEvent::Thinking { parent: None } => self.doing = Some("Thinking".into()),
+            UiEvent::Compacting => self.doing = Some("Compacting the chat".into()),
             UiEvent::ToolStarted { parent: None, name, summary, .. } => self.doing = preview_line(&format!("{name} {summary}")),
             UiEvent::AssistantText { parent: None, text, .. } => {
                 self.doing = None;
@@ -190,6 +191,8 @@ impl Log {
             // The agent itself (following up on its own too). A helper still at work after the turn ended isn't: no turn would
             // end to say it stopped, and the chat would look busy for good, with nothing for Stop to stop and Clear refused.
             UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. } => self.working = true,
+            // Both Claude's /compact and Codex's compaction end with a turn's end, which makes the chat free again.
+            UiEvent::Compacting => self.working = true,
             UiEvent::TurnDone { context_window, .. } => {
                 self.working = false;
                 self.window = context_window.or(self.window);
@@ -367,7 +370,7 @@ fn now_ms() -> u64 {
 
 /// The agent itself at work (not a helper's steps): what makes a chat "working" in `Log::note`.
 fn is_agent_work(event: &UiEvent) -> bool {
-    matches!(event, UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. })
+    matches!(event, UiEvent::Thinking { parent: None } | UiEvent::TextDelta { parent: None, .. } | UiEvent::ToolStarted { parent: None, .. } | UiEvent::Compacting)
 }
 
 fn event_name(event: &UiEvent) -> &'static str {
@@ -682,6 +685,20 @@ mod tests {
         assert!(!hub.extras("a").iter().any(|e| matches!(e, super::super::protocol::RemoteEvent::Commands { commands } if !commands.is_empty())));
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
         assert_eq!(hub.chat("a").unwrap().session_id, None);
+    }
+
+    #[test]
+    fn a_chat_being_compacted_is_working_until_its_turn_ends() {
+        let hub = hub();
+        feed(&hub, "a", vec![user("fix it"), done()]);
+        feed(&hub, "a", vec![UiEvent::Compacting]);
+        let chat = hub.chat("a").unwrap();
+        assert_eq!((chat.status, chat.preview.as_deref()), (ChatStatus::Working, Some("Compacting the chat")));
+        // Compacted mid-turn (Claude Code ran out of room) the turn goes on: only its end makes the chat free.
+        feed(&hub, "a", vec![UiEvent::Compacted]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Working);
+        feed(&hub, "a", vec![done()]);
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Idle);
     }
 
     #[test]

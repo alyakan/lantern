@@ -63,6 +63,8 @@ struct TurnStats {
     baseline: Option<u64>,
     declined: usize,
     retries: u64,
+    /// The conversation was compacted in this turn: Codex can say so twice (the thread's notification, and the item's end).
+    compacted: bool,
 }
 
 pub struct CodexMapper {
@@ -96,7 +98,7 @@ impl CodexMapper {
                 }
             },
             "turn/started" => { self.turn = TurnStats::default(); m.events.push(UiEvent::Thinking { parent: None }); },
-            "thread/compacted" => m.events.push(UiEvent::Compacted),
+            "thread/compacted" => self.compacted(&mut m),
             "item/started" => self.item_started(&p["item"], &mut m),
             "item/completed" => self.item_completed(&p["item"], &mut m),
             "item/agentMessage/delta" => {
@@ -124,7 +126,16 @@ impl CodexMapper {
         m
     }
 
+    /// One compaction, however many ways Codex tells of it.
+    fn compacted(&mut self, m: &mut Mapped) {
+        if !std::mem::replace(&mut self.turn.compacted, true) {
+            m.events.push(UiEvent::Compacted);
+        }
+    }
+
     fn item_started(&mut self, item: &Value, m: &mut Mapped) {
+        // Compacting takes a while: the chat says so until it ends.
+        if item["type"] == "contextCompaction" { m.events.push(UiEvent::Compacting); return; }
         let id = str_of(item, "id");
         match item["type"].as_str().unwrap_or("") {
             "reasoning" => {
@@ -160,7 +171,7 @@ impl CodexMapper {
     }
 
     fn item_completed(&mut self, item: &Value, m: &mut Mapped) {
-        if item["type"] == "contextCompaction" { m.events.push(UiEvent::Compacted); return; }
+        if item["type"] == "contextCompaction" { self.compacted(m); return; }
 
         let id = str_of(item, "id");
         match item["type"].as_str().unwrap_or("") {
@@ -968,6 +979,22 @@ mod tests {
         let done = n(&mut m, "item/completed", json!({"item": {"type": "fileChange", "id": "f", "changes": [change], "status": "completed"}}));
         assert!(done.edits.is_empty());
         assert!(done.events.iter().any(|e| matches!(e, UiEvent::EditApplied { .. })));
+    }
+
+    #[test]
+    fn a_compaction_is_told_once_from_start_to_end() {
+        let mut m = CodexMapper::new(Path::new("/p"));
+        n(&mut m, "turn/started", json!({}));
+        let started = n(&mut m, "item/started", json!({"item": {"type": "contextCompaction", "id": "c1"}}));
+        assert_eq!(started.events, vec![UiEvent::Compacting]);
+        // The item's end and the thread's notification are the same compaction.
+        let mut ends = n(&mut m, "item/completed", json!({"item": {"type": "contextCompaction", "id": "c1"}})).events;
+        ends.extend(n(&mut m, "thread/compacted", json!({"threadId": "t"})).events);
+        assert_eq!(ends, vec![UiEvent::Compacted]);
+        // The next turn's is a compaction of its own.
+        n(&mut m, "turn/completed", json!({"turn": {"status": "completed"}}));
+        n(&mut m, "turn/started", json!({}));
+        assert_eq!(n(&mut m, "thread/compacted", json!({"threadId": "t"})).events, vec![UiEvent::Compacted]);
     }
 
     #[test]

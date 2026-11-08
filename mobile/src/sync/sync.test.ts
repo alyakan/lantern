@@ -1,6 +1,7 @@
 import type { Request } from "../protocol/generated/Request";
 import { ANSWER_WAIT, UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
-import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import { RESTARTED, Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import type { Held, OutboxStore } from "../outbox";
 
 /** A session that records what it was asked and answers from a table. */
 function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}, features: string[] = []) {
@@ -67,6 +68,38 @@ describe("the phone's sync", () => {
     sync.onSession(second.session);
     await settle();
     expect(second.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
+  });
+
+  it("lets go of the open chats while the app is in the back, so the Mac pushes about them, and follows them again from where they were", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7);
+    sync.onSession(s.session);
+    sync.follow("a");
+    await settle();
+    sync.onPushed(delta(12, "hi"));
+    frame();
+    sync.setAway(true);
+    await settle();
+    expect(s.asked).toContainEqual({ op: "unsubscribe", slot: "a" });
+    // A connection that comes up while away follows nothing; one opened while away waits too.
+    const away = fakeSession(7);
+    sync.onSession(away.session);
+    sync.follow("b");
+    await settle();
+    expect(away.asked.filter((r) => r.op === "subscribe")).toEqual([]);
+    // Back in front: nothing until the link is known to work, then both, the first from where it was.
+    sync.setAway(false);
+    await settle();
+    expect(away.asked.filter((r) => r.op === "subscribe")).toEqual([]);
+    sync.onStillUp(away.session);
+    await settle();
+    expect(away.asked).toContainEqual({ op: "subscribe", slot: "a", after: 12, epoch: 7 });
+    expect(away.asked).toContainEqual({ op: "subscribe", slot: "b", after: 0, epoch: 7 });
+    // A link that was dialled again in the meantime is the new one's to follow: the old one's word is ignored.
+    const before = away.asked.length;
+    sync.onStillUp(s.session);
+    await settle();
+    expect(away.asked).toHaveLength(before);
   });
 
   it("keeps the last few closed chats' messages and lets older ones go, so a long session doesn't hold every chat", async () => {
@@ -481,5 +514,98 @@ describe("what a phone may choose for a chat", () => {
       { op: "new_chat", project: "/p", text: "hi", permissions: "ask", preset: null, workflow: null, provider: "gateway:ollama" },
     ]);
     expect("provider" in (asked.filter((r) => r.op === "new_chat")[1] as object)).toBe(false);
+  });
+
+  describe("messages written while the Mac was out of reach", () => {
+    const memoryStore = (start: Held[] = [], epoch: number | null = null, slow?: Promise<void>) => {
+      let kept = { held: start, epoch };
+      const store: OutboxStore = { load: async () => (await slow, kept), save: async (k) => void (kept = { held: [...k.held], epoch: k.epoch }) };
+      return { store, kept: () => kept.held, epoch: () => kept.epoch };
+    };
+    const held = (sync: Sync) => sync.getState().views.a.items.find((it) => it.kind === "user");
+    const chatList = (project: string | null = "web"): Pushed => ({ type: "chats", chats: [{ slot: "a", title: null, project, status: "idle", last_seq: 1, active_at: 1, permissions: null, preset: null, project_color: null, workflow: null }] });
+    /** A connection as the Mac makes one: welcome, then its chat list first. */
+    const connect = async (sync: Sync, epoch: number, project: string | null = "web") => {
+      const s = fakeSession(epoch);
+      sync.onSession(s.session);
+      sync.onPushed(chatList(project));
+      await settle();
+      return s;
+    };
+    const sent = (s: ReturnType<typeof fakeSession>) => s.asked.filter((r) => r.op === "send").map((r) => (r as { text: string }).text);
+
+    it("go in the order written once the same Mac run is back, and are kept on the phone until then", async () => {
+      const { store, kept } = memoryStore();
+      let n = 0;
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => ++n, newId: () => `m-${n}`, outbox: store });
+      await connect(sync, 7);
+      sync.hold("a", "first");
+      sync.hold("a", "second");
+      await settle();
+      expect(kept().map((h) => [h.text, h.epoch, h.project])).toEqual([["first", 7, "web"], ["second", 7, "web"]]);
+      expect(held(sync)).toMatchObject({ held: true });
+      const back = await connect(sync, 7);
+      expect(sent(back)).toEqual(["first", "second"]);
+      expect(kept()).toEqual([]);
+    });
+
+    it("aren't sent when the Mac came back as another run (its chats are named afresh), and say why with no Try again", async () => {
+      const { store, kept } = memoryStore();
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-1", outbox: store });
+      await connect(sync, 7);
+      sync.hold("a", "for project A");
+      const restarted = await connect(sync, 8);
+      expect(sent(restarted)).toEqual([]);
+      expect(held(sync)).toMatchObject({ failed: RESTARTED, stale: true, held: false });
+      expect(kept()).toEqual([]);
+    });
+
+    it("aren't sent when their chat is now another project's, in the same run", async () => {
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-1", outbox: memoryStore().store });
+      await connect(sync, 7, null);
+      sync.hold("a", "for the empty chat");
+      const back = await connect(sync, 7, "billing");
+      expect(sent(back)).toEqual([]);
+      expect(held(sync)).toMatchObject({ failed: RESTARTED, stale: true });
+    });
+
+    it("written before any connection this launch, are for the Mac run the phone last spoke to", async () => {
+      const { store, epoch } = memoryStore([], 7);
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-1", outbox: store });
+      await sync.restoreHeld();
+      sync.hold("a", "on the train");
+      const back = await connect(sync, 7, null);
+      expect(sent(back)).toEqual(["on the train"]);
+      await connect(sync, 9);
+      expect(epoch()).toBe(9);
+    });
+
+    it("show again waiting after the app was closed, and go to the run they were written for", async () => {
+      const { store } = memoryStore([{ slot: "a", text: "kept", clientId: "m-9", epoch: 7, at: 50, project: "web" }]);
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, outbox: store });
+      await sync.restoreHeld();
+      expect(held(sync)).toMatchObject({ id: "local-m-9", text: "kept", held: true });
+      const back = await connect(sync, 7);
+      expect(back.asked).toContainEqual(expect.objectContaining({ op: "send", text: "kept", client_id: "m-9" }));
+    });
+
+    it("aren't lost when a connection comes before they are read back, and go before what was written since", async () => {
+      let read: () => void = () => {};
+      const slow = new Promise<void>((r) => (read = r));
+      const { store, kept } = memoryStore([{ slot: "a", text: "older", clientId: "m-9", epoch: 7, at: 50, project: "web" }], 7, slow);
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => 100, newId: () => "m-10", outbox: store });
+      void sync.restoreHeld();
+      const back = fakeSession(7);
+      sync.onSession(back.session);
+      sync.onPushed(chatList());
+      sync.hold("a", "newer");
+      await settle();
+      // Nothing was written over what is kept while it was still being read.
+      expect(kept().map((h) => h.text)).toEqual(["older"]);
+      read();
+      await settle();
+      expect(sent(back)).toEqual(["older", "newer"]);
+      expect(kept()).toEqual([]);
+    });
   });
 });

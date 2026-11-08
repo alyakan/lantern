@@ -1174,6 +1174,8 @@ button { transition: background-color var(--dur-1) var(--ease-out), border-color
 .mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
 button:focus-visible, [tabindex]:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
+/* On the toolbar's glass and in the side panel's tabs (a strip that scrolls, and so clips): the accent, drawn inside. */
+.toolbar-group button:focus-visible, .pane-tabs-track button:focus-visible, .viewer button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
 button.ghost { border-color: transparent; background: none; color: var(--text-2); padding: 2px 8px; }
@@ -1189,7 +1191,7 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .counts { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: calc(11px * var(--font-scale)); flex: none; }
 .added { color: var(--add); }
 .removed { color: var(--del); }
-.chev { width: 5px; height: 5px; margin: 0 3px 0 1px; flex: none; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.7; transform: rotate(-45deg); transition: transform 0.12s; }
+.chev { width: 5px; height: 5px; margin: 0 3px 0 1px; flex: none; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.7; transform: rotate(-45deg); transition: transform var(--dur-1) var(--ease-out); }
 [aria-expanded="true"] > .chev, .chev.down { transform: rotate(45deg); margin-top: -3px; }
 .spinner { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--line-strong); border-top-color: var(--working); animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1207,17 +1209,21 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .toolbar-group button.icon.pressed { background: var(--bg-active); color: var(--text); }
 .title-center .folder-menu { left: 0; width: auto; min-width: 360px; right: 80px; }
 .pane-toggle { position: relative; }
-.pane-toggle.active { color: var(--text-2); }
+/* On (the side panel open), it is filled like any toolbar button that is pressed in, not only a shade darker. */
+.pane-toggle.active { background: var(--bg-active); color: var(--text); }
 .pane-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
 /* On the history button: a chat is running in the background. */
 .title-center button.icon { position: relative; }
 .canvas-toggle, .settings-button, .storage-button { position: relative; }
 .storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
-.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; min-width: 0; max-width: 220px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A narrow window: the phones chip is its dot alone (its title still says what it is). */
+@media (max-width: 900px) { .phones-label { display: none; } .phones-connected { gap: 0; padding: 0 8px; } }
 .phones-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--add); flex: none; }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
-.title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.title-center .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */
 .title-center .dot.unread { background: var(--unread); }
 /* Xcode's activity viewer: "acme-api › main" on the left, the status on the right, a progress bar underneath. */
@@ -1274,11 +1280,13 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .chat-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 8px; display: flex; flex-direction: column; gap: 10px; }
 /* Back to the end: a small pill over the bottom of the scrolled view, just above the chat box. */
-.jump-latest { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 5; width: max-content; margin: 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px 0 10px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--field) 92%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); box-shadow: var(--shadow); animation: jump-in 0.2s ease-out; }
+.jump-latest { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 5; width: max-content; margin: 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px 0 10px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--field) 92%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); box-shadow: var(--shadow); transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out), background-color var(--dur-1); }
+/* Kept on the page out of sight, so it can leave as smoothly as it came. */
+.jump-latest.away { opacity: 0; transform: translateY(6px); pointer-events: none; }
 .jump-latest:hover:not(:disabled) { background: var(--field); color: var(--text); }
 .jump-latest-arrow { font-size: calc(12px * var(--font-scale)); }
 @keyframes jump-in { from { opacity: 0; transform: translateY(6px); } }
-@media (prefers-reduced-motion: reduce) { .jump-latest { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .jump-latest { transition: none; } }
 .chat > :first-child { margin-top: 16px; }
 /* A conversation starts with its first prompt band flush against the card's top edge. */
 .chat > .turn-section:first-child { margin-top: 0; }
@@ -1321,17 +1329,17 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .code-block { margin: 0 0 10px; border: 1px solid var(--md-pre-line); border-radius: var(--radius-md); background: var(--md-pre-bg); overflow: hidden; }
 .code-block-head { display: flex; align-items: center; height: 26px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--md-pre-line); background: var(--md-pre-head-bg); font-size: calc(11px * var(--font-scale)); color: var(--md-pre-head-text); }
 .code-block-lang { flex: 1; font-weight: 500; letter-spacing: 0.02em; text-transform: var(--label-case); }
-button.code-block-copy { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--md-pre-head-text); font-size: calc(11px * var(--font-scale)); opacity: 0; transition: opacity 0.12s; }
+button.code-block-copy { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--md-pre-head-text); font-size: calc(11px * var(--font-scale)); opacity: 0; transition: opacity var(--dur-1) var(--ease-out); }
 .code-block:hover .code-block-copy, .code-block-copy:focus-visible { opacity: 1; }
 button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 /* Under a message: Copy and the rest, there on hover or keyboard focus only. */
-.msg-actions { display: flex; gap: 2px; margin: 2px 0 8px; opacity: 0; transition: opacity 0.12s; }
+.msg-actions { display: flex; gap: 2px; margin: 2px 0 8px; opacity: 0; transition: opacity var(--dur-1) var(--ease-out); }
 .msg-actions.end { justify-content: flex-end; }
 .msg:hover + .msg-actions, .msg-actions:hover, .msg-actions:focus-within { opacity: 1; }
 button.msg-action { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted-text); font-size: calc(11px * var(--font-scale)); }
 button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 button.msg-action:disabled { opacity: 0.5; cursor: default; }
-.msg.assistant .code-block pre { margin: 0; border-radius: 0; background: none; }
+.msg.assistant .code-block pre { margin: 0; border-radius: 0; background: none; line-height: 1.55; }
 .code-block-colored code { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); line-height: 1.55; white-space: pre; }
 .code-block-colored code br:last-child { display: none; }
 /* A diff block: each line tinted by what it does (added, removed, a hunk header or file line), full width. */
@@ -1398,6 +1406,9 @@ button.msg-action:disabled { opacity: 0.5; cursor: default; }
 }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
 @media (prefers-reduced-motion: reduce) { .activity.live > .activity-line:first-child .activity-text { animation: none; color: var(--text-2); background: none; } }
+/* A card waits for the user: the step it came from isn't working either, so it neither sweeps nor spins. */
+.chat-wrap.waiting .activity.live > .activity-line:first-child .activity-text { animation: none; color: var(--text-2); background: none; }
+.chat-wrap.waiting .activity.live .spinner { animation: none; border-color: var(--attn); opacity: 0.6; }
 /* Narration between steps, shown only in the expanded timeline. */
 .step-note { margin: 3px 0; padding: 0 6px; font-size: calc(12px * var(--font-scale)); line-height: 1.5; color: var(--muted); }
 .step-note p { margin: 0; }
@@ -1414,7 +1425,7 @@ button.msg-action:disabled { opacity: 0.5; cursor: default; }
 .step-stopped .step-name, .step-stopped .step-target { color: var(--muted); }
 .step-output { margin: 2px 0 6px 6px; padding: 8px 10px; background: var(--code-bg); border-radius: var(--radius-inner); max-height: 280px; overflow: auto; white-space: pre-wrap; color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); }
 .step-children { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 6px; padding: 8px 0 8px 12px; border-left: 1px solid var(--line-strong); }
-.edit-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); background: var(--bg-subtle); padding: 3px 8px; font-size: calc(12px * var(--font-scale)); font-family: var(--mono); color: var(--text-2); border-radius: var(--radius-inner); }
+.edit-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); background: var(--bg-subtle); padding: 3px 8px; font-size: calc(12px * var(--font-scale)); font-family: var(--mono); color: var(--text-2); border-radius: var(--radius-md); }
 .edit-line:hover:not(:disabled) { border-color: var(--line-strong); background: var(--bg-hover); color: var(--text); }
 .edit-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
 .edit-head { display: flex; align-items: center; gap: 4px; max-width: 100%; }
@@ -1468,8 +1479,24 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .permission-done.allowed .decision { color: var(--add); }
 .permission-done.denied .decision { color: var(--del); }
 .permission-done-detail { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
-.turn-note { font-size: calc(12px * var(--font-scale)); }
+.turn-note { font-size: calc(12px * var(--font-scale)); display: flex; flex-direction: column; gap: 4px; }
 .turn-note .error { color: var(--del); }
+.turn-stopped { display: flex; align-items: center; gap: 6px; }
+.stop-mark { width: 7px; height: 7px; border-radius: 1.5px; background: currentColor; opacity: 0.7; flex: none; }
+/* A turn that failed: a card, as a waiting prompt is, with what went wrong and Retry beside it. */
+.turn-error { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--del) 40%, var(--line)); border-left: 3px solid var(--del); border-radius: var(--radius-md); background: color-mix(in srgb, var(--del) 6%, var(--bg-subtle)); color: var(--text); }
+.turn-error-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn-retry { flex: none; height: 22px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+.turn-stopped .turn-retry { margin-left: 4px; }
+/* A card waiting for the user stands out from the work around it, in the amber that marks waiting everywhere else. */
+.permission { border-color: color-mix(in srgb, var(--attn) 55%, var(--line-strong)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--attn) 13%, transparent); }
+/* The line under the chat while a card waits: no spinner, Claude isn't working. */
+.waiting-line .activity-line { cursor: default; }
+.waiting-line .activity-line:hover { background: none; }
+.waiting-line .activity-text { color: var(--muted); }
+.waiting-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--attn); flex: none; animation: waiting-pulse 1.8s var(--ease-out) infinite; }
+@keyframes waiting-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .waiting-dot { animation: none; } }
 
 /* Composer. Docked under the chat once a conversation exists; floated in the middle (.hero-wrap) while empty. */
 .hero-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 24px 12vh; }
@@ -1498,7 +1525,7 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .pill:hover:not(:disabled) { background: var(--bg-hover); }
 .pill:disabled { opacity: 1; }
 .pill .chev { margin-left: 2px; }
-.composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 8px 8px 12px; background: var(--field); cursor: text; transition: border-color 0.12s; }
+.composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 8px 8px 12px; background: var(--field); cursor: text; transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
 /* Slash commands: opens above the chat box as you type "/". */
 .slash-menu { bottom: calc(100% + 6px); left: 0; right: 0; max-height: 300px; margin: 0; cursor: default; }
 .slash-list, .slash-section-items { list-style: none; margin: 0; padding: 0; }
@@ -1516,7 +1543,7 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .slash-name { flex: none; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); color: var(--text); }
 .slash-hint { flex: none; font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); color: var(--faint); }
 .slash-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
-.composer-box:focus-within { border-color: var(--faint); }
+.composer-box:focus-within { border-color: var(--faint); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* While Claude works, a soft highlight travels around the box's border (a rotating gradient masked to the edge). */
 @property --sweep { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 .composer-box.working { border-color: var(--line-strong); }
@@ -1538,7 +1565,7 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 @media (prefers-reduced-motion: reduce) { .composer-box.working::before { animation: none; background: none; } }
 /* Messages typed while Claude works, waiting for the turn to end. */
 .queue { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
+.queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .queue-label { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 button.queue-text { flex: 1; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 /* Text on a row, not a control: the pointer never paints it. */
@@ -1622,13 +1649,13 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
 /* No overflow: hidden on the pane itself so the file picker menu can extend past it; the diff clips its own corner. */
 .review { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--pane); box-shadow: var(--pane-edge); }
 /* Changes | Files as a macOS segmented control. */
-.pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 10px; }
+.pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 48px; flex: none; padding: 0 10px; }
 /* In the narrowest the pane gets, with every tab there is, the tabs tighten and the filter keeps a few letters. */
 @container (max-width: 540px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
-.pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
-.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 32px; align-items: center; padding: 0 3px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
+.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 26px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
 .pane-tabs-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
 .pane-tabs-track button.active:hover { background: var(--seg-thumb); }
@@ -2465,6 +2492,9 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .auto-turn-more { display: block; padding: 0; font-size: inherit; }
 .auto-turn > span:nth-child(2) { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .auto-turn-time { font-variant-numeric: tabular-nums; }
+/* Where the conversation was compacted: a quiet line across the chat, with its words in the middle. */
+.compact-line { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.compact-line::before, .compact-line::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 /* A post-hook and what Claude did for it: one line like an auto turn's note, with the work folded under it until it is opened. */
 .hook-card { margin: 6px 0 2px; }
 .hook-card-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 0; border: none; background: none; text-align: left; font: inherit; font-size: calc(12px * var(--font-scale)); color: var(--muted); cursor: pointer; }
@@ -2764,7 +2794,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .send.run:not(:disabled) { background: var(--term-bright); color: var(--term-bg); box-shadow: var(--term-glow-strong); }
 .send.run:hover:not(:disabled) { background: var(--term-bright); opacity: 0.85; }
 .send.run:disabled { color: var(--term-dim); }
-.shell-block { border: 1px solid var(--term-line); border-radius: var(--radius-inner); background: var(--term-bg); color: var(--term-text); font-family: var(--mono); overflow: hidden; }
+.shell-block { border: 1px solid var(--term-line); border-radius: var(--radius-md); background: var(--term-bg); color: var(--term-text); font-family: var(--mono); overflow: hidden; }
 .shell-head { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 8px 5px 10px; font-size: calc(12px * var(--font-scale)); }
 .shell-prompt { flex: none; color: var(--term-bright); text-shadow: var(--term-glow-strong); }
 .shell-command { flex: 1; min-width: 0; color: var(--term-hi); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: auto; }
@@ -2778,7 +2808,7 @@ button.shell-more { display: block; margin: 0 0 4px 26px; padding: 0; border: no
 button.shell-more:hover { color: var(--term-text); }
 .shell-output { margin: 0; padding: 0 10px 9px 26px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(11.5px * var(--font-scale)); line-height: 1.5; color: var(--term-out); background: none; user-select: text; cursor: auto; }
 /* A running command asking something: its question, and the field to answer it. */
-.shell-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 8px 8px 26px; padding: 8px 8px 8px 10px; border: 1px solid color-mix(in srgb, var(--term-bright) 35%, var(--term-line)); border-radius: var(--radius-inner); background: color-mix(in srgb, var(--term-bright) 6%, var(--term-bg)); box-shadow: 0 0 14px color-mix(in srgb, var(--term-bright) 8%, transparent); animation: jump-in 0.15s ease-out; }
+.shell-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 8px 8px 26px; padding: 8px 8px 8px 10px; border: 1px solid color-mix(in srgb, var(--term-bright) 35%, var(--term-line)); border-radius: var(--radius-inner); background: color-mix(in srgb, var(--term-bright) 6%, var(--term-bg)); box-shadow: 0 0 14px color-mix(in srgb, var(--term-bright) 8%, transparent); animation: jump-in var(--dur-1) var(--ease-out); }
 .shell-ask-label { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px; }
 .shell-ask-prompt { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--term-hi); }
 .shell-ask-field { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border: 1px solid var(--term-line); border-radius: var(--radius-chip); background: var(--term-field); color: var(--term-text); font: calc(12px * var(--font-scale)) var(--mono); caret-color: var(--term-bright); outline: none; }
@@ -4761,6 +4791,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(12px) scale(0.995); } }
 @keyframes fade-in { from { opacity: 0; } }
+/* What arrives in a chat while you watch (a message, a step, a card, what a step opens to): it settles in rather than
+   appearing in one frame. Marked by the chat itself, only for what came after it was first drawn (see ChatView). Only its
+   look moves, never its height, so the place being read stays put. */
+.chat .enter { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
+/* A reply still coming in ends in a soft caret after its words, so it reads as being written (not after code, a list or a table). */
+.msg.assistant.streaming > :is(p, h1, h2, h3, h4):last-child::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.15em; border-radius: 1px; background: currentColor; opacity: 0.45; animation: caret-blink 1.1s steps(2, start) infinite; }
+@keyframes caret-blink { to { visibility: hidden; } }
+.aside { animation: sheet-in var(--dur-2) var(--ease-out) backwards; }
+.queue-item { animation: view-in-sm var(--dur-2) var(--ease-out) backwards; }
 /* The Desk's home, a project's page, and the chat card: each mounts on its own, so each rises in once as it appears. */
 .desk-main > .desk-bento, .desk-project-page { animation: view-in var(--dur-3) var(--ease-out) backwards; }
 .chat-pane { animation: view-in var(--dur-2) var(--ease-out) backwards; }
@@ -4778,7 +4817,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: translateY(-1px); box-shadow: var(--shadow); }
 .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link { transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
-  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet { animation: none; }
+  .desk-main > .desk-bento, .desk-project-page, .chat-pane, .yw-fgrid, .yw-fpage, .tab-body, .chat-wrap, .editable-editor, .menu, .mb-card, .usage-pop, .canvas-modal, .desk-ask-overlay, .confirm-dialog, .desk-ask-sheet, .chat .enter, .aside, .queue-item { animation: none; }
+  .chev, .msg-actions, button.code-block-copy, .composer-box { transition: none; }
+  .msg.assistant.streaming > :is(p, h1, h2, h3, h4):last-child::after { animation: none; }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }

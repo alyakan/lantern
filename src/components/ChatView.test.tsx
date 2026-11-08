@@ -37,6 +37,104 @@ describe("ChatView", () => {
     expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
   });
 
+  it("follows the end for as long as the pill back to it isn't showing, with no stretch where neither does", () => {
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const { container, rerender } = render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} {...props} />);
+    const chat = container.querySelector(".chat") as HTMLElement;
+    let height = 2000;
+    Object.defineProperty(chat, "scrollHeight", { get: () => height, configurable: true });
+    Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+    // Nudged up 120px: less than the pill's distance, so still following.
+    chat.scrollTop = 1380;
+    byHand(chat);
+    expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
+    height = 2100;
+    rerender(<ChatView state={{ ...initialState, status: "running", folder: "/p", items: [...items, { type: "assistant", id: "a2", text: "More." }] }} {...props} />);
+    expect(chat.scrollTop).toBe(2100);
+  });
+
+  it("lets what arrives while you watch settle in, but not what it was first drawn with or a load of many at once", async () => {
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const base = { ...initialState, status: "running" as const, folder: "/p" };
+    const { container, rerender } = render(<ChatView state={{ ...base, items }} {...props} />);
+    await Promise.resolve();
+    expect(container.querySelectorAll(".enter")).toHaveLength(0);
+    const more: ChatItem[] = [...items, { type: "user", id: "u2", text: "And the tests?" }];
+    rerender(<ChatView state={{ ...base, items: more }} {...props} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.querySelector(".turn-section[data-turn='u2']")?.classList.contains("enter")).toBe(true);
+    const many: ChatItem[] = [...more, ...[3, 4].map((n): ChatItem => ({ type: "user", id: `u${n}`, text: `Question ${n}` }))];
+    rerender(<ChatView state={{ ...base, items: many }} {...props} />);
+    await new Promise((r) => setTimeout(r, 0));
+    // Two turns at once: a short history loading, not something happening.
+    expect(container.querySelector(".turn-section[data-turn='u3']")?.classList.contains("enter")).toBe(false);
+  });
+
+  describe("a card waiting for an answer", () => {
+    const waiting: ChatItem[] = [...items, { type: "permission", id: "p1", toolName: "Bash", input: { command: "rm -rf build" }, decision: null }];
+    const running = { ...initialState, status: "running" as const, folder: "/p", items: waiting };
+
+    it("says the chat waits for you, with no spinner, instead of that Claude is thinking", () => {
+      const { container } = render(<ChatView front state={running} onDecide={() => {}} onOpenFile={() => {}} />);
+      expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
+      expect(container.querySelector(".spinner")).toBeNull();
+    });
+
+    it("is denied by Escape in the chat in front, never allowed, and not while typing or in a dialog", () => {
+      const onDecide = vi.fn();
+      render(<ChatView front state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      // The chat's own box, as the window has it.
+      const composer = document.createElement("div");
+      composer.className = "composer";
+      const box = document.createElement("textarea");
+      composer.appendChild(box);
+      document.body.appendChild(composer);
+      box.value = "half a sentence";
+      fireEvent.keyDown(box, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      document.body.appendChild(dialog);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      dialog.remove();
+      box.value = "";
+      fireEvent.keyDown(box, { key: "Escape" });
+      expect(onDecide).toHaveBeenCalledWith("p1", false);
+      fireEvent.keyDown(window, { key: "Enter" });
+      expect(onDecide).toHaveBeenCalledTimes(1);
+      composer.remove();
+    });
+
+    it("isn't denied by the Escape that closes its Always allow… menu, or one pressed in another pane's editor", () => {
+      const onDecide = vi.fn();
+      render(<ChatView front state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(screen.queryByRole("button", { name: "Always allow…", expanded: true })).toBeNull();
+      expect(onDecide).not.toHaveBeenCalled();
+      const editor = document.createElement("div");
+      editor.className = "monaco-editor";
+      const hidden = document.createElement("textarea");
+      editor.appendChild(hidden);
+      document.body.appendChild(editor);
+      fireEvent.keyDown(hidden, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+      editor.remove();
+    });
+
+    it("isn't answered by Escape from a chat on the canvas, or when two cards wait", () => {
+      const onDecide = vi.fn();
+      const { unmount } = render(<ChatView state={running} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.keyDown(window, { key: "Escape" });
+      unmount();
+      const two = { ...running, items: [...waiting, { type: "permission" as const, id: "p2", toolName: "Bash", input: {}, decision: null }] };
+      render(<ChatView front state={two} onDecide={onDecide} onOpenFile={() => {}} />);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onDecide).not.toHaveBeenCalled();
+    });
+  });
+
   it("follows new messages by scrolling only the chat, never the page around it", () => {
     // scrollIntoView scrolls every scrollable ancestor too, the page included: message by message, the whole app
     // slid up and out of the window.

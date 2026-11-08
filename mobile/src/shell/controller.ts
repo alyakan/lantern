@@ -11,6 +11,7 @@ import { LiveCards, type CardFactory } from "../liveActivity";
 import { forgetLastKnown } from "../lastKnown";
 import { forgetUsageHistory } from "../usageHistory";
 import { forgetDrafts } from "../drafts";
+import { forgetOutbox } from "../outbox";
 import { forgetDeskLog } from "../deskLog";
 import { forgetPins } from "../pins";
 import { forgetPlaces } from "../view/stepPlace";
@@ -51,6 +52,8 @@ export class Controller {
   constructor(private readonly d: ControllerDeps) {
     this.now = d.now ?? Date.now;
     this.sync = new Sync(d.sync);
+    // What was written offline and hadn't gone when the app last closed waits again.
+    void this.sync.restoreHeld();
     this.liveCards = new LiveCards({ factory: d.liveFactory, tell: (state) => this.sync.liveActivity(state), now: d.now });
     this.sync.onSending = (id, slot, project) => void this.liveCards.begin(id, slot, project);
     this.sync.onSent = (id) => void this.liveCards.confirm(id);
@@ -66,6 +69,7 @@ export class Controller {
       appVersion: d.appVersion,
       onPushed: this.sync.onPushed,
       onSession: this.sync.onSession,
+      onStillUp: this.sync.onStillUp,
       onState: (s) => this.setConnection(s),
     });
   }
@@ -128,8 +132,14 @@ export class Controller {
     return this.connection.start();
   }
 
+  /** The app went to the back (true), or came to the front: what it follows is let go of meanwhile (see Sync.setAway). */
+  setAway(away: boolean) {
+    this.sync.setAway(away);
+  }
+
   /** The app came back to the foreground. */
   resume() {
+    this.sync.setAway(false);
     this.connection.resume();
   }
 
@@ -165,6 +175,7 @@ export class Controller {
     void forgetLastKnown();
     void forgetUsageHistory();
     void forgetDrafts();
+    void forgetOutbox();
     void forgetDeskLog();
     void forgetPins();
     forgetPlaces();

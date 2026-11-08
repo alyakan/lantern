@@ -553,6 +553,12 @@ pub fn replay(path: &Path) -> Replay {
         if !in_conversation(&r) {
             continue;
         }
+        // Where the conversation was compacted (by /compact, or by Claude Code when the context was full): the chat marks the
+        // place. What it kept of the turns before is written again after this, as the summary, which isn't shown.
+        if r["type"] == "system" && r["subtype"] == "compact_boundary" {
+            events.push(UiEvent::Compacted);
+            continue;
+        }
         if let Some((text, images)) = replayed_prompt(&r) {
             events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None, images });
             continue;
@@ -854,6 +860,24 @@ mod tests {
         assert!(!is_agent_folder("/Users/me/dev/lantern-worktrees/app"));
         assert!(!is_agent_folder("/Users/me/Library/Application Support/io.github.alyakan.lantern"));
         assert!(!is_agent_folder("/Users/me/dev/lantern"));
+    }
+
+    #[test]
+    fn a_reopened_chat_shows_where_it_was_compacted() {
+        // As Claude Code writes it: the boundary, then the summary (not shown), then the conversation goes on.
+        let before = rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "uuid": "u1", "message": {"role": "user", "content": "Fix the build"}}));
+        let boundary = rec(json!({"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted", "cwd": FOLDER, "uuid": "b1", "compactMetadata": {"trigger": "manual", "preTokens": 222795}}));
+        let summary = rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "uuid": "s", "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
+            "message": {"role": "user", "content": "This session is being continued from a previous conversation that ran out of context."}}));
+        let after = rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "uuid": "u2", "message": {"role": "user", "content": "Carry on"}}));
+        let root = setup(&[("cccc-3", format!("{before}\n{boundary}\n{summary}\n{after}"))]);
+        let path = transcript_path(root.path(), Path::new(FOLDER), "cccc-3").unwrap();
+        let order: Vec<String> = replay(&path).events.into_iter().filter_map(|e| match e {
+            UiEvent::UserText { text, .. } => Some(text),
+            UiEvent::Compacted => Some("compacted".into()),
+            _ => None,
+        }).collect();
+        assert_eq!(order, ["Fix the build", "compacted", "Carry on"]);
     }
 
     #[test]

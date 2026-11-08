@@ -529,7 +529,7 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone(); Box::pin(async move { conversation_settings_inner(&app, &slot, change).await })
     }
     fn conversation_action(&self, slot: String, action: String) -> remote::gateway::BoxFut<Result<(), String>> {
-        let app = self.app.clone(); Box::pin(async move { conversation_action_inner(&app, &slot, &action).await })
+        let app = self.app.clone(); Box::pin(async move { conversation_action_inner(&app, &slot, &action, None).await })
     }
 
     fn send(&self, slot: String, text: String, by: String, images: Vec<remote::protocol::RemoteImage>) -> remote::gateway::BoxFut<Result<(), String>> {
@@ -969,8 +969,13 @@ async fn stop_turn(app: &AppHandle, slot: &str) {
     let state = app.state::<AppState>();
     let Ok(s) = state.slots.get(slot) else { return };
     publish_state(&state, slot, ui_event::UiEvent::TurnStopping);
+    // A message on its way holds the session: it interrupts as soon as it's in (see slots::Sending), unless it was sent
+    // just before this Stop could say so, and then it's done here.
+    let sending = s.sending.stop();
     if let Some(x) = s.session.lock().await.as_mut() {
-        x.interrupt().await;
+        if !sending || s.sending.take() {
+            x.interrupt().await;
+        }
     }
     for request_id in s.bridge.cancel_all() {
         publish_state(&state, slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
@@ -2278,7 +2283,9 @@ async fn continue_fresh(app: AppHandle, state: State<'_, AppState>, slot: String
     Ok(())
 }
 
-async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) -> Result<(), String> {
+/// `typed`: who typed `/compact` or `/clear` in the box (a phone's id, or remote::SENT_BY_DESKTOP), when it was typed rather
+/// than picked from a menu. A typed /compact is shown as the user's message, like any other, once the chat can take it.
+async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str, typed: Option<&str>) -> Result<(), String> {
     let state = app.state::<AppState>();
     let s = state.slots.get(slot)?;
     let _control = s.control.lock().await;
@@ -2291,7 +2298,19 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
         remote::hub::ChatStatus::Asleep | remote::hub::ChatStatus::Ended => return Err("This chat isn't running. Open it to start it again first.".into()),
     }
     match action {
-        "compact" => s.session.lock().await.as_mut().ok_or("The agent stopped")?.compact().await,
+        "compact" => {
+            let mut session = s.session.lock().await;
+            let session = session.as_mut().ok_or("The agent stopped")?;
+            // Told only once it has gone: a message makes the chat busy until its turn ends, and one that didn't go has no turn.
+            // The phone that typed it waits for this copy (and says why when it didn't go); the window shows a phone's, and
+            // its own already (see remote::for_window). Compacting takes a minute or so, with nothing else to say so.
+            session.compact().await?;
+            if let Some(by) = typed {
+                publish(app, slot, ui_event::UiEvent::UserText { text: "/compact".into(), at: now_ms(), sent_by: Some(by.to_string()), images: 0 });
+            }
+            publish(app, slot, ui_event::UiEvent::Compacting);
+            Ok(())
+        },
         "clear" => {
             let mut cfg = s.config.lock().unwrap().clone().ok_or("No chat is open")?;
             cfg.resume = None;
@@ -2305,7 +2324,7 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
     }
 }
 #[tauri::command]
-async fn conversation_action(app: AppHandle, slot: String, action: String) -> Result<(), String> { conversation_action_inner(&app, &slot, &action).await }
+async fn conversation_action(app: AppHandle, slot: String, action: String) -> Result<(), String> { conversation_action_inner(&app, &slot, &action, None).await }
 
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
@@ -2512,7 +2531,7 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, 
 /// apply to it (not to what Lantern sends in their place).
 async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage], hooks: bool) -> Result<usize, String> {
     if images.is_empty() && matches!(text.trim(), "/clear" | "/compact") {
-        conversation_action_inner(app, slot, text.trim().trim_start_matches('/')).await?;
+        conversation_action_inner(app, slot, text.trim().trim_start_matches('/'), Some(sent_by)).await?;
         return Ok(0);
     }
     let s = state.slots.get(slot)?;
@@ -2599,6 +2618,8 @@ where
 /// Sends `text` (and the `images`, as Claude's own image blocks) into the chat's claude as a new message and returns the
 /// turn's number.
 async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images: Vec<session::InputImage>) -> Result<usize, String> {
+    // Before waiting for the session, so a Stop from here on is this message's (see slots::Sending).
+    let _on_its_way = s.sending.begin();
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
@@ -2612,8 +2633,10 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images:
     // Not at all when the user has turned restore points off.
     if app.state::<AppState>().restore_points.load(std::sync::atomic::Ordering::SeqCst) {
         let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
-        if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
-            late.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Stop pressed meanwhile: no waiting for the rest of it, and a late one is never kept.
+        tokio::select! {
+            done = tokio::time::timeout(std::time::Duration::from_secs(8), taken) => if done.is_err() { late.store(true, std::sync::atomic::Ordering::SeqCst); },
+            _ = s.sending.stopped() => late.store(true, std::sync::atomic::Ordering::SeqCst),
         }
     }
     s.checkpoints.turn_started();
@@ -2628,6 +2651,10 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images:
         s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
+    }
+    // Stop was pressed while it was on its way: the turn it just started stops, as a stopped turn does.
+    if s.sending.take() {
+        claude.interrupt().await;
     }
     // The folder's history is first written with its first message: Open Recent lists it from then on.
     let folder = s.config.lock().unwrap().as_ref().map(|c| c.folder.display().to_string());
@@ -3483,9 +3510,13 @@ async fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bo
         publish_state(state, slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
+        Err(NOT_PENDING.into())
     }
 }
+
+/// What answering a prompt that's already closed says. The window matches it word for word (store.ts `NOT_PENDING`): it
+/// was a lost race, not a failure, since the card is closed by the answer that won (or by the withdrawal).
+const NOT_PENDING: &str = "That permission request is no longer pending: it was answered already, or Claude stopped asking.";
 
 /// The "Always allow" rules Settings lists: this chat's (when it's open), then every folder's.
 #[tauri::command]
@@ -4298,6 +4329,8 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
     for s in state.slots.drain() {
         s.shut_down().await;
     }
+    // A restart doesn't pass through RunEvent::Exit: the chats' last saves go to disk here.
+    state.conversations.flush();
     app.restart()
 }
 
@@ -4627,6 +4660,8 @@ pub fn run() {
                     tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(state.desk_agents.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
+                    // The chats' last saves are made on a thread of their own: on disk before Lantern goes.
+                    state.conversations.flush();
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
                 if let Some(updates) = app.try_state::<updates::Updates>() {
@@ -4808,6 +4843,13 @@ mod hooks_flow_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window tells a lost race from a failure by these exact words, so its copy must say the same.
+    #[test]
+    fn the_window_knows_the_not_pending_words() {
+        let store = include_str!("../../src/store.ts");
+        assert!(store.contains(&format!("export const NOT_PENDING = \"{NOT_PENDING}\";")));
+    }
 
     /// A swap script's marker brings the chats back once, and one left from long ago (or none) doesn't.
     #[test]

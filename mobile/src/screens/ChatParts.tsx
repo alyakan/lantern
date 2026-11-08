@@ -1,7 +1,10 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
-import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useLayout } from "../shell/useLayout";
+import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Host, Image as SwiftImage, Menu, Button as MenuButton } from "@expo/ui/swift-ui";
+import { accessibilityLabel, disabled as disabledMod } from "@expo/ui/swift-ui/modifiers";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
@@ -35,6 +38,7 @@ import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import { markRanges } from "../view/mark";
+import { settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -59,12 +63,13 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
+          // One row of small squares (four fit): the words are the message, the photos go with it.
+          <View style={{ flexDirection: "row", gap: 6, marginBottom: item.text ? 8 : 0 }}>
             {item.thumbs.map((uri, i) => (
-              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: 88, height: 88, borderRadius: 10 }} />
+              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_THUMB, height: SENT_THUMB, borderRadius: 8 }} />
             ))}
           </View>
         )}
@@ -90,7 +95,12 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           )}
         </View>
       )}
-      {queued && !item.failed && (
+      {item.held && (
+        <Txt variant="tiny" tone="ink3" accessibilityLabel="Waiting for your Mac: it's sent once your Mac is back" style={{ marginTop: 4, marginRight: 2 }}>
+          Waiting for your Mac · sends when it's back
+        </Txt>
+      )}
+      {queued && !item.failed && !item.held && (
         <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginRight: 2 }}>
           Queued · Claude reads it after this step
         </Txt>
@@ -165,7 +175,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
               </Txt>
             )}
           </View>
-          <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
+          <Pressable onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View testID="summary-words" onLayout={(e) => measured(e.nativeEvent.layout.height)}>
               <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
@@ -211,11 +221,28 @@ export function withCaret(text: string): string {
 
 export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   return (
-    <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <Markdown text={item.streaming ? withCaret(item.text) : item.text} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
+    <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
+      <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
     </Pressable>
   );
 });
+
+/**
+ * A reply cut into its blocks (see settledCuts), each its own Markdown keyed by where it starts: while it streams, the ones
+ * that are done are parsed and laid out once, and only the last is again for each word. Spaced as one Markdown spaces its
+ * blocks, and drawn this way when done too, so nothing moves when the reply ends.
+ */
+function Blocks({ text, streaming, ...rest }: { text: string; streaming: boolean; selectable: boolean; mark?: string; files?: string[]; onFile?: (path: string) => void }) {
+  const starts = [0, ...settledCuts(text)];
+  return (
+    <View style={{ gap: 8 }}>
+      {starts.map((start, i) => {
+        const part = text.slice(start, starts[i + 1] ?? text.length);
+        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} {...rest} />;
+      })}
+    </View>
+  );
+}
 
 /** Where a new day starts in the chat: its name, small, between two hairlines. */
 export const DayRow = memo(function DayRow({ label }: { label: string }) {
@@ -231,6 +258,23 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
   );
 });
 
+/** Where the conversation was compacted, between two hairlines like a new day: what came before is a summary now. While it runs (a minute or so), it says so. */
+export const CompactRow = memo(function CompactRow({ item }: { item: Extract<Item, { kind: "compact" }> }) {
+  const colors = useColors();
+  const running = item.state === "running";
+  const label = running ? "Compacting the chat…" : item.state === "done" ? "Chat compacted" : "Compacting stopped";
+  return (
+    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingVertical: 14 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+      {running && <ActivityIndicator size="small" color={colors.ink3} />}
+      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "600" }}>
+        {label}
+      </Txt>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+    </View>
+  );
+});
+
 /**
  * What the user's post-hook made Claude say and do after its answer, folded into one quiet line ("Post-hook · The brain is
  * updated."), so the answer is the last thing read. Tapped, it opens to the hook's words and its steps.
@@ -238,7 +282,8 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
 export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: Extract<Row, { kind: "hook" }>; onFiles: (files: string[]) => void; onOutput?: (step: { id: string; text: string }) => void }) {
   const colors = useColors();
   const [open, setOpen] = useRecyclingState(false, [row.key]);
-  const line = row.going ? "Running…" : lastLine(row.said) || "Done";
+  // While it runs, what it has done so far (or said last), so a long one doesn't look stuck.
+  const line = row.going ? lastLine(row.said) || row.chips.map((c) => c.label).join(", ") || "Running…" : lastLine(row.said) || "Done";
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
       <PressScale accessibilityRole="button" accessibilityLabel={`Post-hook: ${row.text}. ${line}`} accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", maxWidth: "100%", paddingVertical: 4 }}>
@@ -721,6 +766,13 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const colors = useColors();
   // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
   const body = useBody();
+  // How tall it grows before it scrolls: on a phone 120 points, or five lines of its own type at a larger text size (a fixed 120
+  // showed under three lines there); on a tablet up to eight lines, while that is under a fifth of the screen.
+  const { height: screenHeight, fontScale } = useWindowDimensions();
+  const tablet = useLayout() !== "phone";
+  // The type is drawn at the system's text size, so its lines are that much taller than `lineHeight` says.
+  const line = (body.lineHeight ?? 22) * fontScale;
+  const tallest = Math.round(Math.max(120, 5 * line + 12, tablet ? Math.min(8 * line + 12, screenHeight * 0.18) : 0));
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
@@ -766,7 +818,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
   const dictation = useDictation(text, setText);
-  const attach = useAttachments();
+  // The pictures attached and not sent stay with the chat (`draftKey`) while the app runs, as its words do.
+  const attach = useAttachments(draftKey);
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
   // The photo being drawn on.
@@ -935,7 +988,6 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           </PressScale>
         </View>
       )}
-      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
       {searching.active && noMatch && (
         <Txt variant="tiny" tone="ink2" style={{ marginBottom: 6, marginHorizontal: 8 }}>
           Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
@@ -951,6 +1003,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         )}
         {/* The message box stays while searching, out of sight, so what was typed and the keyboard hand-over survive. */}
         <View style={{ display: searching.active ? "none" : "flex" }}>
+        {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
         {/* The hidden copy, at the box's width and in its type: dictation writes words in without typing, and the box grows by this. */}
         <Text
           accessibilityElementsHidden
@@ -981,7 +1034,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
-          style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
+          style={{ maxHeight: tallest, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(tallest, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
         <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
@@ -1000,7 +1053,15 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             />
           ) : (
             <>
-              {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
+              {canAttach && (
+                <PlusButton
+                  busy={attach.busy}
+                  full={attach.full}
+                  onPress={() => setChoosing(true)}
+                  // The picker is a screen of its own, so it waits for the menu to have gone.
+                  onPick={(source) => setTimeout(() => void attach.add(source), 350)}
+                />
+              )}
               {dictation.available && !disabled && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
               {tools ? <ToolsButton onPress={() => setTray(true)} /> : search && <BoxSearchButton onPress={searching.open} />}
               <View style={{ flex: 1 }} />
@@ -1160,10 +1221,27 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
   );
 }
 
-/** The + beside the message box: it offers pictures to attach, and is dimmed while one is being fetched or when no more fit. */
-function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onPress: () => void }) {
+/**
+ * The + beside the message box: it offers pictures to attach, and is dimmed while one is being fetched or when no more fit.
+ * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
+ * opens the sheet (`onPress`).
+ */
+function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
   const colors = useColors();
   const off = busy || full;
+  if (Platform.OS === "ios")
+    return (
+      <View style={{ width: barButton, height: barButton, opacity: off ? 0.4 : 1 }}>
+        {/* A SwiftUI host keeps out of the safe area, the keyboard's included, by default: with the keyboard up it moved the +
+            up inside its own frame, over the words (seen on an iPhone). It is a button in a row, so it ignores all of it. */}
+        <Host ignoreSafeArea="all" alignment="center" style={{ width: barButton, height: barButton }}>
+          <Menu modifiers={[accessibilityLabel("Attach photos"), ...(off ? [disabledMod(true)] : [])]} label={<SwiftImage systemName="plus.circle" size={26} color={colors.ink2} />}>
+            <MenuButton label="Photo Library" systemImage="photo.on.rectangle" onPress={() => onPick("library")} />
+            <MenuButton label="Take Photo" systemImage="camera" onPress={() => onPick("camera")} />
+          </Menu>
+        </Host>
+      </View>
+    );
   return (
     <PressScale
       accessibilityRole="button"
@@ -1185,29 +1263,33 @@ function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onP
   );
 }
 
-/** The pictures attached so far, as small squares above the box, each with a × that takes it off. */
+/**
+ * The pictures attached so far, in the message box over its words, as Messages has them: a tap on one opens it to draw on,
+ * and the small × in its corner takes it off. The × is a light mark on the picture, not a dark button hanging off it.
+ */
 export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
   const colors = useColors();
   return (
-    <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }} style={{ flexGrow: 0 }}>
+    <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 2 }} style={{ flexGrow: 0 }}>
       {images.map((image, i) => (
-        <View key={image.id} style={{ width: 64, height: 64 }}>
-          <Image accessibilityLabel={`Photo ${i + 1}`} source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: colors.rule }} />
-          <PressScale accessibilityRole="button" accessibilityLabel={`Mark up photo ${i + 1}`} accessibilityHint="Draw on it before it is sent" onPress={() => onMarkUp(image)} hitSlop={6} haptic="select" scaleTo={0.9} style={{ position: "absolute", left: 4, bottom: 4, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: colors.ink, justifyContent: "center" }}>
-            <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "800" }}>
-              ✎
-            </Txt>
+        <View key={image.id} style={{ width: THUMB, height: THUMB }}>
+          <PressScale accessibilityRole="button" accessibilityLabel={`Mark up photo ${i + 1}`} accessibilityHint="Draw on it before it is sent" onPress={() => onMarkUp(image)} haptic="select" scaleTo={0.95} reach={false}>
+            <Image accessibilityLabel={`Photo ${i + 1}`} source={{ uri: image.uri }} style={{ width: THUMB, height: THUMB, borderRadius: 12, backgroundColor: colors.rule, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.rule }} />
           </PressScale>
-          <PressScale accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} onPress={() => onRemove(image.id)} hitSlop={8} haptic="light" scaleTo={0.9} style={{ position: "absolute", top: -7, right: -7, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
-            <Txt variant="small" tone="on-ink" style={{ fontWeight: "800", lineHeight: 16 }}>
-              ×
-            </Txt>
+          <PressScale accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} onPress={() => onRemove(image.id)} hitSlop={12} haptic="light" scaleTo={0.85} reach={false} style={{ position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityElementsHidden style={{ position: "absolute", width: 9, height: 1.5, borderRadius: 1, backgroundColor: "#ffffff", transform: [{ rotate: "45deg" }] }} />
+            <View accessibilityElementsHidden style={{ position: "absolute", width: 9, height: 1.5, borderRadius: 1, backgroundColor: "#ffffff", transform: [{ rotate: "-45deg" }] }} />
           </PressScale>
         </View>
       ))}
     </ScrollView>
   );
 }
+
+/** A picture's side in the message box. */
+const THUMB = 60;
+/** A sent picture's side in your message. */
+const SENT_THUMB = 56;
 
 /** Where to get the pictures from. Choosing closes the sheet; the Composer then opens the picker (see its `choosing`). */
 function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source: ImageSource) => void }) {

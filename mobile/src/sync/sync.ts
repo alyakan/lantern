@@ -3,6 +3,7 @@
  * re-render on every piece), the chats the user follows are subscribed again from where they were whenever a connection
  * comes up, and the user's sends and answers go to the Mac. React reads it with useSyncExternalStore.
  */
+import type { Held, OutboxStore } from "../outbox";
 import type { Request } from "../protocol/generated/Request";
 import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
@@ -40,7 +41,17 @@ export interface SyncDeps {
   schedule?: (fn: () => void) => void;
   now?: () => number;
   newId?: () => string;
+  /** Where messages written offline are kept until they go (the Keychain in the app; nowhere but memory unless given). */
+  outbox?: OutboxStore;
 }
+
+const NO_STORE: OutboxStore = { load: async () => ({ held: [], epoch: null }), save: async () => {} };
+
+/** What a message that waited says when the Mac came back as another run: its chats are named afresh, so where it was for is unknown. */
+export const RESTARTED = "Your Mac restarted or this chat changed while it waited, so it wasn't sent. Copy it into the chat you meant.";
+
+/** How long held messages wait for a new connection's chat list before they are checked against what is known. */
+const CHATS_WAIT = 4000;
 
 const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => fn()) : setTimeout(fn, 16));
 let ids = 0;
@@ -64,6 +75,8 @@ export class Sync {
   private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
+  /** The app is in the back: the chats open in it are let go of (see `setAway`), and taken up again when it comes back. */
+  private away = false;
   /** Chats closed, the latest first (see `unfollow`). */
   private closed: string[] = [];
   private readonly schedule: (fn: () => void) => void;
@@ -80,6 +93,7 @@ export class Sync {
     this.schedule = d.schedule ?? defaultSchedule;
     this.now = d.now ?? Date.now;
     this.newId = d.newId ?? defaultId;
+    this.store = d.outbox ?? NO_STORE;
   }
 
   getState = () => this.state;
@@ -111,6 +125,14 @@ export class Sync {
     if (msg.type === "chats") {
       const statuses = (cs: State["chats"]) => cs.map((c) => `${c.slot}:${c.status}`).join(",");
       if (statuses(msg.chats) !== statuses(this.state.chats)) void this.refreshWaiting();
+      // Messages that waited for the Mac are checked against it: in the state before they are looked at.
+      if (this.chatsCame) {
+        this.apply({ type: "pushed", msg });
+        this.flush();
+        this.chatsCame();
+        this.chatsCame = null;
+        return;
+      }
     }
     this.apply({ type: "pushed", msg });
     if (msg.type === "reset" && msg.done) void this.refreshWaiting();
@@ -119,6 +141,8 @@ export class Sync {
   /** Forgets everything (the phone was unpaired): the next Mac starts from nothing. */
   reset() {
     this.queue = [];
+    this.outbox = [];
+    this.lastEpoch = null;
     this.session = null;
     this.followed.clear();
     this.closed = [];
@@ -126,12 +150,20 @@ export class Sync {
     for (const l of this.listeners) l();
   }
 
-  /** A connection came up (Connection's onSession): follow the same chats from where they were. */
+  /** A connection came up (Connection's onSession): follow the same chats from where they were, and send what waited for it. */
   onSession = (session: Session) => {
     this.session = session;
     this.apply({ type: "welcome", epoch: session.welcome.epoch });
     this.flush();
-    for (const slot of this.followed) void this.subscribeTo(slot);
+    // The chat list this connection starts with is what held messages are checked against.
+    this.chatsCame?.();
+    this.freshChats = new Promise((r) => (this.chatsCame = r));
+    if (this.lastEpoch !== session.welcome.epoch) {
+      this.lastEpoch = session.welcome.epoch;
+      this.keep();
+    }
+    if (!this.away) for (const slot of this.followed) void this.subscribeTo(slot);
+    void this.sendHeld();
     void this.refreshWaiting();
     void this.refreshDesk();
     void this.refreshWork();
@@ -254,11 +286,32 @@ export class Sync {
     return this.ask<RemoteDeskReply>({ op: "desk_reply", desk, slot, text, after }, DESK_WAIT);
   }
 
+  /**
+   * The app went to the back (true) or came to the front. The Mac doesn't push about a chat a phone follows, since it is being
+   * looked at; a phone put away with a chat open could keep its link up a while and still count, and the push it needed (the chat
+   * finished, or needs you) never came. So the chats are let go of while it is away, and followed again, from where they were,
+   * when it is back.
+   */
+  setAway(away: boolean) {
+    if (away === this.away) return;
+    this.away = away;
+    // Back in front, the link it had may have died meanwhile: the chats are followed again once it is known to work (`onStillUp`),
+    // or by the connection dialled in its place (`onSession`), not asked for over a dead one and shown as failed to load.
+    if (!away || !this.session) return;
+    for (const slot of this.followed) void this.ask({ op: "unsubscribe", slot }).catch(() => {});
+  }
+
+  /** Back in front, the connection it had still works (Connection's onStillUp): follow the open chats again, from where they were. */
+  onStillUp = (session: Session) => {
+    if (this.away || session !== this.session) return;
+    for (const slot of this.followed) void this.subscribeTo(slot);
+  };
+
   /** Opens a chat: its events come from now on. */
   follow(slot: string) {
     if (this.followed.has(slot)) return;
     this.followed.add(slot);
-    void this.subscribeTo(slot);
+    if (!this.away) void this.subscribeTo(slot);
   }
 
   unfollow(slot: string) {
@@ -278,6 +331,85 @@ export class Sync {
     const item = this.state.views[slot]?.items.find((it) => it.kind === "user" && it.id === itemId);
     if (item?.kind !== "user" || !item.failed || !item.id.startsWith("local-")) return Promise.resolve();
     return this.send(slot, item.text, [], item.id.slice("local-".length));
+  }
+
+  /**
+   * Messages written while the Mac couldn't be reached (see `hold`), in the order they were written. Only those: one that was
+   * already on its way when the link went says it didn't go, since the Mac may have it, and sending it again could send it
+   * twice.
+   */
+  private outbox: Held[] = [];
+  private store: OutboxStore;
+  private sendingHeld = false;
+  /** The Mac run this phone last spoke to, kept between launches: a message written before any connection this launch is for it. */
+  private lastEpoch: number | null = null;
+  /** Done once what waited when the app last closed has been read back: nothing is saved or sent before it, or it would be lost. */
+  private restored: Promise<void> = Promise.resolve();
+  /** The chat list a new connection starts with (the Mac sends it first): what waited is checked against it before it goes. */
+  private freshChats: Promise<void> = Promise.resolve();
+  private chatsCame: (() => void) | null = null;
+  private keep() {
+    void this.restored.then(() => this.store.save({ held: this.outbox, epoch: this.lastEpoch }));
+  }
+
+  /** A message written while the Mac can't be reached: it shows as waiting, kept on the phone, and goes once a connection is up. */
+  hold(slot: string, text: string) {
+    // Its chat's project, to check it against once the Mac is back; unknown (not in the list) leaves that check out.
+    const chat = this.state.chats.find((c) => c.slot === slot);
+    const project = chat ? (chat.project ?? null) : undefined;
+    const held: Held = { slot, text, clientId: this.newId(), epoch: this.state.epoch ?? this.lastEpoch, at: this.now(), project };
+    this.apply({ type: "held", slot, clientId: held.clientId, text, at: held.at });
+    this.outbox.push(held);
+    this.keep();
+  }
+
+  /** At launch: what waited when the app last closed shows again, waiting as it was, before anything written since. */
+  restoreHeld() {
+    this.restored = (async () => {
+      const kept = await this.store.load();
+      this.lastEpoch ??= kept.epoch;
+      const back = kept.held.filter((held) => !this.outbox.some((h) => h.clientId === held.clientId));
+      for (const held of back) this.apply({ type: "held", slot: held.slot, clientId: held.clientId, text: held.text, at: held.at });
+      this.outbox = [...back, ...this.outbox].sort((a, b) => a.at - b.at);
+    })();
+    // Connected before they were read back: they go now.
+    void this.restored.then(() => {
+      if (this.session && this.outbox.length > 0) void this.sendHeld();
+    });
+    return this.restored;
+  }
+
+  /**
+   * Sends what waited for the Mac, one after another so they arrive in the order they were written, and only to the chat it
+   * was written for. A chat's slot is only that Mac run's (they are named afresh each launch), and an empty chat's slot can
+   * take another project's chat: one written for another run, or whose chat is now another project's (or gone), isn't sent,
+   * and says why, with no Try again.
+   */
+  private async sendHeld() {
+    if (this.sendingHeld) return;
+    this.sendingHeld = true;
+    try {
+      await this.restored;
+      if (this.outbox.length === 0) return;
+      // The latest connection's list: one that came up meanwhile has its own (see onSession).
+      let waited: Promise<void> | null = null;
+      while (waited !== this.freshChats) {
+        waited = this.freshChats;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([waited, new Promise((r) => (timer = setTimeout(r, CHATS_WAIT)))]);
+        clearTimeout(timer);
+      }
+      for (const held of [...this.outbox]) {
+        const chat = this.state.chats.find((c) => c.slot === held.slot);
+        const same = held.epoch !== null && held.epoch === this.state.epoch && !!chat && (held.project === undefined || (chat.project ?? null) === held.project);
+        if (same) await this.send(held.slot, held.text, [], held.clientId);
+        else this.apply({ type: "send_failed", slot: held.slot, clientId: held.clientId, error: RESTARTED, stale: true });
+        this.outbox = this.outbox.filter((h) => h !== held);
+        this.keep();
+      }
+    } finally {
+      this.sendingHeld = false;
+    }
   }
 
   /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */

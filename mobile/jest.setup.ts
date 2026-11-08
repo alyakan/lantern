@@ -107,6 +107,8 @@ try {
 
 // Where Step by step chats were read is held for the app's life: each test starts with none.
 beforeEach(() => require("./src/view/stepPlace").forgetPlaces());
+// Each chat's pictures attached and not sent are held for the app's run: one test's are not the next one's.
+beforeEach(() => require("./src/ui/useAttachments").resetKeptAttachments());
 
 // No SwiftUI on Node: a menu is its label and its items, there at once; an item is a "menuitem" a test can press, ticked when
 // it shows a checkmark. The modifiers are plain records, so a menu's accessibility label and an item's being off can be read.

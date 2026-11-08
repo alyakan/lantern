@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { answerOf, asideReducer, emptyAside, isWorking } from "../lib/aside";
 import { usageLine } from "../lib/cost";
@@ -73,11 +73,21 @@ export function SideChat({ onClose }: { onClose: () => void }) {
     return () => document.removeEventListener("keydown", esc);
   }, []);
 
-  // The newest words stay in view.
-  useEffect(() => {
+  // The newest words stay in view, while you're at them: scrolled up to read an earlier answer, you're left there. A new
+  // question of yours goes to the end again.
+  const atEnd = useRef(true);
+  const asked = state.turns.length;
+  useLayoutEffect(() => {
+    atEnd.current = true;
+  }, [asked]);
+  useLayoutEffect(() => {
     const el = body.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [state.turns]);
+  const onScroll = () => {
+    const el = body.current;
+    if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  };
 
   const ask = (e: FormEvent) => {
     e.preventDefault();
@@ -123,7 +133,7 @@ export function SideChat({ onClose }: { onClose: () => void }) {
           ×
         </button>
       </div>
-      <div className="aside-body" ref={body} aria-live="polite">
+      <div className="aside-body" ref={body} onScroll={onScroll} aria-live="polite">
         {state.turns.length === 0 && <p className="aside-empty">Ask a quick question about this chat or your files. The chat carries on without it.</p>}
         {state.forked === false && <p className="aside-note">This chat has no messages yet, so Claude has only your question to go on.</p>}
         {state.turns.map((t, i) => (

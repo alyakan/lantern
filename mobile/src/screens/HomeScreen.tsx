@@ -1,7 +1,8 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
-import { Fragment, useEffect, useRef, useState } from "react";
-import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Fragment, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useToTop } from "../ui/useToTop";
+import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
 import { known } from "../prefsKnown";
@@ -21,7 +22,8 @@ import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { SwipeRow } from "../ui/SwipeRow";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { countsOf, diffPreviewOf } from "../view/diffPreview";
-import { gutterFor, layoutFor } from "../view/layout";
+import { gutterFor } from "../view/layout";
+import { useLayout } from "../shell/useLayout";
 import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { HomeSearch } from "./HomeSearch";
@@ -54,12 +56,19 @@ export interface HomeProps {
   /** On a tablet, whether the chats are pinned beside the chat, and the button that pins or unpins them (none on a phone). */
   pinned?: boolean;
   onTogglePin?: () => void;
-  /** On a tablet, Your work is in the main area where no chat is open: this opens it there (its button sits at the top of the chats). None on a phone. */
-  onOpenWork?: () => void;
-  /** On a tablet, Your work is what the main area shows now. */
-  workShown?: boolean;
+  /**
+   * A tablet's column goes into sections, as an iPad's sidebar does: rows at the top of the chats take it into Your work (its
+   * features, each opening its page beside the column) or the Timeline, and "‹ Chats" brings it back. `work` and `timeline` are
+   * what those sections list; `onRefresh` is what pulling Your work down asks for. None on a phone (Work is a tab).
+   */
+  column?: { section: ColumnSection; onSection: (section: ColumnSection) => void; work: ReactNode; timeline: ReactNode; onRefresh: () => Promise<unknown>; workShown: boolean };
+  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). Its row is at the top of the chats. */
+  onOpenInsights?: () => void;
+  insightsShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
   tabbed?: boolean;
+  /** Its tab tapped again while shown (a count): back to the top of the list. */
+  toTop?: number;
 }
 
 /** The sidebar, drawn: a window with its left third set apart, filled in when the chats are pinned beside the chat. */
@@ -239,6 +248,52 @@ function SectionLabel({ label, count, gutter }: { label: string; count: number; 
   );
 }
 
+/** What a tablet's column lists: the chats (its top), or a section it was taken into: Your work, or the Timeline. */
+export type ColumnSection = "chats" | "work" | "timeline";
+
+/**
+ * A row at the top of a tablet's chats that takes the column into a section of its own (Your work, the Timeline), as an iPad's
+ * sidebar goes into a folder: its name, a count when there is one, and a chevron. Insights' row has no chevron: it opens beside.
+ */
+function SectionRow({ label, count = 0, into = true, selected = false, onPress, first = false }: { label: string; count?: number; /** It goes into a list in the column (a chevron), rather than opening beside it. */ into?: boolean; selected?: boolean; onPress: () => void; first?: boolean }) {
+  const colors = useColors();
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={count > 0 ? `${label}, ${count} waiting` : label} accessibilityState={{ selected }} onPress={onPress} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: first ? 12 : 2, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: selected ? colors.card : "transparent" }}>
+      <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
+        {label}
+      </Txt>
+      {count > 0 && (
+        <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
+          <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
+            {count}
+          </Txt>
+        </View>
+      )}
+      {into && (
+        <Txt variant="body" tone="ink3" accessibilityElementsHidden>
+          ›
+        </Txt>
+      )}
+    </PressScale>
+  );
+}
+
+/** The top of a section the column was taken into: the way back to the chats, then the section's name as its title. */
+function SectionHead({ title, onBack }: { title: string; onBack: () => void }) {
+  return (
+    <View testID="column-section" style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 2 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Chats" accessibilityHint="Back to the chats" onPress={onBack} haptic="select" hitSlop={{ top: 10, bottom: 10, left: 8, right: 16 }} scaleTo={0.94} style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, minHeight: 36 }}>
+        <Txt variant="body" tone="cobalt" style={{ fontWeight: "600" }}>
+          ‹ Chats
+        </Txt>
+      </PressScale>
+      <Txt variant="title" accessibilityRole="header">
+        {title}
+      </Txt>
+    </View>
+  );
+}
+
 /** How the chats are listed: most recent first, or under their projects. */
 function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Grouping) => void }) {
   const colors = useColors();
@@ -320,7 +375,10 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, tabbed = false }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, column, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
+  const canInsights = useMacCan("insights");
+  const scroller = useRef<ComponentRef<typeof Animated.ScrollView>>(null);
+  useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const controller = useController();
   const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work } = useSyncState();
@@ -333,8 +391,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
   // Apple's page margin: 16 on a phone, 20 on a wider window.
-  const { width, height } = useWindowDimensions();
-  const gutter = gutterFor(layoutFor(width, height));
+  const gutter = gutterFor(useLayout());
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
   // How the chats are listed, and which project cards are folded away, are remembered on this phone.
@@ -421,10 +478,14 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setQuery("");
   };
 
+  // A section the tablet's column was taken into lists it instead of the chats: pulling Your work down asks the Mac to look at the
+  // work again (and the Timeline, like the chats, asks for what waits).
+  const section: ColumnSection = column && (column.section !== "work" || canWork) ? column.section : "chats";
+  const onWork = section === "work";
   const refresh = async () => {
     setRefreshing(true);
     controller.resume();
-    await controller.sync.refreshWaiting();
+    await (onWork && column ? column.onRefresh() : controller.sync.refreshWaiting()).catch(() => {});
     setRefreshing(false);
   };
 
@@ -483,6 +544,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
       <Animated.ScrollView
+        ref={scroller}
         keyboardShouldPersistTaps="handled"
         // Searching, a drag through the results puts the keyboard away, so the end of a long list can be reached.
         keyboardDismissMode="on-drag"
@@ -494,20 +556,16 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {canWork && onOpenWork && (
-          <PressScale accessibilityRole="button" accessibilityLabel={toDo > 0 ? `Work, ${toDo} waiting` : "Work"} accessibilityState={{ selected: workShown }} onPress={onOpenWork} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: workShown ? colors.card : "transparent" }}>
-            <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
-              Work
-            </Txt>
-            {toDo > 0 && (
-              <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
-                <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
-                  {toDo}
-                </Txt>
-              </View>
-            )}
-          </PressScale>
-        )}
+        {column && section !== "chats" ? (
+          <FadeSlideIn key={section}>
+            <SectionHead title={section === "work" ? "Work" : "Timeline"} onBack={() => column.onSection("chats")} />
+            {section === "work" ? column.work : column.timeline}
+          </FadeSlideIn>
+        ) : (
+          <>
+        {column && canWork && <SectionRow first label="Work" count={toDo} selected={column.workShown} onPress={() => column.onSection("work")} />}
+        {column && <SectionRow first={!canWork} label="Timeline" onPress={() => column.onSection("timeline")} />}
+        {canInsights && onOpenInsights && <SectionRow first={!column} label="Insights" into={false} selected={insightsShown} onPress={onOpenInsights} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />
@@ -585,6 +643,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {!asked && <SupportCard onPress={onSupport} />}
           </>
         )}
+          </>
+        )}
       </Animated.ScrollView>
       {/* The bar stays put, floating over the list, which scrolls under its glass. The status bar's own strip is paper, so rows don't run under the clock. */}
       <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
@@ -593,7 +653,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {banner}
       </View>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
-      {!tabbed && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
+      {!tabbed && section === "chats" && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
       {acting && (
         <ChatActionsSheet

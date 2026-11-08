@@ -20,11 +20,18 @@ import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 import { WorkScreen } from "./WorkScreen";
+import { InsightsScreen } from "./InsightsScreen";
+import { RoundButton, SidebarIcon } from "./SearchBar";
+import { TopBar } from "../ui/TopBar";
 
 /** The widest a decision goes: it is a card to read and swipe, not a page. */
 const DECISION_MAX = 560;
 
 export interface TabletDetailProps {
+  /** What shows where no chat is open: Your work, or Insights. */
+  page?: "work" | "insights";
+  /** The feature picked in the column's Work side, whose page Work shows (null: none yet, so the one that needs you). */
+  feature?: string | null;
   /** The chat to show; none asks to pick one. */
   slot: string | null;
   /** The prompt being decided in that chat, shown over it. */
@@ -50,7 +57,7 @@ export interface TabletDetailProps {
  * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
  * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work", feature = null }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -66,6 +73,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const canTodos = useMacCan("todos");
   // Where no chat is open: Your work (a Mac that lists "work"), or a word to pick a chat. There is no Desk.
   const canWork = useMacCan("work");
+  const canInsights = useMacCan("insights");
   // Each chat's own: the one picked in it the last time it was on screen.
   const [picked, setPicked] = useState<{ slot: string | null; panel: Panel }>(() => ({ slot, panel: panelOf(slot) }));
   const panel = picked.slot === slot ? picked.panel : panelOf(slot);
@@ -111,7 +119,11 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   // A file link tapped in the chat is shown in the pane (brought back if it was put away), whether or not the chat changed it,
   // never in a sheet over the chat with the pane right beside it.
   const [focus, setFocus] = useState<{ path: string; n: number } | undefined>(undefined);
-  useEffect(() => setFocus(undefined), [slot]);
+  // Another chat starts with its pane beside it, not floated over it as the last one's was (open or put away stays the person's).
+  useEffect(() => {
+    setFocus(undefined);
+    setFloating(false);
+  }, [slot]);
   const showFile = (link: string) => {
     if (!wide) return false;
     const path = changedFileOf(changed, link) ?? link;
@@ -144,12 +156,36 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
       <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={wide ? { shown: mode !== "hidden", onToggle: togglePane, onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
     </View>
+  ) : page === "insights" && canInsights ? (
+    // In the chat's column, so its figures don't stretch across a 13-inch screen.
+    <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
+      <InsightsScreen
+        top={
+          // Hugging its words, as Work's bar does beside it.
+          <TopBar style={{ alignSelf: "flex-start" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+              {layout === "overlay" && !chatsOpen && (
+                <RoundButton label="Show chats" onPress={onShowChats}>
+                  <SidebarIcon />
+                </RoundButton>
+              )}
+              <Txt variant="title" accessibilityRole="header">
+                Insights
+              </Txt>
+            </View>
+          </TopBar>
+        }
+        onOpenChat={onOpenChat}
+      />
+    </View>
   ) : canWork ? (
     <WorkScreen
       wide
       onOpenChat={onOpenChat}
-      // The bar's glass (and its Refresh) is the Work screen's: this says only where you are.
-      top={<Txt variant="title">Work</Txt>}
+      // Without it, Work had no way back to the column once it went away but the edge swipe, which VoiceOver and a pointer can't make.
+      onShowChats={layout === "overlay" && !chatsOpen ? onShowChats : undefined}
+      // The features are listed in the column: this is the page of the one picked there.
+      beside={{ feature }}
     />
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
@@ -162,46 +198,50 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   );
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }} onLayout={(e) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}>
-      <View style={{ flex: 1, marginRight: mode === "dock" ? paneWidth : 0 }}>
-        {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
-        <CrossFade id={slot ?? ""}>
-          <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
-        </CrossFade>
-      </View>
-      <ChangesDock
-        mode={mode}
-        width={paneWidth}
-        room={{ ...size, top: insets.top, bottom: insets.bottom }}
-        onScrim={() => toggleChanges(false)}
-        onResizeStart={() => setResizing(true)}
-        onResize={resizeTo}
-        onResizeEnd={() => {
-          setResizing(false);
-          void saveChangesShare(shareOf(paneWidth, size.width));
-        }}
-        onStep={(dir) => {
-          const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
-          touched.current = true;
-          movePanes();
-          setShare(next);
-          void saveChangesShare(next);
-        }}
-        share={`${Math.round((paneWidth / size.width) * 100)}%`}
-      >
-        {slot && (
-          <CrossFade id={slot}>
-            <View style={{ flex: 1, backgroundColor: colors.card }}>
-              {showing === "artifacts" ? (
-                <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
-              ) : showing === "todos" ? (
-                <TodosPane key={slot} projectName={project} onHide={() => toggleChanges(false)} title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
-              ) : (
-                <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts || canTodos ? <PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
-              )}
-            </View>
+      {/* Under a decision, the chat and its pane are out of the screen reader's reach, as they are out of sight. */}
+      <View testID="detail-under" style={{ flex: 1 }} accessibilityElementsHidden={!!decide} importantForAccessibility={decide ? "no-hide-descendants" : "auto"}>
+        <View style={{ flex: 1, marginRight: mode === "dock" ? paneWidth : 0 }}>
+          {/* Each screen has the paper under it, so the one going hides the one coming until it has faded. */}
+          <CrossFade id={slot ?? ""}>
+            <View style={{ flex: 1, backgroundColor: colors.paper }}>{main}</View>
           </CrossFade>
-        )}
-      </ChangesDock>
+        </View>
+        <ChangesDock
+          mode={mode}
+          width={paneWidth}
+          room={{ ...size, top: insets.top, bottom: insets.bottom }}
+          onScrim={() => toggleChanges(false)}
+          onResizeStart={() => setResizing(true)}
+          onResize={resizeTo}
+          onResizeEnd={(w) => {
+            setResizing(false);
+            void saveChangesShare(shareOf(w, size.width));
+          }}
+          fit={(w) => changesWidth(shareOf(w, size.width), size.width)}
+          onStep={(dir) => {
+            const next = shareOf(paneWidth + dir * size.width * 0.05, size.width);
+            touched.current = true;
+            movePanes();
+            setShare(next);
+            void saveChangesShare(next);
+          }}
+          share={`${Math.round((paneWidth / size.width) * 100)}%`}
+        >
+          {slot && (
+            <CrossFade id={slot}>
+              <View style={{ flex: 1, backgroundColor: colors.card }}>
+                {showing === "artifacts" ? (
+                  <ArtifactsPane key={slot} slot={slot} onHide={() => toggleChanges(false)} title={<PanelMenu value="artifacts" artifacts todos={canTodos} onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+                ) : showing === "todos" ? (
+                  <TodosPane key={slot} projectName={project} onHide={() => toggleChanges(false)} title={<PanelMenu value="todos" artifacts={canArtifacts} todos onPick={pick} />} float={{ floating, onToggle: toggleFloat }} />
+                ) : (
+                  <ChangesPane key={slot} slot={slot} focus={focus} onHide={() => toggleChanges(false)} title={canArtifacts || canTodos ? <PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={pick} /> : undefined} float={{ floating, onToggle: toggleFloat }} />
+                )}
+              </View>
+            </CrossFade>
+          )}
+        </ChangesDock>
+      </View>
       <Rise testID="decision-pane" shown={!!decide} style={{ backgroundColor: colors.night }}>
         {decide && (
           <View style={{ flex: 1, width: "100%", maxWidth: DECISION_MAX, alignSelf: "center" }}>

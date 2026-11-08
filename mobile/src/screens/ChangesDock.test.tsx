@@ -13,7 +13,7 @@ afterEach(() => {
 
 const room = { width: 1366, height: 1000, top: 24, bottom: 20 };
 function props(mode: DockMode, over: Partial<ChangesDockProps> = {}): ChangesDockProps {
-  return { mode, width: 683, room, onScrim: jest.fn(), onResizeStart: jest.fn(), onResize: jest.fn(), onResizeEnd: jest.fn(), onStep: jest.fn(), share: "50%", children: <Text>changes</Text>, ...over };
+  return { mode, width: 683, room, onScrim: jest.fn(), onResizeStart: jest.fn(), onResize: jest.fn(), onResizeEnd: jest.fn(), fit: (w: number) => Math.min(1000, Math.max(320, w)), onStep: jest.fn(), share: "50%", children: <Text>changes</Text>, ...over };
 }
 const frame = () => StyleSheet.flatten(screen.getByTestId("changes-dock", { includeHiddenElements: true }).props.style);
 
@@ -47,18 +47,44 @@ describe("the Changes beside a tablet's chat", () => {
     expect(screen.queryByText("changes", { includeHiddenElements: true })).toBeNull();
   });
 
-  it("are dragged wider by their divider: the finger going left by as much as it moves", async () => {
+  it("are dragged wider by their divider: only the divider follows the finger, and the pane takes the width when it lifts", async () => {
+    const p = props("dock");
+    await render(<ChangesDock {...p} />);
+    const divider = screen.getByTestId("changes-divider");
+    const at = () => (StyleSheet.flatten(divider.props.style).transform as { translateX: number }[])[0].translateX;
+    await fireEvent(divider, "responderGrant", { nativeEvent: { pageX: 683 } });
+    expect(p.onResizeStart).toHaveBeenCalled();
+    await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 600 } });
+    expect(at()).toBe(-83);
+    // Kept in bounds as it goes: past the narrowest, it stops there.
+    await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 1300 } });
+    expect(at()).toBe(683 - 320);
+    await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 800 } });
+    expect(at()).toBe(117);
+    expect(p.onResize).not.toHaveBeenCalled();
+    await fireEvent(divider, "responderRelease", { nativeEvent: { pageX: 800 } });
+    expect(p.onResize).toHaveBeenCalledWith(566);
+    expect(p.onResizeEnd).toHaveBeenCalledWith(566);
+  });
+
+  it("take a finger on a 44-point divider, most of it over the pane so the chat's buttons at its edge stay clear", async () => {
+    await render(<ChangesDock {...props("dock")} />);
+    const style = StyleSheet.flatten(screen.getByTestId("changes-divider").props.style);
+    expect(style.width).toBe(44);
+    // 14 points over the chat, 30 over the pane.
+    expect(style.left).toBe(683 - 14);
+  });
+
+  it("are left as they were by a drag that comes back to where it began", async () => {
     const p = props("dock");
     await render(<ChangesDock {...p} />);
     const divider = screen.getByTestId("changes-divider");
     await fireEvent(divider, "responderGrant", { nativeEvent: { pageX: 683 } });
-    expect(p.onResizeStart).toHaveBeenCalled();
     await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 600 } });
-    expect(p.onResize).toHaveBeenLastCalledWith(766);
-    await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 800 } });
-    expect(p.onResize).toHaveBeenLastCalledWith(566);
-    await fireEvent(divider, "responderRelease", { nativeEvent: { pageX: 800 } });
-    expect(p.onResizeEnd).toHaveBeenCalled();
+    await fireEvent(divider, "responderMove", { nativeEvent: { pageX: 683 } });
+    await fireEvent(divider, "responderRelease", { nativeEvent: { pageX: 683 } });
+    expect(p.onResize).not.toHaveBeenCalled();
+    expect(p.onResizeEnd).toHaveBeenCalledWith(683);
   });
 
   it("are made wider or narrower by the screen reader's swipes on the divider, which says how wide they are", async () => {

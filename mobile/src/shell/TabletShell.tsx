@@ -119,14 +119,26 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
     if (goesIn && !open) onOpen();
     if (!goesIn && open) onClose();
   };
-  // Dragging in from the screen's edge, while the column is away.
+  // Dragging in from the screen's edge, while the column is away: asked of every touch on the chat, and taken only from one that
+  // began at the edge and is plainly going right. A strip over the edge took every touch there, so a tap or a scroll that began
+  // at the chat's left edge never reached it.
   const fromEdge = {
-    onStartShouldSetResponder: () => true,
+    onStartShouldSetResponderCapture: (e: GestureResponderEvent) => {
+      if (e.nativeEvent.pageX < EDGE_WIDTH) begin(e, 0);
+      else drag.current = null;
+      return false;
+    },
+    onMoveShouldSetResponderCapture: (e: GestureResponderEvent) => {
+      const d = drag.current;
+      if (!d || d.from !== 0) return false;
+      const dx = e.nativeEvent.pageX - d.x;
+      return dx > 0 && isSideways(dx, e.nativeEvent.pageY - d.y);
+    },
     onResponderGrant: (e: GestureResponderEvent) => {
       p.stopAnimation();
       // A pull that cuts an unpin's slide away short: it floats from here, dimming and all.
       float.setValue(1);
-      begin(e, 0);
+      if (!drag.current) begin(e, 0);
     },
     onResponderMove: follow,
     onResponderRelease: release,
@@ -149,15 +161,21 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
     onResponderRelease: release,
     onResponderTerminate: release,
   };
+  // On the column itself a row gets the left swipe first (its Close and Read), as it does on a phone's Home: the column takes
+  // it only when nothing under the finger did (asked last, on the way out, rather than first, on the way in).
+  const onColumn = {
+    ...toEdge,
+    onMoveShouldSetResponder: toEdge.onMoveShouldSetResponderCapture,
+    onMoveShouldSetResponderCapture: undefined,
+  };
 
   const over = !split && open;
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* With the chats slid in over the chat, the chat is behind them: out of the screen reader's reach too. */}
-      <View accessibilityElementsHidden={over} importantForAccessibility={over ? "no-hide-descendants" : "auto"} style={{ flex: 1, marginLeft: split ? columnWidth : 0 }}>
+      <View testID={!split && !open ? "chats-edge" : undefined} accessibilityElementsHidden={over} importantForAccessibility={over ? "no-hide-descendants" : "auto"} style={{ flex: 1, marginLeft: split ? columnWidth : 0 }} {...(!split && !open ? fromEdge : {})}>
         {children}
       </View>
-      {!split && !open && <View testID="chats-edge" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: EDGE_WIDTH }} {...fromEdge} />}
       {/* The dimming over the chat: as deep as the column is in, and only while it floats, so pinning fades it away. */}
       <Animated.View pointerEvents={over ? "auto" : "none"} style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim, opacity: Animated.multiply(p, float) }]} {...(split ? {} : toEdge)}>
         <Pressable accessibilityLabel="Close chats" accessibilityRole="button" accessibilityElementsHidden={!over} importantForAccessibility={over ? "auto" : "no-hide-descendants"} onPress={onClose} style={StyleSheet.absoluteFill} />
@@ -168,7 +186,7 @@ export function TabletShell({ layout, open, onOpen, onClose, sidebar, children }
         accessibilityElementsHidden={!shown}
         importantForAccessibility={shown ? "auto" : "no-hide-descendants"}
         style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: columnWidth, backgroundColor: colors.paper, transform: [{ translateX: p.interpolate({ inputRange: [0, 1], outputRange: [-travel, 0] }) }] }}
-        {...(split ? {} : toEdge)}
+        {...(split ? {} : onColumn)}
       >
         {/* Its shadow while it floats, and its hairline while it is pinned: one gives way to the other. */}
         <Animated.View testID="chats-column-shadow" pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.paper, opacity: float, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 4, height: 0 } }]} />

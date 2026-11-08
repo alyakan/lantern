@@ -734,3 +734,32 @@ describe("NetworkEmpty", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("the side panel's tabs from the keyboard", () => {
+  it("opens the strip's tabs in order with ⌘1, ⌘2, ⌘3, as a browser's tabs", () => {
+    render(<ReviewPanel {...base} selected={null} follow />);
+    const selected = () => screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+    expect(selected()).toMatch(/^Changes/);
+    fireEvent.keyDown(window, { key: "2", metaKey: true });
+    expect(selected()).toMatch(/^Files/);
+    fireEvent.keyDown(window, { key: "3", metaKey: true });
+    expect(selected()).toMatch(/^Plan/);
+    fireEvent.keyDown(window, { key: "1", metaKey: true });
+    expect(selected()).toMatch(/^Changes/);
+    // A number past the strip's end does nothing.
+    fireEvent.keyDown(window, { key: "9", metaKey: true });
+    expect(selected()).toMatch(/^Changes/);
+  });
+
+  it("shows the panel put away with the tab, and does nothing while it is behind the Desk", () => {
+    const onReveal = vi.fn();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow onReveal={onReveal} />);
+    fireEvent.keyDown(window, { key: "2", metaKey: true });
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    rerender(<ReviewPanel {...base} selected={null} follow onReveal={onReveal} keys={false} />);
+    fireEvent.keyDown(window, { key: "1", metaKey: true });
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    const selected = screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+    expect(selected).toMatch(/^Files/);
+  });
+});

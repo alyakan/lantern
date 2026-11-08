@@ -155,7 +155,9 @@ export type UiEvent =
   | { kind: "advisor_done"; parent: string | null; id: string; outcome: "reviewed" | "declined" | "unavailable"; error_code: string | null }
   | { kind: "model_usage"; models: ModelCost[] }
   | { kind: "conversation_reset" }
-  /** The conversation was compacted. The chat shows nothing of it: the backend uses it to bring the pre-hook back. */
+  /** The conversation is being compacted (/compact, the Compact menu, or Claude Code when the context was full): a minute or so. */
+  | { kind: "compacting" }
+  /** The conversation was compacted: the chat marks the place (the backend also brings the pre-hook back). */
   | { kind: "compacted" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "permission_withdrawn"; request_id: string }

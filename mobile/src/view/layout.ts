@@ -12,6 +12,9 @@ export const SIDEBAR_WIDTH = 340;
 /** The widest a chat reads: its header, messages and message box line up in one column. */
 export const COLUMN_MAX = 860;
 
+/** The widest a tablet's words-on-paper screens go (offline, a link to confirm, the pairing card): one readable column. */
+export const NARROW_MAX = 560;
+
 /** The widest a bottom sheet goes, so one does not stretch across a tablet. */
 export const SHEET_MAX = 640;
 
@@ -21,6 +24,22 @@ export const SPLIT_MIN = 900;
 export function layoutFor(width: number, height: number): Layout {
   if (width < WIDE_MIN) return "phone";
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
+}
+
+/** How far past `WIDE_MIN` a window resized by hand must go before the app changes between a phone's and a tablet's. */
+export const WIDE_SLACK = 24;
+
+/**
+ * The layout for a window that had `before`: as `layoutFor`, except that between a phone's and a tablet's it changes only once
+ * the window is `WIDE_SLACK` past the line. The two are different screens, built again from nothing (the chat's place, the open
+ * pane, the folded projects), and a Stage Manager window dragged to about 700 points wide flipped between them at every step.
+ */
+export function layoutAfter(before: Layout | null, width: number, height: number): Layout {
+  const now = layoutFor(width, height);
+  if (before === null) return now;
+  if (before === "phone" && now !== "phone" && width < WIDE_MIN + WIDE_SLACK) return "phone";
+  if (before !== "phone" && now === "phone" && width >= WIDE_MIN - WIDE_SLACK) return layoutFor(WIDE_MIN, height);
+  return now;
 }
 
 /**

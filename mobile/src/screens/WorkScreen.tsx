@@ -1,6 +1,9 @@
 import { tabBarRoom } from "../ui/TabBar";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
+import { useToTop } from "../ui/useToTop";
+import { BackButton } from "../ui/BackButton";
+import { Host, Image as SwiftImage } from "@expo/ui/swift-ui";
+import { Keyboard, Linking, Platform, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
 import { useController, useSyncState } from "../shell/hooks";
@@ -13,14 +16,22 @@ import { PressScale } from "../ui/motion";
 import { Glass } from "../ui/Glass";
 import { Sheet, SheetPill } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { Magnifier, RoundButton, SearchContents, type BarSearch } from "./SearchBar";
-import { TopBar, TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
+import { Magnifier, RoundButton, SearchContents, SidebarIcon, type BarSearch } from "./SearchBar";
+import { TOP_BAR_GAP } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
-import { BUCKETS, bucketOf, groupingFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, type Bucket, type Tone, type WorkGroup } from "../view/work";
+import { askOf, BUCKETS, bucketOf, featureFor, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, workGroups, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
-  /** What a tablet's bar says where you are ("Work"); the bar's glass and its Refresh are the screen's own. A phone has no bar: its headline says where it is. */
-  top?: ReactNode;
+  /**
+   * A tablet's: the features are listed in its left column (the Work side of its Chats / Work switch), and this is the page
+   * beside them — the feature picked there (by its key), or with none picked the one that needs you. No list, no way back: the
+   * column is the list.
+   */
+  beside?: { feature: string | null };
+  /** A tablet whose chats are put away: the header's button that brings the column back (none when it is beside it, or slid in). */
+  onShowChats?: () => void;
+  /** Its tab tapped again while shown (a count): back from a feature's page, or to the top of the list. */
+  toTop?: number;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
   /** A tablet's main area: the page is held to a column that reads well. */
@@ -54,7 +65,7 @@ function toneColor(tone: Tone, c: Palette): string {
 }
 
 /** An item's colour: its state's, or the warning amber when its step goes around a rule (merging a pull request nobody approved). */
-const hueOf = (item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "move" : toneOf(item), c);
+export const hueOf =(item: RemoteWorkItem, c: Palette): string => toneColor(item.next?.warn ? "move" : toneOf(item), c);
 
 /** What happened to a step asked for: where it went, or why it didn't. Kept while the item stays in the state it was asked in. */
 interface Outcome {
@@ -152,9 +163,23 @@ const says = (i: RemoteWorkItem, typed: string) => {
   return [i.number === null ? "" : `#${i.number}`, i.title, i.issue ?? "", i.feature ?? "", i.repo, i.word, i.branch ?? ""].some((f) => f.toLowerCase().includes(q));
 };
 
-/** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
-const ASK_ORDER: Tone[] = ["you", "bad", "move"];
-const askOf = (items: RemoteWorkItem[]): RemoteWorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(toneOf(a)) - ASK_ORDER.indexOf(toneOf(b)));
+/** Refresh as the system's own arrow (a sign elsewhere), for a round button: a word in a bar didn't read as something to tap. */
+function RefreshGlyph() {
+  const colors = useColors();
+  return (
+    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {Platform.OS === "ios" ? (
+        <Host style={{ width: 20, height: 20 }} alignment="center">
+          <SwiftImage systemName="arrow.clockwise" size={16} color={colors.ink} />
+        </Host>
+      ) : (
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          ↻
+        </Txt>
+      )}
+    </View>
+  );
+}
 
 /** The feature's pieces as dots, one each (shipped work has none): colour only on what needs you, a ring for what isn't started. */
 function Pieces({ items }: { items: RemoteWorkItem[] }) {
@@ -170,7 +195,8 @@ function Pieces({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: WorkProps) {
+export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, onShowChats, toTop }: WorkProps) {
+  const lister = useRef<ComponentRef<typeof ScrollView>>(null);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -184,12 +210,11 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const colorOf = projectColors(chats);
   // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
   const [page, setPage] = useState<string | null>(null);
+  useToTop(toTop, () => (page !== null ? setPage(null) : lister.current?.scrollTo({ y: 0, animated: true })));
   const [tab, setTab] = useState<Bucket | null>(null);
   const [nextOpen, setNextOpen] = useState(false);
   // The item whose details are open, by key: they follow it as it moves on, and close if it goes.
   const [detail, setDetail] = useState<string | null>(null);
-  // How tall the bar over the list is (with the status bar's room above it): the list starts below it.
-  const [barHeight, setBarHeight] = useState(0);
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -199,7 +224,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     const t = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(t);
   }, []);
-  // Searching the page (a tablet's bar): the field is open, and what is typed narrows the list to what says it.
+  // Searching your work (a tablet's header): the field is open, and what is typed lists what says it, from every feature.
   const [finding, setFinding] = useState(false);
   const [query, setQuery] = useState("");
   const findInput = useRef<ComponentRef<typeof TextInput>>(null);
@@ -230,14 +255,19 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const looked = work?.looked === true;
   const blind = work?.blind ?? [];
   // Features with Linear; the projects without it.
-  const by = groupingFor("auto", issues);
   const next = nextSteps(items);
   const listed = standing(items);
-  const groups = groupItems(listed, by);
+  const groups = workGroups(items, issues);
   const needing = listed.filter((i) => bucketOf(i) === "attn").length;
   // One group needs no card to open: its page is the screen.
   const alone = groups.length === 1;
   const open: WorkGroup | undefined = alone ? groups[0] : page !== null ? groups.find((g) => g.key === page) : undefined;
+  // A tablet's page: the feature its column picked, or the one that needs you (the column highlights the same one).
+  const shownFeature = beside ? featureFor(groups, beside.feature) : undefined;
+  // Another feature opens on its own first tab, not on the tab the last one was left on.
+  useEffect(() => {
+    if (beside) setTab(null);
+  }, [shownFeature?.key]);
   // A feature whose page was open and is gone (all of it shipped) is let go: the list shows, and the page doesn't come back by
   // itself if the feature does.
   useEffect(() => {
@@ -447,23 +477,26 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     );
   };
 
-  /** A feature's page: its name, its tabs, and the rows under the one chosen. */
-  const featurePage = (g: WorkGroup) => {
+  /** A feature's page: its name (where nothing above it says it), how much is open, its tabs, and the rows under the one chosen. */
+  const featurePage = (g: WorkGroup, titled: boolean, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode) => {
     const on = tab ?? openBucket(g.items);
     const rows = g.items.filter((i) => bucketOf(i) === on);
     const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
     return (
       <View accessibilityLabel={g.label}>
-        {/* With one feature its page is the screen, and a tablet's bar keeps saying "Work": there the name is the headline.
-            On a phone, pushed, the page's bar carries the name instead. */}
-        {(alone || !!top) && (
+        {/* With one feature its page is the screen, and the name is its headline. A phone's pushed page has the name in its bar,
+            and a tablet's page in its header. */}
+        {titled && (
           <Txt variant="title" style={{ marginTop: 0 }}>
             {g.label}
           </Txt>
         )}
-        <Txt variant="small" tone="ink3" style={{ marginTop: 4 }}>
-          {live} open, {g.items.length - live} shipped
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10, marginTop: 4 }}>
+          <Txt variant="small" tone="ink3">
+            {live} open, {g.items.length - live} shipped
+          </Txt>
+          {review}
+        </View>
         {tabs(g, on)}
         {rows.length === 0 ? (
           <Txt variant="body" tone="ink3" style={{ paddingTop: 18 }}>
@@ -475,6 +508,22 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
       </View>
     );
   };
+
+  /** Where things stand, in a line: nothing looked at yet, nothing open, or how many things need you. */
+  const standsLine = !looked
+    ? "Your Mac hasn't looked yet: open a project on it to see its work."
+    : items.length === 0
+      ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.`
+      : needing === 0
+        ? "Nothing needs you right now."
+        : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`;
+  /** The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */
+  const blindNote =
+    blind.length > 0 ? (
+      <Txt variant="small" tone="ink2">
+        Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
+      </Txt>
+    ) : null;
 
   /** The Work screen: how many things need you, and a card for each feature. */
   // A refresh says it is going where its link was (the list's own pull spinner is hidden; a tap on the link showed nothing).
@@ -488,55 +537,34 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
   const overview = (
     <View style={{ gap: 18 }}>
       <View style={{ gap: 4 }}>
-        {/* A phone's list is its own big "Work" headline; a tablet's bar says it, and a second one under the bar is just the same word twice. */}
-        {!top && (
-          <Txt variant="title" accessibilityRole="header">
-            Work
-          </Txt>
-        )}
+        <Txt variant="title" accessibilityRole="header">
+          Work
+        </Txt>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
           <Txt variant="body" tone="ink2" style={{ flexShrink: 1 }}>
-            {!looked
-              ? "Your Mac hasn't looked yet: open a project on it to see its work."
-              : items.length === 0
-                ? `Nothing open: no pull requests of yours, nothing waiting to be released, no branches left unpushed${issues ? ", no issues to start" : ""}.`
-                : needing === 0
-                  ? "Nothing needs you right now."
-                  : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
+            {standsLine}
           </Txt>
           {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-          {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
-          {!top && (
-            <View style={{ marginLeft: "auto" }}>
-              {refreshLink}
-            </View>
-          )}
+          <View style={{ marginLeft: "auto" }}>{refreshLink}</View>
         </View>
-        {/* The Mac says when it couldn't tell whose pull requests are yours: they aren't listed, and that isn't "nothing open". */}
-        {blind.length > 0 && (
-          <Txt variant="small" tone="ink2">
-            Couldn't tell which GitHub account is yours in {blind.join(", ")}, so its pull requests aren't shown. Refresh to try again.
-          </Txt>
-        )}
+        {blindNote}
       </View>
       {justFinished}
       {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map(featureCard)}</View>}
     </View>
   );
 
-  /** With one feature (or one project) there are no cards: the screen opens on its page, under the same line of how many things need you. */
-  const overviewNote = () => (
+  /**
+   * With one feature (or one project) there are no cards: the screen opens on its page, under the same line of how many things
+   * need you. A tablet's header has Refresh as a button, so its line doesn't repeat it.
+   */
+  const overviewNote = (withRefresh = true) => (
     <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
       <Txt variant="small" tone="ink3" style={{ flexShrink: 1 }}>
         {needing === 0 ? "Nothing needs you right now." : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
       </Txt>
       {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-      {/* A tablet's bar carries Refresh: the line here repeats it only where there is no bar. */}
-      {!top && (
-        <View style={{ marginLeft: "auto" }}>
-          {refreshLink}
-        </View>
-      )}
+      {withRefresh && <View style={{ marginLeft: "auto" }}>{refreshLink}</View>}
     </View>
   );
 
@@ -544,63 +572,22 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
    * The way back from a feature's page: the chat's back button, a circle of glass. The page goes away as the stack takes it
    * away (a swipe in from the edge does the same, with the list coming out from under it).
    */
-  const backCircle = (
-    <PressScale accessibilityRole="button" accessibilityLabel="Back to Work" accessibilityHint="Goes back to every feature" onPress={() => setPage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} haptic="select" scaleTo={0.88} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, justifyContent: "center" }}>
-      <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-      </Glass>
-    </PressScale>
-  );
+  const backCircle = <BackButton label="Back to Work" hint="Goes back to every feature" onPress={() => setPage(null)} />;
 
   /**
-   * The column a bar keeps on a tablet: the page's own, so the bar starts where the content does. A bar as wide as the window over
-   * content held to 640 points reads as a second, wider screen.
-   */
-  const barColumn: ViewStyle = wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", paddingHorizontal: space.xl } : {};
-
-  /**
-   * A tablet's bar: where you are, and the two things the page does — Search, which opens the field in the bar, and Refresh. The
-   * glass is as wide as what is in it, not the column, so it reads as a pill rather than an empty band; the open field takes the
-   * column's width, as a search field does.
-   */
-  const tabletBar = (searchable: boolean) => (
-    <TopBar style={{ marginHorizontal: 0, alignSelf: searchable && finding ? "stretch" : "flex-start" }}>
-      {searchable && finding ? (
-        <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
-      ) : (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
-          {top}
-          {/* Search filters the list; a feature's page has no list to filter, so its bar doesn't offer it. */}
-          {searchable && (
-            <RoundButton label="Search your work" onPress={() => setFinding(true)}>
-              <Magnifier />
-            </RoundButton>
-          )}
-          <Link label="Refresh" onPress={refresh} />
-        </View>
-      )}
-    </TopBar>
-  );
-
-  /**
-   * A feature's page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
-   * bar does. The way back leads, and the page's name sits where a chat's title does — a tablet's bar (`top`) says "Work" there
-   * instead.
+   * A phone's feature page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
+   * bar does. The way back leads, and the page's name sits where a chat's title does.
    */
   const pageBar = (g: WorkGroup) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, ...(top ? barColumn : { paddingHorizontal: space.lg }) }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.lg }}>
         {backCircle}
         <View style={{ flex: 1 }}>
-          {top ? (
-            tabletBar(false)
-          ) : (
-            <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
-              <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
-                {g.label}
-              </Txt>
-            </Glass>
-          )}
+          <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
+            <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
+              {g.label}
+            </Txt>
+          </Glass>
         </View>
       </View>
     </View>
@@ -617,23 +604,13 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
     element: (
       <View style={{ flex: 1, backgroundColor: colors.paper }}>
         <ScrollView
+          ref={lister}
           accessibilityLabel="Your work"
           style={{ flex: 1 }}
-          contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}
+          contentContainerStyle={{ ...margins, paddingTop: insets.top + 16 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
         >
-          {finding ? (
-            // What says what is typed, wherever it sits: a name, a number, an issue, a feature, a repo, a branch.
-            <View accessibilityLabel="Found work">
-              {found.length === 0 ? (
-                <Txt variant="body" tone="ink3">
-                  {query.trim() ? `Nothing says “${query.trim()}”.` : "Search your work: a name, a #number, a ticket, a feature or a repo."}
-                </Txt>
-              ) : (
-                found.map((i, n) => row(i, null, n))
-              )}
-            </View>
-          ) : work === null ? (
+          {work === null ? (
             <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
               <Dots />
             </View>
@@ -641,22 +618,14 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
             <>
               <View style={{ marginBottom: 4 }}>{overviewNote()}</View>
               {justFinished && <View style={{ marginVertical: 12 }}>{justFinished}</View>}
-              {featurePage(open)}
+              {featurePage(open, true)}
             </>
           ) : (
             overview
           )}
         </ScrollView>
-        {/* A phone has no bar over the list (the headline is its own); a tablet's floats over it. The status bar's strip is paper, so words don't run under the clock. */}
-        {!top && <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />}
-        {top && (
-          <View testID="work-bar" pointerEvents="box-none" onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", top: 0, left: 0, right: 0, paddingTop: insets.top + TOP_BAR_GAP }}>
-            {/* The bar starts where the list's column does, and is as wide as what it says. */}
-            <View pointerEvents="box-none" style={barColumn}>
-              {tabletBar(true)}
-            </View>
-          </View>
-        )}
+        {/* The headline is the list's own, with no bar over it. The status bar's strip is paper, so words don't run under the clock. */}
+        <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
       </View>
     ),
   };
@@ -671,7 +640,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
               <View style={{ flex: 1, backgroundColor: colors.paper }}>
                 {pageBar(open)}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
-                  {featurePage(open)}
+                  {featurePage(open, false)}
                 </ScrollView>
               </View>
             ),
@@ -679,11 +648,92 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false }: Wo
         ]
       : [listScreen];
 
+  /**
+   * A tablet's page, beside the features in its column. Its header is words and round buttons, with no capsule round them: the
+   * feature's name as the page's title, then Search and Refresh (the system's arrow, not a word), and before the name the button
+   * that brings the column back while it is put away. Under it how many things need you, then the feature's tabs and rows.
+   * Search lists what it finds, from every feature, in place of the page.
+   */
+  const refreshButton = refreshing ? (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel="Refreshing" style={{ width: 32, height: 32, alignItems: "center", justifyContent: "center" }}>
+      <Dots />
+    </View>
+  ) : (
+    <RoundButton label="Refresh" onPress={refresh}>
+      <RefreshGlyph />
+    </RoundButton>
+  );
+  const header = (
+    <View testID="work-header" style={{ flexDirection: "row", alignItems: "center", gap: space.md, minHeight: 44 }}>
+      {onShowChats && (
+        <RoundButton label="Show chats" onPress={onShowChats}>
+          <SidebarIcon />
+        </RoundButton>
+      )}
+      {finding ? (
+        <View style={{ flex: 1, minHeight: 40, paddingHorizontal: space.lg, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, justifyContent: "center" }}>
+          <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
+        </View>
+      ) : (
+        <>
+          <Txt variant="title" accessibilityRole="header" numberOfLines={2} style={{ flex: 1 }}>
+            {shownFeature?.label ?? "Work"}
+          </Txt>
+          <RoundButton label="Search your work" onPress={() => setFinding(true)}>
+            <Magnifier />
+          </RoundButton>
+          {refreshButton}
+        </>
+      )}
+    </View>
+  );
+  const besidePage = (
+    <ScrollView
+      ref={lister}
+      accessibilityLabel="Your work"
+      keyboardShouldPersistTaps="handled"
+      style={{ flex: 1 }}
+      contentContainerStyle={{ ...margins, paddingTop: insets.top + TOP_BAR_GAP }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
+    >
+      {header}
+      {finding ? (
+        // What says what is typed, wherever it sits: a name, a number, an issue, a feature, a repo, a branch.
+        <View accessibilityLabel="Found work">
+          {found.length === 0 ? (
+            <Txt variant="body" tone="ink3">
+              {query.trim() ? `Nothing says “${query.trim()}”.` : "Search your work: a name, a #number, a ticket, a feature or a repo."}
+            </Txt>
+          ) : (
+            found.map((i, n) => row(i, null, n))
+          )}
+        </View>
+      ) : work === null ? (
+        <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
+          <Dots />
+        </View>
+      ) : (
+        <>
+          {/* The page says its own feature's numbers (its tabs count what needs you in it); how many need you across them all is
+              the Work row's count, and the steps to take across them all are one link beside the page's count. What finished in
+              the chats is the column's Timeline, not this page's: it has nothing to do with the feature. */}
+          {!shownFeature && (
+            <Txt variant="body" tone="ink2">
+              {standsLine}
+            </Txt>
+          )}
+          {blindNote}
+          {shownFeature && featurePage(shownFeature, false, next.length > 0 ? <Link label={`Review all ${next.length} step${next.length === 1 ? "" : "s"}`} hint="Lists every step to take, in every feature" onPress={() => setNextOpen(true)} /> : undefined)}
+        </>
+      )}
+    </ScrollView>
+  );
+
   const shown = detail ? items.find((i) => i.key === detail) : undefined;
   const metaOfShown = shown ? metaUnder(shown, now, null) : "";
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <AnimatedStack items={screens} onBack={() => setPage(null)} />
+      {beside ? besidePage : <AnimatedStack items={screens} onBack={() => setPage(null)} />}
       {shown && (
         <Sheet onClose={() => setDetail(null)}>
           {(close, scroll) => {

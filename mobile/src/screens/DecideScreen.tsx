@@ -403,7 +403,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           {outcome.ours ? "It isn't waiting any more." : "Answered on your Mac."}
         </Txt>
       )}
-      {outcome.kind === "done" && (
+      {/* An allowed permission says so under its circle instead (below), where Deny was. */}
+      {outcome.kind === "done" && !(outcome.allowed && view.kind !== "question") && (
         <FadeSlideIn from={8}>
           <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
             {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Declined." : "Denied."}
@@ -421,17 +422,26 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           <View style={{ gap: 8 }}>
             {/* It stays up while the answer goes, and shows it was allowed (it can't be dragged again). */}
             {/* A failed answer brings a fresh one back (the key), not the one that looks allowed. */}
-            <SwipeToAllow key={outcome.kind === "failed" ? "again" : "first"} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => answer(true)} />
+            <SwipeToAllow settle="center" key={outcome.kind === "failed" ? "again" : "first"} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => answer(true)} />
             <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled={busy} onPress={() => answer(false)} />
           </View>
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
         <View testID="approved" style={{ gap: 8 }}>
           {/* The same bar, now closed in to a circle with the check: it closes this by itself, and a tap on it does so at once. */}
-          <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
-          {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
-          <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ opacity: 0 }}>
-            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled onPress={() => {}} />
+          {/* The same bar, closed in to a circle in the middle of the tray. */}
+          <SwipeToAllow settle="center" key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
+          {/* Deny's place is kept, so the circle isn't pushed down and the tray doesn't shrink under it; what it came to is said
+              there, under the circle, instead of in a corner over it. */}
+          <View>
+            <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ opacity: 0 }}>
+              <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled onPress={() => {}} />
+            </View>
+            <FadeSlideIn from={6} delay={260} style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}>
+              <Txt variant="small" tone="night" style={{ textAlign: "center" }} accessibilityRole="alert">
+                {approval ? "Approved." : "Allowed."}
+              </Txt>
+            </FadeSlideIn>
           </View>
         </View>
       ) : (

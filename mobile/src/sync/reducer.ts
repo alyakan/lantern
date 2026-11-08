@@ -26,7 +26,7 @@ export interface FileEdit {
 }
 
 export type Item =
-  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
+  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** Written while the Mac couldn't be reached: it goes once the Mac is back. */ held?: boolean; /** It waited, and the Mac came back as another run: not sent, and not to be sent again from here. */ stale?: boolean; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
   | { kind: "assistant"; id: string; text: string; streaming: boolean }
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
@@ -35,6 +35,8 @@ export type Item =
   | { kind: "turn"; id: string; isError: boolean; stopped?: boolean; result: string | null; durationMs: number | null }
   /** The user's post-hook was sent after Claude's answer: what Claude says and does after this, to the turn's end, is the hook's. */
   | { kind: "hook"; id: string; text: string }
+  /** Where the conversation was compacted: `running` while it is (a minute or so), `done` once it was, `ended` when the turn ended without it. */
+  | { kind: "compact"; id: string; state: "running" | "done" | "ended" }
   /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
   | { kind: "shell"; id: string; command: string; output: string; status: "running" | "done" | "failed" | "stopped"; code: number | null; /** It is reading a secret (a password): what is typed in reply is hidden. */ secret: boolean };
 
@@ -123,7 +125,8 @@ export type Action =
   /** Your work, as the Mac answered when asked (it pushes it too, as it changes). */
   | { type: "work"; work: RemoteWork }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
-  | { type: "send_failed"; slot: string; clientId: string; error: string }
+  | { type: "held"; slot: string; clientId: string; text: string; at: number }
+  | { type: "send_failed"; slot: string; clientId: string; error: string; /** See the item's `stale`. */ stale?: boolean }
   /** The chat's history was asked for (again), or the asking failed. */
   | { type: "load_started"; slot: string }
   | { type: "load_failed"; slot: string; why: string }
@@ -155,6 +158,20 @@ function onStep(items: Item[], id: string, f: (s: Extract<Item, { kind: "step" }
   return updateById(base, "step", id, f);
 }
 
+
+/** A compaction still running (see the "compact" item). */
+const compacting = (it: Item): it is Extract<Item, { kind: "compact" }> => it.kind === "compact" && it.state === "running";
+
+/**
+ * A new compaction's id: named for the message that began its turn, like the turn's end, so an earlier page (built on its own)
+ * never names one the same as a later page's. A second one in the same turn is numbered.
+ */
+function compactId(items: Item[]): string {
+  const began = [...items].reverse().find((it) => it.kind === "user");
+  const base = `compact-${began?.id ?? "start"}`;
+  const taken = items.filter((it) => it.kind === "compact" && (it.id === base || it.id.startsWith(`${base}-`))).length;
+  return taken ? `${base}-${taken}` : base;
+}
 
 /** One event, applied to a chat's view. */
 export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
@@ -202,16 +219,27 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     // The person stopped this turn (on this phone, the Mac, or wherever it was asked for), before the interrupt landed.
     case "turn_stopping":
       return { ...view, stopping: true };
+    case "compacting":
+      // Claude Code says it started as well as the Mac: one line all the same.
+      if (items.some(compacting)) return { ...view, thinking: false };
+      return { ...view, thinking: false, items: [...items, { kind: "compact", id: compactId(items), state: "running" }] };
+    case "compacted":
+      if (items.some(compacting)) return { ...view, items: items.map((it) => (compacting(it) ? { ...it, state: "done" as const } : it)) };
+      // A chat caught up from its history (no start was told), or one this phone heard only the end of.
+      return { ...view, items: [...items, { kind: "compact", id: compactId(items), state: "done" }] };
     case "turn_done": {
-      // A turn is named for the message that began it, so the same end applied twice is one end.
-      const began = [...items].reverse().find((it) => it.kind === "user");
+      // A turn is named for the message that began it, so the same end applied twice is one end. A post-hook's turn began with the
+      // hook, not a message of the user's: named for that, its end comes after the hook's words (it used to take the answer's end
+      // over, and the hook looked as if it ran for ever).
+      const began = [...items].reverse().find((it) => it.kind === "user" || it.kind === "hook");
       const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error && !view.stopping, ...(view.stopping ? { stopped: true } : {}), result: event.result, durationMs: event.duration_ms };
       return {
         ...view,
         thinking: false,
         stopping: false,
         context: view.context && event.context_window ? { ...view.context, window: event.context_window } : view.context,
-        items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done),
+        // A compaction the turn ended without (it failed, or was stopped) no longer says it is compacting.
+        items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : compacting(it) ? { ...it, state: "ended" as const } : it)), done),
       };
     }
     case "permission_requested":
@@ -293,6 +321,11 @@ export function reducer(state: State, action: Action): State {
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: upsert(view.items, item) } } };
     }
+    case "held": {
+      const view = state.views[action.slot] ?? emptyView;
+      const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, held: true };
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: upsert(view.items, item) } } };
+    }
     case "load_started": {
       const view = state.views[action.slot];
       if (!view || view.loadError === null) return state;
@@ -305,12 +338,12 @@ export function reducer(state: State, action: Action): State {
     case "send_failed": {
       const view = state.views[action.slot];
       if (!view) return state;
-      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, failed: action.error })) } } };
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, held: false, failed: action.error, ...(action.stale ? { stale: true } : {}) })) } } };
     }
     case "forget": {
       const view = state.views[action.slot];
       // A message that is still going, or didn't go, is kept: it is what was typed, and the Mac has no copy of it.
-      if (!view || view.items.some((it) => it.kind === "user" && (it.sending || !!it.failed))) return state;
+      if (!view || view.items.some((it) => it.kind === "user" && (it.sending || it.held || !!it.failed))) return state;
       const { [action.slot]: _, ...views } = state.views;
       return { ...state, views };
     }

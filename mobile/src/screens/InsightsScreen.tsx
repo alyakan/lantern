@@ -3,7 +3,8 @@
  * backs it up. Where the usage goes, whether the savings work, what got done, and how the user works. The Mac works them out
  * from Claude Code's logs and git; this only shows them.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useToTop } from "../ui/useToTop";
 import { PixelRatio, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Insights } from "../protocol/generated/Insights";
@@ -124,7 +125,9 @@ function Shares({ list, colorOf }: { list: InsightsShare[]; colorOf: (name: stri
   );
 }
 
-export function InsightsScreen({ top, visible = true }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are a minute old. */ visible?: boolean }) {
+export function InsightsScreen({ top, visible = true, toTop }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are a minute old. */ visible?: boolean; /** Its tab tapped again while shown (a count): back to the top. */ toTop?: number }) {
+  const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
+  useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sync } = useController();
@@ -176,6 +179,7 @@ export function InsightsScreen({ top, visible = true }: { top: ReactNode; onOpen
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <ScrollView
+        ref={scroller}
         contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabBarRoom(insets.bottom), gap: 22 }}
         // The pull asks again, and the line under the ranges says it is updating (as Home and Work show theirs): no spinner that
         // springs back at once.

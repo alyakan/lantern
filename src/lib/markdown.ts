@@ -210,3 +210,35 @@ export function languageName(className: string | undefined): string | null {
   if (!lang) return null;
   return LANGUAGES[lang.toLowerCase()] ?? lang;
 }
+
+/** A line that carries on a list or code above it, or starts a list: a block boundary isn't safe next to it. */
+const LIST_OR_INDENT = /^(?:\s|[-*+] |\d+[.)] )/;
+
+/**
+ * Where a message streaming in can be cut into blocks that read as the whole does: at each blank line outside any code
+ * fence and away from any list, so each finished block can be drawn once and kept, and only the last is parsed again as
+ * more arrives. None for text with a link or footnote definition, which reaches back into the blocks before it.
+ */
+export function settledCuts(text: string): number[] {
+  if (/^ {0,3}\[[^\]]+\]:/m.test(text)) return [];
+  const cuts: number[] = [];
+  let fence: string | null = null;
+  let at = 0;
+  let prev = "";
+  let blank = false;
+  for (const line of text.split("\n")) {
+    const opens = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (opens && opens[1][0] === fence[0] && opens[1].length >= fence.length && line.trim() === opens[1]) fence = null;
+    } else if (line.trim() === "") {
+      blank = true;
+    } else {
+      if (blank && prev && !LIST_OR_INDENT.test(prev) && !LIST_OR_INDENT.test(line)) cuts.push(at);
+      blank = false;
+      prev = line;
+      if (opens) fence = opens[1];
+    }
+    at += line.length + 1;
+  }
+  return cuts;
+}

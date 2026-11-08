@@ -6,7 +6,7 @@ import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboar
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
-import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
+import { useConnectionState, useController, useDeviceId, useSyncPick } from "../shell/hooks";
 import { emptyView, type Item } from "../sync/reducer";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
@@ -19,9 +19,14 @@ import { control, radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
 import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
 import { projectColorOf, projectTint } from "../view/home";
-import { hasHiddenChars, tellClaude } from "../view/shell";
+import { hasHiddenChars, isTerminal, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
-import { timeline, type Row } from "../view/timeline";
+import { keepSame, timeline, type Row } from "../view/timeline";
+import { gutterFor } from "../view/layout";
+import { useLayout } from "../shell/useLayout";
+import { useShortcut } from "../ui/useShortcut";
+import { BackButton } from "../ui/BackButton";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -37,12 +42,12 @@ import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, typ
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
-import { SearchBar, type BarSearch, type BarTool } from "./SearchBar";
+import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
@@ -113,12 +118,26 @@ export const WAKE_WAIT_MS = 20_000;
 /** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
 const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
 
+/** How long the chat's last message is (0 when it ends in something else). */
+const saidOf = (rows: Row[]) => {
+  const last = rows[rows.length - 1];
+  return last && (last.kind === "assistant" || last.kind === "summary" || last.kind === "page") ? last.item.text.length : 0;
+};
+
+/** The widest the chat's column gets (its rows' own margins inside it): about 80 characters of body text a line. */
+const READABLE = 760;
+/** The room either side of the chat's column in a chat `width` wide: none on a phone. */
+export const readableSide = (width: number) => Math.max(0, (width - READABLE) / 2);
+
+/** How near the end, as a share of the chat's height, the list follows new words in (and so where Jump to latest starts). */
+const FOLLOW_END = 0.2;
+
 export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onTodos, onStartNew, resizing = false }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
-  const { chats, views, plan, providerUsage, workingSince } = useSyncState();
-  const chat = chats.find((c) => c.slot === slot);
+  // Only this chat's part: another chat streaming doesn't draw this one again.
+  const { chat, slotView, plan, providerUsage, since } = useSyncPick(slot, (s) => ({ chat: s.chats.find((c) => c.slot === slot), slotView: s.views[slot], plan: s.plan, providerUsage: s.providerUsage, since: s.workingSince[slot] ?? null }));
   const canOutput = useMacCan("output");
   // A Mac that can read a reviewed file's diff from the PR or branch under review; an older one only has the chat's own edits.
   const canReviewDiff = useMacCan("reviewdiff");
@@ -151,7 +170,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const glass = useGlass();
   const [top, setTop] = useState(0);
   const [bottom, setBottom] = useState(0);
-  const view = views[slot] ?? emptyView;
+  const view = slotView ?? emptyView;
   const working = chat?.status === "working";
   // A chat that comes in pages (a long one opened, or one caught up on after a long time away) is drawn once, when it is whole:
   // until then what was shown stays (the shape of a chat, breathing, when there was nothing). Drawn page by page it was laid out
@@ -170,10 +189,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const items = useMemo(() => {
     if (!holding) return view.items;
     const held = settled.current;
-    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
+    const mine = view.items.filter((it) => it.kind === "user" && (it.sending || it.held || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
     return mine.length ? [...held, ...mine] : held;
   }, [holding, view.items]);
-  const rows = useMemo(() => timeline(items, Date.now(), working), [items, working]);
+  // Rows that say what they said before stay the same objects, so a streamed word draws again only the row it lands in.
+  const lastRows = useRef<Row[]>([]);
+  const rows = useMemo(() => (lastRows.current = keepSame(lastRows.current, timeline(items, Date.now(), working))), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(items, working), [items, working]);
   const canCruise = useMacCan("cruise");
@@ -216,6 +237,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
+  // Command-F on an iPad's keyboard opens the chat's search, as the bar's Search does.
+  useShortcut("find", () => setFind((f) => f ?? { query: "", cursor: null }));
+  useShortcut("escape", () => setFind(null), find !== null);
   // Step by step reads a page at a time, side by side, as on the Mac (or as one list, if asked). The page on screen: none
   // means the newest, followed as pages come; `of` is how many there were when another was picked, so a new one is said.
   const stepsChat = chat?.workflow === "steps";
@@ -290,10 +314,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A message being read aloud: reading stops when the chat is left.
   const [reading, setReading] = useState(false);
   useEffect(() => () => platformSpeech.stop(), []);
-  const [away, setAway] = useState<{ since: number } | null>(null);
+  // `said`: how long the last message was then, so a reply that grows below the reader counts as something new too.
+  const [away, setAway] = useState<{ since: number; said: number } | null>(null);
+  // On a wide iPad the chat is a readable column in the middle, not lines running the width of the screen.
+  const [width, setWidth] = useState(0);
+  const side = readableSide(width);
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);
+  // The bar's and the banners' side margin: a phone's 16, a tablet's 20, as the chats and Work beside it have.
+  const gutter = gutterFor(useLayout());
   // The reader's place survives the chat getting narrower or wider (the chats pinned beside it, put away, or the tablet turned).
   const keep = useKeepPlace(list);
   const { hold } = keep;
@@ -468,6 +498,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const openFiles = useCallback((paths: string[]) => (paths.length === 1 ? openFile(paths[0]) : setFiles(paths)), [openFile]);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
+  // Cruise has a row over the message box (its pill, or its card once on).
+  const cruiseRow = canCruise && !asleep && !stepsChat;
   const send = (text: string) => {
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
@@ -532,12 +564,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       : []),
   ];
   // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
+  // Away is where the list stops following the end (FOLLOW_END of the view from it): the button shows from the moment new words
+  // would no longer bring the chat along, never a stretch later.
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
-    const far = distanceFromEnd(e) > 260;
+    const far = distanceFromEnd(e) > e.nativeEvent.layoutMeasurement.height * FOLLOW_END;
     keep.remember(!far);
-    setAway((a) => (far ? (a ?? { since: rows.length }) : null));
+    setAway((a) => (far ? (a ?? { since: rows.length, said: saidOf(rows) }) : null));
   };
-  const unseen = away ? Math.max(0, rows.length - away.since) : 0;
+  const grew = !!away && rows.length === away.since && saidOf(rows) > away.said;
+  const unseen = away ? Math.max(0, rows.length - away.since) + (grew ? 1 : 0) : 0;
   // A long chat comes in several pages as it opens, each landing at the end, and the list follows the end while the reader is
   // near it: one who started scrolling up was pulled back down with every page. Once they have moved, it is left where they took
   // it until the chat has come whole (then the end is followed again as before).
@@ -548,7 +583,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   }, [resetting]);
   const followEnd = !(resetting && movedWhileLoading);
   // (0, not none: with none the list stops looking, and a pull it had already decided on, from before the finger moved, still came.)
-  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? 0.2 : 0, startRenderingFromBottom: true }), [followEnd]);
+  const keepPosition = useMemo(() => ({ autoscrollToBottomThreshold: followEnd ? FOLLOW_END : 0, startRenderingFromBottom: true }), [followEnd]);
 
   // A row's handlers stay the same function from one drawing of the chat to the next (each calls the latest of what it does), so
   // the rows, which are memoised, aren't all drawn again with every word streamed.
@@ -569,7 +604,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
@@ -587,7 +622,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <StepsRow rowKey={row.key} chips={row.chips} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
+            // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so
+            // play the closing settle on a card decided long ago.
             <PromptRow
+              key={row.item.id}
               item={row.item}
               me={me}
               onReview={() => onReview(row.item.id)}
@@ -606,6 +644,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <TurnRow item={row.item} onRetry={row === lastTurn && online ? retry : undefined} />;
         case "day":
           return <DayRow label={row.label} />;
+        case "compact":
+          return <CompactRow item={row.item} />;
         case "hook":
           return <HookRow row={row} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "shell":
@@ -619,7 +659,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     // While searching, the match being looked at has an outline in the accent, and the other matches a faint one.
     const mark = marks.here === row.key ? "here" : marks.all.has(row.key) ? "other" : null;
     return (
-      <FadeSlideIn animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
+      <FadeSlideIn id={row.key} animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
         {body}
         {mark && <View testID={`match-${mark}`} pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: 6, borderRadius: radius.inner, borderWidth: mark === "here" ? 2 : 1, borderColor: mark === "here" ? colors.cobalt : `${colors.cobalt}55` }]} />}
       </FadeSlideIn>
@@ -629,24 +669,17 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // The pieces of the screen. On iOS 26 the list runs under the header and the message box, which are glass; elsewhere they sit above and below it as before.
   const head = (
     <>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
-        {lead === "back" && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={HEADER_SLOP} scaleTo={0.88}>
-            <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-              <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-            </Glass>
-          </PressScale>
-        )}
+      {/* Centred where the tabs' bars are (their gap under the clock, and half the difference between their 48 and these 44-point
+          circles), so a chat pushed over a tab doesn't shift its bar on the way. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + TOP_BAR_GAP + (TOP_BAR_HEIGHT - control) / 2, paddingHorizontal: gutter, paddingBottom: 10 }}>
+        {lead === "back" && <BackButton onPress={onBack} hitSlop={HEADER_SLOP} />}
         {lead === "sidebar" && (
           // It pops in when the chats are unpinned and go away (not when the chat opens with them away: then it was just there).
           // While they are slid in it stays where it is, under them, so they cover and uncover it as they move.
           <PopIn glass animate={sidebarLeadLate}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} scaleTo={0.88}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Show chats" accessibilityElementsHidden={leadHidden} importantForAccessibility={leadHidden ? "no-hide-descendants" : "auto"} disabled={leadHidden} onPress={onSidebar} hitSlop={HEADER_SLOP} haptic="select" scaleTo={0.88}>
               <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-                {/* A window with its side panel: the chats. */}
-                <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
-                  <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
-                </View>
+                <SidebarIcon />
               </Glass>
             </PressScale>
           </PopIn>
@@ -704,7 +737,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} />}
 
       {banner && (
-        <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View accessibilityRole="alert" style={{ marginHorizontal: gutter, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} />
           <Txt variant="small" tone="ink2">
             Caught up on {view.caughtUp} {view.caughtUp === 1 ? "event" : "events"} from while you were away
@@ -712,7 +745,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </View>
       )}
       {problem && (
-        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
+        <Pressable accessibilityRole="alert" accessibilityHint="Dismisses this" onPress={() => setProblem(null)} style={{ marginHorizontal: gutter, marginBottom: 6, backgroundColor: `${colors.stop}1a`, borderRadius: radius.inner, padding: 10 }}>
           <Txt variant="small" tone="stop">
             {problem}
           </Txt>
@@ -741,8 +774,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           }}
         />
       )}
-      {canCruise && !asleep && !stepsChat && (
+      {cruiseRow && (
         <CruiseBar
+          replies={cruise.on ? undefined : replies}
+          onReply={send}
           on={cruise.on}
           resting={!working && !open}
           asking={cruise.asking}
@@ -782,7 +817,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </Glass>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} placeholder={online ? undefined : "Waiting for your Mac…"} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
+        // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
+        // a command still goes to Run, which says it couldn't).
+        <Composer draftKey={slot} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
+            // What you send is what you follow, even from far up the chat.
+            setAway(null);
+            list.current?.scrollToEnd({ animated: true });
+            // A command (it may hold a secret) is never kept on the phone to go later: it says it didn't go, as before.
+            if (online || images?.length || isTerminal(text)) void sync.send(slot, text, images);
+            else sync.hold(slot, text);
+          }} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
       )}
     </>
   );
@@ -802,7 +846,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         // A tap on the status bar would jump to the oldest message loaded, which in a chat is never where the reader wants to be,
         // and on a tablet the header's buttons are right under it.
         scrollsToTop={false}
-        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : undefined}
+        contentContainerStyle={{ paddingHorizontal: side, ...(glass ? { paddingTop: top, paddingBottom: bottom + (replyHeight ? replyHeight + 10 : 0) } : replyHeight ? { paddingBottom: replyHeight + 10 } : {}) }}
         ref={list}
         onScroll={onScroll}
         scrollEventThrottle={64}
@@ -838,7 +882,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         }
         ListFooterComponent={
           working ? (
-            <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} />
+            <WorkingFooter activity={activityOf(view.items, view.thinking)} since={since} />
           ) : (
             <View style={{ height: 8 }} />
           )
@@ -875,7 +919,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return { ...a, reply: message === "Next." ? "Next" : message };
   };
   const pageBar = heading && !working && !answered.has(heading.item.id) && heading.page.actions.length > 0 ? <PageActionsFloat actions={heading.page.actions} lift={glass ? bottom : 0} onHeight={setFloatHeight} onAction={(a) => reply(heading.item.id, nextOf(heading, a))} /> : null;
-  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={workingSince[slot] ?? null} /> : null} /> : listEl;
+  const body = paged ? <StepPager pages={pages} index={pageAt} onIndex={toPage} renderRow={renderRow} padTop={glass ? top : 0} padBottom={glass ? bottom : 0} endRoom={pageBar ? floatHeight + 10 : replyHeight ? replyHeight + 10 : 0} places={places} lift={lift} held={swiping} footer={working ? <WorkingFooter activity={activityOf(view.items, view.thinking)} since={since} /> : null} /> : listEl;
   // A tap on the chat (a message too) puts the keyboard away.
   const tapAway = useTapAway();
   // What floats over the list rides the keyboard with the bar.
@@ -888,14 +932,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
   // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
   // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
-  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
+  // With Cruise's pill over the box, the replies are chips in its row (CruiseBar); otherwise they float over the chat's end.
+  const replyBar = replies.length > 0 && !pageBar && !(cruiseRow && !cruise.on) ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
+          <View style={StyleSheet.absoluteFill} onLayout={(e) => {
+            keep.widthChanged(e.nativeEvent.layout.width);
+            setWidth(e.nativeEvent.layout.width);
+          }} {...tapAway}>
             {body}
           </View>
           {riding(jump)}
@@ -919,7 +967,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         <>
           {head}
-          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)} {...tapAway}>
+          <View style={{ flex: 1 }} onLayout={(e) => {
+            keep.widthChanged(e.nativeEvent.layout.width);
+            setWidth(e.nativeEvent.layout.width);
+          }} {...tapAway}>
             {body}
             {riding(jump)}
             {riding(pageBar)}

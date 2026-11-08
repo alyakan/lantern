@@ -236,11 +236,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
             {/* The chat's own message box: the words, and under them its row of tools, photos and options at the left, the
                 microphone and send at the right. */}
             <View testID="new-chat-box" style={[{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, padding: 6 }, shadow.card, { shadowOpacity: 0.05 }]}>
-              {attach.images.length > 0 && (
-                <View style={{ paddingHorizontal: 6, paddingTop: 6 }}>
-                  <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />
-                </View>
-              )}
+              {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
               <TextInput
                 accessibilityLabel="What to start with"
                 value={text}

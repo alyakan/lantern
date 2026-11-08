@@ -43,8 +43,10 @@ describe("the pairing screen on a tablet", () => {
     mockLayout = "overlay";
     await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
     expect(style("pair-frame")).toMatchObject({ width: 300, height: 300 });
-    expect(style("pair-screen")).toMatchObject({ width: "100%", maxWidth: 480, alignSelf: "center" });
-    expect(style("pair-column")).toMatchObject({ width: "100%", maxWidth: 480, alignSelf: "center" });
+    // The camera has the whole width; the words are a card as wide as the other words-on-paper screens, not a phone's sheet.
+    expect(style("pair-screen")).toMatchObject({ width: "100%" });
+    expect(style("pair-screen").maxWidth).toBeUndefined();
+    expect(style("pair-panel")).toMatchObject({ maxWidth: 560, alignSelf: "center", borderRadius: 24 });
     expect(screen.getByText("Pair with your Mac")).toBeTruthy();
   });
 
@@ -52,12 +54,15 @@ describe("the pairing screen on a tablet", () => {
     mockLayout = "split";
     await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
     expect(style("pair-frame")).toMatchObject({ width: 300, height: 300 });
-    expect(style("pair-screen")).toMatchObject({ maxWidth: 480 });
+    expect(style("pair-panel")).toMatchObject({ maxWidth: 560 });
   });
 
   it("keeps the phone's frame on a phone, and in a narrow Split View pane", async () => {
     await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
     expect(style("pair-frame")).toMatchObject({ width: 220, height: 220 });
+    // A phone's words are a sheet at the foot, edge to edge.
+    expect(style("pair-panel")).toMatchObject({ borderTopLeftRadius: 24 });
+    expect(style("pair-panel").maxWidth).toBeUndefined();
   });
 });
 

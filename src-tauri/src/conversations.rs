@@ -3,7 +3,7 @@
 use crate::{provider::ProviderId, session::SessionConfig, ui_event::UiEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+use std::{collections::HashMap, path::PathBuf, sync::{mpsc, Arc, Mutex}};
 
 /// What every handoff note starts with, after the project's own notes: an earlier one is cut off from there (see `with_handoff`).
 pub const HANDOFF_MARKER: &str = "\n\nConversation continued ";
@@ -76,8 +76,53 @@ impl Conversation {
     }
 }
 #[derive(Default)]
-struct Data { chats: HashMap<String, Conversation>, slots: HashMap<String, Conversation> }
-pub struct Store { root: Option<PathBuf>, data: Mutex<Data> }
+struct Data { chats: HashMap<String, Arc<Conversation>>, slots: HashMap<String, Conversation> }
+pub struct Store { writer: Option<mpsc::Sender<Job>>, data: Mutex<Data> }
+
+/// What the writer thread is asked: to save a conversation, or to say when everything asked before is on disk.
+enum Job { Save(Arc<Conversation>), Flush(mpsc::Sender<()>) }
+
+/// Saves conversations on a thread of their own. Writing one (all its events as JSON, synced to disk) took long in a long
+/// chat, and it was done on the event path under the store's lock, at the end of every turn, every message and every
+/// answered prompt: the whole app waited, other chats' events too. Saves that pile up meanwhile are coalesced, the latest
+/// of each conversation winning.
+fn writer(root: PathBuf) -> mpsc::Sender<Job> {
+    let (tx, rx) = mpsc::channel::<Job>();
+    let spawned = std::thread::Builder::new().name("conversations".into()).spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let (mut due, mut flushed) = (HashMap::<String, Arc<Conversation>>::new(), Vec::new());
+            for job in std::iter::once(first).chain(std::iter::from_fn(|| rx.try_recv().ok())) {
+                match job {
+                    Job::Save(c) => { due.insert(c.id.clone(), c); },
+                    Job::Flush(done) => flushed.push(done),
+                }
+            }
+            for c in due.values() { write(&root, c); }
+            for done in flushed { let _ = done.send(()); }
+        }
+    });
+    if let Err(e) = spawned { eprintln!("Saving conversations: {e}"); }
+    tx
+}
+
+fn write(root: &std::path::Path, c: &Conversation) {
+    if !crate::history::valid_id(&c.id) { return; }
+    let saved = (|| -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        std::fs::create_dir_all(root)?;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+        let path = root.join(format!("{}.json", c.id));
+        let tmp = path.with_extension("json.tmp");
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+        file.write_all(&serde_json::to_vec(c)?)?;
+        file.sync_all()?;
+        std::fs::rename(tmp, path)?;
+        Ok(())
+    })();
+    if let Err(e) = saved { eprintln!("Saving conversation {}: {e}", c.id); }
+}
+
 impl Store {
     pub fn load(root: Option<PathBuf>) -> Self {
         let mut data = Data::default();
@@ -85,20 +130,34 @@ impl Store {
             if let Ok(files) = std::fs::read_dir(root) {
                 for file in files.flatten().filter(|f| f.path().extension().is_some_and(|x| x == "json")) {
                     if let Ok(bytes) = std::fs::read(file.path()) {
-                        if let Ok(c) = serde_json::from_slice::<Conversation>(&bytes) { data.chats.insert(c.id.clone(), c); }
+                        if let Ok(c) = serde_json::from_slice::<Conversation>(&bytes) { data.chats.insert(c.id.clone(), Arc::new(c)); }
                     }
                 }
             }
         }
-        Self { root, data: Mutex::new(data) }
+        Self { writer: root.map(writer), data: Mutex::new(data) }
     }
-    pub fn get(&self, id: &str) -> Option<Conversation> { self.data.lock().unwrap().chats.get(id).cloned() }
-    pub fn all(&self) -> Vec<Conversation> { self.data.lock().unwrap().chats.values().cloned().collect() }
+    pub fn get(&self, id: &str) -> Option<Conversation> { self.data.lock().unwrap().chats.get(id).map(|c| (**c).clone()) }
+    pub fn all(&self) -> Vec<Conversation> { self.data.lock().unwrap().chats.values().map(|c| (**c).clone()).collect() }
+    /// Waits (a few seconds at most) until every save asked for so far is on disk: at quit, so the last turn isn't lost.
+    pub fn flush(&self) {
+        let Some(writer) = &self.writer else { return };
+        let (done, wait) = mpsc::channel();
+        if writer.send(Job::Flush(done)).is_ok() {
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(5));
+        }
+    }
+    /// `c` is the conversation as it stands now: kept, and saved by the writer (off the caller's path).
+    fn keep(&self, d: &mut Data, c: Conversation) {
+        let c = Arc::new(c);
+        d.chats.insert(c.id.clone(), c.clone());
+        if let Some(writer) = &self.writer { let _ = writer.send(Job::Save(c)); }
+    }
     pub fn detach(&self, slot: &str) { self.data.lock().unwrap().slots.remove(slot); }
     pub fn attach(&self, slot: &str, mut chat: Conversation) {
         chat.updated_ms = crate::remote::now_ms();
         let mut d = self.data.lock().unwrap();
-        if !chat.id.is_empty() { self.persist(&chat); d.chats.insert(chat.id.clone(), chat.clone()); }
+        if !chat.id.is_empty() { self.keep(&mut d, chat.clone()); }
         d.slots.insert(slot.into(), chat);
     }
     /// The slot's conversation now goes on with `handoff` (None: none, as after a /clear).
@@ -108,8 +167,7 @@ impl Store {
         c.handoff = handoff;
         if !c.id.is_empty() {
             let c = c.clone();
-            self.persist(&c);
-            d.chats.insert(c.id.clone(), c);
+            self.keep(&mut d, c);
         }
     }
     pub fn configure(&self, slot: &str, cfg: &SessionConfig) {
@@ -122,29 +180,9 @@ impl Store {
         c.effort = cfg.effort.clone();
         if !c.id.is_empty() {
             let c = c.clone();
-            self.persist(&c);
-            d.chats.insert(c.id.clone(), c);
+            self.keep(&mut d, c);
         }
     }
-    fn persist(&self, c: &Conversation) {
-        let Some(root) = &self.root else { return; };
-        if !crate::history::valid_id(&c.id) { return; }
-        let saved = (|| -> Result<(), Box<dyn std::error::Error>> {
-            use std::io::Write;
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-            std::fs::create_dir_all(root)?;
-            std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
-            let path = root.join(format!("{}.json", c.id));
-            let tmp = path.with_extension("json.tmp");
-            let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-            file.write_all(&serde_json::to_vec(c)?)?;
-            file.sync_all()?;
-            std::fs::rename(tmp, path)?;
-            Ok(())
-        })();
-        if let Err(e) = saved { eprintln!("Saving conversation {}: {e}", c.id); }
-    }
-
     /// Called before publishing, including desktop user messages. Never retain streaming deltas,
     /// secrets, or account-wide usage. Completed events replay identically on either client.
     pub fn observe(&self, slot: &str, event: &mut UiEvent) {
@@ -162,8 +200,7 @@ impl Store {
         let flush = matches!(event, UiEvent::SessionStarted { .. } | UiEvent::UserText { .. } | UiEvent::TurnDone { .. } | UiEvent::SessionEnded { .. } | UiEvent::ConversationReset | UiEvent::PermissionResolved { .. } | UiEvent::PermissionWithdrawn { .. });
         if flush {
             let c = c.clone();
-            d.chats.insert(c.id.clone(), c.clone());
-            self.persist(&c);
+            self.keep(&mut d, c);
         }
     }
 }
@@ -178,10 +215,31 @@ mod tests {
         let c = Conversation { id: "aaaa-bbbb".into(), native_id: "aaaa-bbbb".into(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![serde_json::json!({"kind":"user_text","text":"Fix the bug"})] };
         store.attach("s1", c);
         store.observe("s1", &mut UiEvent::SessionStarted { session_id: "cccc-dddd".into(), model: "gpt".into(), cwd: "/p".into(), permission_mode: "ask".into(), claude_version: "".into() });
+        store.flush();
         let restored = Store::load(Some(dir.path().into())).get("aaaa-bbbb").unwrap();
         assert_eq!(restored.native_id, "cccc-dddd");
         assert!(restored.words().contains("Fix the bug"));
         assert_eq!(restored.events.last().unwrap()["session_id"], "aaaa-bbbb");
+    }
+
+    /// Saves go to disk off the event path, the latest of each conversation winning, and all of them by a flush (at quit).
+    #[test]
+    fn saves_reach_disk_by_a_flush_and_the_latest_one_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::load(Some(dir.path().into()));
+        let c = Conversation { id: "aaaa-bbbb".into(), native_id: "aaaa-bbbb".into(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![] };
+        store.attach("s1", c);
+        for n in 0..50 {
+            store.observe("s1", &mut UiEvent::UserText { text: format!("message {n}"), at: None, sent_by: Some("desktop".into()), images: 0 });
+        }
+        // Kept in memory at once, whatever the writer has got to.
+        assert_eq!(store.get("aaaa-bbbb").unwrap().events.len(), 50);
+        store.flush();
+        let saved = Store::load(Some(dir.path().into())).get("aaaa-bbbb").unwrap();
+        assert_eq!(saved.events.len(), 50);
+        assert!(saved.words().ends_with("message 49"));
+        // Nothing half-written is left behind.
+        assert!(!dir.path().join("aaaa-bbbb.json.tmp").exists());
     }
 }
 
@@ -230,7 +288,7 @@ impl Store {
                 }
             }
             if let Some(c) = chat.filter(|c| c.events.iter().any(|e|e["kind"] == "user_text")) {
-                self.data.lock().unwrap().chats.insert(c.id.clone(), c);
+                self.data.lock().unwrap().chats.insert(c.id.clone(), Arc::new(c));
             }
         }
     }
@@ -322,6 +380,7 @@ mod regression_tests {
         store.observe("s1", &mut UiEvent::PermissionResolved { request_id: "allowed".into(), allow: true, by: "desktop".into() });
         store.observe("s1", &mut UiEvent::PermissionRequested { request_id: "cancelled".into(), tool_name: "Bash".into(), input: serde_json::json!({}) });
         store.observe("s1", &mut UiEvent::PermissionWithdrawn { request_id: "cancelled".into() });
+        store.flush();
         let replay = Store::load(Some(dir.path().into())).get("aaaa").unwrap().replay();
         assert!(replay.iter().any(|e| matches!(e, UiEvent::PermissionResolved { request_id, allow: true, .. } if request_id == "allowed")));
         assert!(replay.iter().any(|e| matches!(e, UiEvent::PermissionWithdrawn { request_id } if request_id == "cancelled")));

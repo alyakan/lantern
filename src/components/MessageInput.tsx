@@ -85,7 +85,10 @@ interface Props {
   mcpIssues?: McpIssue[];
   onOpenSettings?: () => void;
   /** The chat's unsent text, kept while another chat is on screen. */
-  draft?: { initial: string; save: (text: string) => void };
+  /** `images`: the pictures pasted into the draft, by their `[Image #n]`, kept with it so switching chats doesn't lose them. */
+  /** A card in the chat waits for the user's answer: Claude isn't working meanwhile, so the box doesn't look like it is. */
+  waiting?: boolean;
+  draft?: { initial: string; save: (text: string) => void; images?: Record<number, PastedImage>; saveImages?: (images: Record<number, PastedImage>) => void };
   /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
   /** The folder's sent prompts, oldest first, as encoded drafts: ↑ and ↓ recall them. `remember` adds one when sent. */
@@ -99,7 +102,7 @@ interface Props {
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
+export function MessageInput({ status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
   // What the provider hasn't got isn't offered: its box has no effort, preset or "/" menu to show.
@@ -135,7 +138,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const terminal = !!onRun && text.startsWith("!");
   const shown = terminal ? text.slice(1) : text;
   // Pictures pasted into the box, by their number in `[Image #n]`; one whose token is deleted isn't sent.
-  const images = useRef<Record<number, PastedImage>>({});
+  const images = useRef<Record<number, PastedImage>>(draft?.images ?? {});
+  const keepImages = (next: Record<number, PastedImage>) => {
+    images.current = next;
+    draft?.saveImages?.(next);
+  };
   const attached = terminal ? [] : imagesIn(text, images.current);
   // A message with pictures goes when Claude is free: the queue carries text only.
   const waitsForImages = running && attached.length > 0;
@@ -248,7 +255,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       const draft = encodeDraft(t, inUse(t, pastes.current));
       if (sent.length > 0) onSend(full, draft, sent);
       else onSend(full, draft);
-      images.current = {};
+      keepImages({});
     }
   };
 
@@ -465,7 +472,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
           {queued.map((q, i) => (
             <li key={i} className="queue-item">
-              <span className="queue-label">Queued</span>
+              {/* After a crash nothing is sent until the chat restarts: it says so, rather than look like it's next. */}
+              <span className="queue-label" title={status === "ended" ? `Sent once ${agent} is restarted` : undefined}>
+                {status === "ended" ? "Held until restart" : "Queued"}
+              </span>
               <button className="queue-text" title="Edit: takes it back to the box" onClick={() => editQueued(i)}>
                 {queuedBox.current.get(q)?.box ?? q}
               </button>
@@ -484,7 +494,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           <SideChat onClose={closeAside} />
         </div>
       )}
-      <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
+      <div className={`composer-box${running && !waiting ? " working" : ""}${terminal ? " terminal" : ""}${dropping && canType ? " dropping" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu
             kind={open.kind}
@@ -533,7 +543,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
                   if (!image) return;
                   const box = latestText.current;
                   const n = nextImage(box, images.current);
-                  images.current = { ...images.current, [n]: image };
+                  keepImages({ ...images.current, [n]: image });
                   const token = imageToken(n);
                   const at = Math.min(from, box.length);
                   caretTo.current = at + token.length;

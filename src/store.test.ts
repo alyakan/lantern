@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasPendingPrompt, initialState, reducer, type State, type ToolItem } from "./store";
+import { answerFailed, hasPendingPrompt, initialState, NOT_PENDING, reducer, type State, type ToolItem } from "./store";
 import { chatState, firstPrompt, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -293,9 +293,24 @@ describe("reducer", () => {
     expect(after.status).toBe("running");
   });
 
-  it("a compaction is Lantern's bookkeeping: the chat shows nothing of it", () => {
-    const s = { ...initialState, status: "running" as const };
-    expect(ev(s, { kind: "compacted" })).toEqual(s);
+  it("a compaction says it is running, then leaves a line where it happened", () => {
+    const idle = { ...initialState, status: "idle" as const, items: [{ type: "user" as const, id: "u1", text: "/compact" }] };
+    const started = ev(idle, { kind: "compacting" });
+    expect(started.status).toBe("running");
+    expect(started.items[1]).toMatchObject({ type: "compact", state: "running" });
+    // Claude Code says it started too: still one line.
+    expect(ev(started, { kind: "compacting" }).items.filter((it) => it.type === "compact")).toHaveLength(1);
+    const done = ev(started, { kind: "compacted" });
+    expect(done.items[1]).toMatchObject({ type: "compact", state: "done" });
+    // A reopened chat replays only the end: the line is there all the same.
+    expect(ev(initialState, { kind: "compacted" }).items).toEqual([expect.objectContaining({ type: "compact", state: "done" })]);
+  });
+
+  it("a compaction the turn ended without stops saying it is running", () => {
+    const started = ev({ ...initialState, status: "idle" as const }, { kind: "compacting" });
+    const ended = ev(started, { kind: "turn_done", is_error: true, result: "Compaction failed", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 10, auth_hint: false, denied: 0, context_window: null });
+    expect(ended.items[0]).toMatchObject({ type: "compact", state: "ended" });
+    expect(ended.status).toBe("idle");
   });
 
   it("a phone's message with photos says how many, and photos alone are still a message", () => {
@@ -316,6 +331,43 @@ describe("reducer", () => {
     s = reducer(s, { type: "permission_decided", id: "p2", allow: true });
     s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
     expect(s.items[1]).toMatchObject({ id: "p2", decision: "allowed" });
+    const same = s.items[1];
+    s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
+    expect(s.items[1]).toBe(same);
+  });
+
+  it("a card allowed here while a phone's deny got there first shows the deny, and the lost race doesn't end the chat", () => {
+    let s: State = { ...ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} }), status: "running" };
+    s = reducer(s, { type: "permission_decided", id: "p1", allow: true });
+    s = ev(s, { kind: "permission_resolved", request_id: "p1", allow: false, by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ id: "p1", decision: "denied" });
+    // The window's own answer then comes back refused: nothing to do.
+    expect(answerFailed(NOT_PENDING)).toBeNull();
+    // Any other failure didn't reach claude, and still ends the turn.
+    const failed = answerFailed("No Claude session is running");
+    expect(failed).toEqual({ type: "turn_failed", text: "No Claude session is running" });
+    expect(reducer(s, failed!).status).toBe("ended");
+  });
+
+  it("a card allowed here just as Stop withdrew it says it wasn't allowed", () => {
+    let s: State = { ...ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} }), status: "running" };
+    s = reducer(s, { type: "permission_decided", id: "p1", allow: true });
+    s = ev(s, { kind: "permission_withdrawn", request_id: "p1" });
+    expect(s.items[0]).toMatchObject({ id: "p1", decision: "denied" });
+  });
+
+  it("a Stop that lands after the turn ended leaves the chat as it was, so a later crash still says so", () => {
+    const idle: State = { ...initialState, status: "idle" };
+    expect(reducer(idle, { type: "stop_requested" })).toBe(idle);
+    expect(ev(idle, { kind: "turn_stopping" })).toBe(idle);
+    const crashed = ev(reducer(idle, { type: "stop_requested" }), { kind: "session_ended", code: 1, stderr_tail: "" });
+    expect(crashed.banner).toMatchObject({ kind: "error", action: "restart" });
+    expect(reducer({ ...idle, status: "running" }, { type: "stop_requested" }).stopRequested).toBe(true);
+  });
+
+  it("an Always-allow rule that can't be saved shows the error and leaves the turn running", () => {
+    const s = reducer({ ...initialState, status: "running" }, { type: "failed", text: "Couldn't save the rule" });
+    expect(s).toMatchObject({ status: "running", banner: { kind: "error", text: "Couldn't save the rule", action: null } });
   });
 
   it("a message replayed after a Workflow change shows without the backend's settings note, before a flavour note or alone", () => {
