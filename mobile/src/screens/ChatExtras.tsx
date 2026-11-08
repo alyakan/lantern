@@ -167,11 +167,12 @@ export const CHIP_HEIGHT = 36;
 
 /**
  * A row of suggestion chips over the message box, starting at its left edge as the box's words do, scrolling sideways when
- * they don't fit (never wrapping into a second row of different widths).
+ * they don't fit (never wrapping into a second row of different widths). It is only as wide as its chips: past them, a drag
+ * reaches the chat under it.
  */
 export function ChipRow({ label, children }: { label?: string; children: ReactNode }) {
   return (
-    <ScrollView horizontal accessibilityLabel={label} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 4 }} style={{ flexGrow: 0 }}>
+    <ScrollView horizontal accessibilityLabel={label} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 4 }} style={{ flexGrow: 0, alignSelf: "flex-start", maxWidth: "100%" }}>
       {children}
     </ScrollView>
   );
