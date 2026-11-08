@@ -196,6 +196,23 @@ export function groupingFor(chosen: GroupBy | "auto", issues: boolean): GroupBy 
   return chosen === "auto" ? (issues ? "feature" : "project") : chosen === "feature" && !issues ? "project" : chosen;
 }
 
+/** What needs you in a feature, the most pressing first: your call, then blocked, then a ticket to move. */
+const ASK_ORDER: Tone[] = ["you", "bad", "move"];
+export const askOf = (items: RemoteWorkItem[]): RemoteWorkItem[] => items.filter((i) => bucketOf(i) === "attn").sort((a, b) => ASK_ORDER.indexOf(toneOf(a)) - ASK_ORDER.indexOf(toneOf(b)));
+
+/** The features (or, without Linear, the projects) of what the Mac sent, as the Work screen and a tablet's column both list them. */
+export function workGroups(items: RemoteWorkItem[], issues: boolean): WorkGroup[] {
+  return groupItems(standing(items), groupingFor("auto", issues));
+}
+
+/**
+ * The feature a tablet shows beside its column: the one picked, while it is still there, or else the first one that needs you,
+ * or else the first one. Never nothing while there is a feature, so the page beside the list is never blank.
+ */
+export function featureFor(groups: WorkGroup[], picked: string | null): WorkGroup | undefined {
+  return (picked !== null ? groups.find((g) => g.key === picked) : undefined) ?? groups.find((g) => askOf(g.items).length > 0) ?? groups[0];
+}
+
 /** A link this phone opens: https on GitHub or Linear, a plain URL with nothing else in it. The Mac checked it too. */
 export function safeLink(url: string | null): url is string {
   if (!url || url.length > 300) return false;

@@ -1,6 +1,6 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
-import { Fragment, useEffect, useRef, useState, type ComponentRef } from "react";
+import { Fragment, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useToTop } from "../ui/useToTop";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -56,13 +56,14 @@ export interface HomeProps {
   /** On a tablet, whether the chats are pinned beside the chat, and the button that pins or unpins them (none on a phone). */
   pinned?: boolean;
   onTogglePin?: () => void;
-  /** On a tablet, Your work is in the main area where no chat is open: this opens it there (its button sits at the top of the chats). None on a phone. */
-  onOpenWork?: () => void;
-  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). */
+  /**
+   * A tablet's column has two sides, switched at its top: the chats, and Your work (its features, each opening its page beside
+   * the column). `work` is what the Work side lists, and `onRefresh` what pulling it down asks for. None on a phone (Work is a tab).
+   */
+  column?: { side: ColumnSide; onSide: (side: ColumnSide) => void; work: ReactNode; onRefresh: () => Promise<unknown> };
+  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). Its row is on the Chats side. */
   onOpenInsights?: () => void;
   insightsShown?: boolean;
-  /** On a tablet, Your work is what the main area shows now. */
-  workShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
   tabbed?: boolean;
   /** Its tab tapped again while shown (a count): back to the top of the list. */
@@ -246,6 +247,38 @@ function SectionLabel({ label, count, gutter }: { label: string; count: number; 
   );
 }
 
+/** Which side of a tablet's column shows: the chats, or Your work. */
+export type ColumnSide = "chats" | "work";
+
+/**
+ * The switch at the top of a tablet's column, between the chats and Your work, with how many steps wait on you beside Work. Each
+ * side is a button that says whether it is the one shown.
+ */
+function SideSwitch({ side, onSide, waiting }: { side: ColumnSide; onSide: (s: ColumnSide) => void; waiting: number }) {
+  const colors = useColors();
+  const accent = useAccent();
+  const option = (s: ColumnSide, label: string, count = 0) => {
+    const on = side === s;
+    return (
+      <PressScale key={s} accessibilityRole="button" accessibilityLabel={count > 0 ? `${label}, ${count} waiting` : label} accessibilityState={{ selected: on }} onPress={() => onSide(s)} scaleTo={0.96} haptic="select" style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 34, borderRadius: radius.pill, backgroundColor: on ? colors.ink : "transparent" }}>
+        <Txt variant="small" tone={on ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
+          {label}
+        </Txt>
+        {count > 0 && (
+          <Txt variant="small" style={{ fontWeight: "700", color: on ? colors.onInk : accent }}>
+            {count}
+          </Txt>
+        )}
+      </PressScale>
+    );
+  };
+  return (
+    <View testID="side-switch" style={{ flexDirection: "row", gap: 2, padding: 3, marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
+      {[option("chats", "Chats"), option("work", "Work", waiting)]}
+    </View>
+  );
+}
+
 /** How the chats are listed: most recent first, or under their projects. */
 function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Grouping) => void }) {
   const colors = useColors();
@@ -327,7 +360,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, column, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
   const canInsights = useMacCan("insights");
   const scroller = useRef<ComponentRef<typeof Animated.ScrollView>>(null);
   useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
@@ -430,10 +463,12 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setQuery("");
   };
 
+  // The Work side of a tablet's column lists your work instead of the chats: pulling it down asks the Mac to look at the work again.
+  const onWork = !!column && canWork && column.side === "work";
   const refresh = async () => {
     setRefreshing(true);
     controller.resume();
-    await controller.sync.refreshWaiting();
+    await (onWork && column ? column.onRefresh() : controller.sync.refreshWaiting()).catch(() => {});
     setRefreshing(false);
   };
 
@@ -504,20 +539,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         contentContainerStyle={{ paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 4, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 96 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}
       >
-        {canWork && onOpenWork && (
-          <PressScale accessibilityRole="button" accessibilityLabel={toDo > 0 ? `Work, ${toDo} waiting` : "Work"} accessibilityState={{ selected: workShown }} onPress={onOpenWork} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 12, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: workShown ? colors.card : "transparent" }}>
-            <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
-              Work
-            </Txt>
-            {toDo > 0 && (
-              <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.hi }}>
-                <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
-                  {toDo}
-                </Txt>
-              </View>
-            )}
-          </PressScale>
-        )}
+        {canWork && column && <SideSwitch side={column.side} onSide={column.onSide} waiting={toDo} />}
+        {onWork ? (
+          column?.work
+        ) : (
+          <>
         {canInsights && onOpenInsights && (
           <PressScale accessibilityRole="button" accessibilityLabel="Insights" accessibilityState={{ selected: insightsShown }} onPress={onOpenInsights} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: insightsShown ? colors.card : "transparent" }}>
             <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
@@ -602,6 +628,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {!asked && <SupportCard onPress={onSupport} />}
           </>
         )}
+          </>
+        )}
       </Animated.ScrollView>
       {/* The bar stays put, floating over the list, which scrolls under its glass. The status bar's own strip is paper, so rows don't run under the clock. */}
       <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: colors.paper }} />
@@ -610,7 +638,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         {banner}
       </View>
       {/* The search circle: for a list long enough to need it (a few chats are all in view anyway), and whenever a search is going. */}
-      {!tabbed && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
+      {!tabbed && !onWork && !loading && (list.length >= 4 || searching) && <HomeSearch active={searching} query={query} found={shown.length} lift={Platform.OS === "android" && list.length > 0 ? 70 : 0} onOpen={() => setSearching(true)} onChange={setQuery} onClose={closeSearch} />}
       {picking && <SingleSheet chats={allChats} onDismiss={() => setPicking(false)} />}
       {acting && (
         <ChatActionsSheet

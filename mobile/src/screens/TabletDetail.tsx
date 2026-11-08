@@ -30,6 +30,8 @@ const DECISION_MAX = 560;
 export interface TabletDetailProps {
   /** What shows where no chat is open: Your work, or Insights. */
   page?: "work" | "insights";
+  /** The feature picked in the column's Work side, whose page Work shows (null: none yet, so the one that needs you). */
+  feature?: string | null;
   /** The chat to show; none asks to pick one. */
   slot: string | null;
   /** The prompt being decided in that chat, shown over it. */
@@ -55,7 +57,7 @@ export interface TabletDetailProps {
  * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
  * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work" }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work", feature = null }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -180,10 +182,10 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <WorkScreen
       wide
       onOpenChat={onOpenChat}
-      // Without it, Work had no way back to the chats once they went away but the edge swipe, which VoiceOver and a pointer can't make.
+      // Without it, Work had no way back to the column once it went away but the edge swipe, which VoiceOver and a pointer can't make.
       onShowChats={layout === "overlay" && !chatsOpen ? onShowChats : undefined}
-      // The bar's glass (and its Refresh) is the Work screen's: this says only where you are.
-      top={<Txt variant="title">Work</Txt>}
+      // The features are listed in the column: this is the page of the one picked there.
+      beside={{ feature }}
     />
   ) : (
     <View testID="pick-a-chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: space.xl, paddingTop: insets.top, gap: 12 }}>
