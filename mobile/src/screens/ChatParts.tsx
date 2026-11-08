@@ -818,7 +818,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
   const dictation = useDictation(text, setText);
-  const attach = useAttachments();
+  // The pictures attached and not sent stay with the chat (`draftKey`) while the app runs, as its words do.
+  const attach = useAttachments(draftKey);
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
   // The photo being drawn on.
