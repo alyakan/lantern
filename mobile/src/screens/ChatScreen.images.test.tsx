@@ -22,11 +22,13 @@ async function chatWith(features: string[] = ["images"]) {
   return session;
 }
 
-/** + → the sheet → a source: the picker is asked for once the sheet has gone. */
+/** The + is the system's menu on iOS: a source picked from it, and the picker is asked for once the menu has gone. */
 async function attach(source: "Photo library" | "Take a photo") {
-  await fireEvent.press(screen.getByRole("button", { name: "Attach photos" }));
-  await fireEvent.press(screen.getByRole("button", { name: source }));
+  expect(plus()).toBeTruthy();
+  await fireEvent.press(screen.getByRole("menuitem", { name: source === "Photo library" ? "Photo Library" : "Take Photo" }));
+  await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
 }
+const plus = () => screen.queryByRole("menu", { name: "Attach photos" });
 const thumbs = () => screen.queryAllByLabelText(/^Photo \d$/);
 
 beforeEach(() => {
@@ -37,7 +39,7 @@ beforeEach(() => {
 describe("attaching photos to a message", () => {
   it("has no + on a Mac that can't take photos", async () => {
     await chatWith([]);
-    expect(screen.queryByRole("button", { name: "Attach photos" })).toBeNull();
+    expect(plus()).toBeNull();
   });
 
   it("opens the photo library from the +, shows what was picked above the box, and sends it with the message", async () => {
@@ -95,7 +97,7 @@ describe("attaching photos to a message", () => {
     await attach("Photo library");
     await waitFor(() => expect(thumbs()).toHaveLength(4));
     expect(pick).toHaveBeenLastCalledWith("library", 2);
-    expect(screen.getByRole("button", { name: "Attach photos" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(plus()?.props.accessibilityState).toMatchObject({ disabled: true });
   });
 
   it("backing out of the picker changes nothing", async () => {
@@ -132,7 +134,7 @@ describe("attaching photos to a message", () => {
     await fireEvent.changeText(screen.getByLabelText("Message"), "!");
     // (Once the terminal has the keyboard: until then the message box stays in view under it, see ChatParts' `inView`.)
     await fireEvent(screen.getByLabelText("Shell command"), "focus");
-    expect(screen.queryByRole("button", { name: "Attach photos" })).toBeNull();
+    expect(plus()).toBeNull();
   });
 
   it("leaves a message that someone else sent with photos as how many, since they never come back", async () => {
