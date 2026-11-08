@@ -1,7 +1,7 @@
 import { tabBarRoom } from "../ui/TabBar";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useToTop } from "../ui/useToTop";
-import { BackButton } from "../ui/BackButton";
+import { BackButton, BackChevron } from "../ui/BackButton";
 import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -567,12 +567,18 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
    * glass is as wide as what is in it, not the column, so it reads as a pill rather than an empty band; the open field takes the
    * column's width, as a search field does.
    */
-  const tabletBar = (searchable: boolean) => (
+  const tabletBar = (searchable: boolean, back?: () => void) => (
     <TopBar style={{ marginHorizontal: 0, alignSelf: searchable && finding ? "stretch" : "flex-start" }}>
       {searchable && finding ? (
         <SearchContents search={barSearch} input={findInput} onFocused={() => {}} onCancel={barSearch.onCancel} />
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+          {/* A feature's page has its way back in the same pill as the list's bar, so the two pages' bars start at the same place and move nothing. */}
+          {back && (
+            <RoundButton label="Back to Work" onPress={back}>
+              <BackChevron />
+            </RoundButton>
+          )}
           {onShowChats && (
             <RoundButton label="Show chats" onPress={onShowChats}>
               <SidebarIcon />
@@ -599,18 +605,20 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
   const pageBar = (g: WorkGroup) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, ...(top ? barColumn : { paddingHorizontal: space.lg }) }}>
-        {backCircle}
-        <View style={{ flex: 1 }}>
-          {top ? (
-            tabletBar(false)
-          ) : (
-            <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
-              <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
-                {g.label}
-              </Txt>
-            </Glass>
-          )}
-        </View>
+        {top ? (
+          tabletBar(false, () => setPage(null))
+        ) : (
+          <>
+            {backCircle}
+            <View style={{ flex: 1 }}>
+              <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
+                <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
+                  {g.label}
+                </Txt>
+              </Glass>
+            </View>
+          </>
+        )}
       </View>
     </View>
   );
