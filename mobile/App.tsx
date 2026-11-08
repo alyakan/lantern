@@ -90,6 +90,8 @@ export default function App() {
     void controller.start();
     const sub = AppState.addEventListener("change", (s) => {
       controller.setForeground(s === "active");
+      // Only the back counts as away: a glance at Control Center or the app switcher ("inactive") keeps the chats followed.
+      if (s === "background") controller.setAway(true);
       if (s === "active") controller.resume();
     });
     return () => sub.remove();

@@ -177,6 +177,15 @@ describe("the post-hook", () => {
     const s = run([...turn.slice(0, 5), stop, said("h1", "Saved."), post, said("h2", "Nothing more.")].map((e, i) => event("a", i + 1, e)));
     expect(items(s).map((it) => it.kind)).toEqual(["user", "assistant", "hook", "assistant", "assistant"]);
   });
+
+  it("ends the hook's own turn after it, and keeps the answer's end where it was (the hook used to look as if it ran for ever)", () => {
+    const hook: RemoteEvent = { kind: "hook_turn", text: "Update the brain if needed" };
+    const done = (ms: number) => ({ kind: "turn_done", is_error: false, result: "done", duration_ms: ms, context_window: null }) as RemoteEvent;
+    const s = run([...turn, hook, { kind: "assistant_text", block_id: "h1", text: "Updated." } as RemoteEvent, done(800)].map((e, i) => event("a", i + 1, e)));
+    expect(items(s).map((it) => it.kind)).toEqual(["user", "assistant", "step", "step", "turn", "hook", "assistant", "turn"]);
+    const ends = items(s).filter((it) => it.kind === "turn");
+    expect(ends.map((t) => t.kind === "turn" && t.durationMs)).toEqual([3000, 800]);
+  });
 });
 
 describe("a message sent from this phone", () => {

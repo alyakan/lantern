@@ -75,6 +75,8 @@ export class Sync {
   private waitingRequest = 0;
   private session: Session | null = null;
   private followed = new Set<string>();
+  /** The app is in the back: the chats open in it are let go of (see `setAway`), and taken up again when it comes back. */
+  private away = false;
   /** Chats closed, the latest first (see `unfollow`). */
   private closed: string[] = [];
   private readonly schedule: (fn: () => void) => void;
@@ -160,7 +162,7 @@ export class Sync {
       this.lastEpoch = session.welcome.epoch;
       this.keep();
     }
-    for (const slot of this.followed) void this.subscribeTo(slot);
+    if (!this.away) for (const slot of this.followed) void this.subscribeTo(slot);
     void this.sendHeld();
     void this.refreshWaiting();
     void this.refreshDesk();
@@ -284,11 +286,32 @@ export class Sync {
     return this.ask<RemoteDeskReply>({ op: "desk_reply", desk, slot, text, after }, DESK_WAIT);
   }
 
+  /**
+   * The app went to the back (true) or came to the front. The Mac doesn't push about a chat a phone follows, since it is being
+   * looked at; a phone put away with a chat open could keep its link up a while and still count, and the push it needed (the chat
+   * finished, or needs you) never came. So the chats are let go of while it is away, and followed again, from where they were,
+   * when it is back.
+   */
+  setAway(away: boolean) {
+    if (away === this.away) return;
+    this.away = away;
+    // Back in front, the link it had may have died meanwhile: the chats are followed again once it is known to work (`onStillUp`),
+    // or by the connection dialled in its place (`onSession`), not asked for over a dead one and shown as failed to load.
+    if (!away || !this.session) return;
+    for (const slot of this.followed) void this.ask({ op: "unsubscribe", slot }).catch(() => {});
+  }
+
+  /** Back in front, the connection it had still works (Connection's onStillUp): follow the open chats again, from where they were. */
+  onStillUp = (session: Session) => {
+    if (this.away || session !== this.session) return;
+    for (const slot of this.followed) void this.subscribeTo(slot);
+  };
+
   /** Opens a chat: its events come from now on. */
   follow(slot: string) {
     if (this.followed.has(slot)) return;
     this.followed.add(slot);
-    void this.subscribeTo(slot);
+    if (!this.away) void this.subscribeTo(slot);
   }
 
   unfollow(slot: string) {

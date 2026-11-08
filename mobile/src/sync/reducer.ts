@@ -204,8 +204,10 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "turn_stopping":
       return { ...view, stopping: true };
     case "turn_done": {
-      // A turn is named for the message that began it, so the same end applied twice is one end.
-      const began = [...items].reverse().find((it) => it.kind === "user");
+      // A turn is named for the message that began it, so the same end applied twice is one end. A post-hook's turn began with the
+      // hook, not a message of the user's: named for that, its end comes after the hook's words (it used to take the answer's end
+      // over, and the hook looked as if it ran for ever).
+      const began = [...items].reverse().find((it) => it.kind === "user" || it.kind === "hook");
       const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error && !view.stopping, ...(view.stopping ? { stopped: true } : {}), result: event.result, durationMs: event.duration_ms };
       return {
         ...view,

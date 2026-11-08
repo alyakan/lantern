@@ -21,7 +21,7 @@ import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/
 import { projectColorOf, projectTint } from "../view/home";
 import { hasHiddenChars, isTerminal, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
-import { steadyRows, timeline, type Row } from "../view/timeline";
+import { keepSame, timeline, type Row } from "../view/timeline";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -187,9 +187,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const mine = view.items.filter((it) => it.kind === "user" && (it.sending || it.held || !!it.failed) && !held.some((h) => h.kind === "user" && h.id === it.id));
     return mine.length ? [...held, ...mine] : held;
   }, [holding, view.items]);
-  // The rows that read as they did keep their objects, so a streamed word draws only the row it changed (see steadyRows).
+  // Rows that say what they said before stay the same objects, so a streamed word draws again only the row it lands in.
   const lastRows = useRef<Row[]>([]);
-  const rows = useMemo(() => (lastRows.current = steadyRows(lastRows.current, timeline(items, Date.now(), working))), [items, working]);
+  const rows = useMemo(() => (lastRows.current = keepSame(lastRows.current, timeline(items, Date.now(), working))), [items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(items, working), [items, working]);
   const canCruise = useMacCan("cruise");
