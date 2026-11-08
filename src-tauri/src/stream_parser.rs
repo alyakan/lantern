@@ -162,7 +162,9 @@ impl StreamParser {
             }],
             "task_started" => vec![UiEvent::TaskStarted { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id") }],
             "task_notification" => vec![UiEvent::TaskEnded { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id"), status: str_of(v, "status"), summary: str_of(v, "summary") }],
-            // The conversation was compacted (not microcompact, which only trims old tool output): the chat shows nothing of it.
+            // Claude Code started compacting on its own (the context was full) or for /compact: the chat says so while it runs.
+            "status" if v["status"] == "compacting" => vec![UiEvent::Compacting],
+            // The conversation was compacted (not microcompact, which only trims old tool output): the chat marks the place.
             "compact_boundary" => vec![UiEvent::Compacted],
             // hooks, task updates, status, …: session bookkeeping, never conversation content
             _ => vec![],
@@ -869,10 +871,12 @@ mod tests {
     }
 
     #[test]
-    fn compaction_lines_are_bookkeeping_the_chat_ignores() {
-        // /compact writes a compact_boundary (or a microcompact one) before its result. The chat shows neither; a compaction
-        // is told as an event of its own (the chat's hooks use it), a microcompact, which only trims old tool output, is not.
+    fn compaction_is_told_from_start_to_end_and_microcompact_is_not() {
+        // A compaction says it started (a status line) and ends with a compact_boundary before its result: the chat shows both.
+        // A microcompact, which only trims old tool output, is bookkeeping, and so is a status that is no longer compacting.
         let mut p = StreamParser::default();
+        assert_eq!(p.parse_line(r#"{"type":"system","subtype":"status","status":"compacting"}"#), vec![UiEvent::Compacting]);
+        assert!(p.parse_line(r#"{"type":"system","subtype":"status","status":null}"#).is_empty());
         let boundary = r#"{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compact_metadata":{"trigger":"manual","pre_tokens":150000}}"#;
         assert_eq!(p.parse_line(boundary), vec![UiEvent::Compacted]);
         assert!(p.parse_line(r#"{"type":"system","subtype":"microcompact_boundary"}"#).is_empty());

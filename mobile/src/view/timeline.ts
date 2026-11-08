@@ -27,6 +27,8 @@ export type Row =
   | { key: string; kind: "desktop"; item: Extract<Item, { kind: "desktop" }> }
   | { key: string; kind: "turn"; item: Extract<Item, { kind: "turn" }> }
   | { key: string; kind: "shell"; item: Extract<Item, { kind: "shell" }> }
+  /** Where the conversation was compacted (or is being, while it runs). */
+  | { key: string; kind: "compact"; item: Extract<Item, { kind: "compact" }> }
   /** Where a new day starts: "Today", "Yesterday", "Mon 26 Oct". */
   | { key: string; kind: "day"; label: string }
   /** What the user's post-hook made Claude say and do, folded: the hook's words, its last line, and its steps. */
@@ -350,6 +352,8 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
       }
       case "shell":
         return void rows.push({ key: `sh-${item.id}`, kind: "shell", item });
+      case "compact":
+        return void rows.push({ key: `c-${item.id}`, kind: "compact", item });
     }
   });
   endRun();

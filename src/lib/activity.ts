@@ -36,7 +36,8 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
     turn = [];
   };
   for (const [i, it] of items.entries()) {
-    if (it.type === "user") {
+    if (it.type === "user" || it.type === "compact") {
+      // A compaction is a line across the chat, where it happened: the work before and after it are blocks of their own.
       flush(false);
       rows.push(it);
     } else if (it.type === "hook" && !followsReply(items[i - 1])) {

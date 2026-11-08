@@ -188,6 +188,38 @@ describe("the post-hook", () => {
   });
 });
 
+describe("a compaction", () => {
+  it("typed here: the message goes like any other, then the chat says it is compacting, and leaves a line where it was", () => {
+    let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "/compact", at: 5 });
+    s = reducer(s, event("a", 1, { kind: "user_text", text: "/compact", at: 6, sent_by: "phone-abc:m-1" }));
+    expect(items(s)[0]).not.toHaveProperty("sending");
+    s = reducer(s, event("a", 2, { kind: "compacting" }));
+    // Claude Code says it started too: still one line.
+    s = reducer(s, event("a", 3, { kind: "compacting" }));
+    expect(items(s).filter((it) => it.kind === "compact")).toEqual([{ kind: "compact", id: "compact-local-m-1", state: "running" }]);
+    s = reducer(s, event("a", 4, { kind: "compacted" }));
+    s = reducer(s, event("a", 5, { kind: "turn_done", is_error: false, result: null, duration_ms: 71000, context_window: null }));
+    expect(items(s)[1]).toEqual({ kind: "compact", id: "compact-local-m-1", state: "done" });
+  });
+
+  it("caught up from history is a line all the same, and one the turn ended without stops saying it is running", () => {
+    expect(items(reducer(initialState, event("a", 1, { kind: "compacted" })))).toEqual([{ kind: "compact", id: "compact-start", state: "done" }]);
+    let s = reducer(initialState, event("a", 1, { kind: "compacting" }));
+    s = reducer(s, event("a", 2, { kind: "turn_done", is_error: true, result: "Compaction failed", duration_ms: 10, context_window: null }));
+    expect(items(s)[0]).toEqual({ kind: "compact", id: "compact-start", state: "ended" });
+  });
+
+  it("in an earlier page keeps its own line next to a later one", () => {
+    const page = (n: number) => [{ kind: "user_text" as const, text: `message ${n}`, at: n, sent_by: null }, { kind: "compacted" as const }];
+    let s = reducer(initialState, reset("a", 4, page(2)));
+    s = reducer(s, { type: "earlier", slot: "a", events: page(1), hidden: 0 });
+    expect(items(s).filter((it) => it.kind === "compact").map((it) => it.id)).toHaveLength(2);
+    // Two in one turn are two lines.
+    s = reducer(s, event("a", 5, { kind: "compacted" }));
+    expect(new Set(items(s).filter((it) => it.kind === "compact").map((it) => it.id)).size).toBe(3);
+  });
+});
+
 describe("a message sent from this phone", () => {
   it("shows at once, and the Mac's copy takes its place", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "ship it", at: 5 });

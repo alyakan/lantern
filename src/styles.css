@@ -2492,6 +2492,9 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .auto-turn-more { display: block; padding: 0; font-size: inherit; }
 .auto-turn > span:nth-child(2) { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .auto-turn-time { font-variant-numeric: tabular-nums; }
+/* Where the conversation was compacted: a quiet line across the chat, with its words in the middle. */
+.compact-line { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
+.compact-line::before, .compact-line::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 /* A post-hook and what Claude did for it: one line like an auto turn's note, with the work folded under it until it is opened. */
 .hook-card { margin: 6px 0 2px; }
 .hook-card-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 0; border: none; background: none; text-align: left; font: inherit; font-size: calc(12px * var(--font-scale)); color: var(--muted); cursor: pointer; }
