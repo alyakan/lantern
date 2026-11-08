@@ -772,8 +772,6 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const attach = useAttachments();
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
-  // Where the row of tools sits in the box (see PlusButton's `place`).
-  const [toolsAt, setToolsAt] = useState(0);
   // The photo being drawn on.
   const [marking, setMarking] = useState<PickedImage | null>(null);
   const chosen = useRef<ImageSource | null>(null);
@@ -989,7 +987,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           style={{ maxHeight: 120, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(120, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
         />
         {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
-        <View testID="chat-box-tools" onLayout={(e) => setToolsAt(Math.round(e.nativeEvent.layout.y))} style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
+        <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
           {tray && tools ? (
             <TrayContents
               tools={tools}
@@ -1007,7 +1005,6 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             <>
               {canAttach && (
                 <PlusButton
-                  place={toolsAt}
                   busy={attach.busy}
                   full={attach.full}
                   onPress={() => setChoosing(true)}
@@ -1179,13 +1176,15 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
  * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
  * opens the sheet (`onPress`).
  */
-function PlusButton({ busy, full, onPress, onPick, place }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void; /** Where its row sits in the box. The SwiftUI view is drawn again whenever this changes: left alone it kept to where the row had been (seen on an iPhone: once sent photos left the box, the + sat over the words). */ place: number }) {
+function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
   const colors = useColors();
   const off = busy || full;
   if (Platform.OS === "ios")
     return (
       <View style={{ width: barButton, height: barButton, opacity: off ? 0.4 : 1 }}>
-        <Host key={place} style={{ width: barButton, height: barButton }}>
+        {/* A SwiftUI host keeps out of the safe area, the keyboard's included, by default: with the keyboard up it moved the +
+            up inside its own frame, over the words (seen on an iPhone). It is a button in a row, so it ignores all of it. */}
+        <Host ignoreSafeArea="all" alignment="center" style={{ width: barButton, height: barButton }}>
           <Menu modifiers={[accessibilityLabel("Attach photos"), ...(off ? [disabledMod(true)] : [])]} label={<SwiftImage systemName="plus.circle" size={26} color={colors.ink2} />}>
             <MenuButton label="Photo Library" systemImage="photo.on.rectangle" onPress={() => onPick("library")} />
             <MenuButton label="Take Photo" systemImage="camera" onPress={() => onPick("camera")} />
