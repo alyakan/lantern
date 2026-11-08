@@ -366,3 +366,26 @@ export function turnLine(t: Extract<Item, { kind: "turn" }>): { text: string; ba
   if (!t.durationMs) return { text: "Finished", bad: false };
   return { text: s < 60 ? `Finished in ${s} s` : `Finished in ${Math.floor(s / 60)} min ${s % 60} s`, bad: false };
 }
+
+/** Whether two values read the same, looking `depth` levels in (a row's chips, a chip's items). */
+function sameValue(a: unknown, b: unknown, depth: number): boolean {
+  if (Object.is(a, b)) return true;
+  if (depth === 0 || typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  return ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], depth - 1));
+}
+
+/**
+ * `next`, with each row that reads the same as the last time's under its key given back as that same object. `timeline`
+ * makes every row afresh, so each streamed word drew every row of steps and every summary again (their chips are new
+ * arrays each time): with these, the memoised rows that didn't change are left as they are.
+ */
+export function steadyRows(prev: Row[], next: Row[]): Row[] {
+  if (prev.length === 0) return next;
+  const before = new Map(prev.map((r) => [r.key, r]));
+  return next.map((r) => {
+    const old = before.get(r.key);
+    return old && sameValue(old, r, 6) ? old : r;
+  });
+}

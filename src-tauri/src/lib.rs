@@ -969,8 +969,13 @@ async fn stop_turn(app: &AppHandle, slot: &str) {
     let state = app.state::<AppState>();
     let Ok(s) = state.slots.get(slot) else { return };
     publish_state(&state, slot, ui_event::UiEvent::TurnStopping);
+    // A message on its way holds the session: it interrupts as soon as it's in (see slots::Sending), unless it was sent
+    // just before this Stop could say so, and then it's done here.
+    let sending = s.sending.stop();
     if let Some(x) = s.session.lock().await.as_mut() {
-        x.interrupt().await;
+        if !sending || s.sending.take() {
+            x.interrupt().await;
+        }
     }
     for request_id in s.bridge.cancel_all() {
         publish_state(&state, slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
@@ -2599,6 +2604,8 @@ where
 /// Sends `text` (and the `images`, as Claude's own image blocks) into the chat's claude as a new message and returns the
 /// turn's number.
 async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images: Vec<session::InputImage>) -> Result<usize, String> {
+    // Before waiting for the session, so a Stop from here on is this message's (see slots::Sending).
+    let _on_its_way = s.sending.begin();
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
@@ -2612,8 +2619,10 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images:
     // Not at all when the user has turned restore points off.
     if app.state::<AppState>().restore_points.load(std::sync::atomic::Ordering::SeqCst) {
         let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
-        if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
-            late.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Stop pressed meanwhile: no waiting for the rest of it, and a late one is never kept.
+        tokio::select! {
+            done = tokio::time::timeout(std::time::Duration::from_secs(8), taken) => if done.is_err() { late.store(true, std::sync::atomic::Ordering::SeqCst); },
+            _ = s.sending.stopped() => late.store(true, std::sync::atomic::Ordering::SeqCst),
         }
     }
     s.checkpoints.turn_started();
@@ -2628,6 +2637,10 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images:
         s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
+    }
+    // Stop was pressed while it was on its way: the turn it just started stops, as a stopped turn does.
+    if s.sending.take() {
+        claude.interrupt().await;
     }
     // The folder's history is first written with its first message: Open Recent lists it from then on.
     let folder = s.config.lock().unwrap().as_ref().map(|c| c.folder.display().to_string());
@@ -3483,9 +3496,13 @@ async fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bo
         publish_state(state, slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
+        Err(NOT_PENDING.into())
     }
 }
+
+/// What answering a prompt that's already closed says. The window matches it word for word (store.ts `NOT_PENDING`): it
+/// was a lost race, not a failure, since the card is closed by the answer that won (or by the withdrawal).
+const NOT_PENDING: &str = "That permission request is no longer pending: it was answered already, or Claude stopped asking.";
 
 /// The "Always allow" rules Settings lists: this chat's (when it's open), then every folder's.
 #[tauri::command]
@@ -4298,6 +4315,8 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
     for s in state.slots.drain() {
         s.shut_down().await;
     }
+    // A restart doesn't pass through RunEvent::Exit: the chats' last saves go to disk here.
+    state.conversations.flush();
     app.restart()
 }
 
@@ -4627,6 +4646,8 @@ pub fn run() {
                     tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(state.desk_agents.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
+                    // The chats' last saves are made on a thread of their own: on disk before Lantern goes.
+                    state.conversations.flush();
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
                 if let Some(updates) = app.try_state::<updates::Updates>() {
@@ -4808,6 +4829,13 @@ mod hooks_flow_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window tells a lost race from a failure by these exact words, so its copy must say the same.
+    #[test]
+    fn the_window_knows_the_not_pending_words() {
+        let store = include_str!("../../src/store.ts");
+        assert!(store.contains(&format!("export const NOT_PENDING = \"{NOT_PENDING}\";")));
+    }
 
     /// A swap script's marker brings the chats back once, and one left from long ago (or none) doesn't.
     #[test]

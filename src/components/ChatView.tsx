@@ -3,7 +3,7 @@ import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { anchorOf, scrollToAnchor, type ChatAnchor } from "../lib/scrollAnchor";
-import type { State } from "../store";
+import { hasPendingPrompt, type State } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { agentName } from "../lib/provider";
 import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
@@ -14,6 +14,11 @@ import { sinceLabel } from "../lib/revert";
 
 /** How long after the reader's last wheel, touch or key a scroll still counts as theirs (a trackpad's glide goes on after the fingers lift). */
 const READER_WINDOW_MS = 600;
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
+/** More than this many arriving at once is a load (history, earlier turns), not something happening: it doesn't animate. */
+const ENTER_AT_ONCE = 4;
+/** What a row opens to, anywhere in a turn: it settles in as a new row does. */
+const ENTERS = ".steps, .step-output, .file-changes, .step-children, .hook-card-body, .always-menu, .plan-body";
 
 /** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
 export interface RestoreEvents {
@@ -21,10 +26,17 @@ export interface RestoreEvents {
   onUndone: (id: number, text: string) => void;
 }
 
+/** The last item that is `wanted`, looked for from the end (a long chat isn't copied for it on every render). */
+function lastOf(items: State["items"], wanted: (it: State["items"][number]) => boolean) {
+  for (let i = items.length - 1; i >= 0; i--) if (wanted(items[i])) return items[i];
+  return undefined;
+}
+
 /** Loads the turns before the first one shown ("Show earlier messages"); resolves when they are in the chat. */
 export type LoadEarlier = () => Promise<void>;
 
-export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents; loadEarlier?: LoadEarlier } & StreamHandlers) {
+/** `front`: the chat in front of the window (not a card on the canvas): Escape answers its waiting card. */
+export function ChatView({ state, resend, restore, loadEarlier, front = false, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents; loadEarlier?: LoadEarlier; front?: boolean } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new). Kept as a place in the chat, not
   // pixels, since the same chat shows at other widths (its card on the canvas, the chat itself, a resized pane).
@@ -76,11 +88,21 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   };
   useEffect(() => {
     const release = () => (dragging.current = false);
+    // The keys that scroll the chat (Page Up, Home, the arrows) go to the page, not to the chat, which has no focus of its own:
+    // heard here, so a reader paging up isn't pulled back down by the next word. Not while typing, where they move the caret.
+    const keys = (e: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(e.key)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      byHand();
+    };
     window.addEventListener("pointerup", release);
     window.addEventListener("pointercancel", release);
+    window.addEventListener("keydown", keys);
     return () => {
       window.removeEventListener("pointerup", release);
       window.removeEventListener("pointercancel", release);
+      window.removeEventListener("keydown", keys);
     };
   }, []);
   // Following the end: the chat is put there, and that is what is remembered for coming back (never an older place).
@@ -89,7 +111,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
   };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
-  const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
+  const lastSent = (items: State["items"]) => lastOf(items, (it) => it.type === "user" && !it.auto)?.id;
   const sent = useRef(lastSent(state.items));
   // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
   // Before the frame is drawn: the height it reads is the layout the frame needs anyway. Read after the frame (an effect),
@@ -106,10 +128,17 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
   // Older turns put in above what is on screen: the turn that was at the top stays there (the browser doesn't hold the
   // place by itself when content appears above it).
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const loadingEarlierRef = useRef(false);
+  loadingEarlierRef.current = loadingEarlier;
   const earlierTurns = useRef(state.earlierTurns);
+  // With no turn to hold on to (the view above the first one), the distance from the end is kept instead.
+  const fromEnd = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (state.earlierTurns < earlierTurns.current && el && anchor.current) scrollToAnchor(el, anchor.current);
+    if (state.earlierTurns < earlierTurns.current && el) {
+      if (anchor.current) scrollToAnchor(el, anchor.current);
+      else if (fromEnd.current !== null) el.scrollTop = el.scrollHeight - fromEnd.current;
+    }
     earlierTurns.current = state.earlierTurns;
   }, [state.earlierTurns]);
   const showEarlier = () => {
@@ -118,6 +147,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     // Where it is now is what is kept, whether or not it was scrolled away from the end.
     nearBottom.current = false;
     anchor.current = anchorOf(el);
+    fromEnd.current = el.scrollHeight - el.scrollTop;
     setLoadingEarlier(true);
     loadEarlier().finally(() => setLoadingEarlier(false));
   };
@@ -146,6 +176,27 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
       added?.disconnect();
     };
   }, []);
+  // What arrives while you watch settles in (`.chat .enter` in styles.css): a turn, a row of one, a card answered into its
+  // line, what a step opens to. Marked here as it lands, never what the chat was first drawn with, nor a load of many at once
+  // (a chat's history coming in, earlier turns shown): those would all move together.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof MutationObserver === "undefined") return;
+    const arrivals = new MutationObserver((records) => {
+      if (loadingEarlierRef.current) return;
+      // Only what would settle in counts (not the words and colours a streaming reply adds inside itself).
+      const entering = records
+        .flatMap((r) => Array.from(r.addedNodes))
+        .filter((n): n is HTMLElement => n instanceof HTMLElement)
+        .filter((n) => (n.parentElement === el ? n.classList.contains("turn-section") : !!n.parentElement?.classList.contains("turn-section") || n.matches(ENTERS)));
+      // A turn arrives alone: more than one at once, or many rows, is a load (a woken chat's history, however short).
+      const turns = entering.filter((n) => n.parentElement === el).length;
+      if (turns > 1 || entering.length > ENTER_AT_ONCE) return;
+      for (const node of entering) node.classList.add("enter");
+    });
+    arrivals.observe(el, { childList: true, subtree: true });
+    return () => arrivals.disconnect();
+  }, []);
   // Scrolled up from the end: the pill to get back.
   const [away, setAway] = useState(false);
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
@@ -155,16 +206,43 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     if (restoring.current) return;
     // Not the reader's (see byHand): the pill still tells how far from the end it is, and nothing else changes.
     if (!dragging.current && performance.now() - lastInput.current > READER_WINDOW_MS) return;
-    nearBottom.current = fromEnd < 80;
+    // The same line as the pill's: following stops exactly where the way back shows, with no stretch where neither does.
+    nearBottom.current = fromEnd <= AWAY_FROM_END;
     anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
-    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, anchor.current ?? -1);
+    // Kept for coming back, without the row itself (it is gone by then, and held would keep the old page alive).
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, anchor.current ? { ...anchor.current, el: undefined } : -1);
   };
   // For the whole turn, until Claude is fully done: a line at the bottom with the turn's word, like Claude Code's
   // spinner under its output.
-  const prompt = [...state.items].reverse().find((it) => it.type === "user");
+  const prompt = lastOf(state.items, (it) => it.type === "user");
   // A worker whose worktree is being set up hasn't started: nothing is thinking yet.
   const thinkingLine = state.status === "running" && !state.setup;
+  // A card waiting for your answer: Claude isn't working, it's waiting for you, and the line under the chat says so.
+  const waiting = thinkingLine && hasPendingPrompt(state.items);
+  // Escape answers No to the one card waiting, as Deny does: never Allow, which only a click or a key on the card itself
+  // gives. Not while typing (a word in the box, an open menu), nor in a dialog, nor once something else took the key.
+  const denyNow = useRef<(() => void) | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  const pending = front && hasPendingPrompt(state.items) ? state.items.filter((it) => it.type === "permission" && it.decision === null) : [];
+  denyNow.current = pending.length === 1 ? () => handlers.onDecide(pending[0].id, false) : null;
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !denyNow.current) return;
+      // Only from the chat itself, its empty box, or nowhere in particular (the page): never from another pane's editor, a
+      // field with words in it, or anything open over the chat.
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      const page = !t || t === document.body;
+      const emptyBox = t?.tagName === "TEXTAREA" && !!t.closest(".composer") && (t as HTMLTextAreaElement).value === "";
+      const inChat = !!t && !!wrap.current?.contains(t) && !t.isContentEditable && !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName);
+      if (!(page || emptyBox || inChat)) return;
+      if (document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], [role="menu"]')) return;
+      e.preventDefault();
+      denyNow.current();
+    };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
   const jump = () => {
     nearBottom.current = true;
     anchor.current = null;
@@ -172,7 +250,7 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   };
   return (
-    <div className="chat-wrap">
+    <div className={`chat-wrap${waiting ? " waiting" : ""}`} ref={wrap}>
       {state.restoreUndo && (
         <div className="restore-undo" role="status">
           <span className="revert-undo-text">{undoFailed ?? state.restoreUndo.summary}</span>
@@ -204,7 +282,14 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
         )}
         {state.items.length === 0 && !state.thinking && <div className="empty">{`What should ${agentName(state.provider)} work on?`}</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
-        {thinkingLine && (
+        {waiting ? (
+          <div className="activity waiting-line" role="status">
+            <span className="activity-line">
+              <span className="waiting-dot" aria-hidden />
+              <span className="activity-text">Waiting for your answer</span>
+            </span>
+          </div>
+        ) : thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label={`${agentName(state.provider)} is thinking`}>
             <span className="activity-line">
               <span className="spinner" aria-hidden />

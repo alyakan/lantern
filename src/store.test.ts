@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasPendingPrompt, initialState, reducer, type State, type ToolItem } from "./store";
+import { answerFailed, hasPendingPrompt, initialState, NOT_PENDING, reducer, type State, type ToolItem } from "./store";
 import { chatState, firstPrompt, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -316,6 +316,43 @@ describe("reducer", () => {
     s = reducer(s, { type: "permission_decided", id: "p2", allow: true });
     s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
     expect(s.items[1]).toMatchObject({ id: "p2", decision: "allowed" });
+    const same = s.items[1];
+    s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
+    expect(s.items[1]).toBe(same);
+  });
+
+  it("a card allowed here while a phone's deny got there first shows the deny, and the lost race doesn't end the chat", () => {
+    let s: State = { ...ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} }), status: "running" };
+    s = reducer(s, { type: "permission_decided", id: "p1", allow: true });
+    s = ev(s, { kind: "permission_resolved", request_id: "p1", allow: false, by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ id: "p1", decision: "denied" });
+    // The window's own answer then comes back refused: nothing to do.
+    expect(answerFailed(NOT_PENDING)).toBeNull();
+    // Any other failure didn't reach claude, and still ends the turn.
+    const failed = answerFailed("No Claude session is running");
+    expect(failed).toEqual({ type: "turn_failed", text: "No Claude session is running" });
+    expect(reducer(s, failed!).status).toBe("ended");
+  });
+
+  it("a card allowed here just as Stop withdrew it says it wasn't allowed", () => {
+    let s: State = { ...ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} }), status: "running" };
+    s = reducer(s, { type: "permission_decided", id: "p1", allow: true });
+    s = ev(s, { kind: "permission_withdrawn", request_id: "p1" });
+    expect(s.items[0]).toMatchObject({ id: "p1", decision: "denied" });
+  });
+
+  it("a Stop that lands after the turn ended leaves the chat as it was, so a later crash still says so", () => {
+    const idle: State = { ...initialState, status: "idle" };
+    expect(reducer(idle, { type: "stop_requested" })).toBe(idle);
+    expect(ev(idle, { kind: "turn_stopping" })).toBe(idle);
+    const crashed = ev(reducer(idle, { type: "stop_requested" }), { kind: "session_ended", code: 1, stderr_tail: "" });
+    expect(crashed.banner).toMatchObject({ kind: "error", action: "restart" });
+    expect(reducer({ ...idle, status: "running" }, { type: "stop_requested" }).stopRequested).toBe(true);
+  });
+
+  it("an Always-allow rule that can't be saved shows the error and leaves the turn running", () => {
+    const s = reducer({ ...initialState, status: "running" }, { type: "failed", text: "Couldn't save the rule" });
+    expect(s).toMatchObject({ status: "running", banner: { kind: "error", text: "Couldn't save the rule", action: null } });
   });
 
   it("a message replayed after a Workflow change shows without the backend's settings note, before a flavour note or alone", () => {

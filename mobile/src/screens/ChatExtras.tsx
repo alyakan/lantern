@@ -12,7 +12,7 @@ import { Button, Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
 import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
-import { FadeSlideIn, PressScale } from "../ui/motion";
+import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { fonts, MIN_TARGET, radius, space, useBody, useColors } from "../ui/theme";
@@ -68,7 +68,8 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
               <ActionRow
                 label="Copy"
                 onPress={() => {
-                  void Promise.resolve(Clipboard.setStringAsync(text)).catch(() => {});
+                  // Copied: a tap you can feel, as iOS gives, since the sheet closing is all you'd see.
+                  void Promise.resolve(Clipboard.setStringAsync(text)).then(() => buzz("success"), () => {});
                   close();
                 }}
               />

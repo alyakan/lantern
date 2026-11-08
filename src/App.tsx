@@ -27,13 +27,14 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
+import { answerFailed, hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend, type Chats } from "./sessions";
 import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
+import { useSteady } from "./lib/steady";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
@@ -308,6 +309,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
   const drafts = useRef<Record<string, string>>({});
+  // And the pictures pasted into it, by their `[Image #n]`: in memory only (a draft saved for a restart keeps its text).
+  const draftImages = useRef<Record<string, Record<number, PastedImage>>>({});
   // How to start a chat again when its start failed: claude never got far enough to be restarted (see the banner).
   const relaunch = useRef<Record<string, () => void>>({});
   // Counts each chat's starts, so one that was cancelled can tell its late answer is stale.
@@ -565,6 +568,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const forget = (slot: string, agent = false) => {
     dispatchChats({ type: agent ? "close_agent" : "remove", slot });
     delete drafts.current[slot];
+    delete draftImages.current[slot];
     delete relaunch.current[slot];
     api.closeSession(slot).catch(() => {});
   };
@@ -594,6 +598,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     dispatchChats({ type: "close", slots, fresh: `s${++slotSeq.current}` });
     for (const slot of slots) {
       delete drafts.current[slot];
+      delete draftImages.current[slot];
       delete relaunch.current[slot];
       api.closeSession(slot).catch(() => {});
     }
@@ -1813,9 +1818,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // can't be saved, this request is still answered and the error is shown.
   const decideIn = (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
     to(slot)({ type: "permission_decided", id, allow, note });
-    const answer = () => api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    const answer = () =>
+      api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => {
+        const failed = answerFailed(errText(e));
+        if (failed) to(slot)(failed);
+      });
     if (!remember) return answer();
-    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) })).then(answer);
+    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "failed", text: errText(e) })).then(answer);
   };
   const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => decideIn(active, id, allow, note, answered, remember);
 
@@ -2429,22 +2438,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [lastTurn?.id]);
   // What the window is, or null when nothing says: the meter then shows the tokens, not a percent against a guess.
   const contextWindow = windowOf(state, windows);
-  // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs.
-  const streamHandlers = {
+  // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs. Steady (lib/steady.ts), so
+  // while a reply streams the rows that haven't changed aren't drawn again.
+  const steadyHandlers = useSteady({
     onDecide: decide,
     onOpenFile: openFile,
     onStopShell: (id: string) => api.stopShell(active, id).catch(() => {}),
     // A reply that couldn't be typed says so in the command's block (the command most likely just ended).
     onShellInput: (id: string, text: string) => api.shellInput(active, id, text).catch((e) => dispatch({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
-    testRunFor: (id: string) => state.testRuns.find((r) => r.id === id),
     onOpenTestRun: (id: string) => {
       setFocusRun({ id, key: Date.now() });
       setReviewCollapsed(false);
     },
-  };
+  });
+  // New when the runs change, so a step whose test run just came is drawn again with it.
+  const testRuns = state.testRuns;
+  const testRunFor = useCallback((id: string) => testRuns.find((r) => r.id === id), [testRuns]);
+  const streamHandlers = useMemo(() => ({ ...steadyHandlers, testRunFor }), [steadyHandlers, testRunFor]);
   // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
   // have their own flow.
-  const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
+  const resendSteady = useSteady({ onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) });
+  const resendHandlers = state.status === "idle" && !stepsMode ? resendSteady : undefined;
   // "Restore files to here" on a sent message: what it did is said in the chat and told to Claude with the next message.
   const restoreEvents = state.folder && !stepsMode
     ? {
@@ -3248,6 +3262,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
       status={state.status}
+      waiting={state.status === "running" && hasPendingPrompt(state.items)}
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
@@ -3307,6 +3322,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         save: (text) => {
           drafts.current[active] = text;
           saveOpen();
+        },
+        images: draftImages.current[active],
+        saveImages: (images) => {
+          draftImages.current[active] = images;
         },
       }}
       update={updateOffer}
@@ -3493,7 +3512,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
+                        <ChatView key={`chat-${active}`} front state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>

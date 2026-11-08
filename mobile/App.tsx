@@ -8,6 +8,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from "@expo-google-fonts/bricolage-grotesque";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { Controller } from "./src/shell/controller";
+import { keychainOutbox } from "./src/outbox";
 import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
@@ -60,6 +61,7 @@ export default function App() {
         discovery: zeroconfDiscovery(),
         deviceName: Device.deviceName ?? Device.modelName ?? "Phone",
         appVersion: Constants.expoConfig?.version ?? "0",
+        sync: { outbox: keychainOutbox },
       }),
     [],
   );

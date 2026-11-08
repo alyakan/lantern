@@ -10,6 +10,12 @@ export interface ChatAnchor {
   row: number;
   /** How far down the row the view's top is, as a fraction of its height; for the turn's top, pixels. */
   within: number;
+  /**
+   * The row itself, while it is on the page. A reply streaming in regroups the rows of its turn (what was the reply folds into
+   * the work above it when the next step starts), so the row counted earlier is another one now: the row itself is still
+   * where it was read to. Left out where the place is kept for later.
+   */
+  el?: HTMLElement;
 }
 
 const turnsOf = (scroller: HTMLElement) => Array.from(scroller.children).filter((el): el is HTMLElement => el instanceof HTMLElement && !!el.dataset.turn);
@@ -26,7 +32,7 @@ export function anchorOf(scroller: HTMLElement): ChatAnchor | null {
   const row = rows.find((r) => r.getBoundingClientRect().bottom > top);
   const rect = row?.getBoundingClientRect();
   if (!row || !rect || rect.top > top || rect.height === 0) return { turn: turn.dataset.turn, row: -1, within: Math.max(0, top - turn.getBoundingClientRect().top) };
-  return { turn: turn.dataset.turn, row: Array.from(turn.children).indexOf(row), within: (top - rect.top) / rect.height };
+  return { turn: turn.dataset.turn, row: Array.from(turn.children).indexOf(row), within: (top - rect.top) / rect.height, el: row };
 }
 
 /** Scrolls `scroller` so `anchor` is at the top of its view again. False when the turn isn't there (nothing moves). */
@@ -34,7 +40,7 @@ export function scrollToAnchor(scroller: HTMLElement, anchor: ChatAnchor): boole
   const turn = turnsOf(scroller).find((t) => t.dataset.turn === anchor.turn);
   if (!turn) return false;
   const top = scroller.getBoundingClientRect().top;
-  const row = anchor.row >= 0 ? turn.children[anchor.row] : undefined;
+  const row = anchor.el?.isConnected && anchor.el.parentElement === turn ? anchor.el : anchor.row >= 0 ? turn.children[anchor.row] : undefined;
   const target = row instanceof HTMLElement ? row.getBoundingClientRect().top + anchor.within * row.getBoundingClientRect().height : turn.getBoundingClientRect().top + anchor.within;
   scroller.scrollTop += target - top;
   return true;

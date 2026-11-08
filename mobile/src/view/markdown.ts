@@ -60,6 +60,23 @@ function fileTarget(url: string): { path: string; line: number | null } | null {
   return { path, line: line ? Number(line[1]) : null };
 }
 
+// The marks parseInline looks for, matched where it stands in the text (sticky) rather than on a copy of the rest of it:
+// copying the rest at every character made a long paragraph cost its length squared, for every word a reply streamed.
+const LINK = /\[((?:`[^`\n]*`|[^\]`\n])+)\]\((https?:\/\/[^)\s]+)\)/y;
+const FILE_LINK = /\[((?:`[^`\n]*`|[^\]`\n])+)\]\(([^)\s]+)\)/y;
+const CODE = /`([^`\n]+)`/y;
+const BOLD = /(?:\*\*([^*\n]+)\*\*|__([^_\n]+)__)/y;
+const STRIKE = /~~([^~\n]+)~~/y;
+const ITALIC = /(?:\*([^*\s][^*\n]*)\*|_([^_\s][^_\n]*)_)/y;
+const BARE = /https?:\/\/[^\s<>]+/y;
+/** Where a mark can start: anything else is plain text, taken a run at a time. */
+const MARK_START = /[[`*_~h]/g;
+
+const at = (re: RegExp, s: string, i: number) => {
+  re.lastIndex = i;
+  return re.exec(s);
+};
+
 /** [links](url) first (their words may hold code), then code, **bold**, *italic*, ~~strikethrough~~ and bare links; unmatched marks stay as text. */
 export function parseInline(s: string): Span[] {
   const out: Span[] = [];
@@ -69,29 +86,37 @@ export function parseInline(s: string): Span[] {
     text = "";
   };
   for (let i = 0; i < s.length; ) {
-    const rest = s.slice(i);
+    // Plain text up to where the next mark could start.
+    MARK_START.lastIndex = i;
+    const next = MARK_START.exec(s);
+    const to = next ? next.index : s.length;
+    if (to > i) {
+      text += s.slice(i, to);
+      i = to;
+      continue;
+    }
     const before = s[i - 1] ?? "";
     let m: RegExpExecArray | null;
     let file: ReturnType<typeof fileTarget> = null;
-    if ((m = /^\[((?:`[^`\n]*`|[^\]`\n])+)\]\((https?:\/\/[^)\s]+)\)/.exec(rest))) {
+    if ((m = at(LINK, s, i))) {
       flush();
       out.push({ kind: "link", ...labelled(m[1]), url: m[2] });
-    } else if ((m = /^\[((?:`[^`\n]*`|[^\]`\n])+)\]\(([^)\s]+)\)/.exec(rest)) && (file = fileTarget(m[2]))) {
+    } else if ((m = at(FILE_LINK, s, i)) && (file = fileTarget(m[2]))) {
       flush();
       out.push({ kind: "file", ...labelled(m[1]), ...file });
-    } else if ((m = /^`([^`\n]+)`/.exec(rest))) {
+    } else if ((m = at(CODE, s, i))) {
       flush();
       out.push({ kind: "code", text: m[1] });
-    } else if ((m = /^(?:\*\*([^*\n]+)\*\*|__([^_\n]+)__)/.exec(rest)) && (m[1] !== undefined || !/\w/.test(before))) {
+    } else if ((m = at(BOLD, s, i)) && (m[1] !== undefined || !/\w/.test(before))) {
       flush();
       out.push(marked("bold", m[1] ?? m[2]));
-    } else if ((m = /^~~([^~\n]+)~~/.exec(rest))) {
+    } else if ((m = at(STRIKE, s, i))) {
       flush();
       out.push(marked("strike", m[1]));
-    } else if ((m = /^(?:\*([^*\s][^*\n]*)\*|_([^_\s][^_\n]*)_)/.exec(rest)) && !/\w/.test(before)) {
+    } else if ((m = at(ITALIC, s, i)) && !/\w/.test(before)) {
       flush();
       out.push(marked("italic", m[1] ?? m[2]));
-    } else if ((m = /^https?:\/\/[^\s<>]+/.exec(rest)) && !/\w/.test(before)) {
+    } else if ((m = at(BARE, s, i)) && !/\w/.test(before)) {
       // A bare link: what ends the sentence around it (a full stop, a closing bracket) is not part of it.
       const url = m[0].replace(/[.,;:!?)\]'"]+$/, "");
       if (url.length <= "https://".length) {
@@ -245,4 +270,36 @@ export function parseMarkdown(source: string): Block[] {
   }
   endParagraph();
   return blocks;
+}
+
+/** A line that carries on a list or code above it, or starts a list: a block boundary isn't safe next to it. */
+const LIST_OR_INDENT = /^(?:\s|[-*+] |\d+[.)] )/;
+
+/**
+ * Where a message streaming in can be cut into blocks that read as the whole does: at each blank line outside any code
+ * fence and away from any list, so each finished block is parsed once and kept, and only the last is parsed again as more
+ * arrives (as the Mac does, src/lib/markdown.ts). None for text with a link definition, which reaches back into the blocks before it.
+ */
+export function settledCuts(text: string): number[] {
+  if (/^ {0,3}\[[^\]]+\]:/m.test(text)) return [];
+  const cuts: number[] = [];
+  let fence: string | null = null;
+  let at = 0;
+  let prev = "";
+  let blank = false;
+  for (const line of text.split("\n")) {
+    const opens = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (opens && opens[1][0] === fence[0] && opens[1].length >= fence.length && line.trim() === opens[1]) fence = null;
+    } else if (line.trim() === "") {
+      blank = true;
+    } else {
+      if (blank && prev && !LIST_OR_INDENT.test(prev) && !LIST_OR_INDENT.test(line)) cuts.push(at);
+      blank = false;
+      prev = line;
+      if (opens) fence = opens[1];
+    }
+    at += line.length + 1;
+  }
+  return cuts;
 }

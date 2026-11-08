@@ -1,5 +1,6 @@
 import type { Item } from "../sync/reducer";
-import { dayLabel, lastLine, stepChips, summaryOf, timeline, turnLine } from "./timeline";
+import { dayLabel, lastLine, steadyRows, stepChips, summaryOf, timeline, turnLine } from "./timeline";
+import { parseInline, settledCuts } from "./markdown";
 
 type Step = Extract<Item, { kind: "step" }>;
 const step = (id: string, name: string, over: Partial<Step> = {}): Step => ({ kind: "step", id, name, summary: "", done: true, isError: false, edits: [], tests: null, ...over });
@@ -313,5 +314,53 @@ describe("an edit still going", () => {
     expect(stepChips([step("1", "Edit", { done: false, summary: "a.ts" })])).toEqual([{ key: "edits", label: "Editing 1 file", tone: "plain", running: true }]);
     // One that failed with no change made is still said as a tool that was used.
     expect(stepChips([step("1", "Edit", { isError: true })]).map((c) => c.label)).toEqual(["Used 1 other tool", "1 step failed"]);
+  });
+});
+
+describe("steady rows", () => {
+  it("gives back the rows that read the same as the same objects, and new ones for what changed", () => {
+    const before: Item[] = [you("u1", "Go"), step("1", "Read"), step("2", "Grep"), said("a1", "Looking", true)];
+    const first = timeline(before);
+    const second = steadyRows(first, timeline([...before.slice(0, -1), said("a1", "Looking at it", true)]));
+    expect(second[0]).toBe(first[0]);
+    expect(second.find((r) => r.kind === "steps")).toBe(first.find((r) => r.kind === "steps"));
+    expect(second[second.length - 1]).not.toBe(first[first.length - 1]);
+    const third = steadyRows(second, timeline([...before.slice(0, -1), step("3", "Read"), said("a1", "Looking at it", true)]));
+    expect(third.find((r) => r.kind === "steps")).not.toBe(second.find((r) => r.kind === "steps"));
+  });
+});
+
+describe("a streaming reply's blocks", () => {
+  const blocks = (t: string) => {
+    const starts = [0, ...settledCuts(t)];
+    return starts.map((s, i) => t.slice(s, starts[i + 1] ?? t.length));
+  };
+  it("are cut at blank lines outside code and lists, as the Mac cuts them", () => {
+    expect(blocks("One.\n\nTwo.\n\nThr")).toEqual(["One.\n\n", "Two.\n\n", "Thr"]);
+    expect(settledCuts("```\na\n\nb")).toEqual([]);
+    expect(settledCuts("1. one\n\n2. two")).toEqual([]);
+    expect(settledCuts("See [x][d].\n\nMore\n\n[d]: https://a.b")).toEqual([]);
+  });
+
+  it("parse a long paragraph's marks as before, in time that grows with its length", () => {
+    expect(parseInline("a **b** `c` _d_ ~~e~~ [f](https://g.h) https://i.j.")).toEqual([
+      { kind: "text", text: "a " },
+      { kind: "bold", text: "b" },
+      { kind: "text", text: " " },
+      { kind: "code", text: "c" },
+      { kind: "text", text: " " },
+      { kind: "italic", text: "d" },
+      { kind: "text", text: " " },
+      { kind: "strike", text: "e" },
+      { kind: "text", text: " " },
+      { kind: "link", text: "f", url: "https://g.h" },
+      { kind: "text", text: " " },
+      { kind: "link", text: "https://i.j", url: "https://i.j" },
+      { kind: "text", text: "." },
+    ]);
+    const long = "word ".repeat(40000);
+    const t = Date.now();
+    expect(parseInline(long)).toEqual([{ kind: "text", text: long }]);
+    expect(Date.now() - t).toBeLessThan(500);
   });
 });
