@@ -26,7 +26,7 @@ import { gutterFor } from "../view/layout";
 import { useLayout } from "../shell/useLayout";
 import { useShortcut } from "../ui/useShortcut";
 import { BackButton } from "../ui/BackButton";
-import { TOP_BAR_GAP } from "../ui/TopBar";
+import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { CruiseBar } from "./Cruise";
 import { useCruise } from "./useCruise";
 import { pageOfKey, stepPagesOf } from "../view/stepPages";
@@ -641,8 +641,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // The pieces of the screen. On iOS 26 the list runs under the header and the message box, which are glass; elsewhere they sit above and below it as before.
   const head = (
     <>
-      {/* As far below the clock as the tabs' bars, so a chat pushed over a tab doesn't shift its bar on the way. */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + TOP_BAR_GAP, paddingHorizontal: gutter, paddingBottom: 10 }}>
+      {/* Centred where the tabs' bars are (their gap under the clock, and half the difference between their 48 and these 44-point
+          circles), so a chat pushed over a tab doesn't shift its bar on the way. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + TOP_BAR_GAP + (TOP_BAR_HEIGHT - control) / 2, paddingHorizontal: gutter, paddingBottom: 10 }}>
         {lead === "back" && <BackButton onPress={onBack} hitSlop={HEADER_SLOP} />}
         {lead === "sidebar" && (
           // It pops in when the chats are unpinned and go away (not when the chat opens with them away: then it was just there).
