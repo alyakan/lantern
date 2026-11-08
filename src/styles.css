@@ -1201,7 +1201,7 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
    Controls sit in translucent capsules, like Xcode's toolbar. */
 .app { display: flex; flex-direction: column; height: 100%; }
 .topbar { display: grid; grid-template-columns: 1fr minmax(300px, 600px) 1fr; align-items: center; gap: 12px; height: 48px; flex: none; padding: 0 10px 0 84px; }
-.topbar-side { display: flex; align-items: center; height: 100%; min-width: 0; }
+.topbar-side { display: flex; align-items: center; height: 100%; }
 .topbar-side.end { justify-content: flex-end; }
 .title-center { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .toolbar-group { display: flex; align-items: center; gap: 2px; flex: none; height: 32px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
