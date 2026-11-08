@@ -1,7 +1,7 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
 import { known } from "../prefsKnown";
@@ -21,7 +21,8 @@ import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { SwipeRow } from "../ui/SwipeRow";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { countsOf, diffPreviewOf } from "../view/diffPreview";
-import { gutterFor, layoutFor } from "../view/layout";
+import { gutterFor } from "../view/layout";
+import { useLayout } from "../shell/useLayout";
 import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { HomeSearch } from "./HomeSearch";
@@ -333,8 +334,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
   // Apple's page margin: 16 on a phone, 20 on a wider window.
-  const { width, height } = useWindowDimensions();
-  const gutter = gutterFor(layoutFor(width, height));
+  const gutter = gutterFor(useLayout());
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
   // How the chats are listed, and which project cards are folded away, are remembered on this phone.

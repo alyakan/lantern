@@ -223,6 +223,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
   // Command-F on an iPad's keyboard opens the chat's search, as the bar's Search does.
   useShortcut("find", () => setFind((f) => f ?? { query: "", cursor: null }));
+  useShortcut("escape", () => setFind(null), find !== null);
   // Step by step reads a page at a time, side by side, as on the Mac (or as one list, if asked). The page on screen: none
   // means the newest, followed as pages come; `of` is how many there were when another was picked, so a new one is said.
   const stepsChat = chat?.workflow === "steps";

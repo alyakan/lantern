@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
+import { useLayout } from "../shell/useLayout";
 import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
@@ -722,13 +723,13 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const colors = useColors();
   // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
   const body = useBody();
-  // How tall it grows before it scrolls: five lines of its own type at least (so more points at larger text sizes), and up to
-  // eight on a tall screen while that is under a fifth of it (a phone has the keyboard to share it with). A fixed 120 showed
-  // under three lines at large text.
+  // How tall it grows before it scrolls: on a phone 120 points, or five lines of its own type at a larger text size (a fixed 120
+  // showed under three lines there); on a tablet up to eight lines, while that is under a fifth of the screen.
   const { height: screenHeight, fontScale } = useWindowDimensions();
+  const tablet = useLayout() !== "phone";
   // The type is drawn at the system's text size, so its lines are that much taller than `lineHeight` says.
   const line = (body.lineHeight ?? 22) * fontScale;
-  const tallest = Math.round(Math.max(5 * line + 12, Math.min(8 * line + 12, screenHeight * 0.18)));
+  const tallest = Math.round(Math.max(120, 5 * line + 12, tablet ? Math.min(8 * line + 12, screenHeight * 0.18) : 0));
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");

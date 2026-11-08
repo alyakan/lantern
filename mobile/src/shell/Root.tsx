@@ -225,7 +225,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   useShortcut("escape", () => {
     if (!closeTop() && decision(stack)) go({ type: "back" });
   });
-  useShortcut("newChat", () => setNewChat({ text: "" }), homeUp);
+  // A New chat already open keeps what is typed in it.
+  useShortcut("newChat", () => setNewChat((d) => d ?? { text: "" }), homeUp);
   useShortcut(
     "toggleChats",
     () => {
