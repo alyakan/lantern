@@ -17,7 +17,7 @@ export interface HistoryEvent {
   /** When it happened (ms): when what was finished was asked, or since when a chat works or waits. */
   at: number | null;
   kind: HistoryKind;
-  /** On one line: what Claude said, what it is doing, or that it needs you. */
+  /** On one line: what Claude said, or what it is doing ("" when there is nothing more to say than its kind: it needs you). */
   line: string;
 }
 
@@ -34,7 +34,7 @@ export function historyEvents(chats: RemoteChat[], desk: RemoteDesk | null, work
     if (only !== null && c.project !== only) continue;
     if (c.status !== "needs_you" && c.status !== "working") continue;
     const waiting = c.status === "needs_you";
-    out.push({ key: `${c.slot}:now`, slot: c.slot, title: c.title ?? "New chat", project: c.project, at: waiting ? c.active_at : (workingSince[c.slot] ?? c.active_at), kind: waiting ? "waiting" : "working", line: waiting ? "Needs you" : (c.preview ?? "Working") });
+    out.push({ key: `${c.slot}:now`, slot: c.slot, title: c.title ?? "New chat", project: c.project, at: waiting ? c.active_at : (workingSince[c.slot] ?? c.active_at), kind: waiting ? "waiting" : "working", line: waiting ? "" : (c.preview ?? "") });
   }
   const cards = desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])) : [];
   for (const card of cards) {
