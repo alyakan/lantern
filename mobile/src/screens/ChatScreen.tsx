@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncPick } from "../shell/hooks";
 import { emptyView, type Item } from "../sync/reducer";
-import { BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
+import { BackgroundDot, BAR_TEXT_SCALE, Button, ProjectTag, Txt, WorkGlow } from "../ui/components";
 import { useAccent } from "../ui/accent";
 import { barRoom, KEYBOARD_GAP, useTapAway } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
@@ -717,6 +717,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
                     sleeps and what it runs on. */}
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} live={working} background={asleep ? [] : view.background} />}
+                  <BackgroundDot tasks={asleep ? [] : view.background} />
                   {!!([asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).length) && (
                     <Txt variant="small" tone="ink2" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ flexShrink: 1, lineHeight: 16 }}>
                       {[asleep ? "asleep" : working && !chat?.project ? "working" : null, line].filter(Boolean).join(" · ")}
