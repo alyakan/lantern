@@ -468,6 +468,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const openFiles = useCallback((paths: string[]) => (paths.length === 1 ? openFile(paths[0]) : setFiles(paths)), [openFile]);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
+  // Cruise has a row over the message box (its pill, or its card once on).
+  const cruiseRow = canCruise && !asleep && !stepsChat;
   const send = (text: string) => {
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
@@ -741,8 +743,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           }}
         />
       )}
-      {canCruise && !asleep && !stepsChat && (
+      {cruiseRow && (
         <CruiseBar
+          replies={cruise.on ? undefined : replies}
+          onReply={send}
           on={cruise.on}
           resting={!working && !open}
           asking={cruise.asking}
@@ -888,7 +892,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
   // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
   // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
-  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
+  // With Cruise's pill over the box, the replies are chips in its row (CruiseBar); otherwise they float over the chat's end.
+  const replyBar = replies.length > 0 && !pageBar && !(cruiseRow && !cruise.on) ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (

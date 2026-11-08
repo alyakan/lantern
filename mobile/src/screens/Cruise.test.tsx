@@ -4,7 +4,7 @@ import { CruiseBar } from "./Cruise";
 
 const nextStep: Suggestion = { id: "c1", title: "Re-run the tests", why: "One is red.", message: "Re-run the tests.", target: { kind: "continue", slot: "a" } };
 
-const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Suggestion | null; error?: string | null; onToggle?: () => void; onAsk?: () => void; onDo?: () => void; onAnother?: () => void; onStop?: () => void } = {}) => (
+const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Suggestion | null; error?: string | null; onToggle?: () => void; onAsk?: () => void; onDo?: () => void; onAnother?: () => void; onStop?: () => void; replies?: string[]; onReply?: (text: string) => void } = {}) => (
   <CruiseBar
     on={p.on ?? true}
     resting={p.resting ?? true}
@@ -16,6 +16,8 @@ const bar = (p: { on?: boolean; resting?: boolean; asking?: boolean; draft?: Sug
     onDo={p.onDo ?? (() => {})}
     onAnother={p.onAnother ?? (() => {})}
     onStop={p.onStop ?? (() => {})}
+    replies={p.replies}
+    onReply={p.onReply}
   />
 );
 
@@ -25,6 +27,23 @@ describe("Cruise, over the message box", () => {
     await render(bar({ on: false, onToggle }));
     await fireEvent.press(screen.getByRole("button", { name: /Cruise/ }));
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("off, it shares its row with the quick replies: the answers first, then Cruise, all chips of one kind", async () => {
+    const onReply = jest.fn();
+    const onToggle = jest.fn();
+    await render(bar({ on: false, replies: ["Yes", "No"], onReply, onToggle }));
+    expect(screen.getByLabelText("Quick replies")).toBeTruthy();
+    const names = screen.getAllByRole("button").map((b) => b.props.accessibilityLabel);
+    expect(names).toEqual(["Reply: Yes", "Reply: No", "Cruise: suggest the next step each time the chat is idle"]);
+    await fireEvent.press(screen.getByRole("button", { name: "Reply: No" }));
+    expect(onReply).toHaveBeenCalledWith("No");
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("on, it leaves the replies out: its card is the row", async () => {
+    await render(bar({ on: true, replies: ["Yes", "No"] }));
+    expect(screen.queryByRole("button", { name: "Reply: Yes" })).toBeNull();
   });
 
   it("shows the next step; Do it, Another and Stop each do their one thing", async () => {

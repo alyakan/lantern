@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
@@ -147,23 +147,55 @@ export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; on
  * go as a message and are gone; longer ones wrap to a second line.
  */
 export function QuickReplies({ replies, onSend, lift = 0, onHeight, hidden = false }: { replies: string[]; onSend: (text: string) => void; /** How far above the bottom of its box it sits, where the message box floats over the chat. */ lift?: number; onHeight?: (h: number) => void; /** Out of sight and reach, keeping its room (the chat is scrolled away from its end). */ hidden?: boolean }) {
-  const accent = useAccent();
   // Gone, they leave no room behind them.
   useEffect(() => () => onHeight?.(0), []);
   return (
-    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 14, right: 14, bottom: 10 + lift, pointerEvents: "box-none" }}>
-      <View pointerEvents={hidden ? "none" : "box-none"} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? "no-hide-descendants" : "auto"} accessibilityLabel="Quick replies" onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, opacity: hidden ? 0 : 1 }}>
-        {replies.map((r) => (
-          <PressScale key={r} accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.95}>
-            <Glass lift={0.16} style={{ minHeight: MIN_TARGET, borderRadius: radius.pill, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center" }}>
-              <Txt variant="body" numberOfLines={2} style={{ fontWeight: "700", color: accent }}>
-                {r}
-              </Txt>
-            </Glass>
-          </PressScale>
-        ))}
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: 0, right: 0, bottom: 10 + lift, pointerEvents: "box-none" }}>
+      <View pointerEvents={hidden ? "none" : "box-none"} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? "no-hide-descendants" : "auto"} onLayout={(e) => onHeight?.(e.nativeEvent.layout.height)} style={{ opacity: hidden ? 0 : 1 }}>
+        <ChipRow label="Quick replies">
+          {replies.map((r) => (
+            <ReplyChip key={r} label={r} onPress={() => onSend(r)} />
+          ))}
+        </ChipRow>
       </View>
     </FadeSlideIn>
+  );
+}
+
+/** How tall a suggestion chip is drawn. Its tap reaches 44 points all the same (PressScale's reach). */
+export const CHIP_HEIGHT = 36;
+
+/**
+ * A row of suggestion chips over the message box, starting at its left edge as the box's words do, scrolling sideways when
+ * they don't fit (never wrapping into a second row of different widths).
+ */
+export function ChipRow({ label, children }: { label?: string; children: ReactNode }) {
+  return (
+    <ScrollView horizontal accessibilityLabel={label} showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingVertical: 4 }} style={{ flexGrow: 0 }}>
+      {children}
+    </ScrollView>
+  );
+}
+
+/**
+ * One suggestion over the message box: a quick reply, or Cruise. Every chip there is this one, on the same glass at the same
+ * height in the same type, so the row reads as one set of choices rather than buttons from different screens.
+ */
+export function ReplyChip({ label, lead, accessibilityLabel, onPress }: { label: string; /** A small mark before the words (Cruise's ✨). */ lead?: string; accessibilityLabel?: string; onPress: () => void }) {
+  const accent = useAccent();
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? `Reply: ${label}`} onPress={onPress} haptic="select" scaleTo={0.95}>
+      <Glass lift={0.1} style={{ height: CHIP_HEIGHT, borderRadius: radius.pill, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {lead && (
+          <Txt variant="small" accessibilityElementsHidden importantForAccessibility="no">
+            {lead}
+          </Txt>
+        )}
+        <Txt variant="small" numberOfLines={1} style={{ fontWeight: "600", color: accent, maxWidth: 260 }}>
+          {label}
+        </Txt>
+      </Glass>
+    </PressScale>
   );
 }
 
