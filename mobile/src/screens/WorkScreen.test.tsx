@@ -79,9 +79,12 @@ describe("Your work on a tablet, beside its column", () => {
     expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
     expect(screen.queryByTestId("work-bar")).toBeNull();
     expect(screen.queryByTestId("work-page-bar")).toBeNull();
-    // Its tabs and rows are there, under how many things need you.
+    // Its tabs and rows are there, with its own numbers: not a count across every feature on one feature's page.
     expect(screen.getByRole("tab", { name: "Needs you, 2" })).toBeTruthy();
-    expect(screen.getByText("2 things need you.")).toBeTruthy();
+    expect(screen.queryByText("2 things need you.")).toBeNull();
+    // Every step to take, across the features, is one link beside its count.
+    await fireEvent.press(screen.getByRole("button", { name: "Review all 3 steps" }));
+    expect(screen.getByLabelText("All next steps")).toBeTruthy();
   });
 
   it("shows the feature picked in the column", async () => {

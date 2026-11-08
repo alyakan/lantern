@@ -478,7 +478,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   };
 
   /** A feature's page: its name (where nothing above it says it), how much is open, its tabs, and the rows under the one chosen. */
-  const featurePage = (g: WorkGroup, titled: boolean) => {
+  const featurePage = (g: WorkGroup, titled: boolean, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode) => {
     const on = tab ?? openBucket(g.items);
     const rows = g.items.filter((i) => bucketOf(i) === on);
     const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
@@ -491,9 +491,12 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
             {g.label}
           </Txt>
         )}
-        <Txt variant="small" tone="ink3" style={{ marginTop: 4 }}>
-          {live} open, {g.items.length - live} shipped
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10, marginTop: 4 }}>
+          <Txt variant="small" tone="ink3">
+            {live} open, {g.items.length - live} shipped
+          </Txt>
+          {review}
+        </View>
         {tabs(g, on)}
         {rows.length === 0 ? (
           <Txt variant="body" tone="ink3" style={{ paddingTop: 18 }}>
@@ -711,16 +714,16 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
         </View>
       ) : (
         <>
-          {shownFeature ? (
-            overviewNote(false)
-          ) : (
+          {/* The page says its own feature's numbers (its tabs count what needs you in it); how many need you across them all is
+              the Work switch's count, and the steps to take across them all are one link beside the page's count. */}
+          {!shownFeature && (
             <Txt variant="body" tone="ink2">
               {standsLine}
             </Txt>
           )}
           {blindNote}
           {justFinished}
-          {shownFeature && featurePage(shownFeature, false)}
+          {shownFeature && featurePage(shownFeature, false, next.length > 0 ? <Link label={`Review all ${next.length} step${next.length === 1 ? "" : "s"}`} hint="Lists every step to take, in every feature" onPress={() => setNextOpen(true)} /> : undefined)}
         </>
       )}
     </ScrollView>

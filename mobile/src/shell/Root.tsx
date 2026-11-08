@@ -403,7 +403,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} page={tabletPage} feature={workFeature}layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
+          <TabletDetail slot={shown} decide={deciding} page={tabletPage} feature={workFeature} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
