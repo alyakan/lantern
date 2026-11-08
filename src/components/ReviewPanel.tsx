@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { BranchReview, ChangeScope } from "../api";
 import { relativeTime } from "../lib/time";
+import { useAction } from "../lib/actions";
 import type { ChangedFile, TestRunItem } from "../store";
 import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
@@ -210,6 +211,17 @@ export function ReviewPanel(props: Props) {
   }, [tab]);
   // The strip: the pinned tabs, then the open one if it isn't pinned, so you always see where you are.
   const strip = pinned.includes(tab) ? pinned : [...pinned, tab];
+  // ⌘1 to ⌘9 open the strip's tabs in order, each named for its tab in the palette.
+  const label = (n: number) => TABS.find((t) => t.id === strip[n - 1])?.label;
+  useAction("pane-tab-1", () => strip[0] && setTab(strip[0]), strip.length >= 1, label(1) && `Show ${label(1)}`);
+  useAction("pane-tab-2", () => strip[1] && setTab(strip[1]), strip.length >= 2, label(2) && `Show ${label(2)}`);
+  useAction("pane-tab-3", () => strip[2] && setTab(strip[2]), strip.length >= 3, label(3) && `Show ${label(3)}`);
+  useAction("pane-tab-4", () => strip[3] && setTab(strip[3]), strip.length >= 4, label(4) && `Show ${label(4)}`);
+  useAction("pane-tab-5", () => strip[4] && setTab(strip[4]), strip.length >= 5, label(5) && `Show ${label(5)}`);
+  useAction("pane-tab-6", () => strip[5] && setTab(strip[5]), strip.length >= 6, label(6) && `Show ${label(6)}`);
+  useAction("pane-tab-7", () => strip[6] && setTab(strip[6]), strip.length >= 7, label(7) && `Show ${label(7)}`);
+  useAction("pane-tab-8", () => strip[7] && setTab(strip[7]), strip.length >= 8, label(8) && `Show ${label(8)}`);
+  useAction("pane-tab-9", () => strip[8] && setTab(strip[8]), strip.length >= 9, label(9) && `Show ${label(9)}`);
   return (
     <aside className="review">
       <div className="pane-tabs">
