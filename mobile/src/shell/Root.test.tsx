@@ -215,6 +215,15 @@ describe("the optional tips", () => {
     expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
   });
 
+  it("go when a notification opens a chat, rather than staying over it", async () => {
+    const { view, controller } = await open({ chats: [chat()], waiting: [] });
+    await press("Support development");
+    expect(screen.getByRole("header", { name: "Support development" })).toBeTruthy();
+    await view.rerender(<Root controller={controller} openSlot={chat().slot} onOpened={jest.fn()} />);
+    await settle();
+    expect(screen.queryByRole("header", { name: "Support development" })).toBeNull();
+  });
+
   it("close from Close", async () => {
     await open({ chats: [chat()], waiting: [] });
     await press("Support development");

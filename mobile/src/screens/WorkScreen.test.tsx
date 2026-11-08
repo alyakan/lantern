@@ -129,6 +129,18 @@ describe("Your work on the phone", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy());
   });
 
+  it("goes back from a feature's page when its tab is tapped again, as iOS's tabs do", async () => {
+    mockTab = "work";
+    await open();
+    await waitFor(() => expect(screen.getByLabelText("Your work")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
+    expect(screen.getByTestId("work-page-bar")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("tab", { name: /^Work/ }));
+    await waitFor(() => expect(screen.queryByTestId("work-page-bar")).toBeNull());
+    // Still on Work.
+    expect(screen.getByRole("tab", { name: /^Work/ }).props.accessibilityState).toMatchObject({ selected: true });
+  });
+
   it("counts every step waiting, looked at or not, when the phone is set to Always, and none when set to Never", async () => {
     setWorkBadge("always");
     await open();

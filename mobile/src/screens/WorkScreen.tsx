@@ -1,5 +1,7 @@
 import { tabBarRoom } from "../ui/TabBar";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useToTop } from "../ui/useToTop";
+import { BackButton } from "../ui/BackButton";
 import { Keyboard, Linking, RefreshControl, ScrollView, TextInput, View, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteWorkItem } from "../protocol/generated/RemoteWorkItem";
@@ -23,6 +25,8 @@ export interface WorkProps {
   top?: ReactNode;
   /** A tablet whose chats are put away: the bar's button that brings them back (none when they are beside it, or slid in). */
   onShowChats?: () => void;
+  /** Its tab tapped again while shown (a count): back from a feature's page, or to the top of the list. */
+  toTop?: number;
   /** A phone's Work tab: the tab bar floats over its bottom. */
   tabbed?: boolean;
   /** A tablet's main area: the page is held to a column that reads well. */
@@ -172,7 +176,8 @@ function Pieces({ items }: { items: RemoteWorkItem[] }) {
 }
 
 /** Where the user's work stands, and what to do next: the Mac works it out, this shows it, and a step is asked of the Mac. */
-export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onShowChats }: WorkProps) {
+export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onShowChats, toTop }: WorkProps) {
+  const lister = useRef<ComponentRef<typeof ScrollView>>(null);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const controller = useController();
@@ -186,6 +191,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
   const colorOf = projectColors(chats);
   // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
   const [page, setPage] = useState<string | null>(null);
+  useToTop(toTop, () => (page !== null ? setPage(null) : lister.current?.scrollTo({ y: 0, animated: true })));
   const [tab, setTab] = useState<Bucket | null>(null);
   const [nextOpen, setNextOpen] = useState(false);
   // The item whose details are open, by key: they follow it as it moves on, and close if it goes.
@@ -547,11 +553,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
    * away (a swipe in from the edge does the same, with the list coming out from under it).
    */
   const backCircle = (
-    <PressScale accessibilityRole="button" accessibilityLabel="Back to Work" accessibilityHint="Goes back to every feature" onPress={() => setPage(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} haptic="select" scaleTo={0.88} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, justifyContent: "center" }}>
-      <Glass style={{ width: control, height: control, borderRadius: control / 2, alignItems: "center", justifyContent: "center" }}>
-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-      </Glass>
-    </PressScale>
+    <BackButton label="Back to Work" hint="Goes back to every feature" onPress={() => setPage(null)} />
   );
 
   /**
@@ -624,6 +626,7 @@ export function WorkScreen({ top, wide = false, onOpenChat, tabbed = false, onSh
     element: (
       <View style={{ flex: 1, backgroundColor: colors.paper }}>
         <ScrollView
+          ref={lister}
           accessibilityLabel="Your work"
           style={{ flex: 1 }}
           contentContainerStyle={{ ...margins, paddingTop: top ? (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12 : insets.top + 16 }}

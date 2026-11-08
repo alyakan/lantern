@@ -1,6 +1,7 @@
 import { tightest, tightestText } from "../view/providerUsage";
 import { ProviderBadge } from "../ui/ProviderBadge";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ComponentRef } from "react";
+import { useToTop } from "../ui/useToTop";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
@@ -57,10 +58,15 @@ export interface HomeProps {
   onTogglePin?: () => void;
   /** On a tablet, Your work is in the main area where no chat is open: this opens it there (its button sits at the top of the chats). None on a phone. */
   onOpenWork?: () => void;
+  /** A tablet's Insights, in its main area where no chat is open (the phone has a tab for it). */
+  onOpenInsights?: () => void;
+  insightsShown?: boolean;
   /** On a tablet, Your work is what the main area shows now. */
   workShown?: boolean;
   /** On a phone, Home is the Chats tab: the tab bar's button starts a chat, search is at the top of the list, and what finished is under what needs you. */
   tabbed?: boolean;
+  /** Its tab tapped again while shown (a count): back to the top of the list. */
+  toTop?: number;
 }
 
 /** The sidebar, drawn: a window with its left third set apart, filled in when the chats are pinned beside the chat. */
@@ -321,7 +327,10 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, tabbed = false }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, onOpenWork, workShown = false, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
+  const canInsights = useMacCan("insights");
+  const scroller = useRef<ComponentRef<typeof Animated.ScrollView>>(null);
+  useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const controller = useController();
   const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work } = useSyncState();
@@ -483,6 +492,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
       <Animated.ScrollView
+        ref={scroller}
         keyboardShouldPersistTaps="handled"
         // Searching, a drag through the results puts the keyboard away, so the end of a long list can be reached.
         keyboardDismissMode="on-drag"
@@ -506,6 +516,13 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
                 </Txt>
               </View>
             )}
+          </PressScale>
+        )}
+        {canInsights && onOpenInsights && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Insights" accessibilityState={{ selected: insightsShown }} onPress={onOpenInsights} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: space.lg, marginTop: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.inner, backgroundColor: insightsShown ? colors.card : "transparent" }}>
+            <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
+              Insights
+            </Txt>
           </PressScale>
         )}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}

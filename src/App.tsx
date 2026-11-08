@@ -636,8 +636,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     deskByButton.current = false;
     wasDesk.current = desk;
   }, [desk]);
+  // The project page open on the Desk (null: the Desk's own page, every project).
+  const [deskPage, setDeskPage] = useState<string | null>(null);
   const backToDesk = deskReturn !== null && deskReturn === active && !desk;
-  const goBack = backToDesk ? () => setDesk(true) : chatHistory.canGoBack ? chatHistory.goBack : undefined;
+  // On a project's page, back (⌘[ and the title bar's arrow) is to every project, as the page's own link says.
+  const backToProjects = desk && deskPage !== null;
+  const goBack = backToProjects ? () => setDeskPage(null) : backToDesk ? () => setDesk(true) : chatHistory.canGoBack ? chatHistory.goBack : undefined;
   useAction("go-back", () => goBack?.(), !!goBack);
 
   /**
@@ -2891,7 +2895,6 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The projects a message on this Desk may start a chat in: the ones open on it, and the ones given to it.
   const deskFolders = [...new Set([...Object.keys(deskOpen), ...(desks.on === "home" ? [] : (desks.list.find((d) => d.id === desks.on)?.projects ?? []))])];
   // A project's own page on the Desk (its folder), kept while you are in one of its chats; the Desk's button goes back to all.
-  const [deskPage, setDeskPage] = useState<string | null>(null);
   const pageOn = deskPage !== null && deskFolders.includes(deskPage) ? deskPage : null;
   // Ask asks about that project only while its page is open: its chats to route to, and it to start one in. The board itself
   // (to-dos, status) still covers the whole Desk.
@@ -3396,7 +3399,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo, switchToCodex: activeProvider === CLAUDE && isAvailable("codex") && state.status === "idle" && !isBusy(state) && !state.orchestrator && !chats.agents[active] && state.backgroundTasks.length === 0 ? () => chooseProvider("codex") : undefined }}
-          back={goBack && { run: goBack, label: backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
+          back={goBack && { run: goBack, label: backToProjects ? "Back to all projects" : backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
           inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
@@ -3531,6 +3534,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             <div className="review-slot" hidden={deskShown}>
             <ErrorBoundary name="review pane">
               <ReviewPanel
+                keys={!deskShown}
+                onReveal={() => reviewCollapsed && setReviewCollapsed(false)}
                 chat={{ slot: active, session: state.sessionId }}
                 architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox, onUpdate: state.status === "idle" ? () => sendIn(active, UPDATE_MAP) : undefined } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}

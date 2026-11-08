@@ -314,9 +314,9 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             </button>
           )}
           {phones && phones.names.length > 0 && (
-            <button className="phones-connected" onClick={phones.onOpen} title="Remote control (Settings)">
+            <button className="phones-connected" onClick={phones.onOpen} title="Remote control (Settings)" aria-label={phonesLabel(phones.names)}>
               <span className="phones-dot" aria-hidden="true" />
-              {phonesLabel(phones.names)}
+              <span className="phones-label">{phonesLabel(phones.names)}</span>
             </button>
           )}
           {onOpenSettings && (

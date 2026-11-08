@@ -67,7 +67,10 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
   // The tabs opened so far: only those are drawn (Insights isn't asked for until it is looked at).
   const [opened, setOpened] = useState<Set<Tab>>(() => new Set([tab]));
   if (!opened.has(tab)) setOpened(new Set([...opened, tab]));
+  // A tab tapped again while it is shown goes back to its start, as iOS's tabs do (a count, so each tap is news to the tab).
+  const [again, setAgain] = useState<Record<Tab, number>>({ chats: 0, work: 0, insights: 0 });
   const pick = (t: Tab) => {
+    if (t === tab) return setAgain((a) => ({ ...a, [t]: a[t] + 1 }));
     // A keyboard up in the tab being left (Home's search) goes with it.
     Keyboard.dismiss();
     setChosen(t);
@@ -87,17 +90,17 @@ export function PhoneTabs({ onComposeNew, ...home }: PhoneTabsProps) {
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {opened.has("chats") && (
         <Kept shown={tab === "chats"}>
-          <HomeScreen {...home} tabbed />
+          <HomeScreen {...home} tabbed toTop={again.chats} />
         </Kept>
       )}
       {canWork && opened.has("work") && (
         <Kept shown={tab === "work"}>
-          <WorkScreen onOpenChat={home.onOpenChat} tabbed />
+          <WorkScreen onOpenChat={home.onOpenChat} tabbed toTop={again.work} />
         </Kept>
       )}
       {canInsights && opened.has("insights") && (
         <Kept shown={tab === "insights"}>
-          <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} visible={tab === "insights"} />
+          <InsightsScreen top={<Header title="Insights" />} onOpenChat={home.onOpenChat} visible={tab === "insights"} toTop={again.insights} />
         </Kept>
       )}
       <TabBar tabs={tabs} value={tab} onChange={pick} onCompose={() => onComposeNew(false)} onComposeVoice={() => onComposeNew(true)} />

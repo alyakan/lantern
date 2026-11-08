@@ -135,11 +135,15 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   // Starting a chat from the phone: the sheet, with a draft when a suggestion made one.
   const [newChat, setNewChat] = useState<Draft | null>(null);
 
-  // A tapped notification opens its chat.
+  // A tapped notification opens its chat, out from under whatever sheet was open (it stayed over the chat it opened). A New chat
+  // with words typed in it stays: those would be lost.
   useEffect(() => {
     if (!openSlot) return;
     go({ type: "jump_to_chat", slot: openSlot });
     setChatsOpen(false);
+    for (const close of [setNotesOpen, setPairingDevice, setStorageOpen, setUsageOpen, setVoiceOpen, setSupporting, setPicking, setMacSheet]) close(false);
+    setTodos(null);
+    setNewChat((d) => (d && d.text.trim() ? d : null));
     onOpened?.();
   }, [openSlot, onOpened]);
 
@@ -257,7 +261,16 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     setChatsOpen(false);
   };
   // A tablet's Your work is in its main area, where no chat is open: back to that.
+  // What a tablet's main area shows where no chat is open: Your work, or Insights (a phone has a tab for each).
+  const [tabletPage, setTabletPage] = useState<"work" | "insights">("work");
+  const openInsights = () => {
+    setTabletPage("insights");
+    movePanes();
+    go({ type: "home" });
+    setChatsOpen(false);
+  };
   const openWork = () => {
+    setTabletPage("work");
     movePanes();
     go({ type: "home" });
     setChatsOpen(false);
@@ -354,7 +367,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} onOpenWork={tablet ? openWork : undefined} workShown={tablet && !selectedSlot && tabletPage === "work"} onOpenInsights={tablet ? openInsights : undefined} insightsShown={tablet && !selectedSlot && tabletPage === "insights"} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {
@@ -375,7 +388,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
+          <TabletDetail slot={shown} decide={deciding} page={tabletPage} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
