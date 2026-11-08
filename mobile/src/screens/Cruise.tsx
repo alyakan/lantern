@@ -3,6 +3,7 @@ import type { Suggestion } from "../protocol/generated/Suggestion";
 import { Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
+import { ChipRow, ReplyChip } from "./ChatExtras";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { useAccent } from "../ui/accent";
 
@@ -12,8 +13,11 @@ import { useAccent } from "../ui/accent";
  * different one; the ✕ stops it. It never sends anything by itself, and a real prompt (a permission, a question) always
  * breaks the loop: the chat's own card takes the box back.
  */
-export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, onDo, onAnother, onStop }: {
+export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, onDo, onAnother, onStop, replies, onReply }: {
   on: boolean;
+  /** Quick replies to Claude's last words, drawn in the off pill's row (see QuickReplies). */
+  replies?: string[];
+  onReply?: (text: string) => void;
   /** The chat is idle: no turn running and nothing waiting on you. While it isn't, Cruise waits instead of offering a step. */
   resting: boolean;
   asking: boolean;
@@ -31,23 +35,13 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
   const accent = useAccent();
   if (!on)
     return (
-      // At the message box's edge, as Cruise's card is when it is on: the edge doesn't jump as it turns on.
-      <View style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
-        <PressScale
-          accessibilityRole="button"
-          accessibilityLabel="Cruise: suggest the next step each time the chat is idle"
-          onPress={onToggle}
-          haptic="select"
-          scaleTo={0.97}
-          style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 8, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.card }}
-        >
-          <Txt variant="small" style={{ fontWeight: "800", color: accent }}>
-            ✨ Cruise
-          </Txt>
-          <Txt variant="small" tone="ink3">
-            Suggest the next step
-          </Txt>
-        </PressScale>
+      // At the message box's edge, as Cruise's card is when it is on: the edge doesn't jump as it turns on. With quick replies
+      // to offer, they share its row as chips of one kind: the answers first, then Cruise.
+      <View style={{ paddingBottom: 2 }}>
+        <ChipRow label={replies?.length ? "Quick replies" : undefined}>
+          {replies?.map((r) => <ReplyChip key={r} label={r} onPress={() => onReply?.(r)} />)}
+          <ReplyChip lead="✨" label={replies?.length ? "Cruise" : "Cruise · suggest the next step"} accessibilityLabel="Cruise: suggest the next step each time the chat is idle" onPress={onToggle} />
+        </ChipRow>
       </View>
     );
   return (

@@ -15,11 +15,11 @@ const sizes = (compact: boolean) => {
 
 /**
  * "Swipe to allow": a knob dragged to the end, the bar filling green behind it. Only a drag that is let go near the end
- * allows; a tap does nothing. Once allowed the knob becomes a check, and the bar shrinks into a circle at the right edge
- * holding it; with `onDone` that circle is a button (the one that takes you back). A screen reader gets an "Allow"
+ * allows; a tap does nothing. Once allowed the knob becomes a check, and the bar shrinks into a circle at the right edge (or,
+ * with `settle="center"`, in the middle) holding it; with `onDone` that circle is a button (the one that takes you back). A screen reader gets an "Allow"
  * action instead of the drag (a deliberate double tap).
  */
-export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, progress, onDrag }: { onAllow: () => void; /** Told when a drag of the knob starts and ends (a screen holds still while it is going). */ onDrag?: (dragging: boolean) => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
+export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, settle = "end", progress, onDrag }: { /** Where the circle comes to rest: at the bar's right end, or in its middle (the bar closes in from both sides, carrying the knob there). */ settle?: "end" | "center"; onAllow: () => void; /** Told when a drag of the knob starts and ends (a screen holds still while it is going). */ onDrag?: (dragging: boolean) => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
   const { KNOB, INSET, BAR } = sizes(compact);
   const colors = useColors();
   const [width, setWidth] = useState(0);
@@ -107,7 +107,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
           accessibilityState={button ? undefined : { disabled: completed }}
           accessibilityActions={completed ? [] : [{ name: "activate", label: "Allow" }]}
           onAccessibilityAction={(e: AccessibilityActionEvent) => e.nativeEvent.actionName === "activate" && allow()}
-          style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? (colors.isDark ? colors.shapeStrong : colors.ink) : colors.nightRaised, overflow: "hidden" }}
+          style={{ alignSelf: settle === "center" ? "center" : "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? (colors.isDark ? colors.shapeStrong : colors.ink) : colors.nightRaised, overflow: "hidden" }}
         >
           {/* Everything is held to the right edge, so the bar closes in on the knob and the rest is clipped. */}
           <View style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: width || "100%", justifyContent: "center", alignItems: "center", paddingLeft: compact ? KNOB + INSET * 2 : 0 }}>
