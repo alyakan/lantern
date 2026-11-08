@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text, View } from "react-native";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { AnimatedStack, type StackItem } from "./AnimatedStack";
 import { motion } from "./motion";
@@ -81,6 +81,18 @@ describe("going back by dragging the top screen away", () => {
     expect(takes(4, 60, 404)).toBe(true);
     expect(takes(4, 6, 480)).toBe(false);
     expect(takes(200, 300, 400)).toBe(false);
+  });
+
+  it("takes the pull from the stack's own edge where the stack doesn't start at the window's (an iPad's chats pinned beside it)", async () => {
+    const measure = jest.spyOn(View.prototype as unknown as { measureInWindow: (cb: (x: number) => void) => void }, "measureInWindow").mockImplementation((cb) => cb(340));
+    await render(<AnimatedStack items={[item("home"), item("chat")]} onBack={() => {}} />);
+    await fireEvent(edge(), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 700, height: 800 } } });
+    edge().props.onStartShouldSetResponderCapture(touch(345, 0));
+    expect(edge().props.onMoveShouldSetResponderCapture({ nativeEvent: { pageX: 420, pageY: 404, timestamp: 10 } })).toBe(true);
+    // The window's edge is the chats' there, not this stack's.
+    edge().props.onStartShouldSetResponderCapture(touch(4, 0));
+    expect(edge().props.onMoveShouldSetResponderCapture({ nativeEvent: { pageX: 80, pageY: 404, timestamp: 10 } })).toBe(false);
+    measure.mockRestore();
   });
 
   it("has no strip where nothing is told to go back", async () => {

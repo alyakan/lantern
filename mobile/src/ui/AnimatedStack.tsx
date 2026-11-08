@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { Animated, StyleSheet, useWindowDimensions, View, type GestureResponderEvent } from "react-native";
 import { BACK_EDGE_WIDTH, goesBack, pulled } from "../view/back";
 import { isSideways, velocityOf } from "../view/drawer";
@@ -107,10 +107,14 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
   // Where a touch that began at the edge began. Every touch is asked about, on its way in, but none is taken there: a tap at the
   // edge is the screen's (a chat's Back button sits there), and so is a scroll. Only a move plainly to the right is the drag back.
   const start = useRef<{ x: number; y: number } | null>(null);
+  // Where the stack's own left edge is in the window: an iPad with its chats pinned has it 340 points in, not at the window's.
+  const root = useRef<ComponentRef<typeof View>>(null);
+  const left = useRef(0);
   const edge = {
     onStartShouldSetResponderCapture: (e: GestureResponderEvent) => {
       const { pageX, pageY } = e.nativeEvent;
-      start.current = latest.current.top > 0 && !!latest.current.onBack && pageX < BACK_EDGE_WIDTH ? { x: pageX, y: pageY } : null;
+      const fromEdge = pageX - left.current;
+      start.current = latest.current.top > 0 && !!latest.current.onBack && fromEdge >= 0 && fromEdge < BACK_EDGE_WIDTH ? { x: pageX, y: pageY } : null;
       return false;
     },
     onMoveShouldSetResponderCapture: (e: GestureResponderEvent) => {
@@ -151,7 +155,13 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
     },
   };
   return (
-    <View testID={onBack && top > 0 ? "back-edge" : undefined} style={{ flex: 1, overflow: "hidden" }} {...(onBack && top > 0 ? edge : {})}>
+    <View
+      ref={root}
+      testID={onBack && top > 0 ? "back-edge" : undefined}
+      style={{ flex: 1, overflow: "hidden" }}
+      onLayout={() => root.current?.measureInWindow((x: number) => (left.current = x))}
+      {...(onBack && top > 0 ? edge : {})}
+    >
       {entries.map((e, i) => {
         const v = valueFor(e.key);
         const next = entries[i + 1];
