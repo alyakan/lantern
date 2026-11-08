@@ -169,6 +169,24 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.queryByLabelText("Your work")).toBeNull();
     });
 
+    it("opens Insights from its row under Work, where no chat is open, and Work again from Work's", async () => {
+      await withFeatures(["desk", "work", "insights"]);
+      await press("Insights");
+      await settle();
+      expect(screen.getByRole("header", { name: "Insights" })).toBeTruthy();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+      expect(screen.getByRole("button", { name: "Insights" }).props.accessibilityState).toMatchObject({ selected: true });
+      await press("Work, 1 waiting");
+      await settle();
+      expect(screen.getByLabelText("Your work")).toBeTruthy();
+      expect(screen.queryByRole("header", { name: "Insights" })).toBeNull();
+    });
+
+    it("has no Insights row for a Mac without them", async () => {
+      await withFeatures(["desk", "work"]);
+      expect(screen.queryByRole("button", { name: "Insights" })).toBeNull();
+    });
+
     it("asks to pick a chat, with no Desk to open, for a Mac with a Desk and no work", async () => {
       await withFeatures(["desk"]);
       expect(screen.getByTestId("pick-a-chat")).toBeTruthy();

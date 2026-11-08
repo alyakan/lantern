@@ -20,11 +20,16 @@ import { keepPanel, panelOf } from "../view/panelChoice";
 import { ChatScreen } from "./ChatScreen";
 import { DecideScreen } from "./DecideScreen";
 import { WorkScreen } from "./WorkScreen";
+import { InsightsScreen } from "./InsightsScreen";
+import { RoundButton, SidebarIcon } from "./SearchBar";
+import { TopBar } from "../ui/TopBar";
 
 /** The widest a decision goes: it is a card to read and swipe, not a page. */
 const DECISION_MAX = 560;
 
 export interface TabletDetailProps {
+  /** What shows where no chat is open: Your work, or Insights. */
+  page?: "work" | "insights";
   /** The chat to show; none asks to pick one. */
   slot: string | null;
   /** The prompt being decided in that chat, shown over it. */
@@ -50,7 +55,7 @@ export interface TabletDetailProps {
  * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
  * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work" }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -66,6 +71,7 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
   const canTodos = useMacCan("todos");
   // Where no chat is open: Your work (a Mac that lists "work"), or a word to pick a chat. There is no Desk.
   const canWork = useMacCan("work");
+  const canInsights = useMacCan("insights");
   // Each chat's own: the one picked in it the last time it was on screen.
   const [picked, setPicked] = useState<{ slot: string | null; panel: Panel }>(() => ({ slot, panel: panelOf(slot) }));
   const panel = picked.slot === slot ? picked.panel : panelOf(slot);
@@ -147,6 +153,27 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
       <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={wide ? { shown: mode !== "hidden", onToggle: togglePane, onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />
+    </View>
+  ) : page === "insights" && canInsights ? (
+    // In the chat's column, so its figures don't stretch across a 13-inch screen.
+    <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
+      <InsightsScreen
+        top={
+          <TopBar>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
+              {layout === "overlay" && !chatsOpen && (
+                <RoundButton label="Show chats" onPress={onShowChats}>
+                  <SidebarIcon />
+                </RoundButton>
+              )}
+              <Txt variant="title" accessibilityRole="header">
+                Insights
+              </Txt>
+            </View>
+          </TopBar>
+        }
+        onOpenChat={onOpenChat}
+      />
     </View>
   ) : canWork ? (
     <WorkScreen
