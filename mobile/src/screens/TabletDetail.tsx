@@ -159,7 +159,8 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       <InsightsScreen
         top={
-          <TopBar>
+          // Hugging its words, as Work's bar does beside it.
+          <TopBar style={{ alignSelf: "flex-start" }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
               {layout === "overlay" && !chatsOpen && (
                 <RoundButton label="Show chats" onPress={onShowChats}>
