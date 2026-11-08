@@ -1174,6 +1174,8 @@ button { transition: background-color var(--dur-1) var(--ease-out), border-color
 .mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
 button:focus-visible, [tabindex]:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
+/* On the toolbar's glass and in the side panel's tabs (a strip that scrolls, and so clips): the accent, drawn inside. */
+.toolbar-group button:focus-visible, .pane-tabs-track button:focus-visible, .viewer button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
 button.ghost { border-color: transparent; background: none; color: var(--text-2); padding: 2px 8px; }
@@ -1199,7 +1201,7 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
    Controls sit in translucent capsules, like Xcode's toolbar. */
 .app { display: flex; flex-direction: column; height: 100%; }
 .topbar { display: grid; grid-template-columns: 1fr minmax(300px, 600px) 1fr; align-items: center; gap: 12px; height: 48px; flex: none; padding: 0 10px 0 84px; }
-.topbar-side { display: flex; align-items: center; height: 100%; }
+.topbar-side { display: flex; align-items: center; height: 100%; min-width: 0; }
 .topbar-side.end { justify-content: flex-end; }
 .title-center { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .toolbar-group { display: flex; align-items: center; gap: 2px; flex: none; height: 32px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
@@ -1207,17 +1209,21 @@ textarea, input, .msg, .step-note, .step-output, .permission-detail, .finding-te
 .toolbar-group button.icon.pressed { background: var(--bg-active); color: var(--text); }
 .title-center .folder-menu { left: 0; width: auto; min-width: 360px; right: 80px; }
 .pane-toggle { position: relative; }
-.pane-toggle.active { color: var(--text-2); }
+/* On (the side panel open), it is filled like any toolbar button that is pressed in, not only a shade darker. */
+.pane-toggle.active { background: var(--bg-active); color: var(--text); }
 .pane-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
 /* On the history button: a chat is running in the background. */
 .title-center button.icon { position: relative; }
 .canvas-toggle, .settings-button, .storage-button { position: relative; }
 .storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
-.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; min-width: 0; max-width: 220px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A narrow window: the phones chip is its dot alone (its title still says what it is). */
+@media (max-width: 900px) { .phones-label { display: none; } .phones-connected { gap: 0; padding: 0 8px; } }
 .phones-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--add); flex: none; }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
-.title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.title-center .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */
 .title-center .dot.unread { background: var(--unread); }
 /* Xcode's activity viewer: "acme-api › main" on the left, the status on the right, a progress bar underneath. */
@@ -1622,13 +1628,13 @@ button.context-used[aria-haspopup]:hover { color: var(--text-2); }
 /* No overflow: hidden on the pane itself so the file picker menu can extend past it; the diff clips its own corner. */
 .review { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--pane); box-shadow: var(--pane-edge); }
 /* Changes | Files as a macOS segmented control. */
-.pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 10px; }
+.pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 48px; flex: none; padding: 0 10px; }
 /* In the narrowest the pane gets, with every tab there is, the tabs tighten and the filter keeps a few letters. */
 @container (max-width: 540px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
-.pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
-.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.pane-tabs-track { min-width: 0; overflow-x: auto; scrollbar-width: none; display: inline-flex; gap: 2px; height: 32px; align-items: center; padding: 0 3px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); }
+.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 26px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
 .pane-tabs-track button:hover:not(.active) { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: var(--thumb-shadow); }
 .pane-tabs-track button.active:hover { background: var(--seg-thumb); }
