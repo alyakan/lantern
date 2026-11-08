@@ -175,6 +175,16 @@ function sameRowProps(a: RowProps, b: RowProps): boolean {
   return [...keys].every((k) => (k === "row" ? sameRow(a.row, b.row) : Object.is(a[k], b[k])));
 }
 
+/** Where the conversation was compacted: what came before it is a summary now. While it runs (a minute or so), it says so. */
+function CompactLine({ state }: { state: "running" | "done" | "ended" }) {
+  return (
+    <div className={`compact-line ${state}`} role={state === "running" ? "status" : "note"}>
+      {state === "running" && <span className="spinner" aria-hidden />}
+      <span>{state === "running" ? "Compacting the chat…" : state === "done" ? "Chat compacted" : "Compacting stopped"}</span>
+    </div>
+  );
+}
+
 /** One row of the stream. A message streaming in redraws its own row; the hundreds before it stay as they are. */
 const RowView = memo(function RowView({ row, folder, verb, latest, answers, resend, restore, ...handlers }: RowProps) {
   const resendOf = (p: UserRow | null | undefined) => (resend && p ? () => resend.onResend({ text: p.text, draft: p.draft }) : undefined);
@@ -230,6 +240,8 @@ const RowView = memo(function RowView({ row, folder, verb, latest, answers, rese
       return <PermissionCard item={row} onDecide={handlers.onDecide} />;
     case "turn":
       return <TurnNote item={row} onRetry={resendOf(answers)} />;
+    case "compact":
+      return <CompactLine state={row.state} />;
     case "shell":
       return <ShellBlock item={row} onStop={handlers.onStopShell} onInput={handlers.onShellInput} />;
   }

@@ -93,6 +93,9 @@ export interface RunTask {
   startedAt: number;
 }
 
+/** A compaction still running (see the "compact" item). */
+const compacting = (it: ChatItem) => it.type === "compact" && it.state === "running";
+
 export type ChatItem =
   /** `turn`: the backend's number for the turn this prompt started, for that turn's changes (Step-by-step pages). */
   | {
@@ -118,6 +121,8 @@ export type ChatItem =
   | { type: "assistant"; id: string; text: string }
   /** The post-hook (see lib/chatHooks.ts) was sent: what follows it, up to the turn's end, is Claude doing it. `text` is the hook's words. */
   | { type: "hook"; id: string; text: string; at?: number }
+  /** Where the conversation was compacted: `running` while it is, `done` once it was, `ended` when the turn ended without it. */
+  | { type: "compact"; id: string; state: "running" | "done" | "ended" }
   | ToolItem
   | ShellItem
   /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
@@ -717,6 +722,18 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
     // Lantern runs /clear by starting the agent afresh, so no turn ends it: the chat is free again here.
+    // A compaction takes a minute or so: the chat says so where it started, and the line stays where it happened.
+    case "compacting": {
+      if (state.items.some(compacting)) return { ...state, status: "running", thinking: false };
+      const seq = state.seq + 1;
+      return { ...state, status: "running", thinking: false, seq, items: [...state.items, { type: "compact", id: `c${seq}`, state: "running" }] };
+    }
+    case "compacted": {
+      if (state.items.some(compacting)) return { ...state, items: state.items.map((it) => (compacting(it) ? { ...it, state: "done" as const } : it)) };
+      // A reopened chat (no start was replayed), or one compacted before this window heard it start.
+      const seq = state.seq + 1;
+      return { ...state, seq, items: [...state.items, { type: "compact", id: `c${seq}`, state: "done" }] };
+    }
     case "conversation_reset":
       return { ...state, items: [], sessionId: null, contextUsed: null, firstCall: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
     case "turn_done": {
@@ -732,6 +749,8 @@ function applyEvent(state: State, ev: UiEvent): State {
       const reported = usd ? ev.cost_usd : null;
       const restarted = reported !== null && reported < state.costSeen;
       const tokens = ev.session_tokens ?? state.sessionTokens;
+      // A compaction the turn ended without (it failed, or was stopped) no longer says it is compacting.
+      const items = state.items.some(compacting) ? state.items.map((it) => (compacting(it) ? { ...it, state: "ended" as const } : it)) : state.items;
       return {
         ...state,
         status: "idle",
@@ -743,7 +762,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         contextWindow: ev.context_window ?? state.contextWindow,
         // The turn that ran /clear ends in an empty conversation; a marker alone would leave a blank chat, not the start screen.
         cleared: false,
-        items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: reported, tokens: ev.tokens ?? null }],
+        items: state.cleared ? items : [...items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: reported, tokens: ev.tokens ?? null }],
         ...(usd && ev.session_cost_usd != null ? { sessionCost: ev.session_cost_usd } : {}),
         sessionTokens: tokens,
         tokenBase: tokens < state.sessionTokens ? state.tokenBase + state.sessionTokens : state.tokenBase,

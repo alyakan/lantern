@@ -201,6 +201,11 @@ pub enum RemoteEvent {
     SessionEnded { code: Option<i32> },
     Asleep { asleep: bool },
     ConversationReset,
+    /// The conversation is being compacted (a minute or so): the chat says so until `Compacted` or the turn's end. A phone that
+    /// doesn't know these two events shows nothing of a compaction, as before.
+    Compacting,
+    /// The conversation was compacted: what came before it is a summary now, and the chat marks the place with a line.
+    Compacted,
     /// What the chat's claude offers after a "/" (extras: sent only to a phone that can read it).
     Commands { commands: Vec<RemoteCommand> },
     /// The plan Claude keeps, whole each time it changes (extras).
@@ -276,6 +281,8 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         U::SessionEnded { code, .. } => R::SessionEnded { code: *code },
         U::AgentAsleep { asleep } => R::Asleep { asleep: *asleep },
         U::ConversationReset => R::ConversationReset,
+        U::Compacting => R::Compacting,
+        U::Compacted => R::Compacted,
         U::Commands { commands } => {
             let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
             R::Commands { commands: commands.iter().take(COMMANDS_MAX).map(|c| RemoteCommand { name: cut(&c.name, 80), description: cut(&c.description, 200), argument_hint: cut(&c.argument_hint, 80) }).collect() }
@@ -315,7 +322,6 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::AgentMessage { .. }
         | U::AgentStopped { .. }
         | U::AgentTidied
-        | U::Compacted
         | U::ReviewUpdate { .. }
         | U::AgentMode { .. }
         | U::MergeResolved { .. }
@@ -1611,6 +1617,9 @@ mod tests {
     #[test]
     fn a_stop_reaches_the_phone_before_what_it_leaves_behind() {
         assert_eq!(to_remote(&UiEvent::TurnStopping), Some(RemoteEvent::TurnStopping));
+        // A compaction is told to the phone from start to end, to a phone that can't read extras too.
+        assert_eq!(to_remote_for(&UiEvent::Compacting, false), Some(RemoteEvent::Compacting));
+        assert_eq!(to_remote_for(&UiEvent::Compacted, false), Some(RemoteEvent::Compacted));
         // A phone that can't read extras still reads it: it changes what it does with the error result that follows.
         assert_eq!(to_remote_for(&UiEvent::TurnStopping, false), Some(RemoteEvent::TurnStopping));
     }

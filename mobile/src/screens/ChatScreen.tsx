@@ -42,7 +42,7 @@ import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
-import { AssistantRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
@@ -606,6 +606,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <TurnRow item={row.item} onRetry={row === lastTurn && online ? retry : undefined} />;
         case "day":
           return <DayRow label={row.label} />;
+        case "compact":
+          return <CompactRow item={row.item} />;
         case "hook":
           return <HookRow row={row} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "shell":

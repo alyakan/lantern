@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
-import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
@@ -224,6 +224,23 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
     <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 2 }}>
       <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
       <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700", letterSpacing: 0.4 }}>
+        {label}
+      </Txt>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+    </View>
+  );
+});
+
+/** Where the conversation was compacted, between two hairlines like a new day: what came before is a summary now. While it runs (a minute or so), it says so. */
+export const CompactRow = memo(function CompactRow({ item }: { item: Extract<Item, { kind: "compact" }> }) {
+  const colors = useColors();
+  const running = item.state === "running";
+  const label = running ? "Compacting the chat…" : item.state === "done" ? "Chat compacted" : "Compacting stopped";
+  return (
+    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingVertical: 14 }}>
+      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+      {running && <ActivityIndicator size="small" color={colors.ink3} />}
+      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "600" }}>
         {label}
       </Txt>
       <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />

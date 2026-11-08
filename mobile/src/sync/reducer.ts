@@ -35,6 +35,8 @@ export type Item =
   | { kind: "turn"; id: string; isError: boolean; stopped?: boolean; result: string | null; durationMs: number | null }
   /** The user's post-hook was sent after Claude's answer: what Claude says and does after this, to the turn's end, is the hook's. */
   | { kind: "hook"; id: string; text: string }
+  /** Where the conversation was compacted: `running` while it is (a minute or so), `done` once it was, `ended` when the turn ended without it. */
+  | { kind: "compact"; id: string; state: "running" | "done" | "ended" }
   /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
   | { kind: "shell"; id: string; command: string; output: string; status: "running" | "done" | "failed" | "stopped"; code: number | null; /** It is reading a secret (a password): what is typed in reply is hidden. */ secret: boolean };
 
@@ -156,6 +158,20 @@ function onStep(items: Item[], id: string, f: (s: Extract<Item, { kind: "step" }
 }
 
 
+/** A compaction still running (see the "compact" item). */
+const compacting = (it: Item): it is Extract<Item, { kind: "compact" }> => it.kind === "compact" && it.state === "running";
+
+/**
+ * A new compaction's id: named for the message that began its turn, like the turn's end, so an earlier page (built on its own)
+ * never names one the same as a later page's. A second one in the same turn is numbered.
+ */
+function compactId(items: Item[]): string {
+  const began = [...items].reverse().find((it) => it.kind === "user");
+  const base = `compact-${began?.id ?? "start"}`;
+  const taken = items.filter((it) => it.kind === "compact" && (it.id === base || it.id.startsWith(`${base}-`))).length;
+  return taken ? `${base}-${taken}` : base;
+}
+
 /** One event, applied to a chat's view. */
 export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
   const items = view.items;
@@ -202,6 +218,14 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     // The person stopped this turn (on this phone, the Mac, or wherever it was asked for), before the interrupt landed.
     case "turn_stopping":
       return { ...view, stopping: true };
+    case "compacting":
+      // Claude Code says it started as well as the Mac: one line all the same.
+      if (items.some(compacting)) return { ...view, thinking: false };
+      return { ...view, thinking: false, items: [...items, { kind: "compact", id: compactId(items), state: "running" }] };
+    case "compacted":
+      if (items.some(compacting)) return { ...view, items: items.map((it) => (compacting(it) ? { ...it, state: "done" as const } : it)) };
+      // A chat caught up from its history (no start was told), or one this phone heard only the end of.
+      return { ...view, items: [...items, { kind: "compact", id: compactId(items), state: "done" }] };
     case "turn_done": {
       // A turn is named for the message that began it, so the same end applied twice is one end.
       const began = [...items].reverse().find((it) => it.kind === "user");
@@ -211,7 +235,8 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
         thinking: false,
         stopping: false,
         context: view.context && event.context_window ? { ...view.context, window: event.context_window } : view.context,
-        items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done),
+        // A compaction the turn ended without (it failed, or was stopped) no longer says it is compacting.
+        items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : compacting(it) ? { ...it, state: "ended" as const } : it)), done),
       };
     }
     case "permission_requested":

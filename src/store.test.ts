@@ -293,9 +293,24 @@ describe("reducer", () => {
     expect(after.status).toBe("running");
   });
 
-  it("a compaction is Lantern's bookkeeping: the chat shows nothing of it", () => {
-    const s = { ...initialState, status: "running" as const };
-    expect(ev(s, { kind: "compacted" })).toEqual(s);
+  it("a compaction says it is running, then leaves a line where it happened", () => {
+    const idle = { ...initialState, status: "idle" as const, items: [{ type: "user" as const, id: "u1", text: "/compact" }] };
+    const started = ev(idle, { kind: "compacting" });
+    expect(started.status).toBe("running");
+    expect(started.items[1]).toMatchObject({ type: "compact", state: "running" });
+    // Claude Code says it started too: still one line.
+    expect(ev(started, { kind: "compacting" }).items.filter((it) => it.type === "compact")).toHaveLength(1);
+    const done = ev(started, { kind: "compacted" });
+    expect(done.items[1]).toMatchObject({ type: "compact", state: "done" });
+    // A reopened chat replays only the end: the line is there all the same.
+    expect(ev(initialState, { kind: "compacted" }).items).toEqual([expect.objectContaining({ type: "compact", state: "done" })]);
+  });
+
+  it("a compaction the turn ended without stops saying it is running", () => {
+    const started = ev({ ...initialState, status: "idle" as const }, { kind: "compacting" });
+    const ended = ev(started, { kind: "turn_done", is_error: true, result: "Compaction failed", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 10, auth_hint: false, denied: 0, context_window: null });
+    expect(ended.items[0]).toMatchObject({ type: "compact", state: "ended" });
+    expect(ended.status).toBe("idle");
   });
 
   it("a phone's message with photos says how many, and photos alone are still a message", () => {

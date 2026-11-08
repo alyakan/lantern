@@ -529,7 +529,7 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone(); Box::pin(async move { conversation_settings_inner(&app, &slot, change).await })
     }
     fn conversation_action(&self, slot: String, action: String) -> remote::gateway::BoxFut<Result<(), String>> {
-        let app = self.app.clone(); Box::pin(async move { conversation_action_inner(&app, &slot, &action).await })
+        let app = self.app.clone(); Box::pin(async move { conversation_action_inner(&app, &slot, &action, None).await })
     }
 
     fn send(&self, slot: String, text: String, by: String, images: Vec<remote::protocol::RemoteImage>) -> remote::gateway::BoxFut<Result<(), String>> {
@@ -2278,7 +2278,9 @@ async fn continue_fresh(app: AppHandle, state: State<'_, AppState>, slot: String
     Ok(())
 }
 
-async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) -> Result<(), String> {
+/// `typed`: who typed `/compact` or `/clear` in the box (a phone's id, or remote::SENT_BY_DESKTOP), when it was typed rather
+/// than picked from a menu. A typed /compact is shown as the user's message, like any other, once the chat can take it.
+async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str, typed: Option<&str>) -> Result<(), String> {
     let state = app.state::<AppState>();
     let s = state.slots.get(slot)?;
     let _control = s.control.lock().await;
@@ -2291,7 +2293,19 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
         remote::hub::ChatStatus::Asleep | remote::hub::ChatStatus::Ended => return Err("This chat isn't running. Open it to start it again first.".into()),
     }
     match action {
-        "compact" => s.session.lock().await.as_mut().ok_or("The agent stopped")?.compact().await,
+        "compact" => {
+            let mut session = s.session.lock().await;
+            let session = session.as_mut().ok_or("The agent stopped")?;
+            // Told only once it has gone: a message makes the chat busy until its turn ends, and one that didn't go has no turn.
+            // The phone that typed it waits for this copy (and says why when it didn't go); the window shows a phone's, and
+            // its own already (see remote::for_window). Compacting takes a minute or so, with nothing else to say so.
+            session.compact().await?;
+            if let Some(by) = typed {
+                publish(app, slot, ui_event::UiEvent::UserText { text: "/compact".into(), at: now_ms(), sent_by: Some(by.to_string()), images: 0 });
+            }
+            publish(app, slot, ui_event::UiEvent::Compacting);
+            Ok(())
+        },
         "clear" => {
             let mut cfg = s.config.lock().unwrap().clone().ok_or("No chat is open")?;
             cfg.resume = None;
@@ -2305,7 +2319,7 @@ async fn conversation_action_inner(app: &AppHandle, slot: &str, action: &str) ->
     }
 }
 #[tauri::command]
-async fn conversation_action(app: AppHandle, slot: String, action: String) -> Result<(), String> { conversation_action_inner(&app, &slot, &action).await }
+async fn conversation_action(app: AppHandle, slot: String, action: String) -> Result<(), String> { conversation_action_inner(&app, &slot, &action, None).await }
 
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
@@ -2512,7 +2526,7 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, 
 /// apply to it (not to what Lantern sends in their place).
 async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage], hooks: bool) -> Result<usize, String> {
     if images.is_empty() && matches!(text.trim(), "/clear" | "/compact") {
-        conversation_action_inner(app, slot, text.trim().trim_start_matches('/')).await?;
+        conversation_action_inner(app, slot, text.trim().trim_start_matches('/'), Some(sent_by)).await?;
         return Ok(0);
     }
     let s = state.slots.get(slot)?;
