@@ -85,7 +85,8 @@ export function SheetBar({ title, close, right, inset = space.lg }: { title?: st
   return (
     <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: MIN_TARGET, paddingHorizontal: inset, paddingTop: inset ? 10 : 0, paddingBottom: 4 }}>
       {!!title && (
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", paddingTop: 6, paddingHorizontal: 110 }]}>
+        // Centred on the same line as the pills beside it: the row's own padding above and below, whatever its inset.
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center", paddingTop: inset ? 10 : 0, paddingBottom: 4, paddingHorizontal: 110 }]}>
           <Txt variant="body" accessibilityRole="header" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ fontWeight: "700" }}>
             {title}
           </Txt>
