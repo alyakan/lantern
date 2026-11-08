@@ -57,7 +57,7 @@ describe("going back by dragging the top screen away", () => {
   const edge = () => screen.getByTestId("back-edge", { includeHiddenElements: true });
   // The test window is 750 wide.
   const pull = async (to: number, ms = 600) => {
-    await fireEvent(edge(), "startShouldSetResponder", touch(4, 0));
+    await fireEvent(edge(), "startShouldSetResponderCapture", touch(4, 0));
     await fireEvent(edge(), "responderGrant", touch(4, 0));
     await fireEvent(edge(), "responderMove", touch(4 + to / 2, ms / 2));
     await fireEvent(edge(), "responderMove", touch(4 + to, ms));
@@ -69,6 +69,18 @@ describe("going back by dragging the top screen away", () => {
     expect(screen.queryByTestId("back-edge", { includeHiddenElements: true })).toBeNull();
     await render(<AnimatedStack items={[item("home"), item("chat")]} onBack={() => {}} />);
     expect(screen.getByTestId("back-edge", { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  it("leaves a tap or a scroll at the edge to the screen (its Back button is there), and takes only a pull to the right", async () => {
+    await render(<AnimatedStack items={[item("home"), item("chat")]} onBack={() => {}} />);
+    const takes = (fromX: number, x: number, y: number) => {
+      edge().props.onStartShouldSetResponderCapture(touch(fromX, 0));
+      return edge().props.onMoveShouldSetResponderCapture({ nativeEvent: { pageX: x, pageY: y, timestamp: 10 } });
+    };
+    expect(edge().props.onStartShouldSetResponderCapture(touch(4, 0))).toBe(false);
+    expect(takes(4, 60, 404)).toBe(true);
+    expect(takes(4, 6, 480)).toBe(false);
+    expect(takes(200, 300, 400)).toBe(false);
   });
 
   it("has no strip where nothing is told to go back", async () => {

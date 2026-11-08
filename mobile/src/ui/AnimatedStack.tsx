@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, StyleSheet, useWindowDimensions, View, type GestureResponderEvent } from "react-native";
 import { BACK_EDGE_WIDTH, goesBack, pulled } from "../view/back";
-import { velocityOf } from "../view/drawer";
+import { isSideways, velocityOf } from "../view/drawer";
 import { run } from "./motion";
 
 /** One screen of the stack: a "push" slides in from the right (a chat), a "modal" rises from the bottom (a decision). */
@@ -104,14 +104,27 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
     if (d.kind === "push") values.current.get(d.key)?.setValue(1 - p);
     else away.setValue(p * latest.current.width);
   };
+  // Where a touch that began at the edge began. Every touch is asked about, on its way in, but none is taken there: a tap at the
+  // edge is the screen's (a chat's Back button sits there), and so is a scroll. Only a move plainly to the right is the drag back.
+  const start = useRef<{ x: number; y: number } | null>(null);
   const edge = {
-    onStartShouldSetResponder: () => latest.current.top > 0 && !!latest.current.onBack,
+    onStartShouldSetResponderCapture: (e: GestureResponderEvent) => {
+      const { pageX, pageY } = e.nativeEvent;
+      start.current = latest.current.top > 0 && !!latest.current.onBack && pageX < BACK_EDGE_WIDTH ? { x: pageX, y: pageY } : null;
+      return false;
+    },
+    onMoveShouldSetResponderCapture: (e: GestureResponderEvent) => {
+      const s = start.current;
+      if (!s) return false;
+      const dx = e.nativeEvent.pageX - s.x;
+      return dx > 0 && isSideways(dx, e.nativeEvent.pageY - s.y);
+    },
     onResponderGrant: (e: GestureResponderEvent) => {
       const entry = latest.current.entries[latest.current.top];
       if (!entry) return;
-      const { pageX } = e.nativeEvent;
+      const x = start.current?.x ?? e.nativeEvent.pageX;
       values.current.get(entry.key)?.stopAnimation();
-      drag.current = { x: pageX, lastX: pageX, lastAt: at(e), velocity: 0, key: entry.key, kind: entry.kind };
+      drag.current = { x, lastX: x, lastAt: at(e), velocity: 0, key: entry.key, kind: entry.kind };
     },
     onResponderMove: (e: GestureResponderEvent) => {
       const d = drag.current;
@@ -126,6 +139,7 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
     onResponderRelease: (e: GestureResponderEvent) => {
       const d = drag.current;
       drag.current = null;
+      start.current = null;
       if (!d) return;
       const progress = pulled(e.nativeEvent.pageX - d.x, latest.current.width);
       if (goesBack(progress, d.velocity)) {
@@ -137,7 +151,7 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
     },
   };
   return (
-    <View style={{ flex: 1, overflow: "hidden" }}>
+    <View testID={onBack && top > 0 ? "back-edge" : undefined} style={{ flex: 1, overflow: "hidden" }} {...(onBack && top > 0 ? edge : {})}>
       {entries.map((e, i) => {
         const v = valueFor(e.key);
         const next = entries[i + 1];
@@ -157,7 +171,6 @@ export function AnimatedStack({ items, onBack }: { items: StackItem[]; onBack?: 
           </Animated.View>
         );
       })}
-      {onBack && top > 0 && <View testID="back-edge" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: BACK_EDGE_WIDTH }} {...edge} />}
     </View>
   );
 }
