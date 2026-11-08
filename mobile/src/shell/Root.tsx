@@ -29,7 +29,7 @@ import { FadeSlideIn, movePanes } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
-import { CHAT_MIN, NARROW_MAX, SIDEBAR_WIDTH } from "../view/layout";
+import { CHAT_MIN, gutterFor, NARROW_MAX, SIDEBAR_WIDTH } from "../view/layout";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
@@ -384,7 +384,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A chat's Done page: the new-chat sheet, on that chat's project.
   const startNew = (projectName: string | null) => setNewChat({ text: "", projectName });
-  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} column={tablet ? { section, onSection: pickSection, onRefresh: () => controller.sync.workRefresh(), workShown: !selectedSlot && tabletPage === "work", work: <WorkColumn picked={workFeature} shown={!selectedSlot && tabletPage === "work"} onPick={pickFeature} gutter={space.lg} />, timeline: <TimelineColumn onOpenChat={openChat} selectedSlot={selectedSlot} gutter={space.lg} /> } : undefined} onOpenInsights={tablet ? openInsights : undefined} insightsShown={tablet && !selectedSlot && tabletPage === "insights"} />;
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} pinned={shellLayout === "split"} onTogglePin={tablet && pinRoom ? togglePin : undefined} column={tablet ? { section, onSection: pickSection, onRefresh: () => controller.sync.workRefresh(), workShown: !selectedSlot && tabletPage === "work", work: <WorkColumn picked={workFeature} shown={!selectedSlot && tabletPage === "work"} onPick={pickFeature} gutter={gutterFor(layout)} />, timeline: <TimelineColumn onOpenChat={openChat} selectedSlot={selectedSlot} gutter={gutterFor(layout)} /> } : undefined} onOpenInsights={tablet ? openInsights : undefined} insightsShown={tablet && !selectedSlot && tabletPage === "insights"} />;
   const items: StackItem[] = tablet
     ? []
     : stack.map((route, i) => {

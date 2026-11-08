@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useSyncState } from "../shell/hooks";
+import { useAccent } from "../ui/accent";
 import { Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
-import { radius, space, useColors } from "../ui/theme";
+import { useColors } from "../ui/theme";
 import { byDay, historyEvents, type HistoryKind } from "../view/history";
 
 const MARK: Record<HistoryKind, string> = { waiting: "needs you", working: "working", done: "finished", failed: "failed", stopped: "stopped" };
@@ -15,6 +16,7 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-dig
  */
 export function TimelineColumn({ onOpenChat, selectedSlot, gutter }: { onOpenChat: (slot: string) => void; selectedSlot?: string | null; gutter: number }) {
   const colors = useColors();
+  const accent = useAccent();
   const { chats, desk, workingSince, single } = useSyncState();
   // Today becomes Yesterday at midnight, and the list with it.
   const [now, setNow] = useState(Date.now);
@@ -32,15 +34,18 @@ export function TimelineColumn({ onOpenChat, selectedSlot, gutter }: { onOpenCha
   return (
     <View accessibilityLabel="Timeline">
       {days.map((d) => (
-        <View key={d.day} accessibilityLabel={d.day} style={{ paddingTop: 10 }}>
-          <Txt variant="small" accessibilityRole="header" style={{ fontWeight: "700", paddingHorizontal: gutter, paddingTop: 6, paddingBottom: 4 }}>
+        <View key={d.day} accessibilityLabel={d.day} style={{ paddingTop: 14 }}>
+          <Txt variant="small" accessibilityRole="header" style={{ fontWeight: "700", paddingHorizontal: gutter, paddingBottom: 2 }}>
             {d.day}
           </Txt>
-          {d.events.map((e) => {
+          {d.events.map((e, n) => {
             const bad = e.kind === "failed" || e.kind === "stopped";
             const dot = e.kind === "waiting" ? colors.hi : e.kind === "working" ? colors.working : bad ? colors.stop : colors.go;
             const selected = e.slot === selectedSlot;
             return (
+              // Flat rows on the column's gutter, a hairline between them (from the words' edge, as an iOS list's is). The chat
+              // shown has its rows marked by a bar at the column's edge, as its row in the chats is, not filled in: a chat has
+              // several rows here, and filled they stacked into cards.
               <PressScale
                 key={e.key}
                 accessibilityRole="button"
@@ -49,11 +54,12 @@ export function TimelineColumn({ onOpenChat, selectedSlot, gutter }: { onOpenCha
                 accessibilityState={{ selected }}
                 onPress={() => onOpenChat(e.slot)}
                 haptic="select"
-                scaleTo={0.98}
-                style={{ flexDirection: "row", gap: 10, marginHorizontal: space.sm, paddingHorizontal: Math.max(gutter - space.sm, 8), paddingVertical: 9, borderRadius: radius.inner, backgroundColor: selected ? colors.card : "transparent" }}
+                scaleTo={0.99}
+                style={{ flexDirection: "row", gap: 10, paddingLeft: gutter, paddingRight: gutter }}
               >
-                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 8, height: 8, borderRadius: 4, marginTop: 7, backgroundColor: dot }} />
-                <View style={{ flex: 1, gap: 1 }}>
+                {selected && <View testID="timeline-selected" accessibilityElementsHidden pointerEvents="none" style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderTopRightRadius: 2, borderBottomRightRadius: 2, backgroundColor: accent }} />}
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 8, height: 8, borderRadius: 4, marginTop: 19, backgroundColor: dot }} />
+                <View style={{ flex: 1, gap: 1, paddingVertical: 12, borderTopWidth: n > 0 ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.rule }}>
                   <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                     <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600", flex: 1 }}>
                       {e.title}
