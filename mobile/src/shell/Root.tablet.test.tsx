@@ -141,6 +141,23 @@ describe("a tablet with the chats pinned", () => {
       expect(screen.getByLabelText("Your work")).toBeTruthy();
     });
 
+    it("keeps the chat shown through a Mac that started again, whose first list may not have it back yet", async () => {
+      const { controller } = makeController();
+      seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });
+      attachSession(controller, { list_waiting: [], work: { issues: false, looked: true, blind: [], items: [item] } }, ["desk", "work"]);
+      await render(<Root controller={controller} />);
+      await settle();
+      await press(/Release 0.1.53/);
+      await settle();
+      await act(async () => {
+        controller.sync.apply({ type: "welcome", epoch: 999 });
+        controller.sync.flush();
+      });
+      await act(async () => controller.sync.onPushed({ type: "chats", chats: [two[1]] }));
+      await settle();
+      expect(screen.queryByLabelText("Your work")).toBeNull();
+    });
+
     it("keeps a chat shown that the list doesn't have yet (one just started), rather than throwing it away", async () => {
       const { controller } = makeController();
       seed(controller, { chats: two, connection: connectedWith(["desk", "work"]) });

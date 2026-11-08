@@ -87,7 +87,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
 function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTodosOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
-  const { chats, chatsLoaded, plan, providerUsage } = useSyncState();
+  const { chats, chatsLoaded, plan, providerUsage, epoch } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
   // A tablet shows the chats beside the chat ("split") or slides them in over it when asked and away once a chat is chosen
   // ("overlay"); a phone has the stack alone. Which of the two the chats get is the person's pin, or the window's, unpinned.
@@ -273,12 +273,24 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
 
   // A tablet's chat closed from the chats beside it (or on the Mac) goes, as it went from the list: what is left is Work, not a
   // chat that can no longer be sent to. Only a chat that was listed and now isn't: one just started, or shown from what was cached
-  // at launch, may not be listed yet. Only a change in the list decides it, not a chat opened since.
+  // at launch, may not be listed yet. Only a change in the list decides it, not a chat opened since. A Mac that started again
+  // brings its chats back one by one, so its first list after that is a first list too.
   const listedBefore = useRef<Set<string> | null>(null);
+  const listedEpoch = useRef(epoch);
+  const listedChats = useRef<typeof chats | null>(null);
   const shownNow = useRef<string | null>(null);
   shownNow.current = shownSlot(stack);
   useEffect(() => {
     if (!chatsLoaded) return;
+    // Told of a new run before its first list: what was listed before it is no guide to that list.
+    if (listedEpoch.current !== epoch) {
+      listedEpoch.current = epoch;
+      listedBefore.current = null;
+      listedChats.current = chats;
+      return;
+    }
+    if (listedChats.current === chats) return;
+    listedChats.current = chats;
     const listed = new Set(chats.map((c) => c.slot));
     const was = listedBefore.current;
     listedBefore.current = listed;
@@ -287,7 +299,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
       movePanes();
       go({ type: "home" });
     }
-  }, [chats, chatsLoaded, tablet]);
+  }, [chats, chatsLoaded, tablet, epoch]);
 
   // A chat that finishes or needs you, while the chats' own list isn't there to say so: a toast.
   const [toast, setToast] = useState<ToastShown | null>(null);
