@@ -111,6 +111,8 @@ export class Controller {
   /** Where the connection stands (the connection says so; the screens' tests do too). */
   setConnection(s: ConnectionState) {
     this.state = s;
+    // No Mac kept (however it went): nothing kept of one may stay either.
+    if (s.kind === "unpaired") void this.cache.clear();
     this.lookAtCard();
     if (s.kind === "connected") void this.loadDeviceId();
     for (const l of this.listeners) l();

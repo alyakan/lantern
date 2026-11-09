@@ -20,9 +20,12 @@ const isArr = (v: unknown, each: (x: unknown) => boolean) => Array.isArray(v) &&
 const isShare = (v: unknown) => isObj(v) && isStr(v.name) && isNum(v.share);
 const isCompare = (v: unknown) => isObj(v) && isNum(v.now) && (v.before === null || isNum(v.before));
 const isBar = (v: unknown) => isObj(v) && isStr(v.label) && isNum(v.weighted);
-const isChat = (v: unknown) => isObj(v) && isStr(v.title) && isStr(v.project) && isNum(v.weighted);
+const isChat = (v: unknown) => isObj(v) && isStr(v.title) && isStr(v.project) && isNum(v.weighted) && (v.why === null || isStr(v.why));
 
-/** Whether kept figures still have everything the screen reads, for this stretch (an older Mac's may not). */
+/**
+ * Whether kept figures still have everything the screen reads, for this stretch (an older Mac's, or an older build's, may
+ * not). A field the screen starts reading goes in here too, or figures kept by the build before would reach it without it.
+ */
 export function isInsights(range: InsightsRange) {
   return (v: unknown): v is Insights => {
     if (!isObj(v) || v.range !== range || !isStr(v.before)) return false;
