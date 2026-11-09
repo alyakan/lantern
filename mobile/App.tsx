@@ -7,6 +7,7 @@ import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from "@expo-google-fonts/bricolage-grotesque";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { createFileCacheStore } from "./src/cache/fileStore";
 import { Controller } from "./src/shell/controller";
 import { keychainOutbox } from "./src/outbox";
 import { Root } from "./src/shell/Root";
@@ -62,6 +63,7 @@ export default function App() {
         deviceName: Device.deviceName ?? Device.modelName ?? "Phone",
         appVersion: Constants.expoConfig?.version ?? "0",
         sync: { outbox: keychainOutbox },
+        cacheStore: createFileCacheStore(),
       }),
     [],
   );

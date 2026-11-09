@@ -16,7 +16,8 @@ import { forgetDeskLog } from "../deskLog";
 import { forgetPins } from "../pins";
 import { forgetPlaces } from "../view/stepPlace";
 import { forgetPanels } from "../view/panelChoice";
-import { forgetInsights } from "../view/insights";
+import { Cache } from "../cache/cache";
+import { MemoryCacheStore, type CacheStore } from "../cache/store";
 import { forgetWorkSeen } from "../workBadge";
 import { pushKeyStore } from "../platformPushKey";
 
@@ -30,6 +31,8 @@ export interface ControllerDeps {
   sync?: SyncDeps;
   /** The lock-screen card's native side (tests give a fake; the app's own is used when this is left out). */
   liveFactory?: () => CardFactory | null;
+  /** Where what was asked of the Mac is kept between launches (the app's files; memory when left out). */
+  cacheStore?: CacheStore;
 }
 
 /** The Mac a pairing link names, as the confirmation says it. */
@@ -45,6 +48,8 @@ export class Controller {
   /** The card on the lock screen for the chat last messaged from this phone. */
   readonly liveCards: LiveCards;
   readonly connection: Connection;
+  /** What the Mac answered, kept to show again at once (see cache/). */
+  readonly cache: Cache;
   private state: ConnectionState = { kind: "connecting" };
   private listeners = new Set<() => void>();
   private readonly now: () => number;
@@ -52,6 +57,7 @@ export class Controller {
   constructor(private readonly d: ControllerDeps) {
     this.now = d.now ?? Date.now;
     this.sync = new Sync(d.sync);
+    this.cache = new Cache(d.cacheStore ?? new MemoryCacheStore(), this.now);
     // What was written offline and hadn't gone when the app last closed waits again.
     void this.sync.restoreHeld();
     this.liveCards = new LiveCards({ factory: d.liveFactory, tell: (state) => this.sync.liveActivity(state), now: d.now });
@@ -165,6 +171,8 @@ export class Controller {
     if ("error" in p) return p.error;
     try {
       await this.connection.pair(p.offer);
+      // What was kept was the last Mac's: this one's mustn't show as its.
+      void this.cache.clear();
       return null;
     } catch (e) {
       return (e as Error).message;
@@ -184,7 +192,7 @@ export class Controller {
     void forgetPins();
     forgetPlaces();
     forgetPanels();
-    forgetInsights();
+    void this.cache.clear();
     void forgetWorkSeen();
     // The key for the words of notifications was for this Mac: it goes with the pairing.
     void pushKeyStore?.forget().catch(() => {});

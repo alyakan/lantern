@@ -1,15 +1,5 @@
-/** How Insights' figures are said (pure, so they are tested without a screen), and the last ones shown. */
-import type { Insights } from "../protocol/generated/Insights";
+/** How Insights' figures are said (pure, so they are tested without a screen). */
 import type { InsightsCompare } from "../protocol/generated/InsightsCompare";
-import type { InsightsRange } from "../protocol/generated/InsightsRange";
-
-/** What was shown last, per stretch: the tab opens on it while the Mac works out a fresh one. */
-export const kept = new Map<InsightsRange, Insights>();
-
-/** The phone was unpaired: another Mac's figures mustn't show first. */
-export function forgetInsights() {
-  kept.clear();
-}
 
 /** A count of tokens, short: "820", "54k", "9.1M", "1.1B". */
 export function tokens(n: number): string {
