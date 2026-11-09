@@ -19,11 +19,12 @@ export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a"
 export const waiting = (over: Partial<Waiting> = {}): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "git push origin release/0.1.53", description: "Push the release branch" }, at: 1, ...over });
 
 /** A controller that goes nowhere (its transport never opens) with frames applied the moment they are queued. */
-export function makeController(over: { liveFactory?: ControllerDeps["liveFactory"] } = {}) {
+export function makeController(over: { liveFactory?: ControllerDeps["liveFactory"]; cacheStore?: ControllerDeps["cacheStore"]; /** The clock (NOW when left out). */ now?: () => number } = {}) {
+  const now = over.now ?? (() => NOW);
   const transport: Transport = { open: () => Promise.reject(new Error("no network in tests")) };
   const store = new MemoryStore();
   // No lock-screen card unless a test gives one: its native side isn't on Node.
-  const controller = new Controller({ transport, store, deviceName: "Test phone", appVersion: "1.0", now: () => NOW, liveFactory: over.liveFactory ?? (() => null), sync: { schedule: (fn) => fn(), now: () => NOW, newId: () => "m-test" } });
+  const controller = new Controller({ transport, store, deviceName: "Test phone", appVersion: "1.0", now, liveFactory: over.liveFactory ?? (() => null), cacheStore: over.cacheStore, sync: { schedule: (fn) => fn(), now, newId: () => "m-test" } });
   return { controller, store };
 }
 

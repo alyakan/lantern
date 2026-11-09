@@ -3,15 +3,15 @@
  * backs it up. Where the usage goes, whether the savings work, what got done, and how the user works. The Mac works them out
  * from Claude Code's logs and git; this only shows them.
  */
-import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useToTop } from "../ui/useToTop";
 import { PixelRatio, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { Insights } from "../protocol/generated/Insights";
 import type { InsightsBar } from "../protocol/generated/InsightsBar";
 import type { InsightsRange } from "../protocol/generated/InsightsRange";
 import type { InsightsShare } from "../protocol/generated/InsightsShare";
-import { useController, useSyncState } from "../shell/hooks";
+import { useSyncState } from "../shell/hooks";
+import { useInsights } from "../data/insights";
 import { Button, Txt } from "../ui/components";
 import { useAccent } from "../ui/accent";
 import { FadeSlideIn, PressScale } from "../ui/motion";
@@ -20,10 +20,7 @@ import { tabBarRoom } from "../ui/TabBar";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { projectColorOf, projectTint } from "../view/home";
-import { change, kept, percent, tokens, wait } from "../view/insights";
-
-/** How old the figures can be when the tab comes back into view before they are asked for again. */
-const STALE_MS = 60_000;
+import { change, percent, tokens, wait } from "../view/insights";
 
 const RANGES: { id: InsightsRange; label: string }[] = [
   { id: "today", label: "Today" },
@@ -125,50 +122,15 @@ function Shares({ list, colorOf }: { list: InsightsShare[]; colorOf: (name: stri
   );
 }
 
-export function InsightsScreen({ top, visible = true, toTop }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are a minute old. */ visible?: boolean; /** Its tab tapped again while shown (a count): back to the top. */ toTop?: number }) {
+export function InsightsScreen({ top, visible = true, toTop }: { top: ReactNode; onOpenChat?: (slot: string) => void; /** Whether the tab is the one in view: kept while another is, it asks again on coming back once its figures are stale. */ visible?: boolean; /** Its tab tapped again while shown (a count): back to the top. */ toTop?: number }) {
   const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
   useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { sync } = useController();
   const { chats } = useSyncState();
   const [range, setRange] = useState<InsightsRange>("week");
-  const [shown, setShown] = useState<Insights | null>(kept.get("week") ?? null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { value: shown, updated, loading, error, refresh } = useInsights(range, visible);
   const [barHeight, setBarHeight] = useState(0);
-  const asked = useRef(0);
-  const load = (r: InsightsRange) => {
-    const n = ++asked.current;
-    setLoading(true);
-    setError(null);
-    sync.insights(r).then(
-      (i) => {
-        kept.set(r, i);
-        if (n !== asked.current) return;
-        loadedAt.current = Date.now();
-        setShown(i);
-        setLoading(false);
-      },
-      (e: Error) => {
-        if (n !== asked.current) return;
-        setError(e.message);
-        setLoading(false);
-      },
-    );
-  };
-  useEffect(() => load(range), [range]);
-  const loadedAt = useRef(Date.now());
-  useEffect(() => {
-    if (!visible) return;
-    if (Date.now() - loadedAt.current > STALE_MS || error) load(range);
-    // Only on coming back into view.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-  const pick = (r: InsightsRange) => {
-    setShown(kept.get(r) ?? null);
-    setRange(r);
-  };
   // A project's colour is the one the Mac's sidebar gives it, known from a chat open there.
   const colorOf = (name: string) => {
     const c = chats.find((chat) => chat.project === name)?.project_color;
@@ -183,11 +145,11 @@ export function InsightsScreen({ top, visible = true, toTop }: { top: ReactNode;
         contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: (barHeight || insets.top + TOP_BAR_GAP + TOP_BAR_HEIGHT) + 12, paddingBottom: tabBarRoom(insets.bottom), gap: 22 }}
         // The pull asks again, and the line under the ranges says it is updating (as Home and Work show theirs): no spinner that
         // springs back at once.
-        refreshControl={<RefreshControl refreshing={false} tintColor="transparent" onRefresh={() => load(range)} />}
+        refreshControl={<RefreshControl refreshing={false} tintColor="transparent" onRefresh={refresh} />}
       >
         <View accessibilityRole="tablist" style={{ flexDirection: "row", padding: 2, borderRadius: radius.pill, backgroundColor: colors.wash }}>
           {RANGES.map((r) => (
-            <PressScale key={r.id} accessibilityRole="tab" accessibilityLabel={r.label} accessibilityState={{ selected: r.id === range }} onPress={() => pick(r.id)} haptic="select" scaleTo={0.95} hitSlop={{ top: 7, bottom: 7 }} style={[{ flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: radius.pill }, r.id === range ? [{ backgroundColor: colors.card }, shadow.card, { shadowOpacity: 0.06 }] : null]}>
+            <PressScale key={r.id} accessibilityRole="tab" accessibilityLabel={r.label} accessibilityState={{ selected: r.id === range }} onPress={() => setRange(r.id)} haptic="select" scaleTo={0.95} hitSlop={{ top: 7, bottom: 7 }} style={[{ flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: radius.pill }, r.id === range ? [{ backgroundColor: colors.card }, shadow.card, { shadowOpacity: 0.06 }] : null]}>
               <Txt variant="small" tone={r.id === range ? "ink" : "ink2"} style={{ fontWeight: "700" }}>
                 {r.label}
               </Txt>
@@ -203,12 +165,17 @@ export function InsightsScreen({ top, visible = true, toTop }: { top: ReactNode;
             </Txt>
           </View>
         )}
+        {i && updated && !loading && (
+          <Txt variant="tiny" tone="ink3" style={{ paddingHorizontal: 4 }}>
+            Updated {updated}
+          </Txt>
+        )}
         {error && !loading && (
           <View style={{ paddingHorizontal: 4, gap: 4, alignItems: "flex-start" }}>
             <Txt variant="small" tone="stop" accessibilityRole="alert">
               {error}
             </Txt>
-            <Button label="Try again" kind="ghost" onPress={() => load(range)} />
+            <Button label="Try again" kind="ghost" onPress={refresh} />
           </View>
         )}
 
