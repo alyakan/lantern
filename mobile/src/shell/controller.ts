@@ -69,7 +69,11 @@ export class Controller {
       appVersion: d.appVersion,
       onPushed: this.sync.onPushed,
       onSession: this.sync.onSession,
-      onStillUp: this.sync.onStillUp,
+      onStillUp: (session) => {
+        this.sync.onStillUp(session);
+        // A kept connection needs the same card reconciliation as a new one: Apple may have ended it while away.
+        void this.liveCards.connected();
+      },
       onState: (s) => this.setConnection(s),
     });
   }

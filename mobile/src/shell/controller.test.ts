@@ -29,6 +29,17 @@ const link = (k: ReturnType<typeof phoneKeys>, over: Record<string, string> = {}
 };
 
 describe("the app's controller", () => {
+  it("reconciles lock-screen cards when returning over a connection that still works", async () => {
+    const { controller, k } = rig();
+    await controller.pair(link(k));
+    const reconcile = jest.spyOn(controller.liveCards, "connected").mockResolvedValue();
+    controller.setAway(true);
+    controller.resume();
+    for (let i = 0; i < 20 && !reconcile.mock.calls.length; i++) await flush();
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    controller.connection.stop();
+  });
+
   it("previews what a link would pair with before it does anything, and says why a link can't be used", () => {
     const { controller, k } = rig();
     expect(controller.preview(link(k))).toMatchObject({ macName: "Aly's Mac", host: "192.168.1.20" });

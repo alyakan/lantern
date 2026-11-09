@@ -1031,7 +1031,12 @@ impl<'a> Session<'a> {
                         }
                         request => {
                             let answer = self.handle(link, channel, request).await;
-                            respond(link, channel, id, answer)?;
+                            // A catch-up may finish with a full outbox. Its acknowledgement must wait too.
+                            let (ok, error) = match answer {
+                                Ok(v) => (Some(v), None),
+                                Err(e) => (None, Some(e)),
+                            };
+                            send_message_waiting(link, channel, &ServerMessage::Response { id, ok, error }).await?;
                         }
                     }
                 }
@@ -1223,7 +1228,8 @@ impl<'a> Session<'a> {
                         let last = events.last().map_or(after, |e| e.seq);
                         for e in &events {
                             if let Some(event) = protocol::to_remote_for(&e.event, self.extras) {
-                                send_message(link, channel, &ServerMessage::Event { slot: slot.clone(), seq: e.seq, event })?;
+                                // Missed events are a catch-up, not a live burst: let the phone drain them.
+                                send_message_waiting(link, channel, &ServerMessage::Event { slot: slot.clone(), seq: e.seq, event }).await?;
                             }
                         }
                         self.follow(&slot, last);
@@ -3332,6 +3338,22 @@ pub(crate) mod tests {
         let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: seen, epoch: EPOCH }).await;
         let last = before.iter().filter_map(|m| if let ServerMessage::Event { seq, .. } = m { Some(*seq) } else { None }).max();
         assert_eq!(last, Some((crate::remote::transport::OUTBOX * 2) as u64), "and has everything after coming back");
+    }
+
+    #[tokio::test]
+    async fn returning_to_a_chat_can_catch_up_more_events_than_the_outbox_holds() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "first".into(), text: "first".into() });
+        let after = r.bus.last_seq("a");
+        for i in 0..crate::remote::transport::OUTBOX * 2 {
+            r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: format!("b{i}"), text: "x".into() });
+        }
+        let (_, error, before) = p.ask(Request::Subscribe { slot: "a".into(), after, epoch: EPOCH }).await;
+        assert!(error.is_none());
+        let received = before.iter().filter(|m| matches!(m, ServerMessage::Event { .. })).count();
+        assert_eq!(received, crate::remote::transport::OUTBOX * 2);
     }
 
     #[tokio::test]

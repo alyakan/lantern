@@ -22,6 +22,39 @@ export interface PushPlatform {
   getDeviceToken?: () => Promise<string>;
   /** Android needs a channel before any notification shows. */
   prepareChannel: () => Promise<void>;
+  /** Native device token changes; use the token supplied rather than requesting it again. */
+  onTokenChanged?: (refresh: (token: string) => void) => () => void;
+}
+
+/** Keep the Mac's token current after failed registration, a reconnect, or a return from Settings. */
+export function keepPushRegistered(platform: PushPlatform, projectId: string | undefined, send: (token: string) => Promise<unknown>, events: {
+  connected: () => boolean;
+  onConnection: (refresh: () => void) => () => void;
+  onForeground: (refresh: () => void) => () => void;
+}): () => void {
+  let pending = false;
+  let stopped = false;
+  let again = false;
+  let nextToken: string | undefined;
+  const refresh = (token?: string) => {
+    if (stopped || !events.connected()) return;
+    if (pending) { again = true; if (token) nextToken = token; return; }
+    pending = true;
+    // Fetching a device token itself emits the native token event. Reuse its value to avoid a registration loop.
+    const source = token ? { ...platform, getDeviceToken: async () => token } : platform;
+    void registerForPush(source, projectId, send).finally(() => {
+      pending = false;
+      if (again) {
+        again = false;
+        const latest = nextToken;
+        nextToken = undefined;
+        refresh(latest);
+      }
+    });
+  };
+  const stops = [events.onConnection(refresh), events.onForeground(refresh), platform.onTokenChanged?.(refresh)];
+  refresh();
+  return () => { stopped = true; stops.forEach((stop) => stop?.()); };
 }
 
 export async function registerForPush(platform: PushPlatform, projectId: string | undefined, send: (token: string) => Promise<unknown>): Promise<PushStatus> {
