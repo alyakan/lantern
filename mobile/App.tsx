@@ -12,7 +12,7 @@ import { keychainOutbox } from "./src/outbox";
 import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
-import { registerForPush, slotOfNotification } from "./src/notifications";
+import { keepPushRegistered, slotOfNotification } from "./src/notifications";
 import { runButton, TAP } from "./src/notificationActions";
 import { todoOfNotification } from "./src/view/todos";
 import { slotOfLink } from "./src/liveActivity";
@@ -81,7 +81,6 @@ export default function App() {
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const [openTodos, setOpenTodos] = useState<string | null>(null);
-  const registered = useRef(false);
 
   useEffect(() => {
     // An app launched in the background (a notification's button) is not in front: it mustn't take the lock-screen card for
@@ -126,14 +125,14 @@ export default function App() {
     });
   }, [controller, lock]);
   useEffect(() => {
-    const check = () => {
-      if (registered.current || controller.getConnection().kind !== "connected") return;
-      registered.current = true;
-      void registerForPush(pushPlatform, projectId, (token) => controller.sync.registerPushToken(token));
-    };
-    check();
-    const stop = controller.subscribeConnection(check);
-    return () => void stop();
+    return keepPushRegistered(pushPlatform, projectId, (token) => controller.sync.registerPushToken(token), {
+      connected: () => controller.getConnection().kind === "connected",
+      onConnection: controller.subscribeConnection,
+      onForeground: (refresh) => {
+        const sub = AppState.addEventListener("change", (s) => { if (s === "active") refresh(); });
+        return () => sub.remove();
+      },
+    });
   }, [controller]);
   // The key for the words of notifications goes to the Mac on every connection (it keeps the last one it was given).
   useEffect(() => {

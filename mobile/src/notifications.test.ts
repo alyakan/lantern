@@ -1,4 +1,4 @@
-import { pushLine, registerForPush, slotOfNotification, type PushPlatform } from "./notifications";
+import { keepPushRegistered, pushLine, registerForPush, slotOfNotification, type PushPlatform } from "./notifications";
 
 function platform(over: Partial<PushPlatform> = {}) {
   const calls: string[] = [];
@@ -14,6 +14,80 @@ function platform(over: Partial<PushPlatform> = {}) {
 }
 
 describe("registering for notifications", () => {
+  it("uses the token event's value without fetching again and triggering an event loop", async () => {
+    let changed!: (token: string) => void;
+    const fetch = jest.fn(async () => { changed("native"); return "native"; });
+    const { p } = platform({ getDeviceToken: fetch, onTokenChanged: (f) => { changed = f; return () => {}; } });
+    const send = jest.fn(async () => {});
+    const stop = keepPushRegistered(p, undefined, send, {
+      connected: () => true,
+      onConnection: () => () => {},
+      onForeground: () => () => {},
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("native");
+    changed("rotated");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenLastCalledWith("rotated");
+    stop();
+  });
+
+  it("does not lose a token rotation while registration is in flight", async () => {
+    let rotated!: (token: string) => void;
+    let finish!: () => void;
+    let token = "old";
+    const { p } = platform({ getDeviceToken: async () => token, onTokenChanged: (f) => { rotated = f; return () => {}; } });
+    const send = jest.fn().mockImplementationOnce(() => new Promise<void>((r) => { finish = r; })).mockResolvedValue(undefined);
+    const stop = keepPushRegistered(p, undefined, send, {
+      connected: () => true,
+      onConnection: () => () => {},
+      onForeground: () => () => {},
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    token = "new";
+    rotated(token);
+    expect(send).toHaveBeenCalledTimes(1);
+    finish();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith("new");
+    stop();
+  });
+
+  it("retries a failed registration, restores a cleared token on return, and sends a rotated token", async () => {
+    let connection!: () => void;
+    let foreground!: () => void;
+    let rotated!: (token: string) => void;
+    let token = "old";
+    const stopToken = jest.fn();
+    const { p } = platform({ getDeviceToken: async () => token, onTokenChanged: (f) => { rotated = f; return stopToken; } });
+    const send = jest.fn().mockRejectedValueOnce(new Error("link dropped")).mockResolvedValue(undefined);
+    const stop = keepPushRegistered(p, undefined, send, {
+      connected: () => true,
+      onConnection: (f) => { connection = f; return jest.fn(); },
+      onForeground: (f) => { foreground = f; return jest.fn(); },
+    });
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+    await settle();
+    connection();
+    await settle();
+    expect(send).toHaveBeenCalledTimes(2);
+    foreground();
+    await settle();
+    expect(send).toHaveBeenCalledTimes(3);
+    token = "new";
+    rotated(token);
+    await settle();
+    expect(send).toHaveBeenLastCalledWith("new");
+    stop();
+    expect(stopToken).toHaveBeenCalled();
+    foreground();
+    await settle();
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
   it("does nothing without an Expo project id, and says so (and never reaches Expo)", async () => {
     const { p, calls } = platform();
     const send = jest.fn();

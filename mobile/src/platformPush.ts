@@ -14,7 +14,13 @@ export const pushPlatform: PushPlatform = {
   requestPermission: async () => (await Notifications.requestPermissionsAsync()).status,
   getToken: async (projectId) => (await Notifications.getExpoPushTokenAsync({ projectId })).data,
   // An iPhone's own token is what the Mac pushes to Apple with (it needs no Expo account).
-  ...(Platform.OS === "ios" ? { getDeviceToken: async () => String((await Notifications.getDevicePushTokenAsync()).data) } : {}),
+  ...(Platform.OS === "ios" ? {
+    getDeviceToken: async () => String((await Notifications.getDevicePushTokenAsync()).data),
+    onTokenChanged: (refresh: (token: string) => void) => {
+      const sub = Notifications.addPushTokenListener((token) => refresh(String(token.data)));
+      return () => sub.remove();
+    },
+  } : {}),
   prepareChannel: async () => {
     if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("default", { name: "Lantern", importance: Notifications.AndroidImportance.HIGH });
   },
