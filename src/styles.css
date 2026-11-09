@@ -1526,6 +1526,25 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .pill:disabled { opacity: 1; }
 .pill .chev { margin-left: 2px; }
 .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 8px 8px 12px; background: var(--field); cursor: text; transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
+/* The checklist sits behind the input. Only .composer-box gets the working border. */
+.agent-plan { margin: 0 6px -16px; padding-bottom: 20px; border: 1px solid var(--line); border-radius: var(--radius-float) var(--radius-float) 0 0; background: var(--sidebar); overflow: hidden; }
+.agent-plan-handle { display: flex; flex-direction: column; gap: 7px; width: 100%; border: 0; padding: 7px 12px 10px; background: transparent; color: var(--text); cursor: ns-resize; touch-action: none; user-select: none; }
+.agent-plan-handle:hover { background: var(--bg-hover); }
+.agent-plan-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.agent-plan-grabber { align-self: center; width: 30px; height: 3px; border-radius: var(--radius-pill); background: var(--faint); }
+.agent-plan-summary { display: flex; align-items: center; gap: 10px; width: 100%; font-size: calc(12.5px * var(--font-scale)); }
+.agent-plan-count { flex: none; border-radius: var(--radius-md); padding: 2px 7px; background: var(--field); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.agent-plan-current { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-plan-details { overflow: hidden; transition: height 220ms var(--ease-out); }
+.agent-plan.dragging .agent-plan-details { transition: none; }
+.agent-plan-steps { height: 100%; margin: 0; padding: 4px 12px 12px; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+.agent-plan-step { display: flex; align-items: baseline; gap: 9px; padding: 5px 0; font-size: calc(12.5px * var(--font-scale)); line-height: 1.5; overflow-wrap: anywhere; }
+.agent-plan-mark { flex: none; width: 14px; color: var(--muted); }
+.agent-plan-step.in_progress .agent-plan-mark { color: var(--accent); }
+.agent-plan-step.completed { color: var(--muted-text); }
+.agent-plan-step.completed > span:last-child { text-decoration: line-through; }
+.agent-plan-step.completed .agent-plan-mark { color: var(--add); }
+@media (prefers-reduced-motion: reduce) { .agent-plan-details { transition: none; } }
 /* Slash commands: opens above the chat box as you type "/". */
 .slash-menu { bottom: calc(100% + 6px); left: 0; right: 0; max-height: 300px; margin: 0; cursor: default; }
 .slash-list, .slash-section-items { list-style: none; margin: 0; padding: 0; }

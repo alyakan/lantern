@@ -1,5 +1,5 @@
 import type { RevertOutcome } from "./api";
-import type { Hunk, ModelCost, ModelOption, Mode, ProviderInfo, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
+import type { AgentTodo, Hunk, ModelCost, ModelOption, Mode, ProviderInfo, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
 import { agentName, isGateway, providerIdOf, reportsUsd } from "./lib/provider";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
@@ -254,6 +254,8 @@ export interface State {
   explainStart: boolean;
   model: string | null;
   items: ChatItem[];
+  /** The latest progress checklist belonging to this chat. */
+  todos: AgentTodo[];
   changedFiles: ChangedFile[];
   /** Every test run in the conversation, oldest first. */
   testRuns: TestRunItem[];
@@ -378,6 +380,7 @@ export const initialState: State = {
   explainStart: false,
   model: null,
   items: [],
+  todos: [],
   changedFiles: [],
   testRuns: [],
   editCount: 0,
@@ -579,7 +582,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], inputSeen: 0, cacheReadSeen: 0, firstCall: null, sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], todos: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, claudeEdits: 0, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], inputSeen: 0, cacheReadSeen: 0, firstCall: null, sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -729,6 +732,8 @@ function applyEvent(state: State, ev: UiEvent): State {
       const ended = state.backgroundTasks.filter((t) => !ev.tasks.some((n) => n.id === t.id)).pop();
       return { ...state, lastEndedTask: ended ? ended.description || "a background task" : state.lastEndedTask, backgroundTasks: ev.tasks.map((t) => ({ id: t.id, taskType: t.task_type, description: t.description, since: since.get(t.id) ?? Date.now() })) };
     }
+    case "todos":
+      return ev.parent === null ? { ...state, todos: ev.items } : state;
     case "commands":
       return { ...state, commands: ev.commands };
     case "models":
@@ -750,7 +755,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, seq, items: [...state.items, { type: "compact", id: `c${seq}`, state: "done" }] };
     }
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, firstCall: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
+      return { ...state, items: [], todos: [], sessionId: null, contextUsed: null, firstCall: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0, status: state.status === "running" ? "idle" : state.status, stopRequested: false };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: signInText(state.provider), action: null }

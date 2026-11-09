@@ -3264,6 +3264,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const composer = (
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
+      todos={state.todos}
       status={state.status}
       waiting={state.status === "running" && hasPendingPrompt(state.items)}
       provider={state.provider}

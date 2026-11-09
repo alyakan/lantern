@@ -41,7 +41,7 @@ import { ReviewFilePage } from "./ReviewPage";
 import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
-import { distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
+import { distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
@@ -756,7 +756,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   );
   const foot = (
     <>
-      <PlanCard todos={view.todos} />
       {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
       {confirming && (
         <RunCommandCard
@@ -820,7 +819,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
         // a command still goes to Run, which says it couldn't).
-        <Composer draftKey={slot} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
+        <Composer todos={view.todos} draftKey={slot} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
             // What you send is what you follow, even from far up the chat.
             setAway(null);
             list.current?.scrollToEnd({ animated: true });
