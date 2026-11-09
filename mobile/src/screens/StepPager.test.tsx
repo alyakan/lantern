@@ -1,3 +1,4 @@
+import { StyleSheet } from "react-native";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { StepPager, type PagePlaces } from "./StepPager";
 import type { Row } from "../view/timeline";
@@ -41,6 +42,14 @@ describe("the step pager", () => {
   it("goes from page to page with a swipe", async () => {
     await render(<StepPager pages={pages} index={1} onIndex={jest.fn()} renderRow={() => <></>} />);
     expect(screen.getByTestId("step-pager").props.scrollEnabled).toBe(true);
+  });
+
+  it("bounds each vertical page and resizes with the chat pane", async () => {
+    await render(<StepPager pages={pages} index={0} onIndex={jest.fn()} renderRow={() => <></>} />);
+    expect(StyleSheet.flatten(screen.getByTestId("step-page-frame-0").props.style).flex).toBe(1);
+    expect(StyleSheet.flatten(screen.getByTestId("step-page-0").props.style).flex).toBe(1);
+    await fireEvent(screen.getByTestId("step-pager").parent!, "layout", { nativeEvent: { layout: { width: 720, height: 900 } } });
+    expect(StyleSheet.flatten(screen.getByTestId("step-page-frame-0").props.style).width).toBe(720);
   });
 
   it("holds still while a swipe to allow is dragged, so the drag can't take it to the page before", async () => {
