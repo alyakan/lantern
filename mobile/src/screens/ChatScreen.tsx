@@ -494,10 +494,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A file link goes to the Changes pane when there is one that can show it, else to a sheet over the chat.
   const pane = useRef(changesPane);
   pane.current = changesPane;
-  // A file named in the words is read as the review reads it, when the chat reviews a pull request or a branch (the Mac gives
-  // the chat's own change when it reviews nothing, or the review left the file alone): a stacked branch's file is then
-  // compared with the review's base, not with the branch below it, where it has no change.
-  const openFile = useCallback((path: string) => void (pane.current?.onFile?.(path) || setReviewed(path)), []);
+  // The files the chat edited: one of them, named or listed, is the chat's own change (an edit not yet committed is in no review).
+  const edited = useRef<Set<string>>(new Set());
+  edited.current = useMemo(() => new Set(rows.flatMap((r) => ("files" in r && Array.isArray(r.files) ? (r.files as string[]) : []))), [rows]);
+  // Any other file named in the words is read as the review reads it, when the chat reviews a pull request or a branch (the
+  // Mac gives the chat's own change when it reviews nothing, or the review left the file alone): a stacked branch's file is
+  // then compared with the review's base, not with the branch below it, where it has no change.
+  const openFile = useCallback((path: string) => void (pane.current?.onFile?.(path) || (edited.current.has(path) ? setFiles([path]) : setReviewed(path))), []);
   // The files a step or a turn edited: the chat's own change to them.
   const openFiles = useCallback((paths: string[]) => void ((paths.length === 1 && pane.current?.onFile?.(paths[0])) || setFiles(paths)), []);
   const open = chat?.status === "needs_you";

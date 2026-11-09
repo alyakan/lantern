@@ -1378,6 +1378,24 @@ describe("a Review, a file page at a time", () => {
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/lib/auth.ts" }));
   });
 
+  it("opens a file the chat edited as its own change, named in a page's words or listed under it, even where the Mac reads reviews", async () => {
+    const built: RemoteEvent[] = [
+      { kind: "user_text", text: "Commit it.", at: 2, sent_by: "desktop" },
+      { kind: "tool_started", tool_use_id: "e1", name: "Edit", summary: "TimeoutScheduler.swift" },
+      { kind: "file_edited", tool_use_id: "e1", path: "/p/App/Sources/TimeoutScheduler.swift", created: false, added: 9, removed: 2 },
+      { kind: "tool_finished", tool_use_id: "e1", is_error: false },
+      { kind: "assistant_text", block_id: "s5", text: "# Step 5 of 14 — Move the timeout scheduler\n\nIt now lives in `Sources/TimeoutScheduler.swift`." },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
+    ];
+    const { lastOf, asked } = await review(built, ["reviewdiff"], { diff: "--- a\n+++ b\n+moved", review_diff: "--- a\n+++ b\n+range" });
+    await fireEvent.press(screen.getByText("Sources/TimeoutScheduler.swift"));
+    await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/App/Sources/TimeoutScheduler.swift" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByRole("link", { name: "TimeoutScheduler.swift" }));
+    await waitFor(() => expect(screen.getByLabelText("Added: moved")).toBeTruthy());
+    expect(asked.some((r) => r.op === "review_diff")).toBe(false);
+  });
+
   it("asks an older Mac for the chat's own change instead, which it knows", async () => {
     const { lastOf, asked } = await review(one, [], { diff: "--- a\n+++ b\n+mine" });
     await fireEvent.press(screen.getByRole("link", { name: "src/lib/auth.ts" }));
