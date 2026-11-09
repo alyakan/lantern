@@ -112,7 +112,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
       <TabEmpty title="Storage">
         <p>
           {view.free_bytes !== null ? `${sizeText(view.free_bytes)} free. ` : ""}
-          Scan this Mac for what can be cleared to get space back: git worktrees, stale projects, build output, caches, simulators and the Trash. Nothing is deleted until you tick it and press Delete.
+          Scan this Mac for what can be cleared to get space back: git worktrees, stale projects, build output, caches, simulators, what is left in /tmp and the Trash. Nothing is deleted until you tick it and press Delete.
         </p>
         <p>
           <button className="primary" onClick={scan}>

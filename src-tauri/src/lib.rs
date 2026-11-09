@@ -4390,8 +4390,14 @@ pub fn run() {
                 move || {
                     let _ = handle.emit("storage-changed", ());
                 },
-                // Asked at every scan and every delete: the folders chats and agents are running in right now.
-                move || for_in_use.try_state::<AppState>().map(|s| s.slots.running_folders()).unwrap_or_default(),
+                // Asked at every scan and every delete: the folders chats and agents are running in right now, and every open
+                // chat's own folder in /tmp, asleep or not.
+                move || {
+                    let Some(s) = for_in_use.try_state::<AppState>() else { return vec![] };
+                    let mut folders = s.slots.running_folders();
+                    folders.extend(storage::scan::claude_session_dirs(&s.slots.session_ids()));
+                    folders
+                },
             ));
             // Follows the capture while any folder has a watch (a poll with none reads nothing).
             let following = network.clone();

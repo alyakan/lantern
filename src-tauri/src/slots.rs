@@ -164,6 +164,18 @@ impl Slots {
         slots.iter().filter(|s| s.session.try_lock().map(|g| g.is_some()).unwrap_or(true)).filter_map(|s| s.folder().ok()).collect()
     }
 
+    /// The conversations open in a chat, running or asleep: the session its claude runs, or the one it resumes on waking.
+    pub fn session_ids(&self) -> Vec<String> {
+        let slots: Vec<Arc<Slot>> = self.slots.lock().unwrap().values().cloned().collect();
+        slots
+            .iter()
+            .filter_map(|s| {
+                let running = s.session.try_lock().ok().and_then(|g| g.as_ref().and_then(|x| x.session_id()));
+                running.or_else(|| s.config.lock().unwrap().as_ref().and_then(|c| c.resume.clone()))
+            })
+            .collect()
+    }
+
     pub fn drain(&self) -> Vec<Arc<Slot>> {
         self.slots.lock().unwrap().drain().map(|(_, s)| s).collect()
     }

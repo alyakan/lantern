@@ -1,5 +1,5 @@
 //! Storage: a scan of the Mac for what can be cleared to get disk space back (git worktrees, stale projects, build
-//! output, caches, simulators, Xcode archives, the user's temporary folder, the Trash), shown as a checklist in the Storage tab. Claude can run the same scan and mark
+//! output, caches, simulators, Xcode archives, the user's temporary folder and /tmp, the Trash), shown as a checklist in the Storage tab. Claude can run the same scan and mark
 //! what it thinks is safe (the storage_* tools); it can't delete anything. Only the tab's Delete does, by the id of an item
 //! from this app's own last scan, and every item is checked again at that moment (see clean.rs).
 //!
@@ -225,7 +225,7 @@ impl Storage {
     /// The scan's view of the world now: where it looks, and which folders are busy (as real paths).
     fn env(&self, path_env: Option<String>) -> scan::Env {
         let in_use = (self.in_use)().into_iter().filter_map(|p| std::fs::canonicalize(p).ok()).collect();
-        scan::Env { home: self.home.clone(), path_env, now: now_secs(), in_use, temp_base: scan::temp_base() }
+        scan::Env { home: self.home.clone(), path_env, now: now_secs(), in_use, temp_base: scan::temp_base(), shared_tmp: scan::shared_tmp(), tmp_open: Default::default() }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -484,7 +484,7 @@ pub fn tool_list() -> Vec<Value> {
     vec![
         json!({
             "name": "storage_scan",
-            "description": "Scan this Mac for what can be cleared to get disk space back: git worktrees, stale projects, build output (node_modules, target, the CI runner's), caches, simulators, Xcode archives, the temporary folder (Chrome's leftover copies), the Trash. Starts the scan and waits a few seconds; a long scan keeps going in the background (call again, or read storage_results). A scan under 5 minutes old is reused unless `rescan` is true. Nothing is deleted.",
+            "description": "Scan this Mac for what can be cleared to get disk space back: git worktrees, stale projects, build output (node_modules, target, the CI runner's), caches, simulators, Xcode archives, the temporary folders (Chrome's leftover copies, and what builds, downloads and Claude sessions left in /tmp), the Trash. Starts the scan and waits a few seconds; a long scan keeps going in the background (call again, or read storage_results). A scan under 5 minutes old is reused unless `rescan` is true. Nothing is deleted.",
             "inputSchema": {"type": "object", "properties": {"rescan": {"type": "boolean", "description": "Scan again even if the last scan is recent."}}, "additionalProperties": false}
         }),
         json!({

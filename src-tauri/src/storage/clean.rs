@@ -112,11 +112,14 @@ fn guard(env: &Env, kind: Kind, path: &Path) -> Result<PathBuf, String> {
 
 /// The real path of `path` if it may be removed from the user's temporary folder (outside the home folder, so `guard`
 /// can't take it): one of Chrome's copies of itself (`X/com.google.Chrome….code_sign_clone/code_sign_clone.*`) while no
-/// Chrome that may use it runs, or a cache straight inside `C`. A real folder or file the user owns, not a link nor reached
-/// through one, and nothing else.
+/// Chrome that may use it runs, or a cache straight inside `C`; or something in /tmp (see `guard_shared_tmp`). A real
+/// folder or file the user owns, not a link nor reached through one, and nothing else.
 fn guard_temp(env: &Env, path: &Path) -> Result<PathBuf, String> {
-    let base = env.temp_base.as_deref().ok_or("Lantern couldn't find your temporary folder.")?;
     let meta = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if let Some(root) = env.shared_tmp.as_deref().filter(|root| path.starts_with(root)) {
+        return guard_shared_tmp(env, root, path, &meta);
+    }
+    let base = env.temp_base.as_deref().ok_or("Lantern couldn't find your temporary folder.")?;
     if meta.file_type().is_symlink() {
         return Err("It is a link now: Lantern won't delete through a link.".into());
     }
@@ -138,6 +141,46 @@ fn guard_temp(env: &Env, path: &Path) -> Result<PathBuf, String> {
         _ => return Err("It isn't where a scan finds this kind of thing.".into()),
     }
     Ok(canon)
+}
+
+/// The real path of `path` if it may be removed from /tmp: something straight inside it, or in Claude Code's own folder
+/// there a session's folder (or one of its other folders), as the scan offers them. The user's own, not a link nor reached
+/// through one, and, checked now, used by no running program and no chat.
+fn guard_shared_tmp(env: &Env, root: &Path, path: &Path, meta: &std::fs::Metadata) -> Result<PathBuf, String> {
+    if meta.file_type().is_symlink() {
+        return Err("It is a link now: Lantern won't delete through a link.".into());
+    }
+    let canon = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    if canon != path {
+        return Err("It is reached through a link now: Lantern won't delete through a link.".into());
+    }
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err("It isn't yours.".into());
+    }
+    let rel: Vec<String> = canon.strip_prefix(root).map_err(|_| "It isn't in /tmp.")?.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let shape = match rel.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        [name] => !scan::is_claude_temp(name),
+        [claude, name] => scan::is_claude_temp(claude) && !name.starts_with('-') && !scan::is_claude_own(name),
+        [claude, project, _] => scan::is_claude_temp(claude) && project.starts_with('-'),
+        _ => false,
+    };
+    if !shape {
+        return Err("It isn't where a scan finds this kind of thing.".into());
+    }
+    if scan::busy(env, &canon) {
+        return Err("A chat is working in it.".into());
+    }
+    if scan::is_checkout(&canon) {
+        return Err(scan::CHECKOUT.into());
+    }
+    if scan::holds_mount(&canon) {
+        return Err(scan::MOUNTED.into());
+    }
+    match scan::tmp_open(env) {
+        None => Err("Lantern couldn't check whether a program is using it.".into()),
+        Some(open) if open.iter().any(|o| o.starts_with(&canon)) => Err("A program is using it now.".into()),
+        Some(_) => Ok(canon),
+    }
 }
 
 fn remove_worktree(env: &Env, item: &Item) -> Result<u64, String> {
@@ -176,7 +219,7 @@ mod tests {
     use super::*;
 
     fn env_of(home: &Path) -> Env {
-        Env { home: std::fs::canonicalize(home).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None }
+        Env { home: std::fs::canonicalize(home).unwrap(), path_env: None, now: now_secs(), in_use: vec![], temp_base: None, shared_tmp: None, tmp_open: Default::default() }
     }
 
     fn item(kind: Kind, removal: Removal, path: &Path) -> Item {
@@ -293,7 +336,7 @@ mod tests {
         let wt = scan::worktrees(&w.repo, &w.env).into_iter().find(|t| std::fs::canonicalize(&t.path).ok().as_deref() == Some(&path)).unwrap();
         let mut it = scan::worktree_item(&w.repo, &wt, &w.env, &AtomicBool::new(false)).unwrap();
         it.risk = Risk::Safe;
-        let busy = Env { home: w.env.home.clone(), path_env: None, now: w.env.now, in_use: vec![path.clone()], temp_base: None };
+        let busy = Env { home: w.env.home.clone(), path_env: None, now: w.env.now, in_use: vec![path.clone()], temp_base: None, shared_tmp: None, tmp_open: Default::default() };
         let out = remove(&busy, &it);
         assert!(!out.ok && out.error.unwrap().contains("working in it"));
         assert!(path.exists());
@@ -374,6 +417,40 @@ mod tests {
         std::os::unix::fs::symlink(&tmp, base_path.join("C/linked")).unwrap();
         assert!(remove(&env, &temp(&base_path.join("C/linked"))).error.unwrap().contains("link"));
         assert!(!copy.exists() && !cache.exists() && tmp.exists() && other.exists() && deep.exists());
+    }
+
+    #[test]
+    fn tmp_gives_up_only_what_the_scan_offers_there_and_nothing_in_use() {
+        let (_dir, env, claude) = super::super::scan::tests::tmp_world(Some(vec!["open-build/f"]));
+        let root = env.shared_tmp.clone().unwrap();
+        let temp = |p: &Path| item(Kind::Temp, Removal::Permanent, p);
+        let session = root.join(format!("{claude}/-Users-me-proj/session-old"));
+        for ok in [root.join("old-build"), session.clone(), root.join(format!("{claude}/cdp-profile"))] {
+            let out = remove(&env, &temp(&ok));
+            assert!(out.ok, "{ok:?}: {:?}", out.error);
+            assert!(!ok.exists());
+        }
+        assert!(remove(&env, &temp(&root.join("open-build"))).error.unwrap().contains("using it"));
+        assert!(remove(&env, &temp(&root.join("chat-here"))).error.unwrap().contains("chat"));
+        assert!(remove(&env, &temp(&root.join(format!("{claude}/-Users-me-proj/session-asleep")))).error.unwrap().contains("chat"));
+        // Whatever the scan said of it, a checkout is refused: only git can tell what in it is unsaved.
+        let mut checkout = temp(&root.join("checkout"));
+        checkout.risk = Risk::Safe;
+        assert!(remove(&env, &checkout).error.unwrap().contains("git checkout"));
+        assert!(root.join("checkout/.git").exists());
+        assert!(remove(&env, &temp(&root.join("link"))).error.unwrap().contains("link"));
+        // Never /tmp itself, Claude Code's folder, its own folders or a project's folder in it, nor something deeper than the
+        // scan offers.
+        std::fs::create_dir_all(root.join(format!("{claude}/bundled-skills"))).unwrap();
+        for p in [root.clone(), root.join(&claude), root.join(format!("{claude}/bundled-skills")), root.join(format!("{claude}/-Users-me-proj")), root.join("fresh-build/f")] {
+            assert!(remove(&env, &temp(&p)).error.is_some(), "{p:?}");
+            assert!(p.exists(), "{p:?}");
+        }
+        // When lsof couldn't say what is open, nothing goes.
+        let (_dir2, unknown, _) = super::super::scan::tests::tmp_world(None);
+        let fresh = unknown.shared_tmp.clone().unwrap().join("fresh-build");
+        assert!(remove(&unknown, &temp(&fresh)).error.unwrap().contains("couldn't check"));
+        assert!(fresh.exists());
     }
 
     #[test]
