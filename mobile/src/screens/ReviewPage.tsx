@@ -32,7 +32,7 @@ function VerdictPill({ label, on, tone, onPress }: { label: string; on: boolean;
 }
 
 /** One finding: how bad, where (a link to the change there), what, and your verdict on it. */
-function FindingCard({ finding, verdict, onVerdict, onLine }: { finding: Finding; verdict: Verdict | undefined; /** Present while the page can still be answered. */ onVerdict?: (v: Verdict | null) => void; onLine: () => void }) {
+function FindingCard({ finding, verdict, onVerdict, onLine, onFile }: { finding: Finding; verdict: Verdict | undefined; /** Present while the page can still be answered. */ onVerdict?: (v: Verdict | null) => void; onLine: () => void; /** A path in its words was tapped. */ onFile: (path: string) => void }) {
   const colors = useColors();
   const sev = finding.severity;
   const sevColor = sev === "blocker" ? colors.stop : sev === "should-fix" ? colors.hi : colors.ink3;
@@ -55,7 +55,7 @@ function FindingCard({ finding, verdict, onVerdict, onLine }: { finding: Finding
           </Txt>
         )}
       </View>
-      <Markdown text={finding.text} />
+      <Markdown text={finding.text} onFile={onFile} />
       {onVerdict && (
         <View accessibilityRole="radiogroup" accessibilityLabel="Your verdict" style={{ flexDirection: "row", gap: 8 }}>
           <VerdictPill label="Agree" tone="go" on={verdict === "agree"} onPress={() => onVerdict(verdict === "agree" ? null : "agree")} />
@@ -79,7 +79,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * A Review file page, laid out as the Mac lays it out: the file (a link to its change), what changed, the findings with your
- * verdict on each while the page is the live one (and what you said, after), and the notes.
+ * verdict on each while the page is the live one (and what you said, after), and the notes. A path named anywhere on it
+ * (`a/b.swift:42`, a page of several files lists each) is a link to its change too, as the heading is.
  */
 export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdicts, onVerdict, onOpen }: { kicker: string; file: ReviewFile; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void; /** Opens the change in the file. */ onOpen: (path: string) => void }) {
   const colors = useColors();
@@ -107,11 +108,11 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
             </Txt>
           </View>
         )}
-        {!!file.preface && <Markdown text={file.preface} />}
+        {!!file.preface && <Markdown text={file.preface} onFile={onOpen} />}
       </View>
       {!!file.changed && (
         <Section title="What changed">
-          <Markdown text={file.changed} />
+          <Markdown text={file.changed} onFile={onOpen} />
         </Section>
       )}
       <Section title={file.findings.length ? `Findings (${file.findings.length})` : "Findings"}>
@@ -120,12 +121,12 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
             No findings in this file.
           </Txt>
         ) : (
-          file.findings.map((f) => <FindingCard key={f.index} finding={f} verdict={verdicts?.[f.index]} onVerdict={onVerdict && ((v) => onVerdict(f.index, v))} onLine={() => path && onOpen(path)} />)
+          file.findings.map((f) => <FindingCard key={f.index} finding={f} verdict={verdicts?.[f.index]} onVerdict={onVerdict && ((v) => onVerdict(f.index, v))} onLine={() => { const at = f.path ?? path; if (at) onOpen(at); }} onFile={onOpen} />)
         )}
       </Section>
       {!!file.notes && (
         <Section title="Notes">
-          <Markdown text={file.notes} />
+          <Markdown text={file.notes} onFile={onOpen} />
         </Section>
       )}
     </View>

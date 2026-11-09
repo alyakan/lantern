@@ -392,7 +392,12 @@ impl Gateway {
         let path = reviewed_path(&path)?.to_string();
         let host = self.host.clone();
         match self.hub.review_target(&slot) {
-            Some(target) => host.review_diff(slot, path, target).await,
+            // A file the review leaves alone (the phone asks this way for any file named in the chat's words, not only a
+            // review page's): the chat's own change to it, or git's view of it, as Diff gives it.
+            Some(target) => match host.review_diff(slot.clone(), path.clone(), target).await {
+                Ok(d) if !d.lines().any(|l| l.starts_with("@@")) => host.diff(slot, path).await,
+                other => other,
+            },
             // Not reviewing anything that Lantern knows of: the chat's own change to the file, as Diff gives it. A review
             // started before Lantern last restarted is one (what it reviews is only known from the call as it happens).
             None => host.diff(slot, path).await.map_err(|e| format!("{e} (If this chat is reviewing a pull request or a branch: Lantern forgets which when it restarts, until Claude says it again.)")),
@@ -1824,7 +1829,8 @@ pub(crate) mod tests {
             let delay = *self.review_delay.lock().unwrap();
             Box::pin(async move {
                 tokio::time::sleep(delay).await;
-                Ok(format!("review {path} pr={:?} base={:?}", target.pr, target.base))
+                // The review leaves /p/a.rs alone: headers and no hunk, as phone_diff gives a file with no change.
+                Ok(if path == "/p/a.rs" { "--- /p/a.rs\n+++ /p/a.rs\n".into() } else { format!("@@ review {path} pr={:?} base={:?}", target.pr, target.base) })
             })
         }
         fn artifacts(&self, slot: String) -> BoxFut<Result<Vec<protocol::RemoteArtifact>, String>> {
@@ -2368,9 +2374,11 @@ pub(crate) mod tests {
         // Not reviewing anything yet: the chat's own change, as Diff.
         assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
         r.hub.record(&BusEvent { slot: "z".into(), seq: 1, event: UiEvent::ReviewTarget { pr: Some(512), base: None } });
-        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=Some(512) base=None")));
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("@@ review src/lib.rs pr=Some(512) base=None")));
         r.hub.record(&BusEvent { slot: "z".into(), seq: 2, event: UiEvent::ReviewTarget { pr: None, base: Some("feat/core".into()) } });
-        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("review src/lib.rs pr=None base=Some(\"feat/core\")")));
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "src/lib.rs".into() }).await.0, Some(json!("@@ review src/lib.rs pr=None base=Some(\"feat/core\")")));
+        // A file the review leaves alone (a chat's words name any file, not only a reviewed one): the chat's own change to it.
+        assert_eq!(p.ask(Request::ReviewDiff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
         // Never a way out of the repository, and only a chat that is open.
         for bad in ["../secrets", "src/../../etc/passwd", "", "a\nb"] {
             assert!(p.ask(Request::ReviewDiff { slot: "z".into(), path: bad.into() }).await.1.is_some(), "{bad:?}");

@@ -4879,6 +4879,15 @@ mod tests {
         assert!(named_file_diff("/p/a.swift", None, None).is_err());
     }
 
+    /// A reviewed file the review leaves alone has no hunk: that is how the gateway knows to give the chat's own change.
+    #[test]
+    fn a_phone_diff_of_a_file_with_no_change_has_no_hunk() {
+        let same = |t: &str| FileDiff { path: "/p/a.swift".into(), created: false, deleted: false, original: t.into(), current: t.into() };
+        assert!(!phone_diff("/p/a.swift", &same("one\ntwo\n")).lines().any(|l| l.starts_with("@@")));
+        let changed = FileDiff { current: "one\nthree\n".into(), ..same("one\ntwo\n") };
+        assert!(phone_diff("/p/a.swift", &changed).lines().any(|l| l.starts_with("@@")));
+    }
+
     /// A phone's This branch view of a file: its change since the branch left main, and nothing from outside the repository.
     #[test]
     fn a_branch_file_is_its_change_since_main_and_only_in_the_repository() {
