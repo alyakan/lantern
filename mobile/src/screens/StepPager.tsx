@@ -42,25 +42,29 @@ function PageScroll({ page, n, width, newest, renderRow, padTop, padBottom, foot
     else if (newest && talkedAbout(page)) scroll.current?.scrollToEnd({ animated: false });
   };
   return (
-    <KeyboardChatScrollView
-      ref={scroll}
-      testID={`step-page-${n}`}
-      style={{ width }}
-      contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }}
-      keyboardDismissMode="interactive"
-      keyboardShouldPersistTaps="handled"
-      offset={lift}
-      keyboardLiftBehavior="always"
-      onLayout={(e) => (seen.current = e.nativeEvent.layout.height)}
-      onContentSizeChange={(_, h) => place(h)}
-      scrollEventThrottle={100}
-      onScroll={(e) => placed.current && places?.keep(page.key, e.nativeEvent.contentOffset.y)}
-    >
-      {page.rows.map((r) => (
-        <View key={r.key}>{renderRow({ item: r })}</View>
-      ))}
-      {newest && footer}
-    </KeyboardChatScrollView>
+    // The horizontal list cell uses a row. Bound the keyboard scroll wrapper
+    // in a column of its own so the whole page has a definite width.
+    <View testID={`step-page-frame-${n}`} style={{ width, flex: 1 }}>
+      <KeyboardChatScrollView
+        ref={scroll}
+        testID={`step-page-${n}`}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingTop: padTop, paddingBottom: padBottom + 8 }}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        offset={lift}
+        keyboardLiftBehavior="always"
+        onLayout={(e) => (seen.current = e.nativeEvent.layout.height)}
+        onContentSizeChange={(_, h) => place(h)}
+        scrollEventThrottle={100}
+        onScroll={(e) => placed.current && places?.keep(page.key, e.nativeEvent.contentOffset.y)}
+      >
+        {page.rows.map((r) => (
+          <View key={r.key}>{renderRow({ item: r })}</View>
+        ))}
+        {newest && footer}
+      </KeyboardChatScrollView>
+    </View>
   );
 }
 
