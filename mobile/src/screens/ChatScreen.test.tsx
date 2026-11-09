@@ -1355,6 +1355,29 @@ describe("a Review, a file page at a time", () => {
     await waitFor(() => expect(screen.getByLabelText("Added: new")).toBeTruthy());
   });
 
+  it("opens a path named in a page's words, or in what Claude says between pages, as the review reads it; a turn's edited file stays the chat's own change", async () => {
+    const named: RemoteEvent[] = [
+      { kind: "assistant_text", block_id: "f1", text: filePage(1, "src/lib/auth.ts").replace("The token is checked before it is used.", "The token is checked before it is used.\n- `src/lib/session.ts:12`: where it is read.") },
+      { kind: "user_text", text: "why?", at: 2, sent_by: "desktop" },
+      { kind: "tool_started", tool_use_id: "e1", name: "Edit", summary: "auth.ts" },
+      { kind: "file_edited", tool_use_id: "e1", path: "/p/src/lib/auth.ts", created: false, added: 1, removed: 0 },
+      { kind: "tool_finished", tool_use_id: "e1", is_error: false },
+      { kind: "assistant_text", block_id: "a1", text: "Because `/wt/stack/src/lib/token.ts:7` is on the branch below." },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 900, context_window: null },
+    ];
+    const { lastOf } = await review(named, ["reviewdiff"], { review_diff: "--- a\n+++ b\n-old\n+new", diff: "--- a\n+++ b\n+mine" });
+    await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+    await fireEvent.press(screen.getByText("src/lib/session.ts:12"));
+    await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/session.ts" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Next page" }));
+    await fireEvent.press(screen.getByText("/wt/stack/src/lib/token.ts:7"));
+    await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "/wt/stack/src/lib/token.ts" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    await fireEvent.press(screen.getByText(/Edited 1 file/));
+    await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/lib/auth.ts" }));
+  });
+
   it("asks an older Mac for the chat's own change instead, which it knows", async () => {
     const { lastOf, asked } = await review(one, [], { diff: "--- a\n+++ b\n+mine" });
     await fireEvent.press(screen.getByRole("link", { name: "src/lib/auth.ts" }));

@@ -494,8 +494,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // A file link goes to the Changes pane when there is one that can show it, else to a sheet over the chat.
   const pane = useRef(changesPane);
   pane.current = changesPane;
-  const openFile = useCallback((path: string) => void (pane.current?.onFile?.(path) || setFiles([path])), []);
-  const openFiles = useCallback((paths: string[]) => (paths.length === 1 ? openFile(paths[0]) : setFiles(paths)), [openFile]);
+  // A file named in the words is read as the review reads it, when the chat reviews a pull request or a branch (the Mac gives
+  // the chat's own change when it reviews nothing, or the review left the file alone): a stacked branch's file is then
+  // compared with the review's base, not with the branch below it, where it has no change.
+  const openFile = useCallback((path: string) => void (pane.current?.onFile?.(path) || setReviewed(path)), []);
+  // The files a step or a turn edited: the chat's own change to them.
+  const openFiles = useCallback((paths: string[]) => void ((paths.length === 1 && pane.current?.onFile?.(paths[0])) || setFiles(paths)), []);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
   // Cruise has a row over the message box (its pill, or its card once on).
