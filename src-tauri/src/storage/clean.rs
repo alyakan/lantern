@@ -160,7 +160,7 @@ fn guard_shared_tmp(env: &Env, root: &Path, path: &Path, meta: &std::fs::Metadat
     let rel: Vec<String> = canon.strip_prefix(root).map_err(|_| "It isn't in /tmp.")?.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
     let shape = match rel.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [name] => !scan::is_claude_temp(name),
-        [claude, name] => scan::is_claude_temp(claude) && !name.starts_with('-'),
+        [claude, name] => scan::is_claude_temp(claude) && !name.starts_with('-') && !scan::is_claude_own(name),
         [claude, project, _] => scan::is_claude_temp(claude) && project.starts_with('-'),
         _ => false,
     };
@@ -172,6 +172,9 @@ fn guard_shared_tmp(env: &Env, root: &Path, path: &Path, meta: &std::fs::Metadat
     }
     if scan::is_checkout(&canon) {
         return Err(scan::CHECKOUT.into());
+    }
+    if scan::holds_mount(&canon) {
+        return Err(scan::MOUNTED.into());
     }
     match scan::tmp_open(env) {
         None => Err("Lantern couldn't check whether a program is using it.".into()),
@@ -436,8 +439,10 @@ mod tests {
         assert!(remove(&env, &checkout).error.unwrap().contains("git checkout"));
         assert!(root.join("checkout/.git").exists());
         assert!(remove(&env, &temp(&root.join("link"))).error.unwrap().contains("link"));
-        // Never /tmp itself, Claude Code's folder or a project's folder in it, nor something deeper than the scan offers.
-        for p in [root.clone(), root.join(&claude), root.join(format!("{claude}/-Users-me-proj")), root.join("fresh-build/f")] {
+        // Never /tmp itself, Claude Code's folder, its own folders or a project's folder in it, nor something deeper than the
+        // scan offers.
+        std::fs::create_dir_all(root.join(format!("{claude}/bundled-skills"))).unwrap();
+        for p in [root.clone(), root.join(&claude), root.join(format!("{claude}/bundled-skills")), root.join(format!("{claude}/-Users-me-proj")), root.join("fresh-build/f")] {
             assert!(remove(&env, &temp(&p)).error.is_some(), "{p:?}");
             assert!(p.exists(), "{p:?}");
         }

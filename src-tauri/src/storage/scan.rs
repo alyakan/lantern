@@ -680,6 +680,34 @@ pub fn is_checkout(p: &Path) -> bool {
     std::fs::symlink_metadata(p.join(".git")).is_ok()
 }
 
+/// Claude Code's own folders straight inside `claude-<uid>`, which a running claude reads from: never offered.
+const CLAUDE_OWN: &[&str] = &["bundled-skills"];
+
+/// Whether `name`, straight inside Claude Code's folder in /tmp, is one of Claude Code's own (see `CLAUDE_OWN`).
+pub fn is_claude_own(name: &str) -> bool {
+    CLAUDE_OWN.contains(&name)
+}
+
+/// Why something with a volume mounted at it or inside it is never deleted: the delete would wipe that volume's contents,
+/// and a volume nobody has a file open in looks unused to lsof.
+pub const MOUNTED: &str = "A disk or disk image is mounted in it.";
+
+/// Whether a volume is mounted at `p` or anywhere inside it, from the Mac's mount table. When the table can't be read,
+/// true: nothing goes.
+pub fn holds_mount(p: &Path) -> bool {
+    let mut buf: *mut libc::statfs = std::ptr::null_mut();
+    // SAFETY: getmntinfo points `buf` at `n` statfs entries it owns and keeps alive; they are only read here.
+    let n = unsafe { libc::getmntinfo(&mut buf, libc::MNT_NOWAIT) };
+    if n <= 0 || buf.is_null() {
+        return true;
+    }
+    let all = unsafe { std::slice::from_raw_parts(buf, n as usize) };
+    all.iter().any(|s| {
+        let on = unsafe { std::ffi::CStr::from_ptr(s.f_mntonname.as_ptr()) };
+        Path::new(&*on.to_string_lossy()).starts_with(p)
+    })
+}
+
 /// A real folder or file (not a link) that the user owns.
 fn mine(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| !m.file_type().is_symlink() && m.uid() == unsafe { libc::geteuid() })
@@ -705,7 +733,7 @@ fn shared_tmp_items_over(env: &Env, cancel: &AtomicBool, min_bytes: u64) -> Scan
         for inner in top_level(&entry, false).into_iter().filter(|p| mine(p)) {
             if file_name(&inner).starts_with('-') {
                 places.extend(top_level(&inner, false).into_iter().filter(|p| mine(p)).map(|p| (p, true)));
-            } else {
+            } else if !is_claude_own(&file_name(&inner)) {
                 places.push((inner, false));
             }
         }
@@ -740,6 +768,7 @@ fn shared_tmp_items_over(env: &Env, cancel: &AtomicBool, min_bytes: u64) -> Scan
             Some(open) if open.iter().any(|o| o.starts_with(&p)) => Some("A program is using it now.".to_string()),
             _ if busy(env, &p) => Some("A chat is working in it.".to_string()),
             _ if is_checkout(&p) => Some(CHECKOUT.to_string()),
+            _ if holds_mount(&p) => Some(MOUNTED.to_string()),
             _ => None,
         };
         if let Some(why) = blocked {
@@ -1360,6 +1389,21 @@ pub(crate) mod tests {
         assert!(shared_tmp_items_over(&unknown, &AtomicBool::new(false), 5000).items.iter().all(|i| i.risk == Risk::Blocked && !i.ticked));
         // Without /tmp, nothing.
         assert!(shared_tmp_items(&Env { shared_tmp: None, ..clone_env(&env) }, &AtomicBool::new(false)).items.is_empty());
+    }
+
+    #[test]
+    fn a_folder_with_a_volume_mounted_in_it_is_seen_and_claude_codes_own_folders_are_not_offered() {
+        // "/" is always mounted, and so is /System/Volumes/Data under /System.
+        assert!(holds_mount(Path::new("/")) && holds_mount(Path::new("/System")));
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!holds_mount(&std::fs::canonicalize(dir.path()).unwrap()));
+        let (_dir, env, claude) = tmp_world(Some(vec![]));
+        let own = env.shared_tmp.clone().unwrap().join(format!("{claude}/bundled-skills"));
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(own.join("f"), vec![1u8; 10_000]).unwrap();
+        set_old(&own.join("f"), 10);
+        let items = shared_tmp_items_over(&env, &AtomicBool::new(false), 5000).items;
+        assert!(items.iter().all(|i| !i.name.ends_with("bundled-skills")));
     }
 
     #[test]
