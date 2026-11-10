@@ -18,9 +18,14 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 use std::time::Duration;
 
+/// The tool that sets the chat's checklist. `claude -p` has no TodoWrite, so this is how Claude keeps a plan the user sees.
+/// The helper only checks the list and answers: the window and phones read the plan from the call itself, in the stream
+/// (see stream_parser.rs), which is also why a reopened chat still has it.
+pub const CHECKLIST_TOOL: &str = "checklist_set";
+
 /// Tools every chat has that only say or show something, so they run without asking: Step by step's own instructions
-/// (`steps_guide`), and what the Changes pane compares while reviewing (`review_target`).
-pub const LANTERN_TOOLS: &[&str] = &["steps_guide", "review_target"];
+/// (`steps_guide`), what the Changes pane compares while reviewing (`review_target`), and the chat's checklist.
+pub const LANTERN_TOOLS: &[&str] = &["steps_guide", "review_target", CHECKLIST_TOOL];
 
 /// The tools only a Team's lead has (see orchestra.rs). Each returns at once: this helper answers one message at a
 /// time, so a call that waited would hold up the permission prompts behind it.
@@ -100,6 +105,11 @@ impl Server {
                 }
             }
             "steps_guide" => match steps_guide_text(args["flavour"].as_str().unwrap_or("")) {
+                Ok(text) => result_json(text, false),
+                Err(text) => result_json(text, true),
+            },
+            // The checklist is drawn from this call's own input (see CHECKLIST_TOOL), so the app is never asked.
+            CHECKLIST_TOOL => match checklist_says(args) {
                 Ok(text) => result_json(text, false),
                 Err(text) => result_json(text, true),
             },
@@ -299,6 +309,39 @@ impl ReviewTargetArgs {
             (None, None) => "The Changes pane shows the checked-out branch's changes now, against the branch Lantern finds it was built on.".into(),
         }
     }
+}
+
+/// Checks a checklist_set call and says what it did. The list is `todos`, as TodoWrite takes it: each line a `content`, a
+/// `status` (pending, in_progress or completed) and an optional `activeForm`. An empty list clears the checklist. The
+/// stream parser draws what the call carries, so what this refuses is what it would have dropped or bent.
+fn checklist_says(args: &Value) -> Result<String, String> {
+    const MAX_LINES: usize = 50;
+    const MAX_CHARS: usize = 200;
+    let list = args["todos"].as_array().ok_or("`todos` is a list of {content, status, activeForm}, the whole checklist each time. Nothing changed.")?;
+    if list.len() > MAX_LINES {
+        return Err(format!("A checklist has at most {MAX_LINES} lines, and this has {}. Nothing changed.", list.len()));
+    }
+    let mut done = 0;
+    for (i, line) in list.iter().enumerate() {
+        let n = i + 1;
+        match line["content"].as_str().map(str::trim) {
+            Some(c) if !c.is_empty() && c.chars().count() <= MAX_CHARS => {}
+            _ => return Err(format!("Line {n}: `content` is the step in one line of at most {MAX_CHARS} characters. Nothing changed.")),
+        }
+        match line["status"].as_str() {
+            Some("completed") => done += 1,
+            Some("pending" | "in_progress") => {}
+            _ => return Err(format!("Line {n}: `status` is pending, in_progress or completed. Nothing changed.")),
+        }
+        if !(line["activeForm"].is_null() || line["activeForm"].as_str().is_some_and(|f| f.chars().count() <= MAX_CHARS)) {
+            return Err(format!("Line {n}: `activeForm` is the step in the present tense (\"Writing tests\"), at most {MAX_CHARS} characters. Nothing changed."));
+        }
+    }
+    Ok(match (list.len(), done) {
+        (0, _) => "Checklist cleared.".into(),
+        (n, d) if d == n => format!("Checklist updated: all {n} done, so Lantern hides it."),
+        (n, d) => format!("Checklist updated: {d} of {n} done."),
+    })
 }
 
 /// Sends the request to the app and waits for the user's answer. Any failure means deny (and says `failed`).
@@ -893,10 +936,49 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("Lantern has no tool \"frobnicate\". Its tools here are: steps_guide, review_target, request_approval, network_requests"), "{text}");
-        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("todo_done, enter_worktree."), "{text}");
+        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("todo_done, enter_worktree, checklist_set."), "{text}");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
         let approve = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "approve").unwrap().clone();
         assert_eq!(approve["description"], "Internal: Claude Code's permission prompt. Lantern calls it for the CLI; never call it yourself.");
+    }
+
+    fn checklist_call(todos: Value) -> Value {
+        let msg = json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "checklist_set", "arguments": {"todos": todos}}});
+        handle_message(&msg, &|_| panic!("a checklist call must never reach the app")).unwrap()["result"].clone()
+    }
+
+    #[test]
+    fn a_checklist_call_is_checked_and_answered_by_the_helper_without_asking_the_app() {
+        let line = |c: &str, s: &str| json!({"content": c, "status": s, "activeForm": format!("Doing {c}")});
+        let ok = checklist_call(json!([line("a", "completed"), line("b", "in_progress"), line("c", "pending")]));
+        assert_eq!((ok["isError"].clone(), ok["content"][0]["text"].clone()), (json!(false), json!("Checklist updated: 1 of 3 done.")));
+        assert!(checklist_call(json!([line("a", "completed")]))["content"][0]["text"].as_str().unwrap().contains("all 1 done"));
+        assert_eq!(checklist_call(json!([]))["content"][0]["text"], "Checklist cleared.");
+        // The activeForm is optional.
+        assert_eq!(checklist_call(json!([{"content": "a", "status": "pending"}]))["isError"], false);
+        for (bad, why) in [
+            (json!([{"content": "  ", "status": "pending"}]), "Line 1: `content`"),
+            (json!([line("a", "pending"), {"content": "b", "status": "started"}]), "Line 2: `status`"),
+            (json!([{"content": "a", "status": "pending", "activeForm": 5}]), "Line 1: `activeForm`"),
+            (json!([{"content": "x".repeat(201), "status": "pending"}]), "Line 1: `content`"),
+            (json!((0..51).map(|i| line(&format!("s{i}"), "pending")).collect::<Vec<_>>()), "at most 50"),
+            (json!("a, b"), "`todos` is a list"),
+        ] {
+            let r = checklist_call(bad);
+            assert_eq!(r["isError"], true);
+            assert!(r["content"][0]["text"].as_str().unwrap().contains(why), "{r}");
+        }
+        let missing = handle_message(&json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "checklist_set", "arguments": {}}}), &|_| panic!("no app")).unwrap();
+        assert_eq!(missing["result"]["isError"], true);
+    }
+
+    #[test]
+    fn the_checklist_tool_is_listed_for_every_chat_and_runs_without_a_card() {
+        for offer in [Offer::default(), LEAD, Offer { git: true, ..Offer::default() }] {
+            let tools = handle_message_as(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all, offer).unwrap();
+            assert!(tool_names(&tools).contains(&"checklist_set".to_string()), "{offer:?}");
+        }
+        assert!(LANTERN_TOOLS.contains(&CHECKLIST_TOOL), "it is allowed up front, so Ask mode doesn't show a card for each update");
     }
 
     #[test]
@@ -913,7 +995,7 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).chain(crate::dashboard_tools::TOOLS.iter().copied()).chain(crate::todos::TOOLS.iter().copied()).chain([crate::workdir::TOOL]).collect();
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).chain(crate::dashboard_tools::TOOLS.iter().copied()).chain(crate::todos::TOOLS.iter().copied()).chain([crate::workdir::TOOL, CHECKLIST_TOOL]).collect();
         assert_eq!(tool_names(&handle_message_as(&list, &allow_all, Offer::default()).unwrap()), every_chats);
         let names = tool_names(&handle_message_as(&list, &allow_all, LEAD).unwrap());
         assert_eq!(names[..every_chats.len()], every_chats);

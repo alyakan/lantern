@@ -549,7 +549,7 @@ pub fn tool_list() -> Vec<Value> {
     vec![
         json!({
             "name": "todo_list",
-            "description": "The user's own to-do list for this project (shared by its worktrees, shown in Lantern's Todos tab): each item's id, title, note, due date and whether it is done. It is not your plan for this turn (TodoWrite). Read it when the user mentions their to-dos or asks you to work through them.",
+            "description": "The user's own to-do list for this project (shared by its worktrees, shown in Lantern's Todos tab): each item's id, title, note, due date and whether it is done. It is not your plan for this turn (checklist_set). Read it when the user mentions their to-dos or asks you to work through them.",
             "inputSchema": {"type": "object", "properties": {
                 "include_done": {"type": "boolean", "default": false, "description": "Also list the done items."}
             }, "additionalProperties": false}
