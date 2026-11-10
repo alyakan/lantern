@@ -104,7 +104,7 @@ fn checklist_tool() -> Value {
                 "content": {"type": "string", "maxLength": 200, "description": "The step, as an instruction: \"Run the tests\"."},
                 "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
                 "activeForm": {"type": "string", "maxLength": 200, "description": "The same step in the present tense, shown while it is in progress: \"Running the tests\"."}
-            }, "required": ["content", "status"], "additionalProperties": false}}
+            }, "required": ["content", "status"]}}
         }, "required": ["todos"], "additionalProperties": false}
     })
 }

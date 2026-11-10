@@ -314,7 +314,7 @@ impl ReviewTargetArgs {
 /// Checks a checklist_set call and says what it did. The list is `todos`, as TodoWrite takes it: each line a `content`, a
 /// `status` (pending, in_progress or completed) and an optional `activeForm`. An empty list clears the checklist. The
 /// stream parser draws what the call carries, so what this refuses is what it would have dropped or bent.
-fn checklist_says(args: &Value) -> Result<String, String> {
+pub fn checklist_says(args: &Value) -> Result<String, String> {
     const MAX_LINES: usize = 50;
     const MAX_CHARS: usize = 200;
     let list = args["todos"].as_array().ok_or("`todos` is a list of {content, status, activeForm}, the whole checklist each time. Nothing changed.")?;
