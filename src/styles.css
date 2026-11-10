@@ -2751,6 +2751,11 @@ button.review-unit:hover { background: var(--bg-hover); }
 .finding-code-row.del .finding-code-mark { color: var(--del); }
 .finding-code-row code { white-space: pre; color: var(--text); background: none; padding: 0; font: inherit; }
 .finding-code-open { height: var(--pill-s); padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+/* A review page's own diff, one closed card per file, under What changed. */
+.page-diffs { display: flex; flex-direction: column; gap: 2px; margin: 0 0 12px; }
+.page-diff { margin-top: 0; border-top: none; padding-top: 0; }
+.finding-code-row.gap { background: color-mix(in srgb, var(--muted) 8%, transparent); }
+.finding-code-gap { padding: 0 10px 0 calc(6ch + 8px); color: var(--muted); font-family: var(--ui); font-size: calc(11px * var(--font-scale)); }
 
 /* A finding under its line in the Changes pane's diff: the same card, smaller, marked as the review's. */
 .finding.in-diff { gap: 4px; padding: 6px 8px 7px 10px; background: var(--field); }
