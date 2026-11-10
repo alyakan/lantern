@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useFileLinks } from "../lib/fileLinks";
 import { clipLine, commentLines, linesOf, type DiffComment } from "../lib/diffComments";
 import { relativeTo } from "../lib/diff";
-import { diffRows, excerpt, type DiffRow } from "../lib/lineDiff";
+import { diffRows, excerpt, hunks, type DiffPiece, type DiffRow } from "../lib/lineDiff";
 import { useReviewDiffs } from "../lib/reviewDiffs";
 import type { Finding, ReviewFile, Severity, Verdict } from "../lib/review";
 import type { Flavour } from "../lib/flavour";
@@ -116,25 +116,124 @@ function FindingCode({ path, finding }: { path: string | null; finding: Finding 
           ) : loaded.rows.length === 0 ? (
             <div className="finding-code-note">This version of the file doesn't have {span}.</div>
           ) : (
-            <div className="finding-code-rows" role="table" aria-label={`${own} around ${span}`}>
-              {loaded.rows.map((r, i) => {
-                const no = r.kind === "del" ? r.oldNo : r.newNo;
-                const named = r.kind !== "del" && r.newNo >= from && r.newNo <= to;
-                return (
-                  <div key={i} role="row" className={`finding-code-row ${r.kind}${named ? " named" : ""}`}>
-                    <span role="cell" className="finding-code-no">
-                      {no}
-                    </span>
-                    <span role="cell" className="finding-code-mark" aria-label={r.kind === "add" ? "added" : r.kind === "del" ? "removed" : undefined}>
-                      {r.kind === "add" ? "+" : r.kind === "del" ? "−" : ""}
-                    </span>
-                    <code role="cell">{r.text || " "}</code>
-                  </div>
-                );
-              })}
-            </div>
+            <DiffLines pieces={[{ kind: "rows", rows: loaded.rows }]} label={`${own} around ${span}`} named={[from, to]} />
           )}
           <button className="ghost finding-code-open" onClick={() => links.open(file, from)}>
+            Open in the diff
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Diff rows with their numbers and +/− marks, and folded unchanged lines between them. `named`: new-file lines to mark. */
+function DiffLines({ pieces, label, named }: { pieces: DiffPiece[]; label: string; named?: [number, number] }) {
+  return (
+    <div className="finding-code-rows" role="table" aria-label={label}>
+      {pieces.map((p, at) =>
+        p.kind === "gap" ? (
+          <div key={at} role="row" className="finding-code-row gap">
+            <span role="cell" className="finding-code-gap">
+              ⋯ {p.lines} unchanged line{p.lines === 1 ? "" : "s"}
+            </span>
+          </div>
+        ) : (
+          p.rows.map((r, i) => {
+            const no = r.kind === "del" ? r.oldNo : r.newNo;
+            const mark = named && r.kind !== "del" && r.newNo >= named[0] && r.newNo <= named[1];
+            return (
+              <div key={`${at}-${i}`} role="row" className={`finding-code-row ${r.kind}${mark ? " named" : ""}`}>
+                <span role="cell" className="finding-code-no">
+                  {no}
+                </span>
+                <span role="cell" className="finding-code-mark" aria-label={r.kind === "add" ? "added" : r.kind === "del" ? "removed" : undefined}>
+                  {r.kind === "add" ? "+" : r.kind === "del" ? "−" : ""}
+                </span>
+                <code role="cell">{r.text || " "}</code>
+              </div>
+            );
+          })
+        ),
+      )}
+    </div>
+  );
+}
+
+/** Past this many rows a page's diff stops, and "Open in the diff" has the rest. */
+const PAGE_DIFF_ROWS = 400;
+
+type PageLoaded = { pieces: DiffPiece[]; cut: boolean } | { error: string } | { tooBig: true } | null;
+
+/**
+ * One of a page's files as a diff, in a card that stays shut until it is opened: its changes with a few lines around
+ * each, the unchanged lines between them folded. Nothing for a file that isn't among the changed files.
+ */
+function PageDiff({ path, named }: { path: string; named: boolean }) {
+  const links = useFileLinks();
+  const diffs = useReviewDiffs();
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<PageLoaded>(null);
+  const file = links ? links.resolve(path) : null;
+  useEffect(() => {
+    if (!open || !file || !diffs) return;
+    let live = true;
+    setLoaded(null);
+    diffs.load(file).then(
+      (d) => {
+        if (!live) return;
+        const rows = diffRows(d.original, d.current);
+        if (!rows) return setLoaded({ tooBig: true });
+        let left = PAGE_DIFF_ROWS;
+        let cut = false;
+        const pieces: DiffPiece[] = [];
+        for (const p of hunks(rows)) {
+          if (left <= 0) {
+            cut = true;
+            break;
+          }
+          if (p.kind === "gap") pieces.push(p);
+          else {
+            if (p.rows.length > left) cut = true;
+            pieces.push({ kind: "rows", rows: p.rows.slice(0, left) });
+            left -= p.rows.length;
+          }
+        }
+        setLoaded({ pieces, cut });
+      },
+      (e) => live && setLoaded({ error: String(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, file, diffs]);
+  if (!diffs || !file || !links) return null;
+  return (
+    <div className={`finding-code page-diff${open ? " open" : ""}`}>
+      <button className="finding-code-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="finding-code-chevron" aria-hidden>
+          ›
+        </span>
+        {open ? "Hide the diff" : "Show the diff"}
+        {named && <span className="finding-code-span">{path}</span>}
+      </button>
+      {open && (
+        <div className="finding-code-body">
+          {loaded === null ? (
+            <div className="finding-code-note">Loading…</div>
+          ) : "error" in loaded ? (
+            <div className="finding-code-note">Couldn't read the diff: {loaded.error}</div>
+          ) : "tooBig" in loaded ? (
+            <div className="finding-code-note">Too many changes to show here.</div>
+          ) : loaded.pieces.length === 0 ? (
+            <div className="finding-code-note">No changes in this file's text.</div>
+          ) : (
+            <>
+              <DiffLines pieces={loaded.pieces} label={`The diff of ${path}`} />
+              {loaded.cut && <div className="finding-code-note">The rest is in the diff.</div>}
+            </>
+          )}
+          <button className="ghost finding-code-open" onClick={() => links.open(file, null)}>
             Open in the diff
           </button>
         </div>
@@ -160,6 +259,13 @@ export function ReviewFileView({ file, verdicts, onVerdict }: { file: ReviewFile
             <Md>{file.changed}</Md>
           </div>
         </section>
+      )}
+      {(file.path ? [file.path] : file.files).length > 0 && (
+        <div className="page-diffs">
+          {(file.path ? [file.path] : file.files).map((p) => (
+            <PageDiff key={p} path={p} named={!file.path} />
+          ))}
+        </div>
       )}
       <section className="review-section">
         <div className="review-section-title">

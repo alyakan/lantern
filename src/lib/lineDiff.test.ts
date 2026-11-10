@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffRows, excerpt, type DiffRow } from "./lineDiff";
+import { diffRows, excerpt, hunks, type DiffRow } from "./lineDiff";
 
 const show = (rows: DiffRow[] | null) => rows?.map((r) => (r.kind === "ctx" ? ` ${r.newNo} ${r.text}` : r.kind === "add" ? `+${r.newNo} ${r.text}` : `-${r.oldNo} ${r.text}`));
 
@@ -54,5 +54,17 @@ describe("excerpt", () => {
 
   it("stops at its most rows", () => {
     expect(excerpt(rows, 1, 10, 0, 4)).toHaveLength(4);
+  });
+});
+
+describe("hunks", () => {
+  const ctx = (n: number): DiffRow => ({ kind: "ctx", oldNo: n, newNo: n, text: `l${n}` });
+  it("keeps each change with its context, folds what is between, and leaves out what is before the first and after the last", () => {
+    const rows: DiffRow[] = [...[1, 2, 3, 4, 5].map(ctx), { kind: "add", newNo: 6, text: "x" }, ...[7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(ctx), { kind: "del", oldNo: 17, text: "y" }, ...[18, 19].map(ctx)];
+    const pieces = hunks(rows, 2);
+    expect(pieces.map((p) => (p.kind === "gap" ? `gap ${p.lines}` : p.rows.map((r) => r.text).join(",")))).toEqual(["l4,l5,x,l7,l8", "gap 6", "l15,l16,y,l18,l19"]);
+  });
+  it("is nothing for a file with no changes", () => {
+    expect(hunks([1, 2, 3].map(ctx))).toEqual([]);
   });
 });

@@ -86,23 +86,40 @@ describe("file links", () => {
 
   describe("in a review", () => {
     const changed = ["/p/Lumiform/User/User.swift", "/p/Lumiform/Cart/Item.swift", "/p/Lumiform/Cart/User.swift"];
-    const resolveWith = (mentions: string[]) =>
-      render(
-        <FileLinksProvider slot="s1" folder="/p" epoch={0} onOpen={() => {}} changed={changed}>
-          {mentions.map((m) => <Probe key={m} mention={m} seen={() => {}} />)}
-        </FileLinksProvider>,
-      );
-
-    it("asks about whole paths only, a name cut short only when exactly one changed file ends in it", async () => {
+    it("takes a changed file as it is, and asks the backend about the rest, for whole paths only", async () => {
       vi.mocked(api.resolveFiles).mockClear();
       vi.mocked(api.resolveFiles).mockImplementation(async (_slot, mentions) => mentions.map(() => null));
-      resolveWith(["Item.swift", "User.swift", "Lumiform/User/User.swift", "Lumiform/Other.swift"]);
+      const seen = new Map<string, string | null | undefined>();
+      render(
+        <FileLinksProvider slot="s1" folder="/p" epoch={0} onOpen={() => {}} changed={changed}>
+          {["Item.swift", "User.swift", "Lumiform/User/User.swift", "Lumiform/Other.swift"].map((m) => (
+            <Probe key={m} mention={m} seen={(v) => seen.set(m, v)} />
+          ))}
+        </FileLinksProvider>,
+      );
       await waitFor(() => expect(api.resolveFiles).toHaveBeenCalledTimes(1));
       const [, asked, wholeOnly] = vi.mocked(api.resolveFiles).mock.calls[0];
-      // Item.swift is one changed file, so it means that one; User.swift is two, so it is left as it is (and the backend,
-      // asked for whole paths only, finds no file of that name); a whole path is the changed file it names.
-      expect([...asked].sort()).toEqual(["/p/Lumiform/Cart/Item.swift", "/p/Lumiform/User/User.swift", "Lumiform/Other.swift", "User.swift"]);
+      // Item.swift is one changed file, so it means that one; a whole path is the changed file it names. User.swift is two,
+      // so it is left to the backend, asked for whole paths only, which finds no file of that name.
+      expect([...asked].sort()).toEqual(["Lumiform/Other.swift", "User.swift"]);
       expect(wholeOnly).toBe(true);
+      await waitFor(() => expect(seen.get("Item.swift")).toBe("/p/Lumiform/Cart/Item.swift"));
+      expect(seen.get("Lumiform/User/User.swift")).toBe("/p/Lumiform/User/User.swift");
+      expect(seen.get("User.swift")).toBeNull();
+    });
+
+    it("links a reviewed file in a worktree outside the chat's folder, without asking the backend", async () => {
+      vi.mocked(api.resolveFiles).mockClear();
+      vi.mocked(api.resolveFiles).mockImplementation(async (_slot, mentions) => mentions.map(() => null));
+      const onOpen = vi.fn();
+      render(
+        <FileLinksProvider slot="s1" folder="/p/ios-app" epoch={0} onOpen={onOpen} changed={["/p/ios-app-wt/Lumiform/Utils/PhotoDecoder+UIKit.swift"]}>
+          <Markdown components={markdownComponents}>{"See `Lumiform/Utils/PhotoDecoder+UIKit.swift:21`."}</Markdown>
+        </FileLinksProvider>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Lumiform/Utils/PhotoDecoder+UIKit.swift:21" }));
+      expect(onOpen).toHaveBeenCalledWith("/p/ios-app-wt/Lumiform/Utils/PhotoDecoder+UIKit.swift", 21);
+      expect(api.resolveFiles).not.toHaveBeenCalled();
     });
 
     it("starts again when the reviewed files change (the pull request's files arrive after its pages)", async () => {

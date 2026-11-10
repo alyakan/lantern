@@ -64,15 +64,24 @@ export function FileLinksProvider({ slot, folder, epoch, onOpen, changed, childr
       const batch = [...lookups.queued];
       lookups.queued.clear();
       if (!batch.length || !folder || shown.current !== lookups) return;
-      const ask = changed ? batch.map((m) => matchChanged(changed, m, folder) ?? m) : batch;
+      // A reviewed file is the answer as it is: the backend listed it, and it may be in a worktree outside the chat's
+      // folder, which the backend's lookup (of the chat's folder) would never find.
+      const ask: string[] = [];
+      for (const m of batch) {
+        const found = changed ? matchChanged(changed, m, folder) : null;
+        if (found) lookups.known.set(m, found);
+        else ask.push(m);
+      }
+      if (ask.length < batch.length) setVersion((v) => v + 1);
+      if (!ask.length) return;
       api.resolveFiles(slot, ask, !!changed).then(
         (paths) => {
           if (shown.current !== lookups) return;
-          batch.forEach((m, i) => lookups.known.set(m, paths[i] ?? null));
+          ask.forEach((m, i) => lookups.known.set(m, paths[i] ?? null));
           setVersion((v) => v + 1);
         },
         () => {
-          if (shown.current === lookups) batch.forEach((m) => lookups.known.set(m, null));
+          if (shown.current === lookups) ask.forEach((m) => lookups.known.set(m, null));
         },
       );
     };

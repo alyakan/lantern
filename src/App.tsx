@@ -2052,6 +2052,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [reviewFilesKey, shownPr, shownBranch]);
   // The files links in a review's pages may mean: what is reviewed, so a name cut short can't open some other file.
   const reviewChanged = flavour === "review" && reviewing && peek === null ? (reviewPr !== null ? shownPr : shownBranch)?.files.map((f) => f.path) ?? [] : undefined;
+  // A link to a reviewed file a group page left out of the pane shows every file again, so it opens in the diff (the
+  // Files tab can't: the file may be in a worktree outside the chat's folder).
+  const openLink = (path: string, line: number | null) => {
+    if (!paneFiles.some((f) => f.path === path) && shownFiles.some((f) => f.path === path)) setAllFiles(true);
+    openMention(path, line);
+  };
 
   const selectFile = (path: string) => dispatch({ type: "select_file", path });
   const openFile = (path: string) => {
@@ -3531,7 +3537,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
                   <ErrorBoundary key={active} name="chat">
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
-                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention} changed={reviewChanged}>
+                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openLink} changed={reviewChanged}>
                       {stepsView ? (
                         <ReviewDiffsProvider value={reviewDiffs}>
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} onFindings={(findings) => setPageFindings({ slot: active, findings })} reviewNotes={{ items: diffComments[active] ?? [], remove: (ids) => updateComments((all) => all.filter((c) => !ids.includes(c.id))) }} />

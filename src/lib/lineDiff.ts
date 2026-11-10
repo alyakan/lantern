@@ -134,3 +134,31 @@ export function excerpt(rows: DiffRow[], from: number, to: number, context = 3, 
   while (begin > 0 && rows[begin - 1].kind === "del" && rows[first].kind === "add") begin--;
   return rows.slice(begin, last + 1).slice(0, max);
 }
+
+/** A stretch of a diff to show: rows (changed lines with their context), or a count of unchanged lines folded away. */
+export type DiffPiece = { kind: "rows"; rows: DiffRow[] } | { kind: "gap"; lines: number };
+
+/**
+ * A file's diff as a unified diff reads it: each change with `context` unchanged lines either side, and the unchanged
+ * lines between changes folded into gaps. No changes: no pieces.
+ */
+export function hunks(rows: DiffRow[], context = 3): DiffPiece[] {
+  const keep = new Array<boolean>(rows.length).fill(false);
+  rows.forEach((r, i) => {
+    if (r.kind === "ctx") return;
+    for (let k = Math.max(0, i - context); k <= Math.min(rows.length - 1, i + context); k++) keep[k] = true;
+  });
+  const pieces: DiffPiece[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const start = i;
+    const kept = keep[i];
+    while (i < rows.length && keep[i] === kept) i++;
+    if (kept) pieces.push({ kind: "rows", rows: rows.slice(start, i) });
+    else pieces.push({ kind: "gap", lines: i - start });
+  }
+  // Unchanged lines before the first change or after the last are left out, not folded: there is nothing past them.
+  if (pieces[0]?.kind === "gap") pieces.shift();
+  if (pieces[pieces.length - 1]?.kind === "gap") pieces.pop();
+  return pieces;
+}
