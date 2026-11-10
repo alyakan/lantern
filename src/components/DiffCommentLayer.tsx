@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { DiffOnMount, OnMount } from "@monaco-editor/react";
 import { basename } from "../lib/diff";
-import { commentId, kindOf, lineText, newLineOf, removedBlockAfter, type CommentControls, type LineChange } from "../lib/diffComments";
+import { commentId, findLine, kindOf, lineText, linesOf, newLineOf, removedBlockAfter, type CommentControls, type LineChange } from "../lib/diffComments";
+import type { Finding, Verdict } from "../lib/review";
+import { useSlot } from "../lib/slot";
 import { CommentBox, CommentNote, lineLabel } from "./DiffComments";
+import { FindingCard } from "./ReviewPages";
 
 type CodeEditor = Parameters<OnMount>[0];
 type DiffEd = Parameters<DiffOnMount>[0];
@@ -15,8 +18,11 @@ export type Surface = { kind: "diff"; diff: DiffEd; split: boolean } | { kind: "
 /** The editor's line height (FullDiff's option), for finding a removed line inside the block unified view draws. */
 export const LINE_HEIGHT = 19;
 
-/** Monaco's MouseTargetType, for the parts of an editor a line can be pointed at. */
-const T = { gutterZone: 5, contentZone: 8, lineParts: [2, 3, 4, 6, 7] };
+/** Monaco's MouseTargetType, for the parts of an editor a line can be pointed at, and the gutter's (where a click starts a comment). */
+const T = { gutterZone: 5, contentZone: 8, lineParts: [2, 3, 4, 6, 7], gutter: [2, 3, 4] };
+
+/** How long the "+" stays once the pointer leaves the editor, so it can be reached. */
+const LEAVE_MS = 300;
 
 /** Which editor a line was in: a diff's new side, its old side (side by side only), or the one editor of a whole file. */
 type Role = "modified" | "original" | "whole";
@@ -28,10 +34,26 @@ interface Anchor {
   left: number;
   height: number;
 }
-/** A comment being written. */
+/** A comment being written; `moved`: the line it was started on is gone, so it sits on the nearest one there is. */
 interface Draft {
   side: "new" | "old";
   line: number;
+  moved?: boolean;
+}
+
+/**
+ * The comment being written in each chat's diff of a file, kept while the diff isn't on screen (another file, another
+ * tab, the file read again): its line, that line's text (how it finds the line again) and what was written so far.
+ */
+const drafts = new Map<string, { side: "new" | "old"; line: number; lineText: string; text: string }>();
+/** Forget every kept draft (tests start from none). */
+export const forgetDrafts = () => drafts.clear();
+
+/** A finding of the review page on screen, drawn under its line in the diff, with the verdict buttons when it can take one. */
+export interface DiffFinding {
+  finding: Finding;
+  verdict: Verdict | undefined;
+  onVerdict?: (v: Verdict | null) => void;
 }
 
 /**
@@ -40,7 +62,7 @@ interface Draft {
  * code moves down for them. Every line number here is the one a comment is stored with: the new file's for added and
  * unchanged lines, the old file's for removed ones.
  */
-export function DiffCommentLayer({ path, original, modified, surface, monaco, comments }: { path: string; original: string; modified: string; surface: Surface; monaco: Monaco; comments: CommentControls }) {
+export function DiffCommentLayer({ path, original, modified, surface, monaco, comments, findings = [] }: { path: string; original: string; modified: string; surface: Surface; monaco: Monaco; comments: CommentControls; findings?: DiffFinding[] }) {
   const root = useRef<HTMLDivElement>(null);
   const where = basename(path);
   const [changes, setChanges] = useState<LineChange[] | null>(null);
@@ -49,7 +71,23 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
   const [focused, setFocused] = useState(false);
   // Whether the keys are in use rather than the pointer: only then does the cursor's line get a button of its own.
   const [keys, setKeys] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const slot = useSlot();
+  const draftKey = `${slot}\n${path}`;
+  // The kept draft of this file, on its line as the file is now: found again by its text, or the nearest line if it's gone.
+  const keptDraft = (): Draft | null => {
+    const kept = drafts.get(draftKey);
+    if (!kept) return null;
+    const lines = linesOf(kept.side === "old" ? original : modified);
+    const found = findLine(lines, kept.line, kept.lineText);
+    if (found !== null) {
+      if (found !== kept.line) drafts.set(draftKey, { ...kept, line: found });
+      return { side: kept.side, line: found };
+    }
+    const line = Math.max(1, Math.min(kept.line, lines.length));
+    drafts.set(draftKey, { ...kept, line, lineText: lines[line - 1] ?? "" });
+    return { side: kept.side, line, moved: true };
+  };
+  const [draft, setDraft] = useState<Draft | null>(keptDraft);
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const whole = surface.kind === "whole";
   const editors = useMemo<{ ed: CodeEditor; role: Role }[]>(() => (surface.kind === "diff" ? [{ ed: surface.diff.getModifiedEditor(), role: "modified" as const }, { ed: surface.diff.getOriginalEditor(), role: "original" as const }] : [{ ed: surface.editor, role: "whole" as const }]), [surface.kind === "diff" ? surface.diff : surface.editor]);
@@ -59,8 +97,36 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
   const live = useRef({ changes, split, original, modified, wholeSide });
   live.current = { changes, split, original, modified, wholeSide };
 
-  // A comment half written belongs to the file it was started in.
-  useEffect(() => setDraft(null), [path]);
+  // A comment half written belongs to the file it was started in, and follows its line when the file changes.
+  const drawn = useRef(draftKey + "\n" + original + "\n" + modified);
+  useEffect(() => {
+    const now = draftKey + "\n" + original + "\n" + modified;
+    if (drawn.current === now) return;
+    drawn.current = now;
+    setDraft(keptDraft());
+  }, [draftKey, original, modified]);
+  /** Start writing a comment on a line. One with words in it already isn't moved or thrown away by a stray click. */
+  const startDraft = (at: { side: "new" | "old"; line: number }) => {
+    if (drafts.get(draftKey)?.text.trim()) return;
+    const { original, modified } = live.current;
+    drafts.set(draftKey, { ...at, lineText: lineText(at.side === "old" ? original : modified, at.line), text: "" });
+    setDraft({ side: at.side, line: at.line });
+    setHover(null);
+  };
+  // The editors' handlers are set up once: they start a draft through this, which is always this render's.
+  const start = useRef(startDraft);
+  start.current = startDraft;
+  const endDraft = () => {
+    drafts.delete(draftKey);
+    setDraft(null);
+  };
+  // A box opened and left empty isn't kept for when the diff is back: only one with words in it is.
+  useEffect(
+    () => () => {
+      if (!drafts.get(draftKey)?.text.trim()) drafts.delete(draftKey);
+    },
+    [draftKey],
+  );
 
   // The diff's changed lines, read again each time Monaco has worked it out.
   useEffect(() => {
@@ -155,10 +221,19 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
           const mapped = line !== undefined && T.lineParts.includes(t.type) ? lineFor(role, line) : null;
           setHover(mapped ? anchorOf(ed, mapped.side, mapped.line) : role === "modified" && !live.current.split ? removedAt(ed, e) : null);
         }),
+        // A click anywhere in the gutter beside a line (its number, or the lane the "+" is in) starts a comment there,
+        // so the small button isn't the only way in. Also on a removed line of a unified diff.
+        ed.onMouseDown((e) => {
+          if (e.event.rightButton) return;
+          const t = e.target;
+          const line = t.position?.lineNumber;
+          const mapped = line !== undefined && T.gutter.includes(t.type) ? lineFor(role, line) : t.type === T.gutterZone && role === "modified" && !live.current.split ? removedAt(ed, e) : null;
+          if (mapped) start.current({ side: mapped.side, line: mapped.line });
+        }),
         // The pointer going to the button leaves the editor too: the button keeps the line for a moment.
         ed.onMouseLeave(() => {
           clearTimeout(leaving.current);
-          leaving.current = setTimeout(() => setHover(null), 150);
+          leaving.current = setTimeout(() => setHover(null), LEAVE_MS);
         }),
         ed.onDidScrollChange(() => {
           setHover(null);
@@ -191,7 +266,7 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
     const { changes } = live.current;
     if (line === undefined) return;
     const m = lineFor(role, line) ?? (role === "original" && changes ? { side: "new" as const, line: newLineOf(line, changes) } : null);
-    if (m) setDraft(m);
+    if (m) start.current(m);
   };
 
   // The focus being anywhere in the diff pane shows the cursor's button, so Tab from the editor reaches it.
@@ -236,15 +311,21 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
 
   const draftPlace = draft && placeFor(draft.side, draft.line, 50);
   const mine = comments.items.filter((c) => c.path === path && !c.outdated);
-  const add = (text: string) => {
+  // `now`: a Review's Fix now, which sends it to Claude instead of keeping it.
+  const add = (text: string, now = false) => {
     if (!draft) return;
     const { side, line } = draft;
     const kind = side === "old" ? "removed" : whole ? "added" : kindOf("new", line, changes ?? []);
-    comments.update((all) => [...all, { id: commentId(), path, side, line, lineText: textOf(side, line), kind, text }]);
-    setDraft(null);
+    const comment = { id: commentId(), path, side, line, lineText: textOf(side, line), kind, text };
+    if (now) comments.review?.fixNow?.(comment);
+    else comments.update((all) => [...all, comment]);
+    endDraft();
     draftPlace?.ed.focus();
   };
   const draftLabel = draft ? `Comment on ${lineLabel(draft).toLowerCase()} of ${where}` : "";
+  // The review's findings sit on the new file's lines: not on a deleted file, and not past the end of this version.
+  const newLines = whole && wholeSide === "old" ? 0 : linesOf(modified).length;
+  const shownFindings = findings.filter((f) => f.finding.line !== null && (f.finding.lineEnd ?? f.finding.line) <= newLines);
 
   return (
     <div className="diff-comment-layer" ref={root}>
@@ -257,14 +338,22 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
           title="Comment on this line (C)"
           onMouseEnter={() => clearTimeout(leaving.current)}
           onMouseLeave={() => setHover(null)}
-          onClick={() => {
-            setDraft({ side: shown.side, line: shown.line });
-            setHover(null);
-          }}
+          onClick={() => startDraft({ side: shown.side, line: shown.line })}
         >
           +
         </button>
       )}
+      {shownFindings.map((f) => {
+        // Under the last line it is about, ahead of the user's own comments there.
+        const p = placeFor("new", f.finding.lineEnd ?? f.finding.line!, -40);
+        return (
+          p && (
+            <Zone key={`finding-${f.finding.index}`} editor={p.ed} clip={clips?.get(p.ed)} after={p.after} ordinal={p.ordinal}>
+              <FindingCard path={null} finding={f.finding} verdict={f.verdict} onVerdict={f.onVerdict} inDiff />
+            </Zone>
+          )
+        );
+      })}
       {mine.map((c) => {
         const p = placeFor(c.side, c.line);
         return (
@@ -285,9 +374,16 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
         <Zone key="draft" editor={draftPlace.ed} clip={clips?.get(draftPlace.ed)} after={draftPlace.after} ordinal={draftPlace.ordinal}>
           <CommentBox
             label={draftLabel}
+            initial={drafts.get(draftKey)?.text ?? ""}
+            notice={draft.moved ? `The line you started this on has changed, so it now sits on ${lineLabel(draft).toLowerCase()}.` : null}
+            onChange={(text) => {
+              const kept = drafts.get(draftKey);
+              if (kept) drafts.set(draftKey, { ...kept, text });
+            }}
+            review={comments.review ? { onFixNow: (text) => add(text, true), fixOff: comments.review.fixNow ? null : "Claude can't take a message right now." } : undefined}
             onSave={add}
             onCancel={() => {
-              setDraft(null);
+              endDraft();
               draftPlace.ed.focus();
             }}
           />

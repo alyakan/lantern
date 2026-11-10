@@ -126,6 +126,87 @@ export function parseReviewFile(title: string | null, text: string, files: reado
   return { ...file, files: [...files], preface: parts[0].trim(), changed: (sections.get("what changed") ?? "").trim(), findings, clean, notes: (sections.get("notes") ?? "").trim() };
 }
 
+/** A unit the Frame plans, in walk order: its number (its page is "File N of M"), what it is, its counts and why to look. */
+export interface FrameUnit {
+  n: number;
+  /** A file's repo-relative path, or a group's title. */
+  title: string;
+  added: number | null;
+  removed: number | null;
+  note: string;
+}
+
+/** A risk the Frame names: in a few words, why it could go wrong, and the units it is in. */
+export interface FrameRisk {
+  title: string;
+  text: string;
+  units: number[];
+}
+
+/** A Review's Frame, as Lantern draws it: what comes before the sections, the planned units, the risks, and any other section as written. */
+export interface ReviewFrame {
+  preface: string;
+  units: FrameUnit[];
+  risks: FrameRisk[];
+  /** The Frame's other sections, headings and all (what is skipped, ...). */
+  rest: string;
+}
+
+const UNIT = /^\s*(\d+)[.)]\s+(.+)$/;
+const COUNTS = /^(.*?)\s*\(\s*\+(\d+)\s*[−–-]\s*(\d+)\s*\)\s*(?:[—–]|-{1,2})?\s*(.*)$/;
+const RISK = /^\s*[-*]\s+(.+)$/;
+const RISK_UNITS = /\s*\(\s*units?\s+([\d\s,–-]+(?:\s*and\s*\d+)?)\s*\)\s*\.?\s*$/i;
+const plain = (s: string) => s.replace(/\*\*/g, "").replace(/^`|`$/g, "").trim();
+
+/**
+ * The Frame of a Review, when it has the sections Lantern reads (`### Units`, a line per unit: `N. <path or group title>
+ * (+added −removed) — <why to look>`; `### Risks`, a line per risk: `- <risk>: <why> (units 2, 4)`, or "None."). Null
+ * when it has neither (an older Frame): the page then reads as Claude wrote it.
+ */
+export function parseReviewFrame(text: string): ReviewFrame | null {
+  const parts = withoutCue(text).split(/^###\s+(.+)$/m);
+  let units: FrameUnit[] | null = null;
+  let risks: FrameRisk[] | null = null;
+  const rest: string[] = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    const name = parts[i].trim().toLowerCase();
+    const body = parts[i + 1] ?? "";
+    if (name === "units") {
+      units = body.split("\n").flatMap((line): FrameUnit[] => {
+        const m = UNIT.exec(line);
+        if (!m) return [];
+        const c = COUNTS.exec(m[2]);
+        if (c) return [{ n: Number(m[1]), title: plain(c[1]), added: Number(c[2]), removed: Number(c[3]), note: c[4].trim() }];
+        const [title, ...note] = m[2].split(/\s+[—–]\s+/);
+        return [{ n: Number(m[1]), title: plain(title), added: null, removed: null, note: note.join(" — ").trim() }];
+      });
+    } else if (name === "risks") {
+      risks = body.split("\n").flatMap((line): FrameRisk[] => {
+        const m = RISK.exec(line);
+        if (!m) return [];
+        const u = RISK_UNITS.exec(m[1]);
+        const said = u ? m[1].slice(0, u.index) : m[1];
+        const numbers = u ? expandUnits(u[1]) : [];
+        const colon = said.indexOf(":");
+        return colon > 0 ? [{ title: plain(said.slice(0, colon)), text: said.slice(colon + 1).trim(), units: numbers }] : [{ title: plain(said), text: "", units: numbers }];
+      });
+    } else rest.push(`### ${parts[i].trim()}\n${body.trim()}`);
+  }
+  if (units === null && risks === null) return null;
+  return { preface: parts[0].trim(), units: units ?? [], risks: risks ?? [], rest: rest.join("\n\n") };
+}
+
+/** "2, 4–6 and 9" → [2, 4, 5, 6, 9]. */
+function expandUnits(list: string): number[] {
+  const out: number[] = [];
+  for (const piece of list.split(/,|\band\b/)) {
+    const range = /^\s*(\d+)\s*[–-]\s*(\d+)\s*$/.exec(piece);
+    if (range) for (let n = Number(range[1]); n <= Number(range[2]) && out.length < 100; n++) out.push(n);
+    else if (/^\s*\d+\s*$/.test(piece)) out.push(Number(piece));
+  }
+  return out;
+}
+
 /**
  * The pull request a review is about: "#128" in the Frame heading, or "PR 128", "PR #128" or ".../pull/128" in what
  * was asked. The latest mention wins, so a second review in the same chat moves on to its PR.
@@ -209,6 +290,16 @@ export function matchChanged(changed: readonly string[], mention: string, folder
 }
 
 export type Verdict = "agree" | "reject";
+
+/** The findings of the review page on screen, for the Changes pane to draw under their lines in the diff. */
+export interface PageFindings {
+  /** The page they are on. */
+  page: string;
+  /** Each with the file it is in, as the page names it (repo-relative), and your verdict so far. */
+  items: { path: string; finding: Finding; verdict: Verdict | undefined }[];
+  /** Set a verdict: only while the page can take one (the newest page, while Claude isn't working). */
+  onVerdict?: (index: number, v: Verdict | null) => void;
+}
 
 const where = (f: Finding) => {
   if (f.line === null) return `finding ${f.index + 1}`;

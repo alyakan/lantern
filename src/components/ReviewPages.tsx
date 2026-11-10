@@ -1,4 +1,9 @@
+import { useEffect, useState } from "react";
 import { useFileLinks } from "../lib/fileLinks";
+import { clipLine, commentLines, linesOf, type DiffComment } from "../lib/diffComments";
+import { relativeTo } from "../lib/diff";
+import { diffRows, excerpt, type DiffRow } from "../lib/lineDiff";
+import { useReviewDiffs } from "../lib/reviewDiffs";
 import type { Finding, ReviewFile, Severity, Verdict } from "../lib/review";
 import type { Flavour } from "../lib/flavour";
 import { DocIcon, HudCheckIcon } from "./icons";
@@ -25,13 +30,18 @@ function LineChip({ path, finding }: { path: string | null; finding: Finding }) 
   );
 }
 
-export function FindingCard({ path, finding, verdict, onVerdict }: { path: string | null; finding: Finding; verdict: Verdict | undefined; onVerdict?: (v: Verdict | null) => void }) {
+/**
+ * A finding with its verdict buttons (only while it can take one). `inDiff`: drawn under its line in the Changes pane's
+ * diff, where the line needs no link and the card is smaller.
+ */
+export function FindingCard({ path, finding, verdict, onVerdict, inDiff = false }: { path: string | null; finding: Finding; verdict: Verdict | undefined; onVerdict?: (v: Verdict | null) => void; inDiff?: boolean }) {
   const sev = finding.severity;
   return (
-    <div className={`finding${sev ? ` sev-${sev}` : ""}${verdict ? ` verdict-${verdict}` : ""}`}>
+    <div className={`finding${sev ? ` sev-${sev}` : ""}${verdict ? ` verdict-${verdict}` : ""}${inDiff ? " in-diff" : ""}`} role={inDiff ? "group" : undefined} aria-label={inDiff ? `Finding${sev ? `, ${SEVERITY[sev].toLowerCase()}` : ""}` : undefined}>
       <div className="finding-head">
+        {inDiff && <span className="finding-from">Review</span>}
         {sev && <span className="finding-sev">{SEVERITY[sev]}</span>}
-        <LineChip path={path} finding={finding} />
+        {!inDiff && <LineChip path={path} finding={finding} />}
         <span className="spacer" />
         {onVerdict ? (
           <span className="finding-verdict" role="group" aria-label="Your verdict">
@@ -49,6 +59,86 @@ export function FindingCard({ path, finding, verdict, onVerdict }: { path: strin
       <div className="finding-text">
         <Md>{finding.text}</Md>
       </div>
+      {!inDiff && <FindingCode path={path} finding={finding} />}
+    </div>
+  );
+}
+
+type Loaded = { rows: DiffRow[] } | { error: string } | null;
+
+/**
+ * A finding's lines from the diff, in a card that stays shut until it is opened: the lines it names, a few around them,
+ * and what was removed there. "Open in the diff" takes the Changes pane to them. Nothing for a finding with no line, or
+ * one whose file isn't among the changed files.
+ */
+function FindingCode({ path, finding }: { path: string | null; finding: Finding }) {
+  const links = useFileLinks();
+  const diffs = useReviewDiffs();
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<Loaded>(null);
+  const own = finding.path ?? path;
+  const file = own && links ? links.resolve(own) : null;
+  const from = finding.line;
+  const to = finding.lineEnd ?? finding.line;
+  useEffect(() => {
+    if (!open || !file || !diffs || from === null || to === null) return;
+    let live = true;
+    setLoaded(null);
+    diffs.load(file).then(
+      (d) => {
+        if (!live) return;
+        const rows = diffRows(d.original, d.current) ?? linesOf(d.current).map((text, i): DiffRow => ({ kind: "ctx", oldNo: i + 1, newNo: i + 1, text }));
+        setLoaded({ rows: excerpt(rows, from, to) });
+      },
+      (e) => live && setLoaded({ error: String(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, file, diffs, from, to]);
+  if (from === null || to === null || !diffs || !file || !links) return null;
+  const span = from === to ? `line ${from}` : `lines ${from}–${to}`;
+  return (
+    <div className={`finding-code${open ? " open" : ""}`}>
+      <button className="finding-code-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="finding-code-chevron" aria-hidden>
+          ›
+        </span>
+        {open ? "Hide the code" : "Show the code"}
+        <span className="finding-code-span">{span}</span>
+      </button>
+      {open && (
+        <div className="finding-code-body">
+          {loaded === null ? (
+            <div className="finding-code-note">Loading…</div>
+          ) : "error" in loaded ? (
+            <div className="finding-code-note">Couldn't read the diff: {loaded.error}</div>
+          ) : loaded.rows.length === 0 ? (
+            <div className="finding-code-note">This version of the file doesn't have {span}.</div>
+          ) : (
+            <div className="finding-code-rows" role="table" aria-label={`${own} around ${span}`}>
+              {loaded.rows.map((r, i) => {
+                const no = r.kind === "del" ? r.oldNo : r.newNo;
+                const named = r.kind !== "del" && r.newNo >= from && r.newNo <= to;
+                return (
+                  <div key={i} role="row" className={`finding-code-row ${r.kind}${named ? " named" : ""}`}>
+                    <span role="cell" className="finding-code-no">
+                      {no}
+                    </span>
+                    <span role="cell" className="finding-code-mark" aria-label={r.kind === "add" ? "added" : r.kind === "del" ? "removed" : undefined}>
+                      {r.kind === "add" ? "+" : r.kind === "del" ? "−" : ""}
+                    </span>
+                    <code role="cell">{r.text || " "}</code>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <button className="ghost finding-code-open" onClick={() => links.open(file, from)}>
+            Open in the diff
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -167,14 +257,69 @@ export interface ReviewedFinding {
   path: string | null;
   finding: Finding;
   verdict: Verdict | undefined;
+  /** Go back to the page the finding is on. */
+  onRevisit?: () => void;
+}
+
+/** A Review's notes on the diff's lines, kept for its end: listed on the summary, and sent with Fix them or Write it up. */
+export interface SummaryNotes {
+  items: DiffComment[];
+  folder: string | null;
+  /** Take notes away: one deleted, or all of them once an action has sent them. */
+  remove: (ids: string[]) => void;
+}
+
+/** The notes kept from the diff, on the summary: where each is (opening the diff there) and what it says, each deletable. */
+function NotesLedger({ notes }: { notes: SummaryNotes }) {
+  const links = useFileLinks();
+  return (
+    <section className="review-section review-notes-ledger" aria-label="Your notes">
+      <div className="review-section-title">
+        Your notes<span className="tab-count">{notes.items.length}</span>
+      </div>
+      <ul>
+        {notes.items.map((c) => {
+          const where = `${relativeTo(c.path, notes.folder)}:${c.line}${c.side === "old" ? " (before)" : ""}`;
+          return (
+            <li key={c.id} className="review-note">
+              <div className="review-note-head">
+                {links ? (
+                  <button className="finding-line link" title={`Open ${where} in the diff`} onClick={() => links.open(c.path, c.side === "old" || c.outdated ? null : c.line)}>
+                    {where}
+                  </button>
+                ) : (
+                  <span className="finding-line">{where}</span>
+                )}
+                {c.outdated && <span className="diff-comment-tag">Outdated</span>}
+                <span className="spacer" />
+                <button className="ghost" aria-label={`Delete your note on ${where}`} onClick={() => notes.remove([c.id])}>
+                  Delete
+                </button>
+              </div>
+              {c.lineText.trim() !== "" && <code className="diff-comment-quote">{clipLine(c.lineText)}</code>}
+              <div className="review-note-text">{c.text}</div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
 }
 
 /** The summary page's table: every finding across the files, with its severity and your verdict. */
 // The actions send a message, so they wait while Claude works: a message sent then would skip the composer's queue.
 // Start Build and Fix them switch the chat to Build with the message they send.
-export function ReviewSummaryTable({ rows, onAction, busy = false, architecture = false }: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy?: boolean; architecture?: boolean }) {
+export function ReviewSummaryTable({ rows, onAction, busy = false, architecture = false, notes }: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy?: boolean; architecture?: boolean; notes?: SummaryNotes }) {
   const counts = (s: Severity) => rows.filter((r) => r.finding.severity === s).length;
   const agreed = rows.filter((r) => r.verdict === "agree").length;
+  const kept = notes?.items ?? [];
+  // An action takes the notes along, and they are done with once it is sent.
+  const withNotes = (text: string, intro: string) => (kept.length ? `${text}\n\n${intro}\n\n${commentLines(kept, notes!.folder)}` : text);
+  const act = (text: string, switchTo?: Flavour) => {
+    if (switchTo) onAction(text, switchTo);
+    else onAction(text);
+    if (kept.length) notes!.remove(kept.map((c) => c.id));
+  };
   return (
     <div className="review-summary">
       <div className="review-summary-counts">
@@ -198,7 +343,17 @@ export function ReviewSummaryTable({ rows, onAction, busy = false, architecture 
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={r.verdict === "reject" ? "rejected" : ""}>
-                <td className="review-table-file">{architecture ? r.path : r.path?.split("/").pop()}</td>
+                <td className="review-table-file">
+                  {r.onRevisit ? (
+                    <button className="review-revisit" title={`Back to the page of ${r.path ?? "this finding"}`} onClick={r.onRevisit}>
+                      {architecture ? r.path : r.path?.split("/").pop()}
+                    </button>
+                  ) : architecture ? (
+                    r.path
+                  ) : (
+                    r.path?.split("/").pop()
+                  )}
+                </td>
                 {!architecture && <td>{r.finding.line ?? "–"}</td>}
                 <td>
                   {r.finding.severity && <span className={`finding-sev sev-${r.finding.severity}`}>{SEVERITY[r.finding.severity]}</span>} <Md inline>{r.finding.text.split("\n")[0]}</Md>
@@ -214,6 +369,7 @@ export function ReviewSummaryTable({ rows, onAction, busy = false, architecture 
           {architecture ? "No concerns in any part" : "No findings in any file"}
         </div>
       )}
+      {kept.length > 0 && <NotesLedger notes={notes!} />}
       <div className="review-actions">
         {architecture ? (
           <>
@@ -226,10 +382,10 @@ export function ReviewSummaryTable({ rows, onAction, busy = false, architecture 
           </>
         ) : (
           <>
-            <button className="primary" disabled={busy} onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
+            <button className="primary" disabled={busy} title={kept.length ? "Your notes on the diff go in it too" : undefined} onClick={() => act(withNotes("Write it up: put the accepted findings in a local file, grouped by file.", "Put my own notes from the diff in it too:"))}>
               Write it up
             </button>
-            <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.", "build")}>
+            <button disabled={busy} title={kept.length ? "Your notes on the diff go into the plan too" : undefined} onClick={() => act(withNotes("Fix them: hand the accepted findings to incremental-dev as the plan.", "Add my own notes from the diff to the plan:"), "build")}>
               Fix them
             </button>
           </>

@@ -16,9 +16,11 @@ import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
-import { isVerdictNext, parseReviewFile, recallVerdicts, rememberVerdicts, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
+import { isVerdictNext, parseReviewFile, parseReviewFrame, recallVerdicts, rememberVerdicts, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue, type PageFindings, type ReviewFile, type ReviewFrame, type Verdict } from "../lib/review";
+import { ReviewFrameView, ReviewRoute, unitName, type RouteStop } from "./ReviewDesk";
+import type { DiffComment } from "../lib/diffComments";
 import { unreadReply } from "../lib/pageNote";
-import { ReviewFileHeader, ReviewFileView, ReviewGroupHeader, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
+import { ReviewFileHeader, ReviewFileView, ReviewGroupHeader, ReviewSummaryTable, type ReviewedFinding, type SummaryNotes } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
 import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
 import { PHASES, phasesOf } from "../lib/phases";
@@ -36,6 +38,14 @@ function reviewOf(page: StepPage): ReviewFile | null {
   const main = page.turns[page.main];
   const msg = main.items.find((it) => it.id === main.messageId);
   return msg?.type === "assistant" ? parseReviewFile(page.heading.title, msg.text, page.heading.files) : null;
+}
+
+/** A Review Frame's units and risks, if its message has the sections Lantern reads (an older Frame doesn't). */
+function frameOf(page: StepPage): ReviewFrame | null {
+  if (page.heading?.kind !== "frame") return null;
+  const main = page.turns[page.main];
+  const msg = main.items.find((it) => it.id === main.messageId);
+  return msg?.type === "assistant" ? parseReviewFrame(msg.text) : null;
 }
 
 /** An Architecture part page's parts, if its message has the sections. */
@@ -69,6 +79,10 @@ interface Props extends StreamHandlers {
   jump?: { page: string; key: number } | null;
   /** What the Done page hands off to (the side panel, the export, a new chat); without it the page has no actions. */
   handoff?: Handoff;
+  /** Review: the findings of the page that came to rest, for the Changes pane to draw under their lines (null: none). */
+  onFindings?: (findings: PageFindings | null) => void;
+  /** Review: the notes the user left on the diff's lines, kept for the summary, and how to take some away once they are sent. */
+  reviewNotes?: { items: DiffComment[]; remove: (ids: string[]) => void };
 }
 
 const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
@@ -76,7 +90,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, handoff, ...handlers }: Props) {
+export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, handoff, onFindings, reviewNotes, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -243,10 +257,31 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
       else delete page[index];
       return { ...all, [pageKey]: page };
     });
+  // The resting page's findings go to the Changes pane's diff, with its verdicts; one set there is set here too.
+  const restingIndex = Math.min(settled, last);
+  const restingReview = review && restingPage ? reviewOf(restingPage) : null;
+  const canVote = restingIndex === last && !running;
+  const vote = useRef((index: number, v: Verdict | null) => restingPage && setVerdict(restingPage.key, index, v));
+  vote.current = (index, v) => restingPage && setVerdict(restingPage.key, index, v);
+  const findingItems = (restingReview?.findings ?? []).flatMap((f) => {
+    const path = f.path ?? restingReview?.path ?? (restingReview?.files.length === 1 ? restingReview.files[0] : null);
+    return path ? [{ path, finding: f, verdict: verdicts[restingPage!.key]?.[f.index] }] : [];
+  });
+  const findingsKey = restingPage && findingItems.length ? JSON.stringify([restingPage.key, canVote, findingItems.map((it) => [it.path, it.finding.index, it.finding.line, it.finding.lineEnd, it.finding.text, it.verdict])]) : "";
+  const latestFindings = useRef(onFindings);
+  latestFindings.current = onFindings;
+  useEffect(() => {
+    if (!latestFindings.current) return;
+    latestFindings.current(findingsKey ? { page: restingPage!.key, items: findingItems, onVerdict: canVote ? (index, v) => vote.current(index, v) : undefined } : null);
+  }, [findingsKey]);
+  useEffect(() => () => latestFindings.current?.(null), []);
   const currentReview = page ? (reviewOf(page)?.findings ?? partOf(page)?.concerns ?? null) : null;
   // A part's concerns the user has answered (agreed or rejected), of all it has.
   const concernCount = page ? (partOf(page)?.concerns.length ?? 0) : 0;
   const answeredCount = page ? Object.keys(verdicts[page.key] ?? {}).length : 0;
+  // Review: the findings on the page on screen, and the notes on the diff kept for the summary.
+  const reviewCount = review && page ? (reviewOf(page)?.findings.length ?? 0) : 0;
+  const notesCount = reviewNotes?.items.length ?? 0;
   // The latest reply, when it looked like a page but Lantern couldn't read it as one: said under the newest page.
   const unread = !!flavour && unreadReply(state.items) !== null && !running;
   const next = () => {
@@ -255,11 +290,41 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   };
   // Every finding across the reviewed files, for the summary page.
   const reviewed: ReviewedFinding[] = review
-    ? pages.flatMap((p) => {
+    ? pages.flatMap((p, i) => {
         const r = reviewOf(p);
-        return r ? r.findings.map((f) => ({ path: f.path ?? r.path ?? r.group, finding: f, verdict: verdicts[p.key]?.[f.index] })) : [];
+        return r ? r.findings.map((f) => ({ path: f.path ?? r.path ?? r.group, finding: f, verdict: verdicts[p.key]?.[f.index], onRevisit: () => go(i) })) : [];
       })
     : [];
+
+  // Review's route: the Frame, each planned unit (from the Frame's Units, or else the pages' "File N of M"), the Summary.
+  const lastOf = (match: (p: StepPage) => boolean) => {
+    for (let i = last; i >= 0; i--) if (match(pages[i])) return i;
+    return null;
+  };
+  const framePage = review ? lastOf((p) => p.heading?.kind === "frame") : null;
+  const reviewFrame = framePage !== null ? frameOf(pages[framePage]) : null;
+  const unitPage = (n: number) => lastOf((p) => p.heading?.kind === "file" && p.heading.n === n);
+  const route: RouteStop[] = [];
+  if (review) {
+    // Every unit there is word of: the Frame's, the pages' own "File N of M" (Claude may add a unit after the Frame), up to the last M.
+    const filePages = pages.filter((p) => p.heading?.kind === "file");
+    const total = Math.max(0, ...filePages.map((p) => Math.max(p.heading?.total ?? 0, p.heading?.n ?? 0)), ...(reviewFrame?.units.map((u) => u.n) ?? []));
+    const framed = new Map((reviewFrame?.units ?? []).map((u) => [u.n, u.title]));
+    const planned = Array.from({ length: total }, (_, i) => ({ n: i + 1, title: framed.get(i + 1) ?? "" }));
+    route.push({ key: "frame", kind: "frame", label: "Frame", title: "The Frame: what the change is, its risks and the route", page: framePage });
+    for (const u of planned) {
+      const at = unitPage(u.n);
+      const r = at !== null ? reviewOf(pages[at]) : null;
+      const shown = r ? (r.group ?? r.path ?? "") : "";
+      const title = u.title || shown || `Unit ${u.n}`;
+      route.push({ key: `unit-${u.n}`, kind: "unit", n: u.n, label: u.title || shown ? unitName(title) : `Unit ${u.n}`, title, page: at, findings: r?.findings.length, open: r ? r.findings.filter((f) => !verdicts[pages[at!].key]?.[f.index]).length : undefined });
+    }
+    route.push({ key: "summary", kind: "summary", label: "Summary", title: "The Summary: every finding and your notes", page: lastOf((p) => p.heading?.kind === "summary") });
+  }
+  const openUnit = (n: number) => {
+    const i = unitPage(n);
+    return i === null ? null : () => go(i);
+  };
 
   // Architecture: every concern across the parts, for the summary page.
   const concerns: ReviewedFinding[] = arch
@@ -273,6 +338,7 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   return (
     <div className="steps-view">
       <div className="steps-head">
+        {review ? <ReviewRoute stops={route} at={at} onGo={go} /> : (
         <nav className="steps-phases" aria-label="Progress">
           {phases.map((phase, n) => {
             const where = n === phaseAt ? "current" : n < phaseAt ? "past" : "next";
@@ -310,6 +376,7 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
             );
           })}
         </nav>
+        )}
         {state.backgroundTasks.length > 0 && (
           <span className="steps-background" title={`Still running in the background:\n${state.backgroundTasks.map((t) => t.description).join("\n")}`}>
             <span className="spinner" aria-hidden />
@@ -342,11 +409,13 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
                   live={i === last && running}
                   teach={teach}
                   review={review}
+                  frame={review && i === framePage ? reviewFrame : null}
+                  onUnit={openUnit}
                   arch={arch}
                   suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined, agent: agentName(state.provider) } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
-                  summary={p.heading?.kind === "summary" && onSend ? { rows: arch ? concerns : reviewed, onAction: onSend, busy: running, architecture: arch } : null}
+                  summary={p.heading?.kind === "summary" && onSend ? { rows: arch ? concerns : reviewed, onAction: onSend, busy: running, architecture: arch, notes: review && reviewNotes ? { ...reviewNotes, folder: state.folder } : undefined } : null}
                   handoff={p.heading?.kind === "done" ? handoff : undefined}
                   onHandoffSend={i === last && !running ? onSend : undefined}
                   folder={state.folder}
@@ -383,6 +452,11 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
             <span className="steps-hint">Start it, or pick another</span>
           ) : (
             <>
+            {review && (heading?.kind === "file" || notesCount > 0) && (
+              <span className="steps-answered" aria-live="polite">
+                {[heading?.kind === "file" && reviewCount > 0 ? `${answeredCount} of ${reviewCount} finding${reviewCount === 1 ? "" : "s"} decided` : heading?.kind === "file" ? "No findings here" : "", notesCount > 0 ? `${notesCount} note${notesCount === 1 ? "" : "s"} for the summary` : ""].filter(Boolean).join(" · ")}
+              </span>
+            )}
             {arch && heading?.kind === "part" && concernCount > 0 && (
               <span className="steps-answered" aria-live="polite">
                 {answeredCount} of {concernCount} concern{concernCount === 1 ? "" : "s"} answered
@@ -416,6 +490,9 @@ interface PageProps extends StreamHandlers {
   live: boolean;
   teach: boolean;
   review: boolean;
+  /** A Review's Frame with the sections Lantern reads, drawn as its risks and route; how to open a unit's page (null: not there yet). */
+  frame?: ReviewFrame | null;
+  onUnit?: (n: number) => (() => void) | null;
   arch: boolean;
   /**
    * A switch page: the flavour the chat was in, how you answered (the next page's opening prompt), and how to answer
@@ -426,7 +503,7 @@ interface PageProps extends StreamHandlers {
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
-  summary?: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy: boolean; architecture?: boolean } | null;
+  summary?: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy: boolean; architecture?: boolean; notes?: SummaryNotes } | null;
   /** The Done page: where the work goes from here, and how to message Claude (only on the newest page, when idle). */
   handoff?: Handoff;
   onHandoffSend?: (text: string, switchTo?: Flavour) => void;
@@ -441,7 +518,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, unread, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, handoff, onHandoffSend, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, unread, first, live, teach, review, frame = null, onUnit, arch, suggestion, verdicts, onVerdict, summary, handoff, onHandoffSend, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -450,7 +527,7 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
   const part = partOf(page);
   // Review and Architecture pages: the parts are laid out below, and a closing "Say Next…" is dropped (the buttons say it).
   const mainItems = main.items
-    .filter((it) => !((reviewFile || part) && it.id === main.messageId))
+    .filter((it) => !((reviewFile || part || frame) && it.id === main.messageId))
     .map((it) => ((review || arch) && it.type === "assistant" && it.id === main.messageId ? { ...it, text: withoutCue(it.text) } : it));
 
   // While Claude answers in the discussion, follow the end of it if you're there; a new step is read from its top.
@@ -505,10 +582,11 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
       {asked && <UserMessage className="step-asked" text={asked} at={opening.prompt.at} tag={first ? "Task" : movesOn(opening.prompt.text) ? "Then moved on" : null} />}
       <div className="step-content">
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
+        {frame && <ReviewFrameView frame={frame} onUnit={onUnit ?? (() => null)} />}
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
         {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} />}
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} explain={!!h.explain} why={h.title} {...suggestion} />}
-        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
+        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} notes={summary.notes} />}
       </div>
       {handoff && <DoneHandoff handoff={handoff} onSend={onHandoffSend} />}
       <StepCommands page={page} runs={runs} />

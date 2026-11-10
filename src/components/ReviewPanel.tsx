@@ -34,6 +34,7 @@ import { DEFAULT_PINNED, TABS, adoptSession, chatTabOf, keepChatTab, migrateTab,
 import { PaneTabsMenu, type TabBadge } from "./PaneTabsMenu";
 import { commentsMessage, type CommentControls } from "../lib/diffComments";
 import { CommentBar } from "./DiffComments";
+import { matchChanged, type PageFindings, type Verdict } from "../lib/review";
 
 const FullDiff = lazy(() => import("./FullDiff"));
 
@@ -107,6 +108,8 @@ interface Props {
   revert?: RevertControls;
   /** Review comments on diff lines: this chat's, how to change them and how to send them to the chat (absent: no comments). */
   comments?: CommentControls;
+  /** A Review: the findings of the page on screen, drawn under their lines in the diff. */
+  findings?: PageFindings | null;
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -442,7 +445,7 @@ function PlanTab({ summary, architecture, view, onView, revert }: Props & { view
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, findings, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
@@ -453,6 +456,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
   const bar = comments && comments.items.length > 0 && (
     <CommentBar
       count={comments.items.length}
+      review={!!comments.review}
       busy={chatBusy}
       sendOff={sendComments ? null : "Claude can't take a message right now."}
       onSend={() => {
@@ -476,6 +480,11 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
       </>
     );
   }
+
+  // The page's findings in this file (the page names files from the repo's root; the list has them whole).
+  const diffFindings = findings?.items
+    .filter((it) => matchChanged([current.path], it.path, folder) === current.path)
+    .map((it) => ({ finding: it.finding, verdict: it.verdict, onVerdict: findings.onVerdict && ((v: Verdict | null) => findings.onVerdict!(it.finding.index, v)) }));
 
   return (
     <>
@@ -519,7 +528,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
       </div>
       {bar}
       <Suspense fallback={<div className="empty">Loading diff…</div>}>
-        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} comments={comments} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
+        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} comments={comments} findings={diffFindings} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
       </Suspense>
     </>
   );

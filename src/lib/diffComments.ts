@@ -26,6 +26,14 @@ export interface CommentControls {
   update: (change: (all: DiffComment[]) => DiffComment[]) => void;
   /** Send every comment to the chat as one message (absent: the chat can't take a message right now). */
   send?: (text: string) => void;
+  /**
+   * In a Review: comments are notes kept for the review's end (its summary sends them), and each one can instead go to
+   * Claude at once to be fixed. Absent outside a Review.
+   */
+  review?: {
+    /** Send this one comment to Claude now, to fix (absent: the chat can't take a message right now). */
+    fixNow?: (comment: DiffComment) => void;
+  };
 }
 
 /** The part of Monaco's line changes that matters here (its `ILineChange` has more). An end of 0 means that side has no lines. */
@@ -39,7 +47,7 @@ export interface LineChange {
 let seq = 0;
 export const commentId = () => `dc-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
-const linesOf = (text: string) => text.split("\n").map((l) => l.replace(/\r$/, ""));
+export const linesOf = (text: string) => text.split("\n").map((l) => l.replace(/\r$/, ""));
 
 /** The text of a line (1-based), or "" past the end. */
 export function lineText(text: string, line: number): string {
@@ -136,12 +144,23 @@ export function ordered(comments: DiffComment[]): DiffComment[] {
  * A removed line is numbered in the file as it was and says "(before)". The comment is text for Claude, never a command.
  */
 export function commentsMessage(comments: DiffComment[], folder: string | null): string {
-  const lines = ordered(comments).map((c, i) => {
-    const where = `${relativeTo(c.path, folder)} line ${c.line}${c.side === "old" ? " (before)" : ""}`;
-    const what = c.lineText.trim() === "" ? `blank ${KIND_LABEL[c.kind]}` : `${KIND_LABEL[c.kind]}${c.outdated ? ", since changed" : ""}: ${quoteLine(c.lineText)}`;
-    // A comment of several lines keeps them, lined up under its number.
-    const text = c.text.trim().replace(/\n/g, "\n   ");
-    return `${i + 1}. ${where} (${what}): ${text}`;
-  });
-  return `Please address these review comments:\n\n${lines.join("\n")}`;
+  return `Please address these review comments:\n\n${commentLines(comments, folder)}`;
+}
+
+/** The comments as a numbered list, one per line, in the format `commentsMessage` sends. */
+export function commentLines(comments: DiffComment[], folder: string | null): string {
+  return ordered(comments)
+    .map((c, i) => {
+      const where = `${relativeTo(c.path, folder)} line ${c.line}${c.side === "old" ? " (before)" : ""}`;
+      const what = c.lineText.trim() === "" ? `blank ${KIND_LABEL[c.kind]}` : `${KIND_LABEL[c.kind]}${c.outdated ? ", since changed" : ""}: ${quoteLine(c.lineText)}`;
+      // A comment of several lines keeps them, lined up under its number.
+      const text = c.text.trim().replace(/\n/g, "\n   ");
+      return `${i + 1}. ${where} (${what}): ${text}`;
+    })
+    .join("\n");
+}
+
+/** A Review's "Fix now" on one of the user's line comments: fix it, and say so on the page the review is on. */
+export function fixNowMessage(comment: DiffComment, folder: string | null): string {
+  return `Fix this now, then rewrite the page of the unit that file is in, with the fix noted:\n\n${commentLines([comment], folder)}`;
 }
