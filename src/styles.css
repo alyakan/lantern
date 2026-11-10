@@ -3769,7 +3769,7 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .arch-big[open] { display: flex; flex-direction: column; }
 .arch-big::backdrop { background: var(--overlay-strong); }
 .arch-big-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.arch-big-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.arch-big-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 14px; }
 .map-svg g.node { transition: opacity 0.2s; }
 .map-svg.focused g.node:not(.covered) { opacity: 0.4; }
 .map-svg g.node.opens { cursor: pointer; }
@@ -3787,7 +3787,7 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .pz-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .pz-world.animating { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
 .pz-tools { position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); box-shadow: var(--shadow); }
-.pz-tools button { min-width: 26px; height: var(--pill-s); padding: 0 8px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.pz-tools button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: var(--pill-s); padding: 0 8px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); line-height: 1; }
 .pz-tools button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .pz-level { min-width: 40px; text-align: center; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 
@@ -3826,11 +3826,18 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 
 /* The map's boxes and arrows, in the Agents graph's style. */
 .arch-graph { display: block; overflow: visible; }
-.arch-edge path.arch-edge-line { fill: none; stroke: color-mix(in srgb, var(--faint) 60%, var(--line-strong)); stroke-width: 1.5; transition: stroke 0.2s, stroke-width 0.12s; }
+.arch-edge .arch-edge-halo { fill: none; stroke: var(--pane); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.arch-edge path.arch-edge-line { fill: none; stroke: var(--text-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.2s, stroke-width 0.12s; }
 .arch-edge .arch-edge-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; }
+.arch-edge.selectable, .arch-box[aria-pressed], .arch-edge-tag.selectable { cursor: pointer; }
+.arch-graph .arch-edge[tabindex], .arch-graph .arch-edge[tabindex]:focus { outline: none; }
+.arch-graph .arch-edge:focus-visible path.arch-edge-line { stroke-width: 3; }
 .arch-edge-dot { fill: var(--pane); stroke: var(--text-2); stroke-width: 1.2; pointer-events: none; }
-.arch-arrowhead { fill: color-mix(in srgb, var(--faint) 60%, var(--line-strong)); }
-.arch-edge.lit path.arch-edge-line { stroke: var(--text-2); stroke-width: 1.8; }
+.arch-arrowhead { fill: var(--text-2); }
+.arch-arrowhead.active { fill: var(--text); }
+.arch-arrowhead.skip { fill: var(--sev-should); }
+.arch-arrowhead.issue { fill: var(--del); }
+.arch-edge.lit path.arch-edge-line { stroke: var(--text); stroke-width: 2.5; }
 .arch-edge-label { text-anchor: middle; font: calc(11.5px * var(--font-scale)) var(--ui); fill: var(--text-2); pointer-events: none; }
 .arch-box { outline: none; }
 .arch-box.opens { cursor: pointer; }
@@ -3854,8 +3861,9 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .arch-box, .arch-edge, .arch-edge-tag { transition: opacity 0.12s; }
 .arch-box[data-focus="context"], .arch-edge[data-focus="context"], .arch-edge-tag[data-focus="context"] { opacity: 0.6; }
 .arch-box[data-focus="dim"]:not(.shown), .arch-edge[data-focus="dim"], .arch-edge-tag[data-focus="dim"] { opacity: 0.28; }
-.arch-edge[data-focus="dim"]:not(.lit) path.arch-edge-line { stroke-width: 1; }
+.arch-edge[data-focus="dim"]:not(.lit) path.arch-edge-line { stroke-width: 1.5; }
 .arch-edge[data-focus="dim"] .arch-edge-hit, .arch-edge[data-focus="dim"] .arch-edge-dot { pointer-events: none; }
+.arch-edge.selectable[data-focus="dim"] .arch-edge-hit { pointer-events: stroke; }
 .arch-show-all { display: inline-flex; align-items: center; gap: 5px; user-select: none; touch-action: none; }
 .arch-show-all.held, .pz-tools button.arch-show-all.held { background: var(--bg-active); color: var(--text); }
 .pz-tools .arch-show-all svg { flex: none; }
@@ -3869,6 +3877,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .arch-edge-tag rect { fill: var(--pane); stroke: var(--line); stroke-width: 0.8; }
 .arch-edge-tag.open rect { stroke: var(--text-2); }
 .arch-pills { pointer-events: none; }
+.arch-edge-tag.selectable { pointer-events: auto; }
 .arch-edge-tag.skip rect { stroke: color-mix(in srgb, var(--sev-should) 60%, transparent); }
 .arch-edge-tag.issue rect { stroke: color-mix(in srgb, var(--del) 60%, transparent); }
 

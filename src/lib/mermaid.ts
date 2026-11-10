@@ -61,6 +61,27 @@ export function svgSize(svg: string): { w: number; h: number } | null {
   return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
 }
 
+/** Each mounted copy needs its own SVG definitions, including a diagram copied into a modal dialog. */
+export function scopeDiagram(svg: string, scope: string): string {
+  // Match innerHTML's parsing, including Mermaid's HTML labels with <br> and named entities.
+  const root = new DOMParser().parseFromString(svg, "text/html").querySelector("svg");
+  if (!root) return svg;
+  const elements = [root, ...root.querySelectorAll("*")];
+  const ids = new Map(elements.filter((el) => el.id).map((el) => [el.id, `${scope}-${el.id}`]));
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const refs = ids.size ? new RegExp(`#(${[...ids.keys()].sort((a, b) => b.length - a.length).map(escape).join("|")})(?![\\w-])`, "g") : null;
+  const rewrite = (value: string) => refs ? value.replace(refs, (_, id: string) => `#${ids.get(id)}`) : value;
+  for (const el of elements) {
+    for (const attr of [...el.attributes]) {
+      if (attr.name === "id") attr.value = ids.get(attr.value)!;
+      else if (attr.name === "aria-labelledby" || attr.name === "aria-describedby") attr.value = attr.value.split(/\s+/).map((id) => ids.get(id) ?? id).join(" ");
+      else attr.value = rewrite(attr.value);
+    }
+    if (el.localName === "style") el.textContent = rewrite(el.textContent ?? "");
+  }
+  return root.outerHTML;
+}
+
 type Mermaid = (typeof import("mermaid"))["default"];
 
 let loaded: Promise<Mermaid> | null = null;
@@ -116,7 +137,8 @@ export function renderDiagram(source: string, dark: boolean): Promise<string> {
       theme: themed ? "base" : dark ? "dark" : "default",
       themeVariables: themed ? { darkMode: dark, ...vars } : undefined,
       fontFamily: "inherit",
-      flowchart: { htmlLabels: true, useMaxWidth: false },
+      themeCSS: ".flowchart-link { stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; }",
+      flowchart: { htmlLabels: true, useMaxWidth: false, nodeSpacing: 72, rankSpacing: 110, padding: 20, diagramPadding: 24, curve: "linear" },
     });
     const id = `lantern-diagram-${++counter}`;
     try {

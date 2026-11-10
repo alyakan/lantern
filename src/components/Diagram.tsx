@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { PanZoom } from "./PanZoom";
-import { nodeIdOf, renderDiagram, withChangeColours } from "../lib/mermaid";
+import { nodeIdOf, renderDiagram, scopeDiagram, withChangeColours } from "../lib/mermaid";
 import { usePrefersDark, useThemeVersion } from "../lib/theme";
 
 /**
@@ -8,6 +8,7 @@ import { usePrefersDark, useThemeVersion } from "../lib/theme";
  * A source that's still streaming in is drawn once it stops changing, so half a diagram isn't an error.
  */
 export function useDiagram(source: string): { svg: string | null; error: string | null } {
+  const scope = `diagram-${useId().replace(/\W/g, "")}`;
   const dark = usePrefersDark();
   // The diagram takes the theme's colours, so it's drawn again when the theme changes.
   const look = useThemeVersion();
@@ -26,7 +27,8 @@ export function useDiagram(source: string): { svg: string | null; error: string 
       clearTimeout(wait);
     };
   }, [source, dark, look]);
-  return state && state.source === source && state.dark === dark && state.look === look ? { svg: state.svg, error: state.error } : { svg: null, error: null };
+  const ready = state && state.source === source && state.dark === dark && state.look === look ? state : null;
+  return useMemo(() => ({ svg: ready?.svg ? scopeDiagram(ready.svg, scope) : null, error: ready?.error ?? null }), [ready, scope]);
 }
 
 /** The part of a rendered diagram the map can act on: its flowchart nodes, by the id they were written with. */
@@ -83,6 +85,8 @@ export function MapDiagram({ map, current, onOpen }: MapProps) {
 /** A drawn diagram at full size, on a surface you can zoom and move: from a diagram's Expand button in a message. */
 export function DiagramLightbox({ svg, size, onClose }: { svg: string; size: { w: number; h: number }; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const scope = `expanded-${useId().replace(/\W/g, "")}`;
+  const expanded = useMemo(() => scopeDiagram(svg, scope), [svg, scope]);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -98,9 +102,9 @@ export function DiagramLightbox({ svg, size, onClose }: { svg: string; size: { w
         <button onClick={onClose}>Close</button>
       </div>
       <div className="arch-big-body">
-        <PanZoom width={size.w} height={size.h} label="Diagram">
+        <PanZoom width={size.w} height={size.h} label="Diagram" minFit={0.75}>
           {/* Mermaid's markup, as drawn in its strict security level. */}
-          <div className="map-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          <div className="map-svg" dangerouslySetInnerHTML={{ __html: expanded }} />
         </PanZoom>
       </div>
     </dialog>

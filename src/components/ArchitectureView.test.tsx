@@ -136,9 +136,11 @@ describe("the Map tab", () => {
   const names = { [pages[2].key]: "Part 1 of 2 — Gateway", [pages[3].key]: "Part 2 of 2 — Auth service" };
   const box = (name: RegExp) => screen.getByRole("button", { name });
 
-  it("marks a box with no page of its own as disabled, and pans the map to the box the arrow keys reach", () => {
+  it("lets boxes without a page be selected, and pans to the box the arrow keys reach", () => {
     render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
-    expect(box(/^Logs/)).toHaveAttribute("aria-disabled", "true");
+    expect(box(/^Logs/)).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(box(/^Logs/));
+    expect(box(/^Logs/)).toHaveAttribute("aria-pressed", "true");
     expect(box(/^Gateway/)).not.toHaveAttribute("aria-disabled");
     const world = document.querySelector(".pz-world") as HTMLElement;
     const before = world.style.transform;
@@ -181,17 +183,106 @@ describe("the Map tab", () => {
     expect(screen.getByText("forwards")).toBeInTheDocument();
   });
 
-  it("opens a box's page on a click or Enter, and tells what a box does on hover", () => {
+  it("selects with click or Enter and opens a selected box's page from its panel", () => {
     const onOpenPage = vi.fn();
     render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={onOpenPage} />);
     fireEvent.click(box(/^Gateway/));
-    expect(onOpenPage).toHaveBeenLastCalledWith(pages[2].key);
-    fireEvent.keyDown(box(/^Auth service/), { key: "Enter" });
-    expect(onOpenPage).toHaveBeenLastCalledWith(pages[3].key);
-    fireEvent.mouseEnter(box(/^Gateway/));
-    expect(screen.getByText("Terminates TLS and forwards requests")).toBeInTheDocument();
+    expect(onOpenPage).not.toHaveBeenCalled();
+    expect(box(/^Gateway/)).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "Part 1 of 2 — Gateway →" }));
     expect(onOpenPage).toHaveBeenLastCalledWith(pages[2].key);
+    fireEvent.keyDown(box(/^Auth service/), { key: "Enter" });
+    expect(box(/^Auth service/)).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Part 2 of 2 — Auth service →" }));
+    expect(onOpenPage).toHaveBeenLastCalledWith(pages[3].key);
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    fireEvent.mouseEnter(box(/^Gateway/));
+    expect(screen.getByText("Terminates TLS and forwards requests")).toBeInTheDocument();
+  });
+
+  it("pins a node's path across hover, pan, zoom and background clicks, and toggles it off", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const edges = container.querySelectorAll(".arch-edge");
+    fireEvent.mouseEnter(box(/^Gateway/));
+    fireEvent.click(box(/^Gateway/));
+    fireEvent.mouseLeave(box(/^Gateway/));
+    fireEvent.mouseEnter(box(/^Logs/));
+    expect(edges[0]).toHaveAttribute("data-focus", "full");
+    expect(edges[1]).toHaveAttribute("data-focus", "dim");
+    expect(box(/^Gateway/)).toHaveAttribute("aria-pressed", "true");
+    expect(box(/^Logs/)).toHaveAttribute("data-focus", "dim");
+    fireEvent.wheel(container.querySelector(".pz-surface")!, { deltaX: 50, deltaY: 20 });
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+    fireEvent.click(container.querySelector(".pz-surface")!);
+    expect(edges[1]).toHaveAttribute("data-focus", "dim");
+    fireEvent.click(box(/^Gateway/));
+    expect(box(/^Gateway/)).toHaveAttribute("aria-pressed", "false");
+    expect(edges[1]).toHaveAttribute("data-focus", "full");
+    expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
+  });
+
+  it("pins a link or its label, toggles it off, and clears keyboard selections", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const edges = container.querySelectorAll(".arch-edge");
+    // This link has no label: its wider hit path still selects it.
+    fireEvent.mouseEnter(edges[1]);
+    fireEvent.click(edges[1].querySelector(".arch-edge-hit")!);
+    fireEvent.mouseLeave(edges[1]);
+    expect(edges[1]).toHaveAttribute("aria-pressed", "true");
+    expect(edges[0]).toHaveAttribute("data-focus", "dim");
+    fireEvent.mouseEnter(edges[0]);
+    expect(edges[0]).toHaveAttribute("data-focus", "dim");
+    fireEvent.click(edges[1]);
+    expect(edges[1]).toHaveAttribute("aria-pressed", "false");
+    expect(edges[0]).toHaveAttribute("data-focus", "full");
+    fireEvent.click(container.querySelector('[data-pill="e0"]')!);
+    expect(edges[0]).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(edges[0]).toHaveAttribute("aria-pressed", "false");
+    fireEvent.keyDown(edges[1], { key: " " });
+    expect(edges[1]).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(edges[1], { key: "Enter" });
+    expect(edges[1]).toHaveAttribute("aria-pressed", "false");
+    fireEvent.keyDown(box(/^Logs/), { key: " " });
+    expect(box(/^Logs/)).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(box(/^Logs/)).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shares selection with the expanded map and keeps it when the dialog closes", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const pane = container.querySelector(".arch-graph")!;
+    fireEvent.click(box(/^Gateway/));
+    fireEvent.click(screen.getByRole("button", { name: "Open the map larger" }));
+    const big = screen.getByRole("dialog", { name: "Architecture map, larger", hidden: true });
+    expect(big.querySelector('[data-node="gw"]')).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(big.querySelector('[data-node="authSvc"]')!);
+    expect(pane.querySelector('[data-node="authSvc"]')).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(big).getByRole("button", { name: "Close", hidden: true }));
+    expect(pane.querySelector('[data-node="authSvc"]')).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Open the map larger" }));
+    const reopened = screen.getByRole("dialog", { name: "Architecture map, larger", hidden: true });
+    fireEvent.click(within(reopened).getByRole("button", { name: "Clear selection", hidden: true }));
+    expect(pane.querySelector('[data-node="authSvc"]')).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("isolates a box's connections on hover and restores the map on leave", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const edges = container.querySelectorAll(".arch-edge");
+    fireEvent.mouseEnter(box(/^Gateway/));
+    expect(edges[0]).toHaveAttribute("data-focus", "full");
+    expect(edges[0]).toHaveClass("lit");
+    expect(edges[1]).toHaveAttribute("data-focus", "dim");
+    expect(box(/^Auth service/)).toHaveAttribute("data-focus", "full");
+    expect(box(/^Logs/)).toHaveAttribute("data-focus", "dim");
+    fireEvent.mouseLeave(box(/^Gateway/));
+    expect(edges[1]).toHaveAttribute("data-focus", "full");
+    expect(edges[0]).not.toHaveClass("lit");
+    // Unlabelled arrows can be followed too.
+    fireEvent.mouseEnter(edges[1]);
+    expect(edges[1]).toHaveAttribute("data-focus", "full");
+    expect(edges[0]).toHaveAttribute("data-focus", "dim");
   });
 
   it("zooms with its buttons and fits back", () => {
@@ -441,6 +532,12 @@ describe("the labels on a dense map in the Map tab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open the map larger" }));
     const big = within(screen.getByRole("dialog", { name: "Architecture map, larger", hidden: true }));
     expect(big.getAllByRole("button", { name: /^App shell/, hidden: true }).length).toBeGreaterThan(0);
+    const markers = [...document.querySelectorAll(".arch-graph marker")].map((m) => m.id);
+    expect(new Set(markers).size).toBe(markers.length);
+    for (const line of document.querySelectorAll(".arch-edge-line")) {
+      const id = line.getAttribute("marker-end")!.slice(5, -1);
+      expect(document.getElementById(id)).not.toBeNull();
+    }
     expect(big.getByRole("button", { name: "Show everything while held", hidden: true })).toBeInTheDocument();
     fireEvent.click(big.getByRole("button", { name: "Close", hidden: true }));
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
@@ -451,7 +548,7 @@ describe("fitting the map in the room", () => {
   const overview = `# Overview — dense\n\n\`\`\`architecture\n${JSON.stringify(DENSE_MAP)}\n\`\`\``;
   const map = architectureMap(pagesOf([{ type: "user", id: "u0", text: "map it" }, { type: "assistant", id: "a0", text: overview }]))!;
 
-  it("keeps the fitted map clear of the legend at the top and the controls at the bottom", () => {
+  it("keeps a spacious map readable and clips it above the controls", () => {
     const w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
     const h = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
     Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1400 });
@@ -463,7 +560,9 @@ describe("fitting the map in the room", () => {
       const world = document.querySelector(".pz-world") as HTMLElement;
       const height = Number(world.style.height.replace("px", ""));
       expect(y).toBeGreaterThanOrEqual(34);
-      expect(y + height * zoom).toBeLessThanOrEqual(900 - 44);
+      // A large graph uses the world beyond the pane rather than shrinking its labels or packing its rows.
+      expect(y + height * zoom).toBeGreaterThan(900 - 44);
+      expect((document.querySelector(".pz-clip") as HTMLElement).style.bottom).toBe("44px");
       expect(x).toBeGreaterThanOrEqual(0);
       expect(zoom).toBeGreaterThanOrEqual(0.75);
     } finally {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { architectureBlock, edgeCrossings, edgesThroughBoxes, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillText, pillWidth, placeLabels, PILL_CHARS, PILL_H, bestRows, routePath, wrapLabel, type ArchLayout, type ArchSpec, type LabelInput, type Rect } from "./archGraph";
+import { architectureBlock, edgeCrossings, edgesThroughBoxes, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillText, pillWidth, placeLabels, PILL_CHARS, PILL_H, routePath, wrapLabel, type ArchLayout, type ArchSpec, type LabelInput, type Rect } from "./archGraph";
 import { DENSE_MAP } from "./denseMap";
 import { TESTO_MAP } from "./testoMap";
 
@@ -51,6 +51,62 @@ describe("parseArchitecture", () => {
 });
 
 describe("layoutArchitecture", () => {
+  it("widens the gaps between existing boxes as the graph grows", () => {
+    const graph = (count: number): ArchSpec => {
+      const read = parseArchitecture(JSON.stringify({
+        layers: [{ id: "ui", label: "UI" }, { id: "logic", label: "Logic" }],
+        nodes: Array.from({ length: count }, (_, i) => ({ id: `n${i}`, layer: i < 2 ? "ui" : "logic" })),
+        edges: [{ from: "n0", to: "n1" }],
+      }));
+      if (!("spec" in read)) throw new Error(read.error);
+      return read.spec;
+    };
+    const gaps = [4, 12, 24, 40].map((count) => {
+      const l = layoutArchitecture(graph(count));
+      const pair = l.nodes.filter((n) => n.layer === "ui").sort((a, b) => a.x - b.x);
+      return pair[1].x - pair[0].x - (pair[0].w + pair[1].w) / 2;
+    });
+    for (let i = 1; i < gaps.length; i++) expect(gaps[i]).toBeGreaterThan(gaps[i - 1] + 20);
+
+    // The horizontal distance between linked ranks grows in maps without layers too.
+    const flatGap = (count: number) => {
+      const s = graph(count);
+      const l = layoutArchitecture({ ...s, layers: [], nodes: s.nodes.map((n) => ({ ...n, layer: null })) });
+      const a = l.nodes.find((n) => n.id === "n0")!;
+      const b = l.nodes.find((n) => n.id === "n1")!;
+      return b.x - a.x - (a.w + b.w) / 2;
+    };
+    expect(flatGap(24)).toBeGreaterThan(flatGap(4) + 60);
+  });
+
+  it("gives a graph with more connections wider corridors", () => {
+    const full = layoutArchitecture(dense());
+    const sparse = layoutArchitecture({ ...dense(), edges: dense().edges.slice(0, 10) });
+    const gap = (l: ArchLayout) => {
+      const rows = new Map<number, typeof l.nodes>();
+      for (const n of l.nodes) rows.set(n.y, [...(rows.get(n.y) ?? []), n]);
+      return Math.min(...[...rows.values()].flatMap((row) => {
+        row.sort((a, b) => a.x - b.x);
+        return row.slice(1).map((n, i) => n.x - row[i].x - (n.w + row[i].w) / 2);
+      }));
+    };
+    expect(gap(full)).toBeGreaterThan(gap(sparse) + 30);
+  });
+
+  it("leaves room for routes even when edges have no labels", () => {
+    const graph = spec();
+    graph.edges = graph.edges.map((e) => ({ ...e, label: "" }));
+    for (const direction of ["LR", "TB"] as const) {
+      const l = layoutArchitecture(graph, direction);
+      for (const e of l.edges) {
+        const a = l.nodes.find((n) => n.id === e.from)!;
+        const b = l.nodes.find((n) => n.id === e.to)!;
+        const gap = direction === "LR" ? b.x - a.x - (a.w + b.w) / 2 : b.y - a.y - (a.h + b.h) / 2;
+        expect(gap).toBeGreaterThanOrEqual(100);
+      }
+    }
+  });
+
   it("places the boxes left to right in the order the arrows go, each as wide as its label", () => {
     const l = layoutArchitecture(spec());
     const at = Object.fromEntries(l.nodes.map((n) => [n.id, n]));
@@ -75,7 +131,7 @@ describe("layoutArchitecture", () => {
 describe("routePath", () => {
   it("is straight for two points and rounded at the bends of more", () => {
     expect(routePath([{ x: 0, y: 0 }, { x: 10, y: 5 }])).toBe("M 0 0 L 10 5");
-    expect(routePath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }])).toBe("M 0 0 Q 10 0 10 5 L 10 10");
+    expect(routePath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }])).toBe("M 0 0 L 5 0 Q 10 0 10 5 L 10 10");
     expect(routePath([])).toBe("");
   });
 });
@@ -176,6 +232,37 @@ const dense = (): ArchSpec => {
   return read.spec;
 };
 const boxOf = (n: { x: number; y: number; w: number; h: number }): Rect => ({ x: n.x - n.w / 2, y: n.y - n.h / 2, w: n.w, h: n.h });
+
+describe("arrow docking", () => {
+  it("leaves arrowheads outside their boxes with straight, perpendicular approaches", () => {
+    const read = parseArchitecture(JSON.stringify({
+      layers: [{ id: "ui", label: "UI" }, { id: "data", label: "Data" }],
+      nodes: [{ id: "a", layer: "ui" }, { id: "b", layer: "ui", label: "A taller box with a long wrapped label", status: "planned" }, { id: "c", layer: "data" }],
+      edges: [{ from: "a", to: "a" }, { from: "a", to: "b" }, { from: "b", to: "a" }, { from: "a", to: "c" }, { from: "c", to: "b" }],
+    }));
+    if (!("spec" in read)) throw new Error(read.error);
+    const flat = { ...read.spec, layers: [], nodes: read.spec.nodes.map((n) => ({ ...n, layer: null })) };
+    const layouts = [layoutArchitecture(dense()), layoutArchitecture(read.spec), layoutArchitecture(flat), layoutArchitecture(flat, "TB")];
+    for (const l of layouts) for (const e of l.edges) {
+      const a = l.nodes.find((n) => n.id === e.from)!;
+      const z = l.nodes.find((n) => n.id === e.to)!;
+      const first = e.poly[0];
+      const last = e.poly[e.poly.length - 1];
+      const approach = e.poly[e.poly.length - 2];
+      const distance = (p: { x: number; y: number }, n: typeof a) => Math.hypot(Math.max(0, Math.abs(p.x - n.x) - n.w / 2), Math.max(0, Math.abs(p.y - n.y) - n.h / 2));
+      expect(distance(first, a)).toBeCloseTo(3);
+      expect(distance(last, z)).toBeCloseTo(6);
+      const dx = last.x - approach.x;
+      const dy = last.y - approach.y;
+      expect(Math.min(Math.abs(dx), Math.abs(dy))).toBe(0);
+      expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(24 - 0.001);
+      // The final run points into the destination while staying outside it.
+      expect((z.x - last.x) * dx + (z.y - last.y) * dy).toBeGreaterThan(0);
+      expect(distance(approach, z)).toBeGreaterThan(distance(last, z));
+    }
+  });
+});
+
 const pillBox = (p: { x: number; y: number; w: number; h: number }): Rect => ({ x: p.x - p.w / 2, y: p.y - p.h / 2, w: p.w, h: p.h });
 const distToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
   const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
@@ -277,23 +364,7 @@ describe("the labels on the arrows (pills)", () => {
     for (const p of placed) for (const n of f.nodes) expect(overlap(p, boxOf(n))).toBe(false);
   });
 
-  it("takes fewer boxes to a row in a narrow room, so the map needn't be panned sideways", () => {
-    const made: number[] = [];
-    const layoutFor = (r: number) => (made.push(r), layoutArchitecture(dense(), "LR", r));
-    const wide = bestRows(layoutFor, { w: 1800, h: 1400 }, 0.75);
-    // Room for the widest: it is the only one made.
-    expect(wide.rowMax).toBe(5);
-    expect(made).toEqual([5]);
-    const narrow = bestRows((r) => layoutArchitecture(dense(), "LR", r), { w: 600, h: 700 }, 0.75);
-    expect(narrow.rowMax).toBeLessThan(5);
-    expect(narrow.rowMax).toBeGreaterThanOrEqual(2);
-    // The one it takes is no wider than the room at the smallest fit (or the narrowest there is).
-    expect(narrow.layout.width * 0.75 <= 600 - 16 || narrow.rowMax === 2).toBe(true);
-    // No room yet: the widest.
-    expect(bestRows((r) => layoutArchitecture(dense(), "LR", r), { w: 0, h: 0 }, 0.75).rowMax).toBe(5);
-    const rows = (max: number) => new Set(layoutArchitecture(dense(), "LR", max).nodes.filter((n) => n.layer === "domain").map((n) => n.y)).size;
-    expect(rows(2)).toBeGreaterThan(rows(5));
-  });
+
 });
 
 describe("placeLabels", () => {

@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { diagramVariables, isFlowchart, mermaidBlock, nodeIdOf, withChangeColours } from "./mermaid";
+import { diagramVariables, isFlowchart, mermaidBlock, nodeIdOf, scopeDiagram, withChangeColours } from "./mermaid";
+
+describe("mounted diagram copies", () => {
+  it("preserves HTML labels and line breaks", () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" id="drawing"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">First<br>Second&nbsp;line</div></foreignObject></svg>';
+    const doc = new DOMParser().parseFromString(scopeDiagram(svg, "popup"), "text/html");
+    expect(doc.querySelector("foreignObject br")).not.toBeNull();
+    expect(doc.querySelector("foreignObject")?.textContent).toBe("FirstSecond\u00a0line");
+  });
+
+  it("keeps arrows, styles and accessible labels within their own copy", () => {
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" id="drawing" aria-labelledby="title"><style>#drawing .edge { marker-end: url(#arrow); stroke: #fff; }</style><title id="title">Request flow</title><defs><marker id="arrow"><path d="M0 0L8 4L0 8z"/></marker></defs><path id="edge" class="edge" marker-end="url(#arrow)"/><use href="#edge"/></svg>';
+    const copies = ["chat", "popup"].map((scope) => new DOMParser().parseFromString(scopeDiagram(source, scope), "image/svg+xml"));
+    for (const [i, doc] of copies.entries()) {
+      const scope = i ? "popup" : "chat";
+      expect(doc.documentElement.id).toBe(`${scope}-drawing`);
+      expect(doc.documentElement.getAttribute("aria-labelledby")).toBe(`${scope}-title`);
+      expect(doc.querySelector("path.edge")?.getAttribute("marker-end")).toBe(`url(#${scope}-arrow)`);
+      expect(doc.querySelector("use")?.getAttribute("href")).toBe(`#${scope}-edge`);
+      expect(doc.querySelector("style")?.textContent).toContain(`#${scope}-drawing .edge`);
+      expect(doc.querySelector("style")?.textContent).toContain(`url(#${scope}-arrow)`);
+      expect(doc.querySelector("style")?.textContent).toContain("stroke: #fff");
+    }
+    const firstIds = new Set([...copies[0].querySelectorAll("[id]")].map((el) => el.id));
+    expect([...copies[1].querySelectorAll("[id]")].some((el) => firstIds.has(el.id))).toBe(false);
+  });
+});
 
 describe("withChangeColours", () => {
   it("adds the colours for new, changed and removed to a flowchart", () => {

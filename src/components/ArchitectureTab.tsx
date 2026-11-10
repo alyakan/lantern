@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { bestRows, fitScale, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillWidth, routePath, type ArchLayout, type Change, type MapIssue, type PlacedNode, type Status } from "../lib/archGraph";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { fitScale, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillWidth, routePath, type ArchLayout, type Change, type MapIssue, type PlacedNode, type Status } from "../lib/archGraph";
 import { focusOf } from "../lib/archFocus";
 import type { ArchitectureMap } from "../lib/architecture";
 import { MapDiagram, useDiagram } from "./Diagram";
@@ -17,13 +17,17 @@ const MIN_FIT = 0.75;
 const OVERLAY_INSET = { top: 34, bottom: 44 };
 const ARROWS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
+type GraphSelection = { kind: "node" | "edge"; id: string };
+type SelectionState = { value: GraphSelection | null; set: (next: GraphSelection | null) => void };
+
 interface GraphProps {
   layout: ArchLayout;
   /** The boxes the page on screen is about: lit, and everything else steps back. */
   current: string[];
-  /** Box id → the page that covers it (a click opens it). */
+  /** Box id → the page that covers it (available from the node panel). */
   opens: Record<string, string>;
-  onOpen?: (pageKey: string) => void;
+  selected?: GraphSelection | null;
+  onSelect?: (next: GraphSelection) => void;
   /** The box being looked at (hovered, focused or chosen with the keys). */
   shown?: string | null;
   onShow?: (id: string | null) => void;
@@ -38,16 +42,24 @@ interface GraphProps {
 }
 
 /**
- * The map, drawn in the app's own style: each layer a band with its name, each box a button that opens its part's page
+ * The map, drawn in the app's own style: each layer a band with its name, each box a button that selects its connections
  * (its colour how far it's built, a ⚠ when Claude found a problem with it), and each arrow marked where it crosses from
  * one layer into the next. An arrow that goes around a layer is drawn in amber; one Claude found a problem with, in red.
  * With a part on screen the boxes and arrows it isn't about are drawn faint (see focusOf).
  */
-export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onShow, picked = null, reveal = null, all = false, compact = false }: GraphProps) {
+export function ArchGraphSvg({ layout, current, opens, selected = null, onSelect, shown = null, onShow, picked = null, reveal = null, all = false, compact = false }: GraphProps) {
   const svg = useRef<SVGSVGElement>(null);
+  const arrowId = `arch-arrow-${useId().replace(/:/g, "")}`;
   const panTo = useReveal();
   /** The arrow under the pointer: its label is shown in full. */
   const [hot, setHot] = useState<string | null>(null);
+  const activeNode = selected ? (selected.kind === "node" ? selected.id : null) : shown;
+  const activeEdge = selected ? (selected.kind === "edge" ? selected.id : null) : hot;
+  const choose = (next: GraphSelection) => {
+    setHot(null);
+    onShow?.(null);
+    onSelect?.(next);
+  };
   const rectOf = (n: PlacedNode) => ({ x: n.x - n.w / 2, y: n.y - n.h / 2, w: n.w, h: n.h });
   useEffect(() => {
     const n = reveal && layout.nodes.find((x) => x.id === reveal.id);
@@ -59,8 +71,21 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
     const n = layout.nodes.find((x) => current.includes(x.id));
     if (n) panTo?.(rectOf(n));
   }, [litKey]);
-  const focus = useMemo(() => focusOf(layout, current, picked, all), [layout, litKey, picked, all]);
-  const lit = (id: string) => current.includes(id) || picked?.node === id;
+  const focus = useMemo(() => {
+    if (!all && (activeNode || activeEdge)) {
+      const edge = layout.edges.find((e) => e.key === activeEdge);
+      const related = layout.edges.filter((e) => e.from === activeNode || e.to === activeNode || e === edge);
+      const nodes = new Set(related.flatMap((e) => [e.from, e.to]));
+      if (activeNode) nodes.add(activeNode);
+      return {
+        active: true,
+        nodes: new Map(layout.nodes.map((n) => [n.id, nodes.has(n.id) ? "full" as const : "dim" as const])),
+        edges: new Map(layout.edges.map((e) => [e.key, related.includes(e) ? "full" as const : "dim" as const])),
+      };
+    }
+    return focusOf(layout, current, picked, all);
+  }, [layout, litKey, picked, all, activeNode, activeEdge]);
+  const lit = (id: string) => current.includes(id) || picked?.node === id || (selected?.kind === "node" && selected.id === id);
   const onKey = (e: KeyboardEvent, n: PlacedNode) => {
     const dir = ARROWS[e.key];
     if (dir) {
@@ -72,21 +97,23 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
         const target = layout.nodes.find((x) => x.id === to);
         if (target) panTo?.(rectOf(target));
       }
-    } else if ((e.key === "Enter" || e.key === " ") && opens[n.id]) {
+    } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onOpen?.(opens[n.id]);
+      choose({ kind: "node", id: n.id });
     }
   };
   const nameOf = new Map(layout.nodes.map((n) => [n.id, n.label]));
   const kindOf = (e: ArchLayout["edges"][number]) => (e.issue ? " issue" : e.skips.length ? " skip" : "");
   const pills = layout.edges.filter((e) => e.pill && (!compact || kindOf(e)));
-  const revealed = (e: ArchLayout["edges"][number]) => hot === e.key || shown === e.from || shown === e.to;
+  const revealed = (e: ArchLayout["edges"][number]) => activeEdge === e.key || activeNode === e.from || activeNode === e.to;
   return (
     <svg ref={svg} className={`arch-graph${focus.active ? " focused" : ""}`} width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="group" aria-label="Architecture map">
       <defs>
-        <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-          <path d="M 0 1 L 9 5 L 0 9 z" className="arch-arrowhead" />
-        </marker>
+        {["normal", "active", "skip", "issue"].map((kind) => (
+          <marker key={kind} id={`${arrowId}-${kind}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" className={`arch-arrowhead ${kind}`} />
+          </marker>
+        ))}
       </defs>
       {layout.bands.map((b, i) => (
         <g key={b.id} className={`arch-band${i % 2 ? " odd" : ""}`} aria-label={`Layer: ${b.label}`}>
@@ -98,14 +125,23 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
         </g>
       ))}
       {layout.edges.map((e) => {
-        const on = current.includes(e.from) || current.includes(e.to) || picked?.edge === e.key || hot === e.key;
+        const on = selected ? revealed(e) : current.includes(e.from) || current.includes(e.to) || picked?.edge === e.key || revealed(e);
         const kind = kindOf(e);
         const why = [e.issue, e.skips.length ? `Goes around ${e.skips.join(" and ")}` : ""].filter(Boolean).join(". ");
         const d = e.path ?? routePath(e.points);
         return (
-          <g key={e.key} data-edge={e.key} data-focus={focus.edges.get(e.key)} className={`arch-edge${on ? " lit" : ""}${kind}`} onMouseEnter={() => e.label && setHot(e.key)} onMouseLeave={() => setHot((h) => (h === e.key ? null : h))}>
+          <g key={e.key} data-edge={e.key} data-focus={focus.edges.get(e.key)} className={`arch-edge${on ? " lit" : ""}${kind}${onSelect ? " selectable" : ""}`}
+            role={onSelect ? "button" : undefined} tabIndex={onSelect ? 0 : undefined}
+            aria-label={onSelect ? `Connection: ${nameOf.get(e.from)} → ${nameOf.get(e.to)}${e.label ? `: ${e.label}` : ""}` : undefined}
+            aria-pressed={onSelect ? selected?.kind === "edge" && selected.id === e.key : undefined}
+            onClick={onSelect ? () => choose({ kind: "edge", id: e.key }) : undefined}
+            onKeyDown={(event) => { if (onSelect && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); choose({ kind: "edge", id: e.key }); } }}
+            onMouseEnter={() => setHot(e.key)} onMouseLeave={() => setHot((h) => (h === e.key ? null : h))}
+            onFocus={() => setHot(e.key)} onBlur={() => setHot(null)}>
+
             <title>{[`${nameOf.get(e.from)} → ${nameOf.get(e.to)}${e.label ? `: ${e.label}` : ""}`, why].filter(Boolean).join(". ")}</title>
-            <path className="arch-edge-line" d={d} markerEnd="url(#arch-arrow)" />
+            <path className="arch-edge-halo" d={d} />
+            <path className="arch-edge-line" d={d} markerEnd={`url(#${arrowId}-${e.issue ? "issue" : e.skips.length ? "skip" : on ? "active" : "normal"})`} />
             {/* A wider line nobody sees, so the arrow is easy to point at. */}
             <path className="arch-edge-hit" d={d} />
             {e.crossings.map((c, i) => (
@@ -125,17 +161,17 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
             key={n.id}
             data-node={n.id}
             data-focus={focus.nodes.get(n.id)}
-            className={`arch-box${n.change ? ` ${n.change}` : ""}${n.status ? ` st-${n.status}` : ""}${n.issue ? " has-issue" : ""}${lit(n.id) ? " covered" : ""}${page ? " opens" : ""}${shown === n.id ? " shown" : ""}`}
+            className={`arch-box${n.change ? ` ${n.change}` : ""}${n.status ? ` st-${n.status}` : ""}${n.issue ? " has-issue" : ""}${lit(n.id) ? " covered" : ""}${page ? " opens" : ""}${activeNode === n.id ? " shown" : ""}`}
             transform={`translate(${n.x - n.w / 2}, ${n.y - n.h / 2})`}
             tabIndex={0}
             role="button"
-            aria-disabled={page ? undefined : true}
+            aria-pressed={onSelect ? selected?.kind === "node" && selected.id === n.id : undefined}
             aria-label={`${n.label}${said.length ? `, ${said.join(", ")}` : ""}`}
             onMouseEnter={() => onShow?.(n.id)}
             onMouseLeave={() => onShow?.(null)}
             onFocus={() => onShow?.(n.id)}
             onBlur={() => onShow?.(null)}
-            onClick={() => page && onOpen?.(page)}
+            onClick={onSelect ? () => choose({ kind: "node", id: n.id }) : undefined}
             onKeyDown={(e) => onKey(e, n)}
           >
             <title>{[n.label, n.note, n.issue ? `⚠ ${n.issue}` : ""].filter(Boolean).join(": ")}</title>
@@ -173,7 +209,9 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
           const marked = e.issue || e.skips.length > 0 ? 2 : 0;
           const w = open ? pillWidth(e.label.length + marked) : p.w;
           return (
-            <g key={e.key} data-pill={e.key} data-focus={open ? "full" : focus.edges.get(e.key)} className={`arch-edge-tag${open ? " open" : ""}${kindOf(e)}`}>
+            <g key={e.key} data-pill={e.key} data-focus={open ? "full" : focus.edges.get(e.key)} className={`arch-edge-tag${open ? " open" : ""}${kindOf(e)}${onSelect ? " selectable" : ""}`}
+              onClick={onSelect ? () => choose({ kind: "edge", id: e.key }) : undefined}
+              onMouseEnter={() => setHot(e.key)} onMouseLeave={() => setHot(null)}>
               <rect x={p.x - w / 2} y={p.y - p.h / 2} width={w} height={p.h} rx={p.h / 2} />
               <text x={p.x} y={p.y + 3.8} className="arch-edge-label">
                 {marked ? "⚠ " : null}
@@ -310,6 +348,8 @@ interface TabProps {
   large?: boolean;
   /** Ask Claude to bring the map up to date, from any flavour (missing while it's busy). */
   onUpdate?: () => void;
+  /** Shared by the pane and its expanded copy so closing the dialog keeps the selection. */
+  selectionState?: SelectionState;
 }
 
 /** What the map's legend lists: only what it uses. */
@@ -361,33 +401,15 @@ function MapLightbox({ onClose, children }: { onClose: () => void; children: Rea
 }
 
 /** The right pane's Architecture tab: the latest Overview's map, filling the pane, on a surface you can move around. */
-export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, large = false, onUpdate }: TabProps) {
+export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, large = false, onUpdate, selectionState }: TabProps) {
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
-  // A map with layers has one way to be laid out (its bands, top to bottom), with as many boxes to a row as shows it
-  // biggest in the room; one without is laid out both ways, and the one that shows bigger in the pane is drawn (a pane is
-  // usually taller than it is wide).
-  const layered = map.kind === "native" && map.spec.layers.length > 0;
-  const made = useRef<{ spec: unknown; rows: Map<number, ArchLayout> }>({ spec: null, rows: new Map() });
-  const fitted = useMemo(() => {
-    if (map.kind !== "native" || !layered) return null;
-    if (made.current.spec !== map.spec) made.current = { spec: map.spec, rows: new Map() };
-    const rows = made.current.rows;
-    return bestRows(
-      (r) => {
-        if (!rows.has(r)) rows.set(r, layoutArchitecture(map.spec, "LR", r));
-        return rows.get(r)!;
-      },
-      room,
-      MIN_FIT,
-    );
-  }, [map, layered, room.w, room.h]);
-  const rowMax = fitted?.rowMax ?? 0;
+  // Use the canvas's room for the graph: narrowing the pane mustn't pack its bands into extra rows.
   const both = useMemo(() => {
     if (map.kind !== "native") return null;
-    if (fitted) return { LR: fitted.layout, TB: fitted.layout };
-    return { LR: layoutArchitecture(map.spec, "LR"), TB: layoutArchitecture(map.spec, "TB") };
-  }, [map, fitted]);
+    const LR = layoutArchitecture(map.spec, "LR");
+    return { LR, TB: map.spec.layers.length ? LR : layoutArchitecture(map.spec, "TB") };
+  }, [map]);
   useEffect(() => {
     const el = body.current;
     if (!el) return;
@@ -402,6 +424,14 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
   const layout = both ? both[direction] : null;
   const issues = useMemo(() => (layout ? issuesOf(layout) : []), [layout]);
   const [shown, setShown] = useState<string | null>(null);
+  const [selection, setSelection] = useState<GraphSelection | null>(null);
+  const selected = selectionState ? selectionState.value : selection;
+  const setSelected = selectionState ? selectionState.set : setSelection;
+  const choose = (next: GraphSelection) => {
+    setShown(null);
+    setSelected(selected?.kind === next.kind && selected.id === next.id ? null : next);
+  };
+  const clearSelection = () => { setSelected(null); setShown(null); };
   const [picked, setPicked] = useState<MapIssue | null>(null);
   const [all, setAll] = useState(false);
   const [big, setBig] = useState(false);
@@ -409,7 +439,7 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
   useEffect(() => {
     if (box) setShown(box.id);
   }, [box?.key]);
-  const node = layout?.nodes.find((n) => n.id === shown) ?? null;
+  const node = layout?.nodes.find((n) => n.id === (selected ? selected.kind === "node" ? selected.id : null : shown)) ?? null;
   const page = node && map.nodes[node.id] ? { key: map.nodes[node.id], name: pageNames[map.nodes[node.id]] ?? "Its page" } : null;
   const layer = node?.layer && map.kind === "native" ? (map.spec.layers.find((l) => l.id === node.layer)?.label ?? null) : null;
   return (
@@ -437,11 +467,11 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
             width={layout.width}
             height={layout.height}
             label="Architecture map"
-            fitKey={direction + rowMax + map.page + JSON.stringify(map.kind === "native" ? map.spec : "")}
+            fitKey={direction + map.page + JSON.stringify(map.kind === "native" ? map.spec : "")}
             minFit={MIN_FIT}
             pad={8}
             inset={OVERLAY_INSET}
-            tools={<ShowAll onHeld={setAll} />}
+            tools={<><ShowAll onHeld={setAll} />{selected && <button onClick={clearSelection}>Clear selection</button>}</>}
             overlay={
               <>
                 <div className="arch-overlay arch-overlay-top">
@@ -454,7 +484,7 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
               </>
             }
           >
-            <ArchGraphSvg layout={layout} current={current} opens={map.nodes} onOpen={onOpenPage} shown={shown} onShow={setShown} picked={picked} reveal={box} all={all} />
+            <ArchGraphSvg layout={layout} current={current} opens={map.nodes} selected={selected} onSelect={choose} shown={shown} onShow={setShown} picked={picked} reveal={box} all={all} />
           </PanZoom>
         </div>
       ) : map.kind === "mermaid" ? (
@@ -477,6 +507,7 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
               onOpenPage(key);
             }}
             large
+            selectionState={{ value: selected, set: setSelected }}
           />
         </MapLightbox>
       )}
