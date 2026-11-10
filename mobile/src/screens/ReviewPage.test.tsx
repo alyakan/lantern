@@ -2,11 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { ReviewFile } from "../view/review";
 import { ReviewFilePage } from "./ReviewPage";
 
+// A group's page: its Files: line is `files` (as parseReviewFile reads it), and what is said under it the preface.
 const page = (over: Partial<ReviewFile> = {}): ReviewFile => ({
   path: null,
+  group: "#548 Resize without the retry",
+  files: ["Lumiform/Extensions/UIImage+Resized.swift", "LumiformTests/Extensions/UIImageResizedTests.swift"],
   added: 0,
   removed: 391,
-  preface: "Files: `Lumiform/Extensions/UIImage+Resized.swift`, `LumiformTests/Extensions/UIImageResizedTests.swift`",
+  preface: "",
   changed: "This removes the retry resize.\n- `resizeWithCoreGraphics` removed:\n  - `Lumiform/Extensions/UIImage+Resized.swift:52`\n- `.github/workflows/tests.yml:154`: the new job.",
   findings: [{ index: 0, line: 10, lineEnd: null, severity: "nit", text: "Two failures share a name, see `Packages/PhotoImportKit/Tests/PhotoEncoderTests.swift:12`.", path: "Packages/PhotoImportKit/Tests/PhotoEncoderTests.swift" }],
   clean: false,

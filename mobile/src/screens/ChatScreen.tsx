@@ -38,7 +38,10 @@ import { ArtifactsPane } from "./ArtifactsPane";
 import { ChangesIcon, PanelMenu, type Panel } from "./PanelMenu";
 import { keepPanel, panelOf } from "../view/panelChoice";
 import { ReviewFilePage } from "./ReviewPage";
-import { parseReviewFile, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
+import { ReviewFramePage } from "./ReviewFrame";
+import { ReviewRoute } from "./ReviewRoute";
+import { parseReviewFile, parseReviewFrame, verdictMessage, verdictsFromNext, type ReviewFile, type Verdict } from "../view/review";
+import { reviewRoute, type RoutePage } from "../view/reviewRoute";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -411,6 +414,28 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       else delete mine[index];
       return { ...all, [id]: mine };
     });
+  /** The verdicts a Review page shows: what is being picked while it can still be answered, else what its Next carried. */
+  const verdictsOn = (row: Extract<Row, { kind: "page" }>, file: ReviewFile, open: boolean) => (open ? verdicts[row.item.id] : (sentVerdicts(row, file) ?? verdicts[row.item.id]));
+  // A Review's route (its Frame, each unit, the Summary), drawn under the page bar; null for any other chat, and while not paged.
+  // The phone isn't told a chat's flavour: a chat is a Review once it has a File page or a Frame with Units or Risks.
+  const route = useMemo(() => {
+    if (!paged) return null;
+    let frameRow: Extract<Row, { kind: "page" }> | null = null;
+    const infos = pages.map((p): RoutePage | null => {
+      const row = p.rows.findLast((r): r is Extract<Row, { kind: "page" }> => r.kind === "page");
+      if (!row) return null;
+      if (row.page.kind === "frame") frameRow = row;
+      const file = reviewOf(row);
+      return { kind: row.page.kind, kicker: row.page.kicker, file, decided: file ? Object.keys(verdictsOn(row, file, row === newest && !answered.has(row.item.id) && !working) ?? {}).length : 0 };
+    });
+    return reviewRoute(infos, frameRow ? parseReviewFrame((frameRow as Extract<Row, { kind: "page" }>).page.body) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paged, pages, rows, verdicts, newest, answered, working]);
+  /** How to open a unit's page from the Frame (null: it isn't written yet). */
+  const openUnit = (n: number) => {
+    const at = route?.find((s) => s.kind === "unit" && s.n === n)?.page;
+    return at === null || at === undefined ? null : () => toPage(at);
+  };
 
   const reply = (id: string, a: PageAction) => {
     // The Done page's own buttons: they open something here and the page can still be answered.
@@ -617,11 +642,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "summary":
           return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
-          // On a page of its own, a Review file page is laid out as the Mac's: its file a link to its change, and its findings.
+          // On a page of its own, a Review's Frame with Units or Risks is drawn as its totals, risks and route, as the Mac's is.
+          const frame = paged && row.page.kind === "frame" ? parseReviewFrame(row.page.body) : null;
+          if (frame) return <ReviewFramePage kicker={row.page.kicker} title={row.page.title} frame={frame} onUnit={openUnit} onFile={openFile} />;
+          // A Review file page is laid out as the Mac's: its file a link to its change, and its findings.
           const file = paged ? reviewOf(row) : null;
           if (file) {
             const open = row === newest && !answered.has(row.item.id) && !working;
-            return <ReviewFilePage kicker={row.page.kicker} file={file} verdicts={open ? verdicts[row.item.id] : (sentVerdicts(row, file) ?? verdicts[row.item.id])} onVerdict={open ? (i, v) => pickVerdict(row.item.id, i, v) : undefined} onOpen={setReviewed} />;
+            return <ReviewFilePage kicker={row.page.kicker} file={file} verdicts={verdictsOn(row, file, open)} onVerdict={open ? (i, v) => pickVerdict(row.item.id, i, v) : undefined} onOpen={setReviewed} load={canReviewDiff ? loadReviewed : undefined} />;
           }
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
@@ -743,6 +771,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         </PressScale>
       </View>
       {paged && <StepNav pages={pages} index={pageAt} onIndex={toPage} fresh={freshPage} />}
+      {route && <ReviewRoute stops={route} at={pageAt} onGo={toPage} />}
 
       {banner && (
         <View accessibilityRole="alert" style={{ marginHorizontal: gutter, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
