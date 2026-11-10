@@ -1455,6 +1455,13 @@ describe("a Review, a file page at a time", () => {
       expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, 1 without a verdict/)).toBeTruthy();
     });
 
+    it("reads another flavour's Frame as written, even with a Risks section: no cards, no route", async () => {
+      await review([{ kind: "assistant_text", block_id: "d1", text: "# Frame — A new cache\n\nWhat is in scope.\n\n### Risks\n- **Coupling**: the layers lean on each other" }]);
+      expect(screen.queryByLabelText("Review route")).toBeNull();
+      expect(screen.queryByTestId("review-risk-0")).toBeNull();
+      expect(screen.getByText("What is in scope.")).toBeTruthy();
+    });
+
     it("has no route in a Step by step chat that isn't a Review", async () => {
       await review([{ kind: "assistant_text", block_id: "s1", text: "# Step 1 of 2 — Bump the version\n\nDone." }]);
       expect(screen.queryByLabelText("Review route")).toBeNull();

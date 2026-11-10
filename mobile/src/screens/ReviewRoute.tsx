@@ -40,7 +40,11 @@ export function ReviewRoute({ stops, at, onGo }: { stops: RouteStop[]; at: numbe
           const count = s.kind === "unit" && reached && !here && s.findings !== undefined ? (s.findings === 0 ? "✓" : String(s.findings)) : null;
           const fg = here ? colors.white : reached ? colors.ink : colors.ink3;
           return (
-            <PressScale key={s.key} accessibilityRole="button" accessibilityLabel={describe(s, here)} accessibilityState={{ selected: here, disabled: !reached }} disabled={!reached} onPress={() => s.page !== null && onGo(s.page)} onLayout={(e) => places.current.set(s.key, { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width })} haptic="select" scaleTo={0.94} hitSlop={4} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: here ? colors.cobalt : colors.rule, backgroundColor: here ? colors.cobalt : "transparent", opacity: reached ? 1 : 0.55 }}>
+            <PressScale key={s.key} accessibilityRole="button" accessibilityLabel={describe(s, here)} accessibilityState={{ selected: here, disabled: !reached }} disabled={!reached} onPress={() => s.page !== null && onGo(s.page)} onLayout={(e) => {
+              places.current.set(s.key, { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width });
+              // The strip may be laid out before its chips are measured: the one on screen is brought into view when it is.
+              if (here) follow();
+            }} haptic="select" scaleTo={0.94} hitSlop={4} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, paddingHorizontal: 10, borderRadius: radius.pill, borderWidth: 1, borderColor: here ? colors.cobalt : colors.rule, backgroundColor: here ? colors.cobalt : "transparent", opacity: reached ? 1 : 0.55 }}>
               <Txt variant="tiny" accessibilityElementsHidden style={{ color: fg, fontWeight: "700" }}>
                 {mark}
               </Txt>

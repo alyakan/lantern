@@ -23,6 +23,10 @@ describe("a Review's route", () => {
     expect(reviewRoute([], null)).toBeNull();
   });
 
+  it("is not a Review for a Frame that only lists Risks: another flavour's may, and it ends on a Summary page too", () => {
+    expect(reviewRoute([other("frame", "Frame"), other("overview", "Overview"), other("summary", "Summary")], parseReviewFrame("Scope.\n\n### Risks\n- Coupling: the layers lean on each other")!)).toBeNull();
+  });
+
   it("has the Frame, every unit the Frame planned and the Summary, the unreached ones with no page", () => {
     const stops = reviewRoute([other("frame", "Frame"), file(1, 3, "src/a.ts", 2, 1)], frame)!;
     expect(stops.map((s) => [s.key, s.page, s.label])).toEqual([

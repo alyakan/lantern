@@ -63,11 +63,7 @@ function UnitRow({ unit, onOpen }: { unit: FrameUnit; onOpen: (() => void) | nul
             {unit.title.slice(0, slash)}
           </Txt>
         )}
-        {!!unit.note && (
-          <Txt variant="small" tone="ink2">
-            {unit.note}
-          </Txt>
-        )}
+        {!!unit.note && <Markdown text={unit.note} selectable={false} />}
       </View>
       {onOpen && <View accessibilityElementsHidden style={{ width: 8, height: 8, alignSelf: "center", borderRightWidth: 2, borderTopWidth: 2, borderColor: colors.ink3, transform: [{ rotate: "45deg" }] }} />}
     </PressScale>

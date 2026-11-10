@@ -4,7 +4,8 @@ import { unitName, type ReviewFile, type ReviewFrame } from "./review";
 /**
  * The route through a Review, as the Mac draws it in the head of the steps (ReviewRoute in src/components/ReviewDesk.tsx): the
  * Frame, every unit the Frame planned (those not reached yet greyed), and the Summary. The phone doesn't know a chat's flavour,
- * so a chat is a Review when one of its pages is a File page, or its Frame has the Units and Risks the Mac reads.
+ * so a chat is a Review when one of its pages is a File page, or its Frame lists Units. (Risks alone don't say so: a Design
+ * Frame may have a Risks section too, and it ends on a Summary page of its own.)
  */
 
 /** A stop on a Review's route: the Frame, a unit, or the Summary, and the page it is (null: not on the phone). */
@@ -58,7 +59,7 @@ export function reviewRoute(pages: (RoutePage | null)[], frame: ReviewFrame | nu
     return null;
   };
   const filePages = pages.flatMap((p) => (p?.kind === "file" ? [fileNumbers(p.kicker)] : [])).filter((f): f is { n: number; total: number } => f !== null);
-  if (!frame && filePages.length === 0) return null;
+  if ((!frame || frame.units.length === 0) && filePages.length === 0) return null;
   const unitPage = (n: number) => lastOf((p) => p.kind === "file" && fileNumbers(p.kicker)?.n === n);
   // Every unit there is word of: the Frame's, the pages' own "File N of M" (Claude may add a unit after the Frame), up to the last M.
   const total = Math.max(0, ...filePages.map((f) => Math.max(f.total, f.n)), ...(frame?.units.map((u) => u.n) ?? []));

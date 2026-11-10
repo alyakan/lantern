@@ -642,8 +642,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "summary":
           return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
-          // On a page of its own, a Review's Frame with Units or Risks is drawn as its totals, risks and route, as the Mac's is.
-          const frame = paged && row.page.kind === "frame" ? parseReviewFrame(row.page.body) : null;
+          // On a page of its own, a Review's Frame with Units or Risks is drawn as its totals, risks and route, as the Mac's is
+          // (only in a chat that is a Review: another flavour's Frame may have a Risks section too, and reads as written).
+          const frame = paged && route && row.page.kind === "frame" ? parseReviewFrame(row.page.body) : null;
           if (frame) return <ReviewFramePage kicker={row.page.kicker} title={row.page.title} frame={frame} onUnit={openUnit} onFile={openFile} />;
           // A Review file page is laid out as the Mac's: its file a link to its change, and its findings.
           const file = paged ? reviewOf(row) : null;
