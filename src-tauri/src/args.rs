@@ -45,6 +45,7 @@ Workflow:
 This chat's Permissions are {permissions} and its Workflow is {workflow}. {artifacts}To show the user something visual (an architecture map, a flow, a chart, a report), write it with the Write tool as a self-contained file in .lantern/artifacts/ in this folder: .html, .svg, .md or .mmd (Mermaid). Lantern opens it in the Artifacts tab. HTML runs sandboxed with no network: inline your scripts and styles, load nothing from a CDN, and draw charts with SVG or canvas. Link lantern.css (<link rel=\"stylesheet\" href=\"lantern.css\">, beside the page) for the app's colours and fonts as CSS variables (--text, --pane, --line, --accent, --add, --del, --ui, --mono…), so it matches the app in light and dark.
 A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
 Lantern's own tools are on its MCP server (mcp__lantern__…), whose instructions say what each is for. Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one.
+For a request that takes three or more steps, make your first tool call mcp__lantern__checklist_set with your plan, then keep it current: send the whole list each time, mark a step in_progress as you start it and completed as you finish it, and add a step when you find more to do. It shows as the chat's checklist above the user's message box and on their phone. Skip it for a quick answer or a one- or two-step change. Claude Code's own TodoWrite isn't available here.
 Before an action the user must approve that is hard to reverse or outward-facing (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside your own worktree), call mcp__lantern__request_approval instead of asking in the chat. A yes covers exactly the action you named and nothing more."
     )
 }
@@ -573,6 +574,14 @@ mod tests {
     }
 
     #[test]
+    fn every_chat_is_told_to_keep_its_plan_on_the_checklist_tool_since_claude_p_has_no_todowrite() {
+        for mode in [Mode::Ask, Mode::Auto, Mode::Steps] {
+            let text = workflow_prompt(mode, false, &helper());
+            assert!(text.contains("mcp__lantern__checklist_set") && text.contains("TodoWrite isn't available"), "{mode:?}");
+        }
+    }
+
+    #[test]
     fn subagents_off_adds_their_tools_to_the_one_disallowed_list() {
         let mut a = vec!["--model".to_string(), "sonnet".into()];
         without_subagents(&mut a);
@@ -703,7 +712,7 @@ mod tests {
         let a = build_args(Mode::Auto, false, None, None, None, &worker);
         let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
         assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_ROLE").is_none());
-        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()), "only Lantern's own tools, none of the orchestra's");
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}").as_str()), "only Lantern's own tools, none of the orchestra's");
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         assert!(prompt.contains("named \"login-form\"") && prompt.contains("never merge, push or switch branches"));
         assert!(!prompt.contains("Lead of a Lantern Team"));
@@ -759,7 +768,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(lantern_prompt(Mode::Ask, false, &Role::Normal, false));
-        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
+        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}")]);
         let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
         got.extend(preset_args(None));
         assert_eq!(got, expected);
@@ -776,7 +785,7 @@ mod tests {
             lantern_prompt(Mode::Steps, true, &Role::Main, false)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__todo_list,mcp__lantern__todo_add,mcp__lantern__todo_done,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(preset_args(Some("fable")));
@@ -789,7 +798,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto, false, &worker.role, false), worker_prompt("w")));
-        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
+        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}")]);
         assert_eq!(build_args(Mode::Auto, false, None, None, None, &worker), expected);
     }
 
@@ -873,12 +882,12 @@ mod tests {
         let a = build_args(Mode::Steps, false, None, None, None, &helper());
         assert_eq!(value_after(&a, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()));
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}").as_str()));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         for part in ["# Switch to", "incremental-dev", "# Plan step N", "Explain as you go:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Design:", "# Overview", "# Part N of M", "Covers:", "Base: <branch>", "gh pr view --json baseRefName", "```architecture block", "\"change\" is only for what a pull request does", "don't draw the Overview in Mermaid", "This is a design review, not a code review", "\"layers\"", "\"status\"", "\"issue\"", "### Boundaries", "### Design", "goes around a layer", "mcp__lantern__review_target", "right after you open a pull request", "no prefix of your own"] {
             assert!(prompt.contains(part), "{part}");
         }
-        assert_eq!(value_after(&build_args(Mode::Ask, false, None, None, None, &helper()), "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()), "no reproduce card outside Step by step");
+        assert_eq!(value_after(&build_args(Mode::Ask, false, None, None, None, &helper()), "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}").as_str()), "no reproduce card outside Step by step");
         // Its pages' tools, as the guide reads (the Overview's map block is what Lantern draws, and what T9's note points to).
         for part in ["{\"pr\": N}", "{\"base\": \"<branch>\"}", "{} for one cut from the default branch"] {
             assert!(prompt.contains(part), "{part}");
@@ -975,7 +984,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-mode"), Some("auto"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert!(a.iter().any(|x| x == "--mcp-config"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()));
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__checklist_set,{NETWORK_TOOLS}").as_str()));
         let ask = build_args(Mode::Ask, true, None, None, None, &helper());
         assert_eq!(value_after(&ask, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&ask, "--permission-prompt-tool"), Some("mcp__lantern__approve"));

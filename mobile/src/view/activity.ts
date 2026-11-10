@@ -38,6 +38,7 @@ export function stepActivity(s: Pick<Step, "name" | "summary">): string {
     case "advisor":
       return "Asking the advisor";
     case "TodoWrite":
+    case "mcp__lantern__checklist_set":
       return "Updating the plan";
   }
   const mcp = /^mcp__(.+?)__/.exec(s.name);

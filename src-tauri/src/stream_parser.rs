@@ -279,7 +279,16 @@ impl StreamParser {
                         description: str_of(input, "description"),
                         model: input["model"].as_str().map(String::from),
                     });
-                    let todos = (name == "TodoWrite").then(|| todos_of(input)).flatten().map(|items| UiEvent::Todos { parent: parent.clone(), items });
+                    // The plan comes from Claude's own TodoWrite, or from Lantern's checklist_set: claude -p has no TodoWrite
+                    // (see permission::helper::CHECKLIST_TOOL). Read here, from the call's input, so a reopened chat has it too.
+                    // A checklist_set call the helper refused ("Nothing changed") draws nothing, so the sheet never says more than
+                    // Claude was told; TodoWrite's own list is taken as it comes.
+                    let plan = match name.as_str() {
+                        "TodoWrite" => true,
+                        "mcp__lantern__checklist_set" => crate::permission::helper::checklist_says(input).is_ok(),
+                        _ => false,
+                    };
+                    let todos = plan.then(|| todos_of(input)).flatten().map(|items| UiEvent::Todos { parent: parent.clone(), items });
                     out.push(UiEvent::ToolStarted {
                         parent: parent.clone(),
                         tool_use_id: id,
@@ -515,6 +524,8 @@ pub fn summarize(name: &str, input: &Value) -> String {
             input.get("base").and_then(Value::as_str).filter(|b| !b.trim().is_empty()).unwrap_or("auto")
         )),
         "mcp__lantern__steps_guide" => s("flavour"),
+        // How far the plan is, as the step's header says it.
+        "mcp__lantern__checklist_set" => todos_of(input).map(|items| format!("{}/{} done", items.iter().filter(|t| t.status == "completed").count(), items.len())),
         // The worktree it put the chat in (empty: it left it), which a reopened chat goes back to (see worktree.ts worktreeOf).
         "mcp__lantern__enter_worktree" => s("path"),
         // A workflow's name, from its script's meta (or the saved one it runs).
@@ -626,6 +637,45 @@ mod tests {
         // Another tool's input with a `todos` field, or a TodoWrite with none, is no plan.
         let other = serde_json::json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Other","input":{"todos":[{"content":"a"}]}},{"type":"tool_use","id":"t3","name":"TodoWrite","input":{}}]}}).to_string();
         assert!(!parse_all(&other).iter().any(|e| matches!(e, UiEvent::Todos { .. })));
+    }
+
+    #[test]
+    fn a_checklist_set_call_makes_the_same_plan_event_and_a_subagents_stays_with_it() {
+        let call = |id: &str, parent: Option<&str>| {
+            let mut v = serde_json::json!({"type":"assistant","message":{"id":format!("m{id}"),"content":[{"type":"tool_use","id":id,"name":"mcp__lantern__checklist_set","input":{"todos":[
+                {"content":"Write tests","status":"completed","activeForm":"Writing tests"},
+                {"content":"Ship it","status":"in_progress"}
+            ]}}]}});
+            if let Some(p) = parent {
+                v["parent_tool_use_id"] = p.into();
+            }
+            v.to_string()
+        };
+        let plans = |text: &str| -> Vec<(Option<String>, usize)> { parse_all(text).iter().filter_map(|e| if let UiEvent::Todos { parent, items } = e { Some((parent.clone(), items.len())) } else { None }).collect() };
+        assert_eq!(plans(&call("t1", None)), vec![(None, 2)]);
+        assert_eq!(plans(&call("t2", Some("agent-1"))), vec![(Some("agent-1".to_string()), 2)], "a subagent's plan keeps its parent, so it stays out of the chat's checklist");
+        let events = parse_all(&call("t3", None));
+        assert!(events.iter().any(|e| matches!(e, UiEvent::ToolStarted { summary, .. } if summary == "1/2 done")), "the step header says how far it is");
+    }
+
+    #[test]
+    fn a_checklist_set_call_the_helper_refuses_draws_nothing_but_its_step_still_shows() {
+        let call = |todos: serde_json::Value| serde_json::json!({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"mcp__lantern__checklist_set","input":{"todos":todos}}]}}).to_string();
+        let plan_events = |text: &str| parse_all(text).iter().filter(|e| matches!(e, UiEvent::Todos { .. })).count();
+        let started = |text: &str| parse_all(text).iter().any(|e| matches!(e, UiEvent::ToolStarted { name, .. } if name == "mcp__lantern__checklist_set"));
+        for refused in [
+            serde_json::json!([{"content": "a", "status": "started"}]),
+            serde_json::json!([{"content": "  ", "status": "pending"}]),
+            serde_json::json!((0..51).map(|i| serde_json::json!({"content": format!("s{i}"), "status": "pending"})).collect::<Vec<_>>()),
+        ] {
+            let text = call(refused);
+            assert_eq!(plan_events(&text), 0, "Claude was told nothing changed, so nothing is drawn");
+            assert!(started(&text), "the step card still appears");
+        }
+        // Extra fields on a line, as older TodoWrite schemas had, are fine.
+        assert_eq!(plan_events(&call(serde_json::json!([{"content": "a", "status": "pending", "id": "1", "priority": "high"}]))), 1);
+        // An empty list is a valid way to clear the checklist.
+        assert_eq!(plan_events(&call(serde_json::json!([]))), 1);
     }
 
     /// Shapes from a real CLI 2.1.293 run with --advisor and an Explore subagent (trimmed, paths changed).
