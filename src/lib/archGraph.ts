@@ -451,10 +451,32 @@ function withPills(edges: Omit<PlacedEdge, "pill" | "labelAt">[], nodes: PlacedN
 
 // ---- The layouts ----
 
+/** A port outside a rectangular node, and the straight approach that keeps its arrowhead clear of the border. */
+function dock(n: PlacedNode, p: Point, clearance: number): [Point, Point] {
+  const left = n.x - n.w / 2;
+  const right = n.x + n.w / 2;
+  const top = n.y - n.h / 2;
+  const bottom = n.y + n.h / 2;
+  const sides = [
+    { distance: Math.abs(p.x - left), x: left, y: Math.min(bottom - 14, Math.max(top + 14, p.y)), dx: -1, dy: 0 },
+    { distance: Math.abs(p.x - right), x: right, y: Math.min(bottom - 14, Math.max(top + 14, p.y)), dx: 1, dy: 0 },
+    { distance: Math.abs(p.y - top), x: Math.min(right - 14, Math.max(left + 14, p.x)), y: top, dx: 0, dy: -1 },
+    { distance: Math.abs(p.y - bottom), x: Math.min(right - 14, Math.max(left + 14, p.x)), y: bottom, dx: 0, dy: 1 },
+  ];
+  const side = sides.sort((a, b) => a.distance - b.distance)[0];
+  const end = { x: side.x + side.dx * clearance, y: side.y + side.dy * clearance };
+  return [end, { x: end.x + side.dx * TERMINAL_RUN, y: end.y + side.dy * TERMINAL_RUN }];
+}
+
+/** Bigger graphs get wider routing corridors, even when their extra nodes are in other layers. */
+function horizontalGap(spec: ArchSpec): number {
+  return 64 + 4 * Math.max(0, spec.nodes.length - 4) + 2 * Math.max(0, spec.edges.length - spec.nodes.length);
+}
+
 /**
  * The boxes placed in the order the arrows go, left to right ("LR") or top to bottom ("TB"), and each arrow's route
  * between them. A map with layers is laid out by them instead: each layer a band, outermost at the top. `rowMax` is the
- * most boxes a band has in a row (a narrow room wants fewer, more rows).
+ * most boxes a band has in a row. Spacing grows with the whole graph, independently of the viewport.
  */
 export function layoutArchitecture(spec: ArchSpec, direction: "LR" | "TB" = "LR", rowMax = ROW_MAX): ArchLayout {
   if (spec.layers.length > 0) return layeredLayout(spec, rowMax);
@@ -462,12 +484,13 @@ export function layoutArchitecture(spec: ArchSpec, direction: "LR" | "TB" = "LR"
   const labelled = spec.edges.filter((e) => e.label).length;
   // A map full of labels is spaced for them.
   const crowd = Math.min(1, labelled / Math.max(1, spec.nodes.length));
+  const room = horizontalGap(spec);
   let best: ArchLayout | null = null;
   let bestScore = Infinity;
   // Dagre's rankers give different pictures: the one with fewest crossings is kept.
   for (const ranker of ["network-simplex", "tight-tree", "longest-path"]) {
     const g = new dagre.graphlib.Graph({ multigraph: true });
-    g.setGraph({ rankdir: direction, ranker, nodesep: (direction === "LR" ? 20 : 28) + 14 * crowd, ranksep: (direction === "LR" ? 46 : 34) + 24 * crowd, edgesep: 12 + 8 * crowd, marginx: 16, marginy: 16 });
+    g.setGraph({ rankdir: direction, ranker, nodesep: (direction === "TB" ? room : 56) + 24 * crowd, ranksep: 100 + 40 * crowd + (direction === "LR" ? room - 64 : 0), edgesep: 24 + 12 * crowd, marginx: 32, marginy: 32 });
     g.setDefaultEdgeLabel(() => ({}));
     for (const n of spec.nodes) g.setNode(n.id, { width: boxes.get(n.id)!.w, height: boxes.get(n.id)!.h });
     spec.edges.forEach((e, i) => {
@@ -482,7 +505,10 @@ export function layoutArchitecture(spec: ArchSpec, direction: "LR" | "TB" = "LR"
     });
     const edges = spec.edges.map((e, i) => {
       const p = g.edge({ v: e.from, w: e.to, name: `e${i}` }) as { points?: Point[] };
-      const points = p.points ?? [];
+      const raw = p.points ?? [];
+      const [start, exit] = dock(nodes.find((n) => n.id === e.from)!, raw[0], SOURCE_CLEARANCE);
+      const [end, entry] = dock(nodes.find((n) => n.id === e.to)!, raw[raw.length - 1], ARROW_CLEARANCE);
+      const points = [start, exit, ...raw.slice(1, -1), entry, end];
       return { ...e, key: `e${i}`, points, poly: points, crossings: [] as Point[], skips: [] as string[], via: [] as string[] };
     });
     const score = roughness({ edges, nodes });
@@ -497,39 +523,24 @@ export function layoutArchitecture(spec: ArchSpec, direction: "LR" | "TB" = "LR"
   return best!;
 }
 
-/**
- * The row size for a layered map in a room: the most boxes to a row whose map is no wider than the room at `minFit`
- * (so it needn't be panned sideways, which is worse than panning down), trying wide first. A room too narrow for any
- * gets the narrowest. `layoutFor` makes (or remembers) the layout for a row size; a room that fits the widest, or has no
- * size yet, needs only that one.
- */
-export function bestRows(layoutFor: (rowMax: number) => ArchLayout, room: { w: number; h: number }, minFit: number): { rowMax: number; layout: ArchLayout } {
-  let layout = layoutFor(ROW_MAX);
-  if (room.w <= 0 || room.h <= 0) return { rowMax: ROW_MAX, layout };
-  let rowMax = ROW_MAX;
-  while (layout.width * minFit > room.w - 16 && rowMax > 2) {
-    rowMax--;
-    layout = layoutFor(rowMax);
-  }
-  return { rowMax, layout };
-}
-
 // The layered layout's measures.
 const GUTTER_MAX = 150;
 const GUTTER_MIN = 84;
-const BAND_PAD = 22;
-const ROW_GAP = 26;
-const NODE_GAP = 30;
+const BAND_PAD = 48;
+const ROW_GAP = 64;
 export const ROW_MAX = 5;
-const SIDE = 32;
+const SIDE = 52;
 /** How much more room a strip between two rows gets for each arrow that crosses it (they have pills to carry too). */
-const STRIP_PER_EDGE = 1.5;
-const STRIP_EXTRA_MAX = 36;
+const STRIP_PER_EDGE = 4;
+const STRIP_EXTRA_MAX = 120;
 /** How far apart arrows are drawn where they leave or enter the same side of a box. */
-const PORT_GAP = 14;
+const PORT_GAP = 20;
 /** The room an arc over a row takes for each level of arc. */
-const ARC_LEVEL = 9;
-const CORRIDOR_MARGIN = 9;
+const ARC_LEVEL = 24;
+const CORRIDOR_MARGIN = 14;
+const SOURCE_CLEARANCE = 3;
+const ARROW_CLEARANCE = 6;
+const TERMINAL_RUN = 24;
 
 /** A cubic curve's points, as a polyline. */
 function cubicPoly(p0: Point, p1: Point, p2: Point, p3: Point, steps = 10): Point[] {
@@ -544,6 +555,7 @@ function cubicPoly(p0: Point, p1: Point, p2: Point, p3: Point, steps = 10): Poin
 
 /** A route through stations that run straight down a column and swing across in the space between rows: path and polyline. */
 function viaStations(st: Point[]): { path: string; poly: Point[] } {
+  st = st.filter((p, i) => !i || p.x !== st[i - 1].x || p.y !== st[i - 1].y);
   let path = `M ${round(st[0].x)} ${round(st[0].y)}`;
   const poly: Point[] = [st[0]];
   for (let i = 1; i < st.length; i++) {
@@ -599,9 +611,7 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
     neighbours.get(e.from)!.push(e.to);
     neighbours.get(e.to)!.push(e.from);
   }
-  // A map with many arrows keeps its boxes further apart, so there are gaps for them to pass through.
-  const density = spec.edges.length / Math.max(1, spec.nodes.length);
-  const nodeGap = NODE_GAP + Math.round(Math.min(20, Math.max(0, density - 1) * 20));
+  const nodeGap = horizontalGap(spec);
   const gutter = Math.round(Math.min(GUTTER_MAX, Math.max(GUTTER_MIN, Math.max(...layers.map((l) => l.label.length)) * 7.2 + 30)));
 
   // Where each box would sit with its band in one row, centred: the guess the ordering improves on.
@@ -752,7 +762,7 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
   const through = flat.map((_, k) => spec.edges.filter((e) => e.from !== e.to && rowOf.get(e.from)! !== rowOf.get(e.to)! && Math.min(rowOf.get(e.from)!, rowOf.get(e.to)!) <= k && k < Math.max(rowOf.get(e.from)!, rowOf.get(e.to)!)).length);
   const strip = (k: number) => {
     // The space above row k (k = 0 is the top of the map; k = flat.length the bottom).
-    const arcs = k < flat.length && rowLevels[k] ? rowLevels[k] * ARC_LEVEL + 8 : 0;
+    const arcs = k < flat.length && rowLevels[k] ? rowLevels[k] * ARC_LEVEL + 24 : 0;
     if (k === 0) return BAND_PAD + arcs;
     if (k === flat.length) return BAND_PAD;
     return (flat[k - 1].band === flat[k].band ? ROW_GAP : 2 * BAND_PAD) + Math.min(STRIP_EXTRA_MAX, through[k - 1] * STRIP_PER_EDGE) + arcs;
@@ -772,7 +782,7 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
   const bands: Band[] = [];
   layers.forEach((layer, b) => {
     // The arcs over a row take the bottom of the space above it; the boundary is in the middle of the rest.
-    const edgeY = (k: number) => (k <= 0 ? 0 : k >= flat.length ? total : flat[k - 1].top + flat[k - 1].h + (strips[k] - (rowLevels[k] ? rowLevels[k] * ARC_LEVEL + 8 : 0)) / 2);
+    const edgeY = (k: number) => (k <= 0 ? 0 : k >= flat.length ? total : flat[k - 1].top + flat[k - 1].h + (strips[k] - (rowLevels[k] ? rowLevels[k] * ARC_LEVEL + 24 : 0)) / 2);
     const top = edgeY(firstRow[b]);
     const bottom = b + 1 < layers.length ? edgeY(firstRow[b + 1]) : total;
     bands.push({ id: layer.id, label: layer.label, y: top, h: bottom - top });
@@ -813,13 +823,9 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
       const ideal = a.x + (z.x - a.x) * f;
       const spans = free(k);
       const clear = spans.find(([s, t]) => ideal >= s + 2 && ideal <= t - 2);
-      if (clear) {
-        corridor[i].set(k, ideal);
-        continue;
-      }
       // The nearest gap to where it would have gone.
       const near = spans.reduce<[number, number] | null>((b, s) => (!b || Math.min(Math.abs(ideal - s[0]), Math.abs(ideal - s[1])) < Math.min(Math.abs(ideal - b[0]), Math.abs(ideal - b[1])) ? s : b), null);
-      wanted.push({ edge: i, row: k, ideal, span: near ?? [lo, hi] });
+      wanted.push({ edge: i, row: k, ideal, span: clear ?? near ?? [lo, hi] });
     }
   });
   // Arrows sent to the same gap run side by side in it.
@@ -828,10 +834,12 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
   for (const group of byGap.values()) {
     group.sort((p, q) => p.ideal - q.ideal || p.edge - q.edge);
     const [s, t] = group[0].span;
-    const gap = Math.min(9, (t - s - 4) / group.length);
-    const mean = group.reduce((m, w) => m + Math.min(t - 2, Math.max(s + 2, w.ideal)), 0) / group.length;
-    const start = Math.min(t - 2 - gap * (group.length - 1), Math.max(s + 2, mean - (gap * (group.length - 1)) / 2));
-    group.forEach((w, n) => corridor[w.edge].set(w.row, start + gap * n));
+    const gap = Math.min(16, (t - s - 4) / group.length);
+    // Keep each route near its natural position; packing an entire corridor around its mean creates extra crossings.
+    const lanes: number[] = [];
+    group.forEach((w, n) => lanes.push(Math.max(s + 2, w.ideal, n ? lanes[n - 1] + gap : s + 2)));
+    for (let n = lanes.length - 1; n >= 0; n--) lanes[n] = Math.min(lanes[n], n === lanes.length - 1 ? t - 2 : lanes[n + 1] - gap);
+    group.forEach((w, n) => corridor[w.edge].set(w.row, lanes[n]));
   }
 
   // Ports: where arrows meet a box's top or bottom, side by side, in the order their other ends lie.
@@ -855,7 +863,7 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
   for (const [key, list] of ports) {
     const node = at.get(key.slice(0, key.lastIndexOf(":")))!;
     list.sort((p, q) => p.sort - q.sort || p.edge - q.edge || (p.end === "from" ? -1 : 1));
-    const gap = Math.min(PORT_GAP, (node.w - 24) / Math.max(1, list.length - 1));
+    const gap = Math.min(PORT_GAP, (node.w - 36) / Math.max(1, list.length - 1));
     list.forEach((p, n) => portX.set(`${p.edge}:${p.end}`, node.x + (n - (list.length - 1) / 2) * gap));
   }
 
@@ -868,30 +876,41 @@ function layoutLayers(spec: ArchSpec, rowMax: number, seed: number): Bare {
     if (e.from === e.to) {
       // A box to itself: a loop out of its right side.
       const x = a.x + a.w / 2;
-      const p0 = { x, y: a.y - 6 };
-      const p3 = { x, y: a.y + 6 };
-      const c1 = { x: x + 34, y: a.y - 20 };
-      const c2 = { x: x + 34, y: a.y + 20 };
-      route = { path: `M ${round(p0.x)} ${round(p0.y)} C ${round(c1.x)} ${round(c1.y)}, ${round(c2.x)} ${round(c2.y)}, ${round(p3.x)} ${round(p3.y)}`, poly: cubicPoly(p0, c1, c2, p3) };
+      const start = { x: x + SOURCE_CLEARANCE, y: a.y - 10 };
+      const end = { x: x + ARROW_CLEARANCE, y: a.y + 10 };
+      const p0 = { x: start.x + TERMINAL_RUN, y: start.y };
+      const p3 = { x: end.x + TERMINAL_RUN, y: end.y };
+      const c1 = { x: x + 52, y: a.y - 24 };
+      const c2 = { x: x + 52, y: a.y + 24 };
+      route = { path: `M ${round(start.x)} ${round(start.y)} L ${round(p0.x)} ${round(p0.y)} C ${round(c1.x)} ${round(c1.y)}, ${round(c2.x)} ${round(c2.y)}, ${round(p3.x)} ${round(p3.y)} L ${round(end.x)} ${round(end.y)}`, poly: [start, ...cubicPoly(p0, c1, c2, p3), end] };
     } else if (ra === rz) {
       // In one row: over the top, so it doesn't run through the boxes between.
-      const lift = flat[ra].top - 10 - ARC_LEVEL * (arcLevel.get(i) ?? 0);
-      const p0 = { x: portX.get(`${i}:from`)!, y: a.y - a.h / 2 };
-      const p3 = { x: portX.get(`${i}:to`)!, y: z.y - z.h / 2 };
+      const lift = flat[ra].top - 64 - ARC_LEVEL * (arcLevel.get(i) ?? 0);
+      const start = { x: portX.get(`${i}:from`)!, y: a.y - a.h / 2 - SOURCE_CLEARANCE };
+      const end = { x: portX.get(`${i}:to`)!, y: z.y - z.h / 2 - ARROW_CLEARANCE };
+      const p0 = { x: start.x, y: start.y - TERMINAL_RUN };
+      const p3 = { x: end.x, y: end.y - TERMINAL_RUN };
       const c1 = { x: p0.x, y: lift };
       const c2 = { x: p3.x, y: lift };
-      route = { path: `M ${round(p0.x)} ${round(p0.y)} C ${round(c1.x)} ${round(c1.y)}, ${round(c2.x)} ${round(c2.y)}, ${round(p3.x)} ${round(p3.y)}`, poly: cubicPoly(p0, c1, c2, p3, 16) };
+      route = { path: `M ${round(start.x)} ${round(start.y)} L ${round(p0.x)} ${round(p0.y)} C ${round(c1.x)} ${round(c1.y)}, ${round(c2.x)} ${round(c2.y)}, ${round(p3.x)} ${round(p3.y)} L ${round(end.x)} ${round(end.y)}`, poly: [start, ...cubicPoly(p0, c1, c2, p3, 16), end] };
     } else {
       const down = rz > ra;
       const px = portX.get(`${i}:from`)!;
       const qx = portX.get(`${i}:to`)!;
       const rowEdge = (k: number, leaving: boolean) => (down === leaving ? flat[k].top + flat[k].h : flat[k].top);
-      const st: Point[] = [{ x: px, y: down ? a.y + a.h / 2 : a.y - a.h / 2 }, { x: px, y: rowEdge(ra, true) }];
+      const sign = down ? 1 : -1;
+      const st: Point[] = [
+        { x: px, y: a.y + sign * (a.h / 2 + SOURCE_CLEARANCE) },
+        { x: px, y: rowEdge(ra, true) + sign * (SOURCE_CLEARANCE + TERMINAL_RUN) },
+      ];
       for (let k = ra + (down ? 1 : -1); k !== rz; k += down ? 1 : -1) {
         const x = corridor[i].get(k)!;
         st.push({ x, y: rowEdge(k, false) }, { x, y: rowEdge(k, true) });
       }
-      st.push({ x: qx, y: rowEdge(rz, false) }, { x: qx, y: down ? z.y - z.h / 2 : z.y + z.h / 2 });
+      st.push(
+        { x: qx, y: rowEdge(rz, false) - sign * (ARROW_CLEARANCE + TERMINAL_RUN) },
+        { x: qx, y: z.y - sign * (z.h / 2 + ARROW_CLEARANCE) },
+      );
       route = viaStations(st);
     }
     // Where it crosses each boundary between its two bands.
@@ -927,8 +946,17 @@ export function routePath(points: Point[]): string {
   if (points.length < 3) return `M ${points.map(f).join(" L ")}`;
   let d = `M ${f(points[0])}`;
   for (let i = 1; i < points.length - 1; i++) {
-    const mid = { x: (points[i].x + points[i + 1].x) / 2, y: (points[i].y + points[i + 1].y) / 2 };
-    d += ` Q ${f(points[i])} ${f(mid)}`;
+    const a = points[i - 1];
+    const corner = points[i];
+    const b = points[i + 1];
+    const before = Math.hypot(corner.x - a.x, corner.y - a.y);
+    const after = Math.hypot(b.x - corner.x, b.y - corner.y);
+    if (!before || !after) continue;
+    // Keep long runs straight and round only the corner; smoothing a whole run distorts arrow approaches.
+    const radius = Math.min(12, before / 2, after / 2);
+    const entry = { x: corner.x + (a.x - corner.x) * radius / before, y: corner.y + (a.y - corner.y) * radius / before };
+    const exit = { x: corner.x + (b.x - corner.x) * radius / after, y: corner.y + (b.y - corner.y) * radius / after };
+    d += ` L ${f(entry)} Q ${f(corner)} ${f(exit)}`;
   }
   return `${d} L ${f(points[points.length - 1])}`;
 }
