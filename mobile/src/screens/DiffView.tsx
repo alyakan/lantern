@@ -112,10 +112,14 @@ function MdText({ line, colors }: { line: MdLine; colors: Palette }) {
  * A file's change, drawn as the file: each line with its number in the old and new file, a green wash behind what was added and a
  * red one behind what was removed (no "+" or "-"), code coloured as its language and a markdown file's lines as markdown. Code
  * scrolls sideways; markdown wraps, as prose should. Read-only.
+ *
+ * Inside a page that is itself swiped sideways (a Review's cards) it is drawn with `wrap`: long lines wrap instead of scrolling,
+ * so a swipe on the card still turns the page. `rows`, in place of `text`, draws a few rows of a diff (a finding's lines) and
+ * `named` marks the new-file lines among them with a bar.
  */
-export function DiffView({ path, text }: { path: string; text: string }) {
+export function DiffView({ path, text = "", rows: given, named, wrap = false }: { path: string; text?: string; rows?: DiffRow[]; named?: [number, number]; wrap?: boolean }) {
   const colors = useColors();
-  const rows = useMemo(() => parseUnifiedDiff(text), [text]);
+  const rows = useMemo(() => given ?? parseUnifiedDiff(text), [given, text]);
   const markdown = isMarkdown(path);
   const lang = languageOf(path);
   const tokens = useMemo(() => (markdown ? null : tokensOf(rows, lang)), [rows, markdown, lang]);
@@ -161,8 +165,9 @@ export function DiffView({ path, text }: { path: string; text: string }) {
         const no = row.kind === "del" ? row.oldNo : row.newNo;
         const md = lines?.[i];
         const code = tokens?.[i] ?? [];
+        const marked = !!named && row.kind !== "del" && row.newNo !== null && row.newNo >= named[0] && row.newNo <= named[1];
         return (
-          <View key={i} accessible accessibilityLabel={`${KIND_WORDS[row.kind]}${no ? `, line ${no}` : ""}: ${row.text.trim() ? row.text : "blank"}`} style={{ flexDirection: "row", backgroundColor: washOf(row.kind, colors, false) }}>
+          <View key={i} accessible accessibilityLabel={`${marked ? "Named by the finding. " : ""}${KIND_WORDS[row.kind]}${no ? `, line ${no}` : ""}: ${row.text.trim() ? row.text : "blank"}`} style={[{ flexDirection: "row", backgroundColor: washOf(row.kind, colors, false) }, named ? { borderLeftWidth: 3, borderLeftColor: marked ? colors.cobalt : "transparent" } : null]}>
             {gutter > 0 && number(row.oldNo, row)}
             {gutter > 0 && number(row.newNo, row)}
             {md ? (
@@ -170,7 +175,7 @@ export function DiffView({ path, text }: { path: string; text: string }) {
                 <MdText line={md} colors={colors} />
               </View>
             ) : (
-              <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.mono, { color: row.kind === "ctx" ? colors.ink2 : colors.ink, paddingLeft: 8, paddingRight: space.lg }]}>
+              <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} selectable style={[scale.mono, { color: row.kind === "ctx" ? colors.ink2 : colors.ink, paddingLeft: 8, paddingRight: space.lg }, wrap ? { flex: 1 } : null]}>
                 {code.length === 0 || row.text === ""
                   ? row.text || " "
                   : code.map((t, j) => {
@@ -195,9 +200,10 @@ export function DiffView({ path, text }: { path: string; text: string }) {
       )}
     </View>
   );
-  const scroller = markdown ? body : <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView>;
+  const scroller = markdown || wrap ? body : <ScrollView horizontal showsHorizontalScrollIndicator={false}>{body}</ScrollView>;
   // A file with no change in it (the Mac shows a named file whole when git has nothing for it) says so before its lines.
-  if (rows.some((r) => r.kind === "add" || r.kind === "del") || !rows.some((r) => r.kind === "ctx")) return scroller;
+  // (Not for rows picked out of a diff: they are a few lines of it, and say nothing about the file.)
+  if (given || rows.some((r) => r.kind === "add" || r.kind === "del") || !rows.some((r) => r.kind === "ctx")) return scroller;
   return (
     <>
       <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.lg, paddingBottom: 8 }}>

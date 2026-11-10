@@ -1409,6 +1409,130 @@ describe("a Review, a file page at a time", () => {
     expect(within(screen.getByTestId("step-page-0")).getByText("Agreed")).toBeTruthy();
     expect(within(screen.getByTestId("step-page-0")).queryByRole("button", { name: "Agree" })).toBeNull();
   });
+
+  describe("what the Mac's review desk added", () => {
+    const frame: RemoteEvent = {
+      kind: "assistant_text",
+      block_id: "fr",
+      text: '# Frame — Retry the client\n\nRetries with backoff.\n\n### Units\n1. `src/lib/auth.ts` (+12 −3) — the token\n2. src/lib/api.ts (+4 −0) — the call\n\n### Risks\n- **Stale token**: it may be reused (units 1, 2)\n\nSay "Next" to start.',
+    };
+    const diff = "--- a/src/lib/auth.ts\n+++ b/src/lib/auth.ts\n@@ -40,4 +40,4 @@\n context one\n context two\n-const old = refresh();\n+const fresh = refresh(token);\n context three\n";
+    const unit = (name: RegExp | string) => screen.getByRole("button", { name });
+
+    it("draws the Frame as its totals, risks and route, and a unit opens its page once it is written", async () => {
+      await review([frame, ...one]);
+      await fireEvent.press(screen.getByRole("button", { name: "Previous page" }));
+      expect(screen.getByLabelText("This review: 2 units, 16 lines added, 3 removed, 1 risk")).toBeTruthy();
+      expect(within(screen.getByTestId("review-risk-0")).getByText("Stale token")).toBeTruthy();
+      // Unit 2 has no page yet: it is there, and says so, but doesn't open.
+      expect(screen.getAllByLabelText("2. api.ts: the call, not reached yet").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("link", { name: "2. api.ts: the call" })).toBeNull();
+      await fireEvent.press(screen.getByRole("link", { name: "1. auth.ts: the token" }));
+      await waitFor(() => expect(unit(/^Unit 1, src\/lib\/auth\.ts.*the page on screen/).props.accessibilityState).toMatchObject({ selected: true }));
+    });
+
+    it("walks a Review along its route: the Frame, every planned unit, the Summary", async () => {
+      await review([frame, ...one]);
+      expect(screen.getByLabelText("Review route")).toBeTruthy();
+      expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, 2 without a verdict, the page on screen/).props.accessibilityState).toMatchObject({ selected: true });
+      expect(unit(/^Unit 2, src\/lib\/api\.ts, not reached yet/).props.accessibilityState).toMatchObject({ disabled: true });
+      expect(unit(/^The Summary.*not reached yet/).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(unit(/^The Frame/));
+      await waitFor(() => expect(unit(/^The Frame.*the page on screen/).props.accessibilityState).toMatchObject({ selected: true }));
+    });
+
+    it("counts the verdicts given on a unit as they are given, and once they are sent", async () => {
+      await review(one);
+      expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, 2 without a verdict/)).toBeTruthy();
+      await fireEvent.press(within(screen.getByTestId("finding-0")).getByRole("button", { name: "Agree" }));
+      await waitFor(() => expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, 1 without a verdict/)).toBeTruthy());
+      await fireEvent.press(within(screen.getByTestId("finding-1")).getByRole("button", { name: "Reject" }));
+      await waitFor(() => expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, the page on screen/)).toBeTruthy());
+    });
+
+    it("reads the verdicts a Next carried, for the unit it left", async () => {
+      await review([...one, { kind: "user_text", text: "Next. Agreed: line 42.", at: 2, sent_by: "desktop" }, { kind: "assistant_text", block_id: "f2", text: filePage(2, "src/lib/api.ts") }]);
+      expect(unit(/^Unit 1, src\/lib\/auth\.ts, 2 findings, 1 without a verdict/)).toBeTruthy();
+    });
+
+    it("reads another flavour's Frame as written, even with a Risks section: no cards, no route", async () => {
+      await review([{ kind: "assistant_text", block_id: "d1", text: "# Frame — A new cache\n\nWhat is in scope.\n\n### Risks\n- **Coupling**: the layers lean on each other" }]);
+      expect(screen.queryByLabelText("Review route")).toBeNull();
+      expect(screen.queryByTestId("review-risk-0")).toBeNull();
+      expect(screen.getByText("What is in scope.")).toBeTruthy();
+    });
+
+    it("has no route in a Step by step chat that isn't a Review", async () => {
+      await review([{ kind: "assistant_text", block_id: "s1", text: "# Step 1 of 2 — Bump the version\n\nDone." }]);
+      expect(screen.queryByLabelText("Review route")).toBeNull();
+    });
+
+    it("shows the diff of the page's file, shut until opened, read from what is reviewed", async () => {
+      const { lastOf, asked } = await review(one, ["reviewdiff"], { review_diff: diff });
+      expect(asked.some((r) => r.op === "review_diff")).toBe(false);
+      await fireEvent.press(screen.getByRole("button", { name: "Show the diff" }));
+      await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/auth.ts" }));
+      await waitFor(() => expect(screen.getByLabelText("Added, line 42: const fresh = refresh(token);")).toBeTruthy());
+      expect(screen.getByRole("button", { name: "Hide the diff" })).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Hide the diff" }));
+      expect(screen.queryByLabelText("Added, line 42: const fresh = refresh(token);")).toBeNull();
+    });
+
+    it("shows the lines a finding names, marked, and says when the diff doesn't have them", async () => {
+      const { lastOf } = await review(one, ["reviewdiff"], { review_diff: diff });
+      await fireEvent.press(within(screen.getByTestId("finding-0")).getByRole("button", { name: "Show the code, line 42" }));
+      await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/auth.ts" }));
+      await waitFor(() => expect(within(screen.getByTestId("finding-0")).getByLabelText("Named by the finding. Added, line 42: const fresh = refresh(token);")).toBeTruthy());
+      // The lines around it are shown, not marked.
+      expect(within(screen.getByTestId("finding-0")).getByLabelText("Unchanged, line 41: context two")).toBeTruthy();
+      // Line 50 is further from the change than the diff reaches.
+      await fireEvent.press(within(screen.getByTestId("finding-1")).getByRole("button", { name: "Show the code, line 50" }));
+      await waitFor(() => expect(within(screen.getByTestId("finding-1")).getByText("Line 50 isn't near a change in this diff.")).toBeTruthy());
+    });
+
+    it("opens the whole change from a card", async () => {
+      await review(one, ["reviewdiff"], { review_diff: diff });
+      await fireEvent.press(screen.getByRole("button", { name: "Show the diff" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Open the whole change" })).toBeTruthy());
+      await fireEvent.press(screen.getByRole("button", { name: "Open the whole change" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toBeTruthy());
+    });
+
+    it("says why when the diff can't be read", async () => {
+      const { controller } = makeController();
+      attachSession(controller, {}, ["reviewdiff"]);
+      await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ workflow: "steps" })], events: { a: one }, connection: connectedWith(["reviewdiff"]) }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+      await fireEvent.press(screen.getByRole("button", { name: "Show the diff" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    });
+
+    it("offers no diff or code card to a Mac that can't read a reviewed file's diff", async () => {
+      await review(one, [], { diff });
+      expect(screen.queryByRole("button", { name: "Show the diff" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Show the code/ })).toBeNull();
+    });
+
+    describe("a page for a group of files", () => {
+      const group: RemoteEvent[] = [{ kind: "assistant_text", block_id: "g1", text: "# File 1 of 1 — #548 Retry the client (+16 −3)\n\nFiles: `src/lib/auth.ts`, src/lib/api.ts\n\n### What changed\nBoth sides.\n\n### Findings\n⚠ src/lib/api.ts:5 (nit): Odd name.\n\n### Notes\nFine." }];
+
+      it("has the group's title, not as a file, and each file as a link to its change", async () => {
+        const { lastOf } = await review(group, ["reviewdiff"], { review_diff: diff });
+        expect(screen.getByText("#548 Retry the client")).toBeTruthy();
+        expect(screen.queryByRole("link", { name: /#548/ })).toBeNull();
+        expect(screen.getByRole("link", { name: "src/lib/auth.ts" })).toBeTruthy();
+        await fireEvent.press(screen.getByRole("link", { name: "src/lib/api.ts" }));
+        await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/api.ts" }));
+      });
+
+      it("has a diff for each file and the code of a finding from its own file", async () => {
+        const { lastOf } = await review(group, ["reviewdiff"], { review_diff: diff });
+        expect(screen.getAllByRole("button", { name: "Show the diff" })).toHaveLength(2);
+        await fireEvent.press(within(screen.getByTestId("finding-0")).getByRole("button", { name: "Show the code, line 5" }));
+        await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "src/lib/api.ts" }));
+      });
+    });
+  });
 });
 
 describe("what a turn changed", () => {

@@ -1,10 +1,11 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { View } from "react-native";
 import { Txt } from "../ui/components";
 import { Markdown } from "../ui/Markdown";
 import { PressScale } from "../ui/motion";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import type { Finding, ReviewFile, Severity, Verdict } from "../view/review";
+import { ReviewDiffCard } from "./ReviewDiffCard";
 
 const SEVERITY: Record<Severity, string> = { blocker: "Blocker", "should-fix": "Should fix", nit: "Nit" };
 
@@ -31,8 +32,8 @@ function VerdictPill({ label, on, tone, onPress }: { label: string; on: boolean;
   );
 }
 
-/** One finding: how bad, where (a link to the change there), what, and your verdict on it. */
-function FindingCard({ finding, verdict, onVerdict, onLine, onFile }: { finding: Finding; verdict: Verdict | undefined; /** Present while the page can still be answered. */ onVerdict?: (v: Verdict | null) => void; onLine: () => void; /** A path in its words was tapped. */ onFile: (path: string) => void }) {
+/** One finding: how bad, where (a link to the change there), what, its code (shut), and your verdict on it. */
+function FindingCard({ finding, verdict, onVerdict, onLine, onFile, code }: { finding: Finding; verdict: Verdict | undefined; /** Present while the page can still be answered. */ onVerdict?: (v: Verdict | null) => void; onLine: () => void; /** A path in its words was tapped. */ onFile: (path: string) => void; /** The lines it names, from the diff (a card that is shut until opened). */ code?: ReactNode }) {
   const colors = useColors();
   const sev = finding.severity;
   const sevColor = sev === "blocker" ? colors.stop : sev === "should-fix" ? colors.hi : colors.ink3;
@@ -56,6 +57,7 @@ function FindingCard({ finding, verdict, onVerdict, onLine, onFile }: { finding:
         )}
       </View>
       <Markdown text={finding.text} onFile={onFile} />
+      {code}
       {onVerdict && (
         <View accessibilityRole="radiogroup" accessibilityLabel="Your verdict" style={{ flexDirection: "row", gap: 8 }}>
           <VerdictPill label="Agree" tone="go" on={verdict === "agree"} onPress={() => onVerdict(verdict === "agree" ? null : "agree")} />
@@ -78,13 +80,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /**
- * A Review file page, laid out as the Mac lays it out: the file (a link to its change), what changed, the findings with your
- * verdict on each while the page is the live one (and what you said, after), and the notes. A path named anywhere on it
- * (`a/b.swift:42`, a page of several files lists each) is a link to its change too, as the heading is.
+ * A Review file page, laid out as the Mac lays it out: the file (a link to its change), or a group's title with each of its
+ * files, what changed with the diff of each file (shut), the findings with your verdict on each while the page is the live
+ * one (and what you said, after) and the lines each names (shut), and the notes. A path named anywhere on it
+ * (`a/b.swift:42`, a page of several files lists each) is a link to its change too, as the heading is. `load`, given when
+ * the Mac can read a reviewed file's diff, reads one: without it the diff and code cards aren't offered.
  */
-export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdicts, onVerdict, onOpen }: { kicker: string; file: ReviewFile; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void; /** Opens the change in the file. */ onOpen: (path: string) => void }) {
+export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdicts, onVerdict, onOpen, load }: { kicker: string; file: ReviewFile; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void; /** Opens the change in the file. */ onOpen: (path: string) => void; /** A reviewed file's unified diff. */ load?: (path: string) => Promise<string> }) {
   const colors = useColors();
   const path = file.path;
+  // Where a finding is, when it doesn't say: this page's file, or the only one a group has.
+  const only = path ?? (file.files.length === 1 ? file.files[0] : null);
+  const diffs = path ? [path] : file.files;
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, gap: 16 }}>
       <View style={[{ backgroundColor: colors.card, borderRadius: radius.block, padding: 14, gap: 6 }, shadow.card, { shadowOpacity: 0.06 }]}>
@@ -97,6 +104,10 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
               {path}
             </Txt>
           </PressScale>
+        ) : file.group ? (
+          <Txt variant="heading" accessibilityRole="header">
+            {file.group}
+          </Txt>
         ) : null}
         {(file.added !== null || file.removed !== null) && (
           <View style={{ flexDirection: "row", gap: 8 }}>
@@ -108,11 +119,34 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
             </Txt>
           </View>
         )}
+        {file.files.length > 0 && (
+          <View accessibilityLabel="Files on this page" style={{ gap: 2, marginTop: 2 }}>
+            {file.files.map((f) => (
+              <PressScale key={f} accessibilityRole="link" accessibilityLabel={f} accessibilityHint="Opens the change in this file" onPress={() => onOpen(f)} hitSlop={4} style={{ paddingVertical: 4 }}>
+                <Txt variant="small" tone="cobalt" numberOfLines={1} ellipsizeMode="head" style={{ textDecorationLine: "underline" }}>
+                  {f}
+                </Txt>
+              </PressScale>
+            ))}
+          </View>
+        )}
         {!!file.preface && <Markdown text={file.preface} onFile={onOpen} />}
       </View>
-      {!!file.changed && (
+      {(!!file.changed || (!!load && diffs.length > 0)) && (
         <Section title="What changed">
-          <Markdown text={file.changed} onFile={onOpen} />
+          {!!file.changed && <Markdown text={file.changed} onFile={onOpen} />}
+          {!!load &&
+            diffs.map((p) => (
+              <View key={p} style={{ gap: 2 }}>
+                {/* A group says which file each diff is of. */}
+                {!path && (
+                  <Txt variant="tiny" tone="ink3" numberOfLines={1} ellipsizeMode="head">
+                    {p}
+                  </Txt>
+                )}
+                <ReviewDiffCard path={p} load={load} onOpen={onOpen} />
+              </View>
+            ))}
         </Section>
       )}
       <Section title={file.findings.length ? `Findings (${file.findings.length})` : "Findings"}>
@@ -121,7 +155,10 @@ export const ReviewFilePage = memo(function ReviewFilePage({ kicker, file, verdi
             No findings in this file.
           </Txt>
         ) : (
-          file.findings.map((f) => <FindingCard key={f.index} finding={f} verdict={verdicts?.[f.index]} onVerdict={onVerdict && ((v) => onVerdict(f.index, v))} onLine={() => { const at = f.path ?? path; if (at) onOpen(at); }} onFile={onOpen} />)
+          file.findings.map((f) => {
+            const at = f.path ?? only;
+            return <FindingCard key={f.index} finding={f} verdict={verdicts?.[f.index]} onVerdict={onVerdict && ((v) => onVerdict(f.index, v))} onLine={() => { if (at) onOpen(at); }} onFile={onOpen} code={load && at && f.line !== null ? <ReviewDiffCard path={at} span={[f.line, f.lineEnd ?? f.line]} load={load} onOpen={onOpen} /> : undefined} />;
+          })
         )}
       </Section>
       {!!file.notes && (

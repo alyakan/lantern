@@ -1,8 +1,10 @@
 /**
- * A Review page as the Mac reads it (src/lib/review.ts, copied here line for line so the two agree): a file page's parts, and
- * the Next that carries your verdicts on its findings, which is what Claude reads whichever of them sent it. What isn't
- * here: a group page's Files: line and header (the phone shows it as the text Claude wrote); only its findings, which name
- * their file (`src/a.ts:42 (nit): …`), are read, so a verdict on one reads back from the Next like the Mac's.
+ * A Review page as the Mac reads it (src/lib/review.ts, copied here line for line so the two agree): a page's parts (a
+ * file's, or a group's `Files:` line and title), the Frame's Units and Risks, and the Next that carries your verdicts on its
+ * findings, which is what Claude reads whichever of them sent it. A finding names its file (`src/a.ts:42 (nit): …`), so a
+ * verdict on one reads back from the Next like the Mac's. What isn't here: what the Mac does with the Changes pane (findings
+ * in its diff, the notes kept for the summary) and its prNumberOf, baseBranchOf, reviewTargetOf and matchChanged, which are
+ * about the Mac's own panes.
  */
 
 /**
@@ -27,7 +29,11 @@ export interface Finding {
 }
 
 export interface ReviewFile {
+  /** The file, for a page about one file; null for a group's. */
   path: string | null;
+  /** A group's title ("#548 Add the field, model and mapping") and its files, for a page that covers several; else null and empty. */
+  group: string | null;
+  files: string[];
   added: number | null;
   removed: number | null;
   /** Anything said before the sections (e.g. about the last file's verdicts). */
@@ -109,17 +115,122 @@ export function findingsOf(section: string): { findings: Finding[]; clean: boole
   return { findings, clean: false };
 }
 
-/** A file page's parts; null when the message doesn't have the skill's sections. */
+/** A group page's first line under its heading: `Files: a/b.ts, c/d.ts` (also bold, or with the paths in backticks). */
+const FILES_LINE = /^(?:\*\*)?Files:?(?:\*\*)?:?[ \t]*(.+)$/i;
+
+/**
+ * The paths of the `Files:` line a page opens with, when it has one (a Review page for a group of files). The Mac reads it
+ * from the second line of the message, under the heading; the phone's page body has lost the heading, so it is the first.
+ */
+export function filesUnder(body: string): string[] | null {
+  const m = FILES_LINE.exec((body.split("\n").find((l) => l.trim()) ?? "").trim());
+  const files = (m?.[1] ?? "").split(",").map((f) => f.replace(/\*\*/g, "").trim().replace(/^`+|`+$/g, "").trim()).filter(Boolean);
+  return files.length ? files : null;
+}
+
+/**
+ * A unit's parts; null when the message doesn't have the skill's sections. A page that opens with a `Files:` line is a
+ * group's: its title is the group's (not a path), the line becomes `files`, and it goes from the preface.
+ */
 export function parseReviewFile(title: string | null, text: string): ReviewFile | null {
   const parts = withoutCue(text).split(/^###\s+(.+)$/m);
   if (parts.length < 3) return null;
   const sections = new Map<string, string>();
   for (let i = 1; i < parts.length; i += 2) sections.set(parts[i].trim().toLowerCase(), parts[i + 1] ?? "");
   if (!sections.has("what changed") && !sections.has("findings")) return null;
-  const file = title ? splitFileTitle(title) : { path: null, added: null, removed: null };
+  const files = filesUnder(text) ?? [];
+  const named = title ? splitFileTitle(title) : { path: null, added: null, removed: null };
+  const file = files.length ? { ...named, path: null, group: named.path } : { ...named, group: null };
+  const preface = files.length ? parts[0].replace(/^\s*[^\n]*\n?/, "") : parts[0];
   const { findings, clean } = findingsOf(sections.get("findings") ?? "");
-  return { ...file, preface: parts[0].trim(), changed: (sections.get("what changed") ?? "").trim(), findings, clean, notes: (sections.get("notes") ?? "").trim() };
+  return { ...file, files, preface: preface.trim(), changed: (sections.get("what changed") ?? "").trim(), findings, clean, notes: (sections.get("notes") ?? "").trim() };
 }
+
+/** A unit the Frame plans, in walk order: its number (its page is "File N of M"), what it is, its counts and why to look. */
+export interface FrameUnit {
+  n: number;
+  /** A file's repo-relative path, or a group's title. */
+  title: string;
+  added: number | null;
+  removed: number | null;
+  note: string;
+}
+
+/** A risk the Frame names: in a few words, why it could go wrong, and the units it is in. */
+export interface FrameRisk {
+  title: string;
+  text: string;
+  units: number[];
+}
+
+/** A Review's Frame: what comes before the sections, the planned units, the risks, and any other section as written. */
+export interface ReviewFrame {
+  preface: string;
+  units: FrameUnit[];
+  risks: FrameRisk[];
+  /** The Frame's other sections, headings and all (what is skipped, ...). */
+  rest: string;
+}
+
+const UNIT = /^\s*(\d+)[.)]\s+(.+)$/;
+const COUNTS = /^(.*?)\s*\(\s*\+(\d+)\s*[−–-]\s*(\d+)\s*\)\s*(?:[—–]|-{1,2})?\s*(.*)$/;
+const RISK = /^\s*[-*]\s+(.+)$/;
+const RISK_UNITS = /\s*\(\s*units?\s+([\d\s,–-]+(?:\s*and\s*\d+)?)\s*\)\s*\.?\s*$/i;
+const plain = (s: string) => s.replace(/\*\*/g, "").replace(/^`|`$/g, "").trim();
+
+/**
+ * The Frame of a Review, when it has the sections the Mac reads (`### Units`, a line per unit: `N. <path or group title>
+ * (+added −removed) — <why to look>`; `### Risks`, a line per risk: `- <risk>: <why> (units 2, 4)`, or "None."). Null
+ * when it has neither (an older Frame): the page then reads as Claude wrote it.
+ */
+export function parseReviewFrame(text: string): ReviewFrame | null {
+  const parts = withoutCue(text).split(/^###\s+(.+)$/m);
+  let units: FrameUnit[] | null = null;
+  let risks: FrameRisk[] | null = null;
+  const rest: string[] = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    const name = parts[i].trim().toLowerCase();
+    const body = parts[i + 1] ?? "";
+    if (name === "units") {
+      units = body.split("\n").flatMap((line): FrameUnit[] => {
+        const m = UNIT.exec(line);
+        if (!m) return [];
+        const c = COUNTS.exec(m[2]);
+        if (c) return [{ n: Number(m[1]), title: plain(c[1]), added: Number(c[2]), removed: Number(c[3]), note: c[4].trim() }];
+        const [title, ...note] = m[2].split(/\s+[—–]\s+/);
+        return [{ n: Number(m[1]), title: plain(title), added: null, removed: null, note: note.join(" — ").trim() }];
+      });
+    } else if (name === "risks") {
+      risks = body.split("\n").flatMap((line): FrameRisk[] => {
+        const m = RISK.exec(line);
+        if (!m) return [];
+        const u = RISK_UNITS.exec(m[1]);
+        const said = u ? m[1].slice(0, u.index) : m[1];
+        const numbers = u ? expandUnits(u[1]) : [];
+        const colon = said.indexOf(":");
+        return colon > 0 ? [{ title: plain(said.slice(0, colon)), text: said.slice(colon + 1).trim(), units: numbers }] : [{ title: plain(said), text: "", units: numbers }];
+      });
+    } else rest.push(`### ${parts[i].trim()}\n${body.trim()}`);
+  }
+  if (units === null && risks === null) return null;
+  return { preface: parts[0].trim(), units: units ?? [], risks: risks ?? [], rest: rest.join("\n\n") };
+}
+
+/** "2, 4–6 and 9" → [2, 4, 5, 6, 9]. */
+function expandUnits(list: string): number[] {
+  const out: number[] = [];
+  for (const piece of list.split(/,|\band\b/)) {
+    const range = /^\s*(\d+)\s*[–-]\s*(\d+)\s*$/.exec(piece);
+    if (range) for (let n = Number(range[1]); n <= Number(range[2]) && out.length < 100; n++) out.push(n);
+    else if (/^\s*\d+\s*$/.test(piece)) out.push(Number(piece));
+  }
+  return out;
+}
+
+/** A unit's title as a file (a path with no spaces) or a group's title. */
+export const isPath = (title: string) => !/\s/.test(title) && (title.includes("/") || /\.[A-Za-z]\w*$/.test(title));
+/** What a unit is called where room is short: a file's name, or a group's title. */
+export const unitName = (title: string) => (isPath(title) ? title.slice(title.lastIndexOf("/") + 1) : title);
 
 export type Verdict = "agree" | "reject";
 
