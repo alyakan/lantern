@@ -8,8 +8,11 @@ export const lineLabel = (c: Pick<DiffComment, "side" | "line">) => (c.side === 
 /**
  * The box a comment is written in: Enter adds it, Shift+Enter starts a new line, Escape cancels. Also how one is edited.
  * `label` names it for a screen reader ("Comment on line 42 of retry.ts").
+ * In a Review (`review`), Enter keeps it for the review's end, and Fix now sends it to Claude at once instead; `fixOff`
+ * is why Fix now can't be used right now. `onChange` hears every keystroke (a draft kept while the diff is away).
+ * `notice` is said above the box (the line it was started on has changed).
  */
-export function CommentBox({ label, initial = "", onSave, onCancel }: { label: string; initial?: string; onSave: (text: string) => void; onCancel: () => void }) {
+export function CommentBox({ label, initial = "", editing = false, onSave, onCancel, onChange, review, notice }: { label: string; initial?: string; editing?: boolean; onSave: (text: string) => void; onCancel: () => void; onChange?: (text: string) => void; review?: { onFixNow: (text: string) => void; fixOff: string | null }; notice?: string | null }) {
   const [text, setText] = useState(initial);
   const box = useRef<HTMLTextAreaElement>(null);
   // Focused once it is on screen: an editor draws a note's node a frame after it is given it.
@@ -36,13 +39,21 @@ export function CommentBox({ label, initial = "", onSave, onCancel }: { label: s
         save();
       }}
     >
+      {notice && (
+        <div className="diff-comment-notice" role="status">
+          {notice}
+        </div>
+      )}
       <textarea
         ref={box}
         aria-label={label}
         rows={Math.min(6, Math.max(2, text.split("\n").length))}
-        placeholder="Leave a comment for Claude"
+        placeholder={review ? "A note for this review" : "Leave a comment for Claude"}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange?.(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
@@ -55,12 +66,17 @@ export function CommentBox({ label, initial = "", onSave, onCancel }: { label: s
         }}
       />
       <div className="diff-comment-actions">
-        <span className="diff-comment-hint">Enter adds it, Shift+Enter starts a new line</span>
+        <span className="diff-comment-hint">{review && !editing ? "Enter keeps it for the summary, Shift+Enter starts a new line" : "Enter adds it, Shift+Enter starts a new line"}</span>
         <button type="button" className="ghost" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="primary" disabled={text.trim() === ""}>
-          {initial ? "Save" : "Add comment"}
+        {review && !editing && (
+          <button type="button" disabled={text.trim() === "" || !!review.fixOff} title={review.fixOff ?? "Send this to Claude now to fix, instead of keeping it for the end of the review"} onClick={() => text.trim() !== "" && review.onFixNow(text.trim())}>
+            Fix now
+          </button>
+        )}
+        <button type="submit" className="primary" disabled={text.trim() === ""} title={review && !editing ? "Keep this note for the end of the review: the summary lists it, and Fix them or Write it up takes it along" : undefined}>
+          {editing ? "Save" : review ? "Add to review" : "Add comment"}
         </button>
       </div>
     </form>
@@ -75,6 +91,7 @@ export function CommentNote({ comment, where, onEdit, onDelete, quote }: { comme
       <CommentBox
         label={`Edit your comment on ${lineLabel(comment).toLowerCase()} of ${where}`}
         initial={comment.text}
+        editing
         onSave={(text) => {
           onEdit(text);
           setEditing(false);
@@ -109,14 +126,14 @@ export function CommentNote({ comment, where, onEdit, onDelete, quote }: { comme
  * The bar over the diff once there are comments: how many, and Send to Claude (one message for all of them) or Discard.
  * Discard asks once: the comments are the user's own writing. `sendOff` is why Send isn't there right now.
  */
-export function CommentBar({ count, onSend, onDiscard, busy, sendOff }: { count: number; onSend: () => void; onDiscard: () => void; busy?: boolean; sendOff?: string | null }) {
+export function CommentBar({ count, onSend, onDiscard, busy, sendOff, review = false }: { count: number; onSend: () => void; onDiscard: () => void; busy?: boolean; sendOff?: string | null; review?: boolean }) {
   const [sure, setSure] = useState(false);
   // Whatever changes the count (a comment deleted, all sent) puts the question away.
   useEffect(() => setSure(false), [count]);
   return (
     <div className="review-bar comment-bar" role="group" aria-label="Review comments">
       <span className="comment-bar-count" role="status">
-        {count} comment{count === 1 ? "" : "s"}
+        {review ? `${count} note${count === 1 ? "" : "s"} kept for the summary` : `${count} comment${count === 1 ? "" : "s"}`}
       </span>
       <div className="spacer" />
       {sure ? (
@@ -134,8 +151,8 @@ export function CommentBar({ count, onSend, onDiscard, busy, sendOff }: { count:
           <button className="ghost" onClick={() => setSure(true)}>
             Discard
           </button>
-          <button className="primary" disabled={!!sendOff} title={sendOff ?? (busy ? "Claude is working: this goes in as soon as it's done" : "Send every comment to Claude as one message")} onClick={onSend}>
-            Send to Claude
+          <button className={review ? "" : "primary"} disabled={!!sendOff} title={sendOff ?? (busy ? "Claude is working: this goes in as soon as it's done" : review ? "Send every note to Claude now to fix, instead of keeping them for the end of the review" : "Send every comment to Claude as one message")} onClick={onSend}>
+            {review ? "Fix all now" : "Send to Claude"}
           </button>
         </>
       )}

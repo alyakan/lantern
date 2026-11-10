@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, Editor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
+import { editor as monacoEditor } from "monaco-editor/editor/editor.api";
 import { DARK_THEME, LIGHT_THEME } from "../monaco";
 import { api, type ChangeScope } from "../api";
 import { useSlot } from "../lib/slot";
@@ -8,7 +9,7 @@ import { languageFor } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { registerFindable } from "../lib/editorFind";
 import { reconcile, type CommentControls } from "../lib/diffComments";
-import { DiffCommentLayer, type Surface } from "./DiffCommentLayer";
+import { DiffCommentLayer, type DiffFinding, type Surface } from "./DiffCommentLayer";
 import { OutdatedNotes } from "./DiffComments";
 
 /** "inline": one unified view, removals above additions. "split": old and new side by side. */
@@ -17,7 +18,7 @@ export type DiffLayout = "inline" | "split";
 /** A line to scroll to and flash in the new version; `key` changes for every request. */
 export type Reveal = { line: number; key: number } | null;
 
-export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, base = null, reveal = null, comments }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; base?: string | null; reveal?: Reveal; comments?: CommentControls }) {
+export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, base = null, reveal = null, comments, findings }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; base?: string | null; reveal?: Reveal; comments?: CommentControls; findings?: DiffFinding[] }) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dark = usePrefersDark();
@@ -80,9 +81,9 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
       <div className="diff-body" ref={body}>
         {diff.deleted && <div className="diff-note">This file was deleted.</div>}
         {whole ? (
-          <WholeFile path={path} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} comments={note} />
+          <WholeFile path={path} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} comments={note} findings={current ? findings : undefined} />
         ) : (
-          <Diff key={version} path={path} original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} comments={note} />
+          <Diff key={version} path={path} original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} comments={note} findings={current ? findings : undefined} />
         )}
       </div>
     </>
@@ -126,7 +127,7 @@ function useReveal(reveal: Reveal) {
   return { apply, queue };
 }
 
-function Diff({ path, original, modified, language, theme, layout, reveal, comments }: { path: string; original: string; modified: string; language: string; theme: string; layout: DiffLayout; reveal: Reveal; comments?: CommentControls }) {
+function Diff({ path, original, modified, language, theme, layout, reveal, comments, findings }: { path: string; original: string; modified: string; language: string; theme: string; layout: DiffLayout; reveal: Reveal; comments?: CommentControls; findings?: DiffFinding[] }) {
   const editor = useRef<Parameters<DiffOnMount>[0] | null>(null);
   // The editor once it's up, for the comments drawn over it.
   const [mounted, setMounted] = useState<{ diff: Parameters<DiffOnMount>[0]; monaco: Parameters<DiffOnMount>[1] } | null>(null);
@@ -183,12 +184,12 @@ function Diff({ path, original, modified, language, theme, layout, reveal, comme
           renderMarginRevertIcon: false,
         }}
       />
-      {comments && mounted && <DiffCommentLayer path={path} original={original} modified={modified} surface={{ kind: "diff", diff: mounted.diff, split: layout === "split" } satisfies Surface} monaco={mounted.monaco} comments={comments} />}
+      {comments && mounted && <DiffCommentLayer path={path} original={original} modified={modified} surface={{ kind: "diff", diff: mounted.diff, split: layout === "split" } satisfies Surface} monaco={mounted.monaco} comments={comments} findings={findings} />}
     </>
   );
 }
 
-function WholeFile({ path, text, kind, language, theme, reveal, comments }: { path: string; text: string; kind: "added" | "removed"; language: string; theme: string; reveal: Reveal; comments?: CommentControls }) {
+function WholeFile({ path, text, kind, language, theme, reveal, comments, findings }: { path: string; text: string; kind: "added" | "removed"; language: string; theme: string; reveal: Reveal; comments?: CommentControls; findings?: DiffFinding[] }) {
   const editor = useRef<CodeEditor | null>(null);
   const [mounted, setMounted] = useState<{ editor: CodeEditor; monaco: Parameters<OnMount>[1] } | null>(null);
   const marks = useRef<ReturnType<CodeEditor["createDecorationsCollection"]> | null>(null);
@@ -217,7 +218,7 @@ function WholeFile({ path, text, kind, language, theme, reveal, comments }: { pa
   return (
     <>
       <Editor height="100%" value={text} language={language} theme={theme} onMount={onMount} options={{ ...EDITOR_OPTIONS, renderLineHighlight: "none" }} />
-      {comments && mounted && <DiffCommentLayer path={path} original={kind === "removed" ? text : ""} modified={kind === "added" ? text : ""} surface={{ kind: "whole", editor: mounted.editor, side: kind === "added" ? "new" : "old" } satisfies Surface} monaco={mounted.monaco} comments={comments} />}
+      {comments && mounted && <DiffCommentLayer path={path} original={kind === "removed" ? text : ""} modified={kind === "added" ? text : ""} surface={{ kind: "whole", editor: mounted.editor, side: kind === "added" ? "new" : "old" } satisfies Surface} monaco={mounted.monaco} comments={comments} findings={findings} />}
     </>
   );
 }
@@ -227,7 +228,10 @@ const EDITOR_OPTIONS = {
   readOnly: true,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
-  glyphMargin: false,
+  // A lane of its own left of the line numbers, where a line's comment "+" goes, rather than over the numbers.
+  glyphMargin: true,
+  // The code is read-only, so Monaco's code actions have nothing to do here, and their lightbulb sat where the "+" is.
+  lightbulb: { enabled: monacoEditor.ShowLightbulbIconMode.Off },
   folding: false,
   // Xcode colours brackets like the code around them and draws no indent guides.
   bracketPairColorization: { enabled: false },

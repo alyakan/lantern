@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Flavour } from "../lib/flavour";
 import { StepsView, UPDATE_STEP } from "./StepsView";
@@ -55,8 +55,70 @@ describe("StepsView", () => {
       return found;
     };
     expect(names("debug")).toEqual(["Frame", "Evidence", "Fix", "Done"]);
-    expect(names("review")).toEqual(["Frame", "Files", "Summary"]);
     expect(names("architecture")).toEqual(["Frame", "Overview", "Parts", "Summary"]);
+  });
+
+  it("draws a Review's route instead of stages: the Frame, every unit it plans (those ahead dim), and the Summary", () => {
+    const review: ChatItem[] = [
+      { type: "user", id: "u1", text: "Review PR 128", turn: 0 },
+      { type: "assistant", id: "a1", text: "# Frame — Retry (#128)\n\nIntent.\n\n### Units\n1. `src/client/retry.ts` (+14 −3) — the loop\n2. `src/client/retry.test.ts` (+32 −0) — its tests\n\n### Risks\n- **Network errors**: may escape the loop (units 1)\n" },
+      { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+      { type: "user", id: "u2", text: "Next", turn: 1 },
+      { type: "assistant", id: "a2", text: "# File 1 of 2 — src/client/retry.ts (+14 −3)\n\n### What changed\n\nA loop.\n\n### Findings\n\n⚠ src/client/retry.ts:7 (blocker): network errors escape.\n\n### Notes\n\nChecked." },
+      { type: "turn", id: "t2", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    render(<StepsView state={state({ items: review })} {...handlers("review")} />);
+    expect(screen.queryByRole("navigation", { name: "Progress" })).toBeNull();
+    const route = screen.getByRole("navigation", { name: "Review route" });
+    const stops = within(route).getAllByRole("button");
+    expect(stops.map((b) => b.querySelector(".review-stop-label")?.textContent)).toEqual(["Frame", "retry.ts", "retry.test.ts", "Summary"]);
+    expect(stops[1]).toHaveAttribute("aria-current", "step");
+    expect(stops[2]).toBeDisabled();
+    expect(stops[3]).toBeDisabled();
+    // Back on the Frame: its risks and route are drawn from its sections, and the read unit shows its one finding.
+    fireEvent.click(stops[0]);
+    expect(current().querySelector(".review-risk-title")).toHaveTextContent("Network errors");
+    expect([...current().querySelectorAll(".review-unit-name")].map((n) => n.textContent)).toEqual(["retry.ts", "retry.test.ts"]);
+    expect(within(route).getAllByRole("button")[1].querySelector(".review-stop-count")).toHaveTextContent("1");
+    // A unit on the Frame opens its page once it's written.
+    fireEvent.click(within(current() as HTMLElement).getByRole("button", { name: /retry\.ts\s*src\/client/ }));
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("File 1 of 2");
+  });
+
+  it("keeps a stop for a unit Claude added after the Frame planned the route", () => {
+    const review: ChatItem[] = [
+      { type: "user", id: "u1", text: "Review PR 128", turn: 0 },
+      { type: "assistant", id: "a1", text: "# Frame — Retry (#128)\n\n### Units\n1. `src/a.ts` (+1 −0) — a\n2. `src/b.ts` (+1 −0) — b\n\n### Risks\nNone." },
+      { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+      { type: "user", id: "u2", text: "Next", turn: 1 },
+      { type: "assistant", id: "a2", text: "# File 3 of 3 — src/c.ts (+2 −0)\n\n### What changed\n\nC.\n\n### Findings\n\nNone.\n\n### Notes\n\nChecked." },
+      { type: "turn", id: "t2", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    render(<StepsView state={state({ items: review })} {...handlers("review")} />);
+    const stops = within(screen.getByRole("navigation", { name: "Review route" })).getAllByRole("button");
+    expect(stops.map((b) => b.querySelector(".review-stop-label")?.textContent)).toEqual(["Frame", "a.ts", "b.ts", "c.ts", "Summary"]);
+    expect(stops[3]).toHaveAttribute("aria-current", "step");
+  });
+
+  it("hands the Changes pane the findings of the Review page on screen, and a verdict set there shows on the page", async () => {
+    const review: ChatItem[] = [
+      { type: "user", id: "u1", text: "Review PR 128", turn: 0 },
+      { type: "assistant", id: "a1", text: "# Frame — Retry (#128)\n\nIntent." },
+      { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+      { type: "user", id: "u2", text: "Next", turn: 1 },
+      { type: "assistant", id: "a2", text: "# File 1 of 1 — src/client/retry.ts (+14 −3)\n\n### What changed\n\nA loop.\n\n### Findings\n\n⚠ src/client/retry.ts:7 (blocker): network errors escape.\n\n### Notes\n\nChecked." },
+      { type: "turn", id: "t2", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    const onFindings = vi.fn();
+    render(<StepsView state={state({ items: review })} {...handlers("review")} onFindings={onFindings} reviewNotes={{ items: [{ id: "n", path: "/p/src/client/retry.ts", side: "new", line: 3, lineText: "x", kind: "added", text: "Hm" }], remove: vi.fn() }} />);
+    const sent = onFindings.mock.lastCall![0];
+    expect(sent.items).toEqual([expect.objectContaining({ path: "src/client/retry.ts", finding: expect.objectContaining({ line: 7, severity: "blocker" }), verdict: undefined })]);
+    act(() => sent.onVerdict(0, "agree"));
+    expect(within(current() as HTMLElement).getByRole("button", { name: "Agree" })).toHaveAttribute("aria-pressed", "true");
+    expect(onFindings.mock.lastCall![0].items[0].verdict).toBe("agree");
+    expect(screen.getByText("1 of 1 finding decided · 1 note for the summary")).toBeInTheDocument();
+    // Unsent verdicts are kept for the chat while the app runs: leave none for the tests after this one.
+    act(() => onFindings.mock.lastCall![0].onVerdict(0, null));
   });
 
   it("ends a Build on the hand-off, and only the Done page has it", () => {

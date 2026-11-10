@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DiffComment, LineChange } from "../lib/diffComments";
-import { DiffCommentLayer, type Surface } from "./DiffCommentLayer";
+import { DiffCommentLayer, forgetDrafts, type Surface } from "./DiffCommentLayer";
+
+beforeEach(forgetDrafts);
 
 // Monaco's editors, reduced to what the layer asks of them: events it can be handed, and the zones it asks for.
 type Handler = (e: unknown) => void;
@@ -22,6 +24,7 @@ function fakeEditor() {
     setCursor: (l: number) => (line = l),
     getDomNode: () => dom,
     onMouseMove: on("move"),
+    onMouseDown: on("down"),
     onMouseLeave: on("leave"),
     onDidScrollChange: on("scroll"),
     onDidChangeCursorPosition: on("cursor"),
@@ -242,3 +245,136 @@ describe("comments that follow their lines", () => {
     expect(screen.getByRole("group", { name: "Comment on line 3 before of a.ts" })).toBeInTheDocument();
   });
 });
+
+const down = (editor: Fake, line: number, type: number, rightButton = false) => act(() => editor.handlers.down({ target: { type, position: { lineNumber: line } }, event: { rightButton, posy: 0 } }));
+
+describe("starting a comment from the gutter", () => {
+  const text = "one\ntwo\nthree\n";
+  const whole = (editor: Fake) => ({ kind: "whole", editor: editor as never, side: "new" }) as const;
+
+  it("opens the box on a line from a click on its number or the lane beside it, not from a right click or the code", () => {
+    const editor = fakeEditor();
+    render(<Preset surface={whole(editor)} original="" modified={text} />);
+    down(editor, 2, 6);
+    down(editor, 2, 3, true);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    down(editor, 2, 3);
+    expect(screen.getByRole("textbox", { name: "Comment on line 2 of a.ts" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+    down(editor, 3, 2);
+    expect(screen.getByRole("textbox", { name: "Comment on line 3 of a.ts" })).toBeInTheDocument();
+  });
+
+  it("moves an empty box to the line clicked, but never one with words in it", () => {
+    const editor = fakeEditor();
+    render(<Preset surface={whole(editor)} original="" modified={text} />);
+    down(editor, 1, 3);
+    down(editor, 2, 3);
+    const box = screen.getByRole("textbox", { name: "Comment on line 2 of a.ts" });
+    fireEvent.change(box, { target: { value: "Half written" } });
+    down(editor, 3, 3);
+    expect(screen.getByRole("textbox", { name: "Comment on line 2 of a.ts" })).toHaveValue("Half written");
+  });
+});
+
+describe("a comment half written", () => {
+  const whole = (editor: Fake) => ({ kind: "whole", editor: editor as never, side: "new" }) as const;
+
+  it("is kept while the diff is away, and comes back on its line", () => {
+    const editor = fakeEditor();
+    const first = render(<Preset surface={whole(editor)} original="" modified={"a\nb\nc\n"} />);
+    down(editor, 2, 3);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep me" } });
+    first.unmount();
+    render(<Preset surface={whole(fakeEditor())} original="" modified={"a\nb\nc\n"} />);
+    expect(screen.getByRole("textbox", { name: "Comment on line 2 of a.ts" })).toHaveValue("Keep me");
+  });
+
+  it("follows its line when lines come in above it, and says so when its line is gone", () => {
+    const editor = fakeEditor();
+    const first = render(<Preset surface={whole(editor)} original="" modified={"a\nb\nc\n"} />);
+    down(editor, 2, 3);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "On b" } });
+    first.unmount();
+    const moved = render(<Preset surface={whole(fakeEditor())} original="" modified={"new\na\nb\nc\n"} />);
+    expect(screen.getByRole("textbox", { name: "Comment on line 3 of a.ts" })).toHaveValue("On b");
+    expect(screen.queryByRole("status")).toBeNull();
+    moved.unmount();
+    render(<Preset surface={whole(fakeEditor())} original="" modified={"new\na\nB!\nc\n"} />);
+    expect(screen.getByRole("textbox", { name: "Comment on line 3 of a.ts" })).toHaveValue("On b");
+    expect(screen.getByRole("status")).toHaveTextContent("has changed");
+  });
+
+  it("an empty box isn't kept", () => {
+    const editor = fakeEditor();
+    const first = render(<Preset surface={whole(editor)} original="" modified={"a\nb\n"} />);
+    down(editor, 1, 3);
+    first.unmount();
+    render(<Preset surface={whole(fakeEditor())} original="" modified={"a\nb\n"} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});
+
+describe("in a Review", () => {
+  const text = "one\ntwo\nthree\n";
+  function ReviewPreset({ editor, fixNow, findings = [] }: { editor: Fake; fixNow?: (c: DiffComment) => void; findings?: Parameters<typeof DiffCommentLayer>[0]["findings"] }) {
+    const [items, setItems] = useState<DiffComment[]>([]);
+    latest = items;
+    return (
+      <div className="diff-body">
+        <DiffCommentLayer path="/p/src/a.ts" original="" modified={text} surface={{ kind: "whole", editor: editor as never, side: "new" }} monaco={monaco as never} comments={{ items, update: (change) => setItems(change), review: { fixNow } }} findings={findings} />
+      </div>
+    );
+  }
+
+  it("keeps a note for the summary with Enter, or sends it to Claude to fix now", () => {
+    const editor = fakeEditor();
+    const fixNow = vi.fn();
+    render(<ReviewPreset editor={editor} fixNow={fixNow} />);
+    down(editor, 1, 3);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Rename this" } });
+    expect(screen.getByRole("button", { name: "Add to review" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Fix now" }));
+    expect(fixNow).toHaveBeenCalledWith(expect.objectContaining({ line: 1, side: "new", text: "Rename this", lineText: "one" }));
+    expect(latest).toEqual([]);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    addCommentOn(editor, 2, "Keep for later");
+    expect(latest.map((c) => c.text)).toEqual(["Keep for later"]);
+    expect(fixNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("can't fix now while Claude can't take a message", () => {
+    const editor = fakeEditor();
+    render(<ReviewPreset editor={editor} />);
+    down(editor, 1, 3);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "x" } });
+    expect(screen.getByRole("button", { name: "Fix now" })).toBeDisabled();
+  });
+
+  it("draws the page's findings under their last line, with the verdict buttons when it can take one", () => {
+    const editor = fakeEditor();
+    const onVerdict = vi.fn();
+    render(
+      <ReviewPreset
+        editor={editor}
+        findings={[
+          { finding: { index: 0, line: 1, lineEnd: 2, severity: "blocker", text: "Breaks", path: "src/a.ts" }, verdict: undefined, onVerdict },
+          { finding: { index: 1, line: 9, lineEnd: null, severity: "nit", text: "Past the end" }, verdict: undefined },
+          { finding: { index: 2, line: null, lineEnd: null, severity: "nit", text: "No line" }, verdict: undefined },
+        ]}
+      />,
+    );
+    expect(editor.zones.map((z) => z.afterLineNumber)).toEqual([2]);
+    const card = screen.getByRole("group", { name: "Finding, blocker" });
+    expect(card).toHaveTextContent("Breaks");
+    fireEvent.click(within(card).getByRole("button", { name: "Agree" }));
+    expect(onVerdict).toHaveBeenCalledWith("agree");
+  });
+});
+
+function addCommentOn(editor: Fake, line: number, text: string) {
+  down(editor, line, 3);
+  const box = screen.getByRole("textbox");
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.keyDown(box, { key: "Enter" });
+}

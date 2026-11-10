@@ -1869,6 +1869,7 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 .diff-comment-box textarea:focus-visible { outline: 2px solid var(--text); outline-offset: -1px; }
 .diff-comment-actions { display: flex; align-items: center; gap: 6px; }
 .diff-comment-actions button { height: var(--pill-s); padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+.diff-comment-notice { font-size: calc(11.5px * var(--font-scale)); color: var(--attn-text); }
 .diff-comment-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
 /* Comments whose line Claude has changed since: over the diff, until deleted. */
 .diff-outdated { display: flex; flex-direction: column; gap: 6px; flex: none; max-height: 40%; overflow-y: auto; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: calc(12.5px * var(--font-scale)); }
@@ -2678,6 +2679,90 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .review-table td:nth-child(2) { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .review-table tr.rejected td { opacity: 0.5; }
 .review-table-file { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+/* A summary row's file goes back to its page. */
+.review-revisit { padding: 0; border: none; background: none; color: inherit; font: inherit; text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
+.review-revisit:hover { color: var(--text); text-decoration-color: currentColor; }
+
+/* A Review's route, in the head of the steps: the Frame, every planned unit, the Summary. Reached stops are buttons; the
+   one on screen is lit; units not reached yet are dim; a unit read shows its findings (amber while some wait for a verdict). */
+.review-route { display: flex; align-items: center; align-self: stretch; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+.review-route::-webkit-scrollbar { display: none; }
+.review-route ol { display: flex; align-items: center; margin: 0; padding: 0 2px; list-style: none; }
+.review-stop { display: flex; align-items: center; flex: none; }
+.review-stop-line { flex: none; width: 10px; height: 1px; margin: 0 4px; background: var(--line-strong); }
+.review-stop.reached .review-stop-line { background: var(--muted); }
+.review-stop button { display: inline-flex; align-items: center; gap: 6px; max-width: 170px; height: 24px; padding: 0 9px 0 4px; border: 1px solid transparent; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); white-space: nowrap; }
+.review-stop button:disabled { color: var(--faint); }
+.review-stop button:not(:disabled):hover { background: var(--bg-hover); color: var(--text); }
+.review-stop.current button { border-color: var(--line-strong); background: var(--bg-active); color: var(--text); font-weight: 600; }
+.review-stop-mark { display: inline-grid; place-items: center; flex: none; min-width: 16px; height: 16px; padding: 0 3px; box-sizing: border-box; border: 1.5px solid var(--faint); border-radius: var(--radius-pill); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; line-height: 1; }
+.review-stop.reached .review-stop-mark { border-color: var(--muted); }
+.review-stop.current .review-stop-mark { border-color: var(--text); background: var(--text); color: var(--bg); }
+.review-stop-label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.review-stop.stop-unit .review-stop-label { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+.review-stop-count { flex: none; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: var(--radius-pill); background: var(--bg-active); color: var(--text-2); font-size: calc(10px * var(--font-scale)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.review-stop-count.open { background: color-mix(in srgb, var(--attn) 22%, transparent); color: var(--attn-text); }
+@container (max-width: 520px) { .review-stop:not(.current) .review-stop-label { display: none; } .review-stop button { padding-right: 4px; } }
+
+/* The Frame, drawn from its sections: totals, risk cards, the route as rows. */
+.review-frame { display: flex; flex-direction: column; gap: 18px; }
+.review-totals { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-2); font-size: calc(12.5px * var(--font-scale)); }
+.review-totals strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.review-risks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.review-risk { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 10px 14px; border: 1px solid var(--line-strong); border-left: 3px solid var(--sev-should); border-radius: var(--radius-md); background: var(--bg-subtle); }
+.review-risk-title { font-size: calc(13px * var(--font-scale)); font-weight: 600; color: var(--text); }
+.review-risk-text { font-size: calc(12.5px * var(--font-scale)); line-height: 1.5; color: var(--text-2); }
+.review-risk-units { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.review-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; height: 20px; padding: 0 7px 0 3px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--bg); color: var(--muted-text); font-size: calc(11px * var(--font-scale)); }
+button.review-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.review-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.review-unit-n { display: inline-grid; place-items: center; flex: none; min-width: 16px; height: 16px; padding: 0 3px; box-sizing: border-box; border-radius: var(--radius-pill); background: var(--bg-active); color: var(--text-2); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.review-units { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.review-units li + li { border-top: 1px solid var(--line); }
+.review-unit { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 12px; border: none; border-radius: 0; background: none; color: var(--text); text-align: left; font: inherit; }
+button.review-unit:hover { background: var(--bg-hover); }
+.review-unit.pending { color: var(--muted-text); }
+.review-unit .review-unit-n { margin-top: 2px; }
+.review-unit-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.review-unit-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.review-unit-name { font-family: var(--mono); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; overflow-wrap: anywhere; }
+.review-unit-dir { font-family: var(--mono); font-size: calc(11px * var(--font-scale)); color: var(--muted); overflow-wrap: anywhere; }
+.review-unit-note { font-size: calc(12.5px * var(--font-scale)); line-height: 1.5; color: var(--text-2); }
+.review-unit.pending .review-unit-note { color: var(--muted-text); }
+.review-frame-rest { font-size: calc(13px * var(--font-scale)); color: var(--text-2); }
+
+/* A finding's code, in a card that stays shut until opened: the lines it names (marked), a few around, and what was removed. */
+.finding-code { margin-top: 2px; border-top: 1px solid var(--line); padding-top: 6px; }
+.finding-code-toggle { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 4px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.finding-code-toggle:hover { background: var(--bg-hover); color: var(--text); }
+.finding-code-chevron { display: inline-block; width: 10px; text-align: center; transition: transform 0.15s; }
+.finding-code.open .finding-code-chevron { transform: rotate(90deg); }
+.finding-code-span { font-family: var(--mono); font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.finding-code-body { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; }
+.finding-code-note { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.finding-code-rows { width: 100%; box-sizing: border-box; overflow-x: auto; padding: 4px 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); line-height: 1.6; }
+.finding-code-row { display: flex; min-width: max-content; padding-right: 10px; }
+.finding-code-row.add { background: color-mix(in srgb, var(--add) 9%, transparent); }
+.finding-code-row.del { background: color-mix(in srgb, var(--del) 9%, transparent); }
+.finding-code-row.named { box-shadow: inset 2px 0 0 var(--attn); }
+.finding-code-no { flex: none; width: 4ch; padding-right: 8px; text-align: right; color: var(--muted); user-select: none; font-variant-numeric: tabular-nums; }
+.finding-code-mark { flex: none; width: 2ch; color: var(--muted); user-select: none; }
+.finding-code-row.add .finding-code-mark { color: var(--add); }
+.finding-code-row.del .finding-code-mark { color: var(--del); }
+.finding-code-row code { white-space: pre; color: var(--text); background: none; padding: 0; font: inherit; }
+.finding-code-open { height: var(--pill-s); padding: 0 10px; font-size: calc(12px * var(--font-scale)); }
+
+/* A finding under its line in the Changes pane's diff: the same card, smaller, marked as the review's. */
+.finding.in-diff { gap: 4px; padding: 6px 8px 7px 10px; background: var(--field); }
+.finding.in-diff .finding-text { font-size: calc(12.5px * var(--font-scale)); line-height: 1.45; }
+.finding-from { font-size: calc(10.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+
+/* The summary's notes from the diff, kept for the end of the review. */
+.review-notes-ledger ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.review-note { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px 8px 12px; border: 1px solid var(--line-strong); border-left: 3px solid var(--attn); border-radius: var(--radius-md); background: var(--bg-subtle); }
+.review-note-head { display: flex; align-items: center; gap: 8px; }
+.review-note-head .ghost { height: var(--pill-s); padding: 0 8px; font-size: calc(11.5px * var(--font-scale)); }
+.review-note-text { font-size: calc(13px * var(--font-scale)); line-height: 1.5; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-actions { display: flex; gap: 8px; }
 .review-actions button { height: 28px; padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 

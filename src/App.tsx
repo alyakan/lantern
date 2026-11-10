@@ -13,7 +13,7 @@ import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
-import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf, type PageFindings } from "./lib/review";
 import { forgetWorktree, isGoneWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
@@ -120,7 +120,8 @@ import { RecapLine, useRecap } from "./components/RecapLine";
 import type { PastedImage } from "./lib/images";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
-import type { DiffComment } from "./lib/diffComments";
+import { fixNowMessage, type DiffComment } from "./lib/diffComments";
+import { ReviewDiffsProvider } from "./lib/reviewDiffs";
 import { ShipDialog } from "./components/ShipDialog";
 import { PrChecksDialog } from "./components/PrChecksDialog";
 import { settingFor as prSettingFor, type PrSetting } from "./lib/prChecks";
@@ -344,6 +345,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [branchPeek, setBranchPeek] = useState<{ slot: string; base: string | null; key: number } | null>(null);
   // Review comments on diff lines, kept for each chat while the app runs (a worker's branch review is its own chat's).
   const [diffComments, setDiffComments] = useState<Record<string, DiffComment[]>>({});
+  // The findings of the Review page on screen, for the Changes pane's diff (the chat they came from: only that one shows them).
+  const [pageFindings, setPageFindings] = useState<{ slot: string; findings: PageFindings | null } | null>(null);
   // Step-by-step mode shows the conversation as pages; the page on screen picks the turn whose changes the Changes pane
   // shows.
   const [pageRange, setPageRange] = useState<{ from: number; to: number } | null>(null);
@@ -1968,6 +1971,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
   const reviewBase = !reviewing ? null : peek ? peek.base : reviewTarget ? reviewTarget.base : baseBranchOf(state.items);
   const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) ? "session" : changeScope;
+  // Step by step's Review: its page's findings go under their lines in the diff, and line comments are notes for its summary.
+  const reviewSteps = stepsView && flavour === "review";
+  const updateComments = (change: (all: DiffComment[]) => DiffComment[]) =>
+    setDiffComments((all) => {
+      const was = all[active] ?? [];
+      const now = change(was);
+      return now === was ? all : { ...all, [active]: now };
+    });
+  const sendComments = state.status === "idle" || state.status === "running" ? (text: string) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, text] }) : sendIn(active, text)) : undefined;
   const prPicked = useRef<string | null>(null);
   useEffect(() => {
     if (!reviewing) return;
@@ -2016,7 +2028,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     };
   }, [scope, active, state.folder, reviewPr]);
   const shownPr = prFiles?.key === prKey ? prFiles : null;
-  const shownFiles = scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
+  // A Review page's finding shows its lines from the same diff the Changes pane has (the PR's, the branch's, ...).
+  const diffBase = scope === "branch" && reviewBranch ? (shownBranch?.review?.base ?? null) : null;
+  const diffTurn = scope === "turn" && stepsView ? pageRange : null;
+  const reviewDiffs = useMemo(
+    () => ({ load: (path: string) => api.getFileDiff(active, path, scope, diffTurn?.from ?? null, diffTurn?.to ?? null, scope === "pr" ? reviewPr : null, diffBase) }),
+    [active, scope, diffTurn?.from, diffTurn?.to, reviewPr, diffBase],
+  );
+  const shownFiles =scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
   // A review page's files, shown in the PR's changes once they're in: one file, or the files of a group page. A path that
   // matches no changed file, or several, is left out (a bare name must not pick one by chance).
   const [reviewFiles, setReviewFiles] = useState<string[]>([]);
@@ -3514,7 +3533,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention} changed={reviewChanged}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
+                        <ReviewDiffsProvider value={reviewDiffs}>
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={(paths) => setReviewFiles((now) => (now.join("\n") === paths.join("\n") ? now : paths))} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} onFindings={(findings) => setPageFindings({ slot: active, findings })} reviewNotes={{ items: diffComments[active] ?? [], remove: (ids) => updateComments((all) => all.filter((c) => !ids.includes(c.id))) }} />
+                        </ReviewDiffsProvider>
                       ) : (
                         <ChatView key={`chat-${active}`} front state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
@@ -3579,17 +3600,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                   state.folder
                     ? {
                         items: diffComments[active] ?? [],
-                        update: (change) =>
-                          setDiffComments((all) => {
-                            const was = all[active] ?? [];
-                            const now = change(was);
-                            return now === was ? all : { ...all, [active]: now };
-                          }),
+                        update: updateComments,
                         // One message for all of them: sent now when Claude is free, queued behind the turn when it's working.
-                        send: state.status === "idle" || state.status === "running" ? (text) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, text] }) : sendIn(active, text)) : undefined,
+                        send: sendComments,
+                        // A Review keeps them for its summary, and each can go to Claude at once to be fixed.
+                        review: reviewSteps ? { fixNow: sendComments && ((c) => sendComments(fixNowMessage(c, state.folder))) } : undefined,
                       }
                     : undefined
                 }
+                findings={reviewSteps && pageFindings?.slot === active ? pageFindings.findings : null}
                 revert={{
                   slot: active,
                   blocked: state.status === "running" ? "Wait for Claude to finish before reverting." : null,

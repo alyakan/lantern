@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commentsMessage, findLine, kindOf, newLineOf, ordered, quoteLine, reconcile, removedBlockAfter, type DiffComment, type LineChange } from "./diffComments";
+import { commentsMessage, findLine, fixNowMessage, kindOf, newLineOf, ordered, quoteLine, reconcile, removedBlockAfter, type DiffComment, type LineChange } from "./diffComments";
 
 const comment = (over: Partial<DiffComment> = {}): DiffComment => ({ id: "c1", path: "/p/src/a.ts", side: "new", line: 2, lineText: "const a = 1;", kind: "added", text: "Why 1?", ...over });
 
@@ -129,5 +129,12 @@ describe("commentsMessage", () => {
   it("goes file by file, top to bottom, in the order files were first commented on", () => {
     const list = ordered([comment({ id: "1", path: "/p/b.ts", line: 9 }), comment({ id: "2", path: "/p/a.ts", line: 3 }), comment({ id: "3", path: "/p/b.ts", line: 2 })]);
     expect(list.map((c) => c.id)).toEqual(["3", "1", "2"]);
+  });
+});
+
+describe("fixNowMessage", () => {
+  it("asks for one note to be fixed now, in the same format the comments are sent in", () => {
+    const c = { id: "a", path: "/p/src/a.ts", side: "new" as const, line: 4, lineText: "  run();", kind: "added" as const, text: "Guard this" };
+    expect(fixNowMessage(c, "/p")).toBe("Fix this now, then rewrite the page of the unit that file is in, with the fix noted:\n\n1. src/a.ts line 4 (added line: `run();`): Guard this");
   });
 });
