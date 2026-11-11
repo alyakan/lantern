@@ -55,10 +55,17 @@ async function open(answers: Record<string, unknown> = {}, features = ["desk", "
   return { session, controller };
 }
 
-/** Opens a feature's page from its card on the Work screen. */
-async function openCard(name: string) {
+/** Opens the feature cards of a project. */
+async function openProject(name: string) {
   await fireEvent.press(screen.getByRole("button", { name: new RegExp(`^${name}, `) }));
-  return within(screen.getByLabelText(name));
+  return within(screen.getByLabelText("Project features"));
+}
+
+/** Opens one feature through its project. */
+async function openCard(project: string, feature = "Reliability") {
+  const features = await openProject(project);
+  await fireEvent.press(features.getByRole("button", { name: new RegExp(`^${feature}, `) }));
+  return within(screen.getByLabelText(feature));
 }
 
 describe("Your work on a tablet, beside its column", () => {
@@ -128,12 +135,12 @@ describe("Your work on the phone", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "Work" })).toBeTruthy());
   });
 
-  it("goes back from a feature's page when its tab is tapped again, as iOS's tabs do", async () => {
+  it("goes back from a project's page when its tab is tapped again, as iOS's tabs do", async () => {
     mockTab = "work";
     await open();
     await waitFor(() => expect(screen.getByLabelText("Your work")).toBeTruthy());
-    await fireEvent.press(screen.getByRole("button", { name: /^Reliability, / }));
-    expect(screen.getByTestId("work-page-bar")).toBeTruthy();
+    await openCard("lantern");
+    expect(screen.getByRole("button", { name: "Back to features" })).toBeTruthy();
     await fireEvent.press(screen.getByRole("tab", { name: /^Work/ }));
     await waitFor(() => expect(screen.queryByTestId("work-page-bar")).toBeNull());
     // Still on Work.
@@ -171,12 +178,13 @@ describe("Your work on the phone", () => {
     expect(mockTab).toBe("chats");
   });
 
-  it("says each item's project as the chats' chip, unless the page it is on is that project", async () => {
+  it("doesn't repeat the project on the rows inside it, with a chip or in their line", async () => {
     await open();
-    const page = await openCard("Reliability");
-    // The chip says the project, so the quiet line doesn't.
-    expect(page.getAllByLabelText("lantern").length).toBeGreaterThan(0);
+    const page = await openCard("lantern");
+    // The project's page is underneath and the feature is the bar's title: the line says neither.
+    expect(page.queryAllByLabelText("lantern")).toHaveLength(0);
     expect(page.getByText(/ENG-1 Retry on 429$/)).toBeTruthy();
+    expect(page.getByRole("button", { name: /^#7 Retry fetchJson, Checks failing, ENG-1 Retry on 429$/ })).toBeTruthy();
   });
 
   it("leaves room under the list for the tab bar floating over it", async () => {
@@ -185,29 +193,30 @@ describe("Your work on the phone", () => {
     expect(paddingBottom).toBeGreaterThan(40);
   });
 
-  it("is a card for each feature, with what it holds and the one thing that needs you, and how many things need you", async () => {
+  it("is a card for each project with Linear connected, with what it holds and the one thing that needs you, and how many things need you", async () => {
     await open();
     expect(screen.getByText("2 things need you.")).toBeTruthy();
     // Your call comes before blocked: the card names that, and says one more is waiting.
-    expect(screen.getByRole("button", { name: "Reliability, 2 open, Ready to merge" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "lantern, 2 open, Ready to merge" })).toBeTruthy();
     expect(screen.getByText(/Merge #8 Cache settings/)).toBeTruthy();
     expect(screen.getByText("and 1 more")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Dashboard, 1 open" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "No feature, 1 shipped" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "web, 1 open · 1 shipped" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Reliability, / })).toBeNull();
     // No filters, grouping switch or list of states over the cards.
     expect(screen.queryByText("Group by")).toBeNull();
     expect(screen.queryByLabelText("Where things stand")).toBeNull();
   });
 
-  it("opens a card to the feature's page, on Needs you, and goes back to the cards", async () => {
+  it("opens a project then its feature on Needs you, and goes back through both levels", async () => {
     await open();
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     expect(page.getByText("2 open, 0 shipped")).toBeTruthy();
     expect(page.getByRole("tab", { name: "Needs you, 2" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(page.getByText(/Retry fetchJson/)).toBeTruthy();
     expect(page.getByText(/Cache settings/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Back to features" }));
     await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
-    expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^web, / })).toBeTruthy();
   });
 
   it("lists what just finished on the Mac above the cards, and a line opens its chat; the chats tab doesn't", async () => {
@@ -222,31 +231,31 @@ describe("Your work on the phone", () => {
     expect(screen.queryByRole("header", { name: "Just finished" })).toBeNull();
   });
 
-  it("lets go of a feature's page once the feature is gone, and doesn't open it again by itself when it comes back", async () => {
+  it("lets go of a project's page once the project is gone, and doesn't open it again by itself when it comes back", async () => {
     const { controller } = await open();
-    await openCard("Reliability");
-    const without = { ...work, items: work.items.filter((i) => i.feature !== "Reliability") };
+    await openCard("lantern");
+    const without = { ...work, items: work.items.filter((i) => i.repo !== "lantern") };
     await act(async () => controller.sync.apply({ type: "work", work: without }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
     expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
     await act(async () => controller.sync.apply({ type: "work", work }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 600))));
     expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Reliability, / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^lantern, / })).toBeTruthy();
   });
 
   it("puts the way back beside the bar, as a chat's is: a glass circle with a finger's worth of a target", async () => {
     await open();
-    const page = await openCard("Reliability");
-    const back = within(screen.getByTestId("work-page-bar")).getByRole("button", { name: "Back to Work" });
+    const page = await openCard("lantern");
+    const back = within(screen.getByTestId("work-page-bar")).getByRole("button", { name: "Back to features" });
     expect(StyleSheet.flatten(back.props.style).minHeight).toBe(44);
     // It is the bar's, not the page's: the page's own heading no longer carries it, so it can't scroll away.
-    expect(page.queryByRole("button", { name: "Back to Work" })).toBeNull();
+    expect(page.queryByRole("button", { name: "Back to features" })).toBeNull();
   });
 
   it("lets the page's name grow its capsule at the larger text sizes, to 1.8 times and no further", async () => {
     await open();
-    await openCard("Reliability");
+    await openCard("lantern");
     const bar = within(screen.getByTestId("work-page-bar"));
     const name = bar.getByRole("header", { name: "Reliability" });
     expect(name.props.maxFontSizeMultiplier).toBe(BAR_TEXT_SCALE);
@@ -256,14 +265,14 @@ describe("Your work on the phone", () => {
     expect(capsule.height).toBeUndefined();
   });
 
-  it("can still be pulled to refresh when everything is in one feature, and while it loads", async () => {
+  it("can still be pulled to refresh when everything is in one project", async () => {
     await open({ work: { ...work, items: work.items.filter((i) => i.feature === "Reliability") } });
     expect(screen.getByLabelText("Your work").props.refreshControl).toBeTruthy();
   });
 
   it("has four tabs, each with the rows of its state, and dims one with nothing in it", async () => {
     await open();
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     for (const label of ["Moving", "To start", "Shipped"]) expect(page.getByRole("tab", { name: label })).toBeTruthy();
     expect(StyleSheet.flatten(page.getByText("Shipped").props.style).opacity).toBe(0.5);
     expect(StyleSheet.flatten(page.getByText("Needs you").props.style).opacity).toBe(1);
@@ -272,23 +281,26 @@ describe("Your work on the phone", () => {
     expect(page.queryByText(/Retry fetchJson/)).toBeNull();
   });
 
-  it("opens a feature with nothing needing you on its first tab that has anything, and shows a shipped item's time filled in", async () => {
+  it("opens a project on its first populated tab and keeps shipped work in that project", async () => {
     const clock = jest.spyOn(Date, "now").mockReturnValue(NOW);
     await open();
-    const page = await openCard("No feature");
-    expect(page.getByRole("tab", { name: "Shipped" }).props.accessibilityState).toMatchObject({ selected: true });
-    // Its project is a chip, so the line doesn't say it.
-    expect(page.getByText(/merged 2 h ago/)).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
-    const dashboard = await openCard("Dashboard");
-    expect(dashboard.getByRole("tab", { name: "To start" }).props.accessibilityState).toMatchObject({ selected: true });
+    const page = await openCard("web", "Dashboard");
+    expect(page.getByRole("tab", { name: "To start" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(page.getByText(/ENG-5 Rate limit/)).toBeTruthy();
+    expect(page.queryByText(/Retry fetchJson/)).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Back to features" }));
+    await fireEvent.press(screen.getByRole("button", { name: /^No feature, / }));
+    const shipped = within(screen.getByLabelText("No feature"));
+    expect(shipped.getByRole("tab", { name: "Shipped" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(shipped.getByText(/Old merged/)).toBeTruthy();
+    expect(shipped.getByText(/merged 2 h ago/)).toBeTruthy();
     clock.mockRestore();
   });
 
   it("lists every shipped item on its tab, with no fold", async () => {
     const ready = (key: string) => item(key, { title: `Ready ${key}`, tone: "ready", stage: "release", word: "Ready", feature: "Reliability", issue: key.toUpperCase(), fold: "ready" });
     await open({ work: { ...work, items: [...work.items, ready("r1"), ready("r2")] } });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     await fireEvent.press(page.getByRole("tab", { name: "Shipped" }));
     expect(page.getByText(/Ready r1/)).toBeTruthy();
     expect(page.getByText(/Ready r2/)).toBeTruthy();
@@ -297,7 +309,7 @@ describe("Your work on the phone", () => {
 
   it("shows each item's pipeline, and the stage it is at", async () => {
     await open();
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     // Linear is connected, so the pipeline starts at the issue: Checks is where the blocked pull request is.
     expect(page.getByLabelText("At Checks, blocked")).toBeTruthy();
     expect(page.getByLabelText("At Merge, your call")).toBeTruthy();
@@ -308,7 +320,7 @@ describe("Your work on the phone", () => {
   it("draws a merge that goes around the required review as Bypass & merge, outlined, and says what it does", async () => {
     const bypass = item("pr10", { number: 10, title: "Unreviewed", tone: "you", stage: "review", word: "Not approved", feature: "Reliability", next: step("Bypass review and merge", { yours: true, warn: true, button: "Bypass & merge…" }) });
     await open({ work: { ...work, items: [...work.items, bypass] } });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     const button = page.getByRole("button", { name: "Bypass review and merge #10" });
     expect(button.props.accessibilityHint).toMatch(/past the required review/);
     expect(StyleSheet.flatten(button.props.style)).toMatchObject({ borderWidth: 1 });
@@ -323,16 +335,78 @@ describe("Your work on the phone", () => {
     expect(screen.getByRole("button", { name: /^web, / })).toBeTruthy();
   });
 
-  it("has no cards when everything is in one feature: its page is the screen", async () => {
-    await open({ work: { ...work, items: work.items.filter((i) => i.feature === "Reliability") } });
-    expect(screen.getByLabelText("Reliability")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Back to Work" })).toBeNull();
-    expect(screen.getByText("2 things need you.")).toBeTruthy();
+  it("shows a card even for one project, and navigates back to it", async () => {
+    await open({ work: { ...work, items: work.items.filter((i) => i.repo === "lantern") } });
+    expect(screen.getByRole("button", { name: /^lantern, 2 open/ })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Needs you, 2" })).toBeNull();
+    const page = await openCard("lantern");
+    expect(page.getByText(/Retry fetchJson/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Back to features" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
+    await waitFor(() => expect(screen.queryByTestId("work-page-bar")).toBeNull());
+    expect(screen.getByRole("button", { name: /^lantern, 2 open/ })).toBeTruthy();
+  });
+
+  it("lists only the project's features, then only the selected feature's items", async () => {
+    await open({ work: { ...work, items: [
+      ...work.items,
+      item("other-feature", { title: "Another feature", feature: "Dashboard", tone: "bad", word: "Blocked" }),
+      item("other-project", { title: "Same feature elsewhere", repo: "web", feature: "Reliability", tone: "bad", word: "Blocked" }),
+    ] } });
+    const features = await openProject("lantern");
+    expect(features.getByRole("button", { name: /^Reliability, 2 open/ })).toBeTruthy();
+    expect(features.getByRole("button", { name: /^Dashboard, 1 open/ })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: /^Needs you/ })).toBeNull();
+    await fireEvent.press(features.getByRole("button", { name: /^Reliability, / }));
+    const page = within(screen.getByLabelText("Reliability"));
+    expect(page.getByText(/Retry fetchJson/)).toBeTruthy();
+    expect(page.queryByText(/Another feature/)).toBeNull();
+    expect(page.queryByText(/Same feature elsewhere/)).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Back to features" }));
+    await fireEvent.press(screen.getByRole("button", { name: /^Dashboard, / }));
+    expect(within(screen.getByLabelText("Dashboard")).getByText(/Another feature/)).toBeTruthy();
+  });
+
+  it("returns to the project's feature cards if the open feature disappears", async () => {
+    const { controller } = await open();
+    await openCard("lantern");
+    const more = { ...work, items: [...work.items, item("other-feature", { title: "Another feature", feature: "Dashboard", tone: "bad", word: "Blocked" })] };
+    await act(async () => controller.sync.apply({ type: "work", work: more }));
+    await act(async () => controller.sync.apply({ type: "work", work: { ...more, items: more.items.filter((i) => !(i.repo === "lantern" && i.feature === "Reliability")) } }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Back to features" })).toBeNull());
+    expect(screen.getByLabelText("Project features")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Dashboard, / })).toBeTruthy();
+  });
+
+  it("opens a project with no features straight on its tabs, as there is nothing to choose", async () => {
+    await open({ work: { ...work, issues: false, items: work.items.map((i) => ({ ...i, feature: null })) } });
+    await fireEvent.press(screen.getByRole("button", { name: /^lantern, / }));
+    expect(screen.queryByLabelText("Project features")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^No feature, / })).toBeNull();
+    const page = within(screen.getByLabelText("lantern"));
+    expect(page.getByRole("tab", { name: "Needs you, 2" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(page.getByText(/Retry fetchJson/)).toBeTruthy();
+    // The bar says the project, so its rows don't.
+    expect(page.queryAllByLabelText("lantern")).toHaveLength(0);
+    await fireEvent.press(screen.getByRole("button", { name: "Back to Work" }));
+    await waitFor(() => expect(screen.queryByTestId("work-page-bar")).toBeNull());
+    expect(screen.getByRole("button", { name: /^web, / })).toBeTruthy();
+  });
+
+  it("goes to a project's tabs when the last of its features goes, and lets go of the feature", async () => {
+    const { controller } = await open();
+    await openCard("web", "Dashboard");
+    await act(async () => controller.sync.apply({ type: "work", work: { ...work, items: work.items.filter((i) => i.feature !== "Dashboard") } }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Back to features" })).toBeNull());
+    const page = within(screen.getByLabelText("web"));
+    expect(page.getByRole("tab", { name: "Shipped" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(page.getByText(/Old merged/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Work" })).toBeTruthy();
   });
 
   it("asks the Mac to do a step by its key and what it showed, sends no words, and says where it went", async () => {
     const { session } = await open({ work_step: { kind: "sent", to: "Fix the checks" } });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     await fireEvent.press(page.getByRole("button", { name: "Fix failing checks on #7" }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(session.lastOf("work_step")).toEqual({ op: "work_step", key: "pr7", sig: "checks:fail" });
@@ -343,7 +417,7 @@ describe("Your work on the phone", () => {
 
   it("says a step that gets prepared in a chat asks before anything happens, and where a new chat was started", async () => {
     await open({ work_step: { kind: "started", to: "lantern" } });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     await fireEvent.press(page.getByRole("button", { name: "Merge #8" }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(page.getByText("Started a chat in lantern. It asks you before anything happens.")).toBeTruthy();
@@ -351,7 +425,7 @@ describe("Your work on the phone", () => {
 
   it("says why when the Mac refuses a step, and lets it be asked again", async () => {
     await open({ work_step: new Error("That moved on since you looked. Look again.") });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     await fireEvent.press(page.getByRole("button", { name: "Fix failing checks on #7" }));
     await act(async () => void (await new Promise((r) => setTimeout(r, 10))));
     expect(page.getByText("That moved on since you looked. Look again.")).toBeTruthy();
@@ -381,7 +455,7 @@ describe("Your work on the phone", () => {
     const open_ = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
     const evil = { ...work, items: [...work.items, item("x", { title: "Sneaky", tone: "bad", feature: "Reliability", url: "https://evil.example/https://github.com/", issue_url: "https://evil.example/", next: step() })] };
     await open({ work: evil });
-    const page = await openCard("Reliability");
+    const page = await openCard("lantern");
     await fireEvent.press(page.getByRole("button", { name: /^#7 Retry fetchJson/ }));
     const details = within(screen.getByLabelText("Details"));
     await fireEvent.press(details.getByRole("button", { name: "GitHub" }));
@@ -398,6 +472,8 @@ describe("Your work on the phone", () => {
     const onOpenChat = jest.fn();
     const stacked = { ...work, issues: false, items: [item("s1", { number: 1, title: "Base", tone: "you", stack: { id: 1, pos: 1, of: 2, on: null } }), item("s2", { number: 2, title: "Top", stack: { id: 1, pos: 2, of: 2, on: 1 }, branch: "aly/top", chat: { slot: "a", title: "Top work" } })] };
     await open({ work: stacked }, ["desk", "work"], onOpenChat);
+    // Without Linear there are no features: the project opens on its tabs.
+    await fireEvent.press(screen.getByRole("button", { name: /^lantern, / }));
     await fireEvent.press(screen.getByRole("tab", { name: "Moving" }));
     const page = within(screen.getByLabelText("lantern"));
     expect(page.getByRole("button", { name: /^#2 Top, Checks running, b · stack 2 of 2 · on #1$/ })).toBeTruthy();
@@ -422,6 +498,6 @@ describe("Your work on the phone", () => {
   it("says which repositories it couldn't tell the owner of, with the work it could list", async () => {
     await open({ work: { ...work, blind: ["lantern", "web"] } });
     expect(screen.getByText(/Couldn't tell which GitHub account is yours in lantern, web/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Reliability, / })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^lantern, / })).toBeTruthy();
   });
 });
