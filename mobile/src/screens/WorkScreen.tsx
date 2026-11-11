@@ -19,7 +19,7 @@ import { Dots } from "../ui/skeleton";
 import { Magnifier, RoundButton, SearchContents, SidebarIcon, type BarSearch } from "./SearchBar";
 import { TOP_BAR_GAP } from "../ui/TopBar";
 import { control, MIN_TARGET, radius, space, useColors, type Palette } from "../ui/theme";
-import { askOf, BUCKETS, bucketOf, featureFor, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, workGroups, type Bucket, type Tone, type WorkGroup } from "../view/work";
+import { askOf, BUCKETS, bucketOf, featureFor, groupItems, lineUnder, linksOf, metaUnder, nextSteps, openBucket, pathOf, projectColors, stackWord, standing, toneOf, TONE_WORD, workGroups, type Bucket, type Tone, type WorkGroup } from "../view/work";
 
 export interface WorkProps {
   /**
@@ -208,9 +208,18 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   const done = desk ? desk.desks.flatMap((d) => finished(desk, d.id, [])).filter((c) => !single || c.project === single.name).sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : [];
   const justFinished = done.length > 0 && onOpenChat ? <JustFinished list={done} onOpen={onOpenChat} /> : null;
   const colorOf = projectColors(chats);
-  // The feature (or project) whose page is open, by its group key, and which of its tabs; null opens on the one that needs you.
+  // The project whose page is open on a phone. The tablet selects features through its column.
   const [page, setPage] = useState<string | null>(null);
-  useToTop(toTop, () => (page !== null ? setPage(null) : lister.current?.scrollTo({ y: 0, animated: true })));
+  const [feature, setFeature] = useState<string | null>(null);
+  const back = () => {
+    if (feature !== null) setFeature(null);
+    else setPage(null);
+  };
+  useToTop(toTop, () => {
+    setFeature(null);
+    if (page !== null) setPage(null);
+    else lister.current?.scrollTo({ y: 0, animated: true });
+  });
   const [tab, setTab] = useState<Bucket | null>(null);
   const [nextOpen, setNextOpen] = useState(false);
   // The item whose details are open, by key: they follow it as it moves on, and close if it goes.
@@ -254,22 +263,25 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   const issues = work?.issues === true;
   const looked = work?.looked === true;
   const blind = work?.blind ?? [];
-  // Features with Linear; the projects without it.
+  // Phones always list projects; the tablet keeps the same feature groups as its column.
   const next = nextSteps(items);
   const listed = standing(items);
-  const groups = workGroups(items, issues);
+  const groups = beside ? workGroups(items, issues) : groupItems(listed, "project");
   const needing = listed.filter((i) => bucketOf(i) === "attn").length;
-  // One group needs no card to open: its page is the screen.
-  const alone = groups.length === 1;
-  const open: WorkGroup | undefined = alone ? groups[0] : page !== null ? groups.find((g) => g.key === page) : undefined;
+  // Even a single project opens from a card, keeping the way into and out of its work consistent.
+  const open: WorkGroup | undefined = page !== null ? groups.find((g) => g.key === page) : undefined;
+  const features = open ? groupItems(open.items, "feature") : [];
+  const openFeature = feature !== null ? features.find((g) => g.key === feature) : undefined;
+  useEffect(() => {
+    if (feature !== null && !features.some((g) => g.key === feature)) setFeature(null);
+  }, [page, feature, features.map((g) => g.key).join("\n")]);
   // A tablet's page: the feature its column picked, or the one that needs you (the column highlights the same one).
   const shownFeature = beside ? featureFor(groups, beside.feature) : undefined;
   // Another feature opens on its own first tab, not on the tab the last one was left on.
   useEffect(() => {
     if (beside) setTab(null);
   }, [shownFeature?.key]);
-  // A feature whose page was open and is gone (all of it shipped) is let go: the list shows, and the page doesn't come back by
-  // itself if the feature does.
+  // Let go of a project that disappears, so its page cannot reopen by itself if the project returns.
   useEffect(() => {
     if (page !== null && !groups.some((g) => g.key === page)) setPage(null);
   }, [page, groups.map((g) => g.key).join("\n")]);
@@ -353,8 +365,8 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
     </View>
   );
 
-  /** One feature as a card: its name, its pieces as dots, and the one thing that needs you. It opens to the feature's page. */
-  const featureCard = (g: WorkGroup) => {
+  /** A project or feature card: its pieces and the one thing that needs you. */
+  const groupCard = (g: WorkGroup, onOpen: () => void, hint: string) => {
     const live = g.items.filter((i) => bucketOf(i) !== "shipped");
     const shipped = g.items.length - live.length;
     const ask = askOf(g.items);
@@ -365,11 +377,8 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
         key={g.key}
         accessibilityRole="button"
         accessibilityLabel={`${g.label}, ${sum || "nothing open"}${top ? `, ${top.word}` : ""}`}
-        accessibilityHint="Opens its work"
-        onPress={() => {
-          setPage(g.key);
-          setTab(null);
-        }}
+        accessibilityHint={hint}
+        onPress={onOpen}
         scaleTo={0.985}
         style={{ backgroundColor: colors.card, borderRadius: radius.card, borderWidth: 1, borderColor: colors.rule, paddingHorizontal: 18, paddingTop: 18, paddingBottom: 16, gap: 12 }}
       >
@@ -477,20 +486,13 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
     );
   };
 
-  /** A feature's page: its name (where nothing above it says it), how much is open, its tabs, and the rows under the one chosen. */
-  const featurePage = (g: WorkGroup, titled: boolean, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode) => {
+  /** A project or feature page: how much is open, its tabs, and the rows under the one chosen. */
+  const groupPage = (g: WorkGroup, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode) => {
     const on = tab ?? openBucket(g.items);
     const rows = g.items.filter((i) => bucketOf(i) === on);
     const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
     return (
       <View accessibilityLabel={g.label}>
-        {/* With one feature its page is the screen, and the name is its headline. A phone's pushed page has the name in its bar,
-            and a tablet's page in its header. */}
-        {titled && (
-          <Txt variant="title" style={{ marginTop: 0 }}>
-            {g.label}
-          </Txt>
-        )}
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10, marginTop: 4 }}>
           <Txt variant="small" tone="ink3">
             {live} open, {g.items.length - live} shipped
@@ -525,7 +527,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
       </Txt>
     ) : null;
 
-  /** The Work screen: how many things need you, and a card for each feature. */
+  /** The Work screen: how many things need you, and a card for each project. */
   // A refresh says it is going where its link was (the list's own pull spinner is hidden; a tap on the link showed nothing).
   const refreshLink = refreshing ? (
     <View accessible accessibilityRole="progressbar" accessibilityLabel="Refreshing" style={{ minHeight: 22, justifyContent: "center" }}>
@@ -550,38 +552,19 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
         {blindNote}
       </View>
       {justFinished}
-      {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map(featureCard)}</View>}
+      {groups.length > 0 && <View style={{ gap: 14 }}>{groups.map((g) => groupCard(g, () => {
+        setPage(g.key);
+        setFeature(null);
+        setTab(null);
+      }, "Opens its features"))}</View>}
     </View>
   );
 
-  /**
-   * With one feature (or one project) there are no cards: the screen opens on its page, under the same line of how many things
-   * need you. A tablet's header has Refresh as a button, so its line doesn't repeat it.
-   */
-  const overviewNote = (withRefresh = true) => (
-    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
-      <Txt variant="small" tone="ink3" style={{ flexShrink: 1 }}>
-        {needing === 0 ? "Nothing needs you right now." : `${needing === 1 ? "1 thing needs" : `${needing} things need`} you.`}
-      </Txt>
-      {next.length > 0 && <Link label="Review" hint="Lists every step to take" onPress={() => setNextOpen(true)} />}
-      {withRefresh && <View style={{ marginLeft: "auto" }}>{refreshLink}</View>}
-    </View>
-  );
-
-  /**
-   * The way back from a feature's page: the chat's back button, a circle of glass. The page goes away as the stack takes it
-   * away (a swipe in from the edge does the same, with the list coming out from under it).
-   */
-  const backCircle = <BackButton label="Back to Work" hint="Goes back to every feature" onPress={() => setPage(null)} />;
-
-  /**
-   * A phone's feature page bar, which is part of the page: it slides in with it and follows a finger going back, as a navigation
-   * bar does. The way back leads, and the page's name sits where a chat's title does.
-   */
-  const pageBar = (g: WorkGroup) => (
+  /** A pushed page's bar: feature pages return to the project, project pages return to Work. */
+  const pageBar = (g: WorkGroup, featurePage = false) => (
     <View testID="work-page-bar" style={{ backgroundColor: colors.paper, paddingTop: insets.top + TOP_BAR_GAP, paddingBottom: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.lg }}>
-        {backCircle}
+        <BackButton label={featurePage ? "Back to features" : "Back to Work"} hint={featurePage ? "Goes back to this project's features" : "Goes back to every project"} onPress={back} />
         <View style={{ flex: 1 }}>
           <Glass style={{ minHeight: control, borderRadius: control / 2, paddingHorizontal: 18, paddingVertical: 2, justifyContent: "center" }}>
             <Txt variant="heading" numberOfLines={1} maxFontSizeMultiplier={BAR_TEXT_SCALE} accessibilityRole="header">
@@ -596,8 +579,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   /** The room a screen's list keeps round it. */
   const margins: ViewStyle = { paddingHorizontal: wide ? space.xl : space.lg, paddingBottom: tabbed ? tabBarRoom(insets.bottom) : insets.bottom + 40, gap: 14, ...(wide ? { width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" } : {}) };
 
-  // The tab is the app's own stack, as a chat's screen is: the list, and the feature's page pushed over it — so going back
-  // uncovers the list itself, sliding out from under, rather than a blank screen.
+  // Projects, then a project's features, then a feature's items; each level stays underneath for back navigation.
   const listScreen: StackItem = {
     key: "work:list",
     kind: "push",
@@ -614,12 +596,6 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
             <View accessibilityLabel="Loading your work" accessible style={{ alignItems: "center", paddingVertical: 40 }}>
               <Dots />
             </View>
-          ) : alone && open ? (
-            <>
-              <View style={{ marginBottom: 4 }}>{overviewNote()}</View>
-              {justFinished && <View style={{ marginVertical: 12 }}>{justFinished}</View>}
-              {featurePage(open, true)}
-            </>
           ) : (
             overview
           )}
@@ -629,24 +605,38 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
       </View>
     ),
   };
-  const screens: StackItem[] =
-    !alone && open
-      ? [
-          listScreen,
-          {
-            key: `work:${open.key}`,
-            kind: "push",
-            element: (
-              <View style={{ flex: 1, backgroundColor: colors.paper }}>
-                {pageBar(open)}
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
-                  {featurePage(open, false)}
-                </ScrollView>
-              </View>
-            ),
-          },
-        ]
-      : [listScreen];
+  const screens: StackItem[] = [listScreen];
+  if (open) {
+    screens.push({
+      key: JSON.stringify(["work", open.key]),
+      kind: "push",
+      element: (
+        <View style={{ flex: 1, backgroundColor: colors.paper }}>
+          {pageBar(open)}
+          <ScrollView accessibilityLabel="Project features" style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
+            {features.map((g) => groupCard(g, () => {
+              setFeature(g.key);
+              setTab(null);
+            }, "Opens its work items"))}
+          </ScrollView>
+        </View>
+      ),
+    });
+    if (openFeature) {
+      screens.push({
+        key: JSON.stringify(["work", open.key, openFeature.key]),
+        kind: "push",
+        element: (
+          <View style={{ flex: 1, backgroundColor: colors.paper }}>
+            {pageBar(openFeature, true)}
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
+              {groupPage(openFeature)}
+            </ScrollView>
+          </View>
+        ),
+      });
+    }
+  }
 
   /**
    * A tablet's page, beside the features in its column. Its header is words and round buttons, with no capsule round them: the
@@ -723,7 +713,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
             </Txt>
           )}
           {blindNote}
-          {shownFeature && featurePage(shownFeature, false, next.length > 0 ? <Link label={`Review all ${next.length} step${next.length === 1 ? "" : "s"}`} hint="Lists every step to take, in every feature" onPress={() => setNextOpen(true)} /> : undefined)}
+          {shownFeature && groupPage(shownFeature, next.length > 0 ? <Link label={`Review all ${next.length} step${next.length === 1 ? "" : "s"}`} hint="Lists every step to take, in every feature" onPress={() => setNextOpen(true)} /> : undefined)}
         </>
       )}
     </ScrollView>
@@ -733,7 +723,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   const metaOfShown = shown ? metaUnder(shown, now, null) : "";
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      {beside ? besidePage : <AnimatedStack items={screens} onBack={() => setPage(null)} />}
+      {beside ? besidePage : <AnimatedStack items={screens} onBack={back} />}
       {shown && (
         <Sheet onClose={() => setDetail(null)}>
           {(close, scroll) => {
