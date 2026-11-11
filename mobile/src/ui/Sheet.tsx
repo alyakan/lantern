@@ -9,7 +9,7 @@ import { useAccent } from "./accent";
 import { BAR_TEXT_SCALE, Txt } from "./components";
 import { Glass } from "./Glass";
 import { PressScale } from "./motion";
-import { MIN_TARGET, radius, space } from "./theme";
+import { MIN_TARGET, radius, space, useColors } from "./theme";
 
 /** How much of the screen's height a sheet may take. */
 const MOST = 0.88;
@@ -101,10 +101,11 @@ export function SheetBar({ title, close, right, inset = space.lg }: { title?: st
 /** A word in a capsule of glass at a sheet's top (Close, Cancel, Done): a finger's worth of a target. */
 export function SheetPill({ label, onPress, disabled = false, tone = "ink" }: { label: string; onPress: () => void; disabled?: boolean; tone?: "ink" | "accent" }) {
   const accent = useAccent();
+  const colors = useColors();
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} opacity={disabled ? 0.45 : 1} onPress={onPress} haptic="select" scaleTo={0.94}>
       <Glass lift={0.1} style={{ minHeight: MIN_TARGET, paddingHorizontal: 16, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" }}>
-        <Txt variant="body" maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ fontWeight: "600", color: tone === "accent" ? accent : undefined }}>
+        <Txt variant="body" maxFontSizeMultiplier={BAR_TEXT_SCALE} style={{ fontWeight: "600", color: tone === "accent" ? accent : colors.ink }}>
           {label}
         </Txt>
       </Glass>

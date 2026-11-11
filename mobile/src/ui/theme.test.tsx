@@ -207,6 +207,12 @@ describe("the body text", () => {
     expect(body()).toMatchObject({ fontSize: 17, lineHeight: 22 });
   });
 
+  it("keeps the phone's type size when turned sideways", async () => {
+    mockWindow = { width: 956, height: 440 };
+    await render(<Txt>Words</Txt>);
+    expect(body()).toMatchObject({ fontSize: 16, lineHeight: 21 });
+  });
+
   // The page's margins and the body's size ask the same question: a window wide enough for a tablet's layout is one, however short.
   it("is the tablet's in a wide window that is short, as the layout is", async () => {
     mockWindow = { width: 800, height: 600 };

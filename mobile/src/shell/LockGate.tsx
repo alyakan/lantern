@@ -26,7 +26,7 @@ export function LockGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <Modal visible={shown} animationType="none" presentationStyle="fullScreen" statusBarTranslucent onRequestClose={() => {}}>
+      <Modal visible={shown} animationType="none" presentationStyle="fullScreen" supportedOrientations={["portrait", "portrait-upside-down", "landscape-left", "landscape-right"]} statusBarTranslucent onRequestClose={() => {}}>
         <LockCover />
       </Modal>
     </>

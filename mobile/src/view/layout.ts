@@ -6,6 +6,9 @@ export type Layout = "phone" | "overlay" | "split";
 /** The narrowest window that has room for more than one screen. An iPad's Split View pane or Slide Over is narrower, so it gets the phone's layout. */
 export const WIDE_MIN = 700;
 
+/** A landscape phone has width, but too little height for the tablet shell. */
+export const TABLET_HEIGHT_MIN = 500;
+
 /** The chats' column, beside the chat or sliding over it. */
 export const SIDEBAR_WIDTH = 340;
 
@@ -22,7 +25,7 @@ export const SHEET_MAX = 640;
 export const SPLIT_MIN = 900;
 
 export function layoutFor(width: number, height: number): Layout {
-  if (width < WIDE_MIN) return "phone";
+  if (width < WIDE_MIN || height < TABLET_HEIGHT_MIN) return "phone";
   return width > height && width >= SPLIT_MIN ? "split" : "overlay";
 }
 
@@ -36,6 +39,7 @@ export const WIDE_SLACK = 24;
  */
 export function layoutAfter(before: Layout | null, width: number, height: number): Layout {
   const now = layoutFor(width, height);
+  if (height < TABLET_HEIGHT_MIN) return "phone";
   if (before === null) return now;
   if (before === "phone" && now !== "phone" && width < WIDE_MIN + WIDE_SLACK) return "phone";
   if (before !== "phone" && now === "phone" && width >= WIDE_MIN - WIDE_SLACK) return layoutFor(WIDE_MIN, height);

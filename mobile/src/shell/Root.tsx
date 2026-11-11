@@ -472,8 +472,15 @@ export function Root({ controller, ...rest }: RootProps) {
     <SafeAreaProvider>
       <ControllerContext.Provider value={controller}>
         <StatusBar style="auto" />
-        <Screens {...rest} />
+        <SafeSides><Screens {...rest} /></SafeSides>
       </ControllerContext.Provider>
     </SafeAreaProvider>
   );
+}
+
+/** In landscape the notch moves to a side; every phone screen keeps its controls and words clear of it. */
+function SafeSides({ children }: { children: ReactNode }) {
+  const { left, right } = useSafeAreaInsets();
+  const colors = useColors();
+  return <View style={{ flex: 1, paddingLeft: left, paddingRight: right, backgroundColor: colors.paper }}>{children}</View>;
 }

@@ -8,6 +8,7 @@ import { useAccent } from "./accent";
 import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
+import { ArchitectureDiagram } from "./ArchitectureDiagram";
 
 /** The colour of the words: ink on the page, night or white on a dark background, on-ink on an ink one (your own message). */
 type Tone = "ink" | "night" | "white" | "on-ink";
@@ -370,8 +371,10 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
             return <Table key={i} block={b} tone={tone} mark={mark} surface={surface ?? (tone === "ink" ? colors.paper : tone === "on-ink" ? "" : colors.night)} />;
           case "rule":
             return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
-          case "code":
-            return <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} />;
+          case "code": {
+            const code = <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} />;
+            return b.lang.toLowerCase() === "architecture" ? <ArchitectureDiagram key={i} text={b.text} fallback={code} /> : code;
+          }
         }
       })}
     </View>

@@ -243,8 +243,7 @@ export const phoneBody: TextStyle = { fontSize: 16, lineHeight: 21 };
 
 /**
  * The body for the window the app is in: 16 on a phone, 17 on a tablet. The layout decides (the same call that gives the page its
- * margins), so an iPad in a narrow Split View pane, laid out as a phone, gets the phone's size, and a window wide enough to be a
- * tablet's never gets it for being short.
+ * margins), so a narrow Split View pane and a phone in landscape keep the phone's size.
  */
 export function useBody(): TextStyle {
   const { width, height } = useWindowDimensions();
