@@ -3,6 +3,11 @@
 //! ever restarts the app on its own, since that would stop every chat's claude.
 
 use std::sync::Mutex;
+use std::time::Duration;
+
+const STARTUP_DELAY: Duration = Duration::from_secs(10);
+const CHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const RETRY_DELAY: Duration = Duration::from_secs(60);
 
 /// Installs a downloaded update over the running app (it takes effect on the next launch).
 pub type Install = Box<dyn FnOnce() -> Result<(), String> + Send>;
@@ -96,18 +101,35 @@ pub fn publish(app: &tauri::AppHandle, state: UpdateState) {
     let _ = app.emit("update-state", state);
 }
 
-/// Looks for a newer release a little after launch, then every few hours, until one is downloaded.
+/// Looks shortly after launch, then every fifteen minutes; an offline launch retries after a minute.
 pub async fn watch(app: tauri::AppHandle) {
     use tauri::Manager;
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-    loop {
-        if app.state::<Updates>().ready().is_none() {
-            // Offline, GitHub down, a bad signature: nothing to tell the user; the next check tries again.
-            if let Err(e) = check(&app, false).await {
-                eprintln!("Lantern update check failed: {e}");
-            }
+    background_checks(|| async {
+        if app.state::<Updates>().ready().is_some() {
+            return Ok(true);
         }
-        tokio::time::sleep(std::time::Duration::from_secs(4 * 60 * 60)).await;
+        check(&app, false).await.map(|state| matches!(state, UpdateState::Ready { .. }))
+    })
+    .await;
+}
+
+/// Kept separate from the app so the actual polling and retry timing can be tested with a paused clock.
+async fn background_checks<F, Fut>(mut check: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    tokio::time::sleep(STARTUP_DELAY).await;
+    loop {
+        let delay = match check().await {
+            Ok(true) => return, // Downloaded and verified: wait for the user to restart or quit.
+            Ok(false) => CHECK_INTERVAL,
+            Err(e) => {
+                eprintln!("Lantern update check failed: {e}");
+                RETRY_DELAY
+            }
+        };
+        tokio::time::sleep(delay).await;
     }
 }
 
@@ -140,7 +162,10 @@ pub async fn check(app: &tauri::AppHandle, manual: bool) -> Result<UpdateState, 
 async fn download_newer(app: &tauri::AppHandle) -> Result<UpdateState, String> {
     use tauri::{Emitter, Manager};
     use tauri_plugin_updater::UpdaterExt;
-    let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(UpdateState::UpToDate) };
+    // Without a timeout, a stalled request holds the check lock indefinitely, blocking automatic and manual checks.
+    let Some(mut update) = app.updater_builder().timeout(Duration::from_secs(60)).build().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(UpdateState::UpToDate) };
+    // The app archive is larger than the manifest; give its download more time on a slow connection.
+    update.timeout = Some(Duration::from_secs(5 * 60));
     let version = update.version.clone();
     let notes = update.body.clone();
     publish(app, UpdateState::Downloading { version: version.clone(), downloaded: 0, total: None });
@@ -198,6 +223,45 @@ mod tests {
             count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_offline_launch_retries_soon_then_keeps_looking_until_an_update_is_ready() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let watcher = tokio::spawn(background_checks(move || {
+            let attempt = observed.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(match attempt {
+                0 => Err("offline at launch".into()),
+                1 => Ok(false), // Connected again, but no release yet.
+                _ => Ok(true), // A release published while Lantern stayed open.
+            })
+        }));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(9)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(Duration::from_secs(59)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        tokio::time::advance(Duration::from_secs(15 * 60 - 1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert!(watcher.is_finished());
+        watcher.await.unwrap();
+        tokio::time::advance(Duration::from_secs(60 * 60)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
     #[test]

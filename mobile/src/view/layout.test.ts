@@ -1,6 +1,13 @@
 import { CHANGES_MIN, CHANGES_SHARE, CHANGES_WIDTH, CHAT_MIN, changesWidth, floatFrame, gutterFor, hasRoomForChanges, layoutAfter, layoutFor, shareOf, WIDE_MIN, WIDE_SLACK } from "./layout";
 
 describe("layoutFor", () => {
+  it("keeps a landscape phone on one screen instead of mounting a tablet shell", () => {
+    for (const [width, height] of [[852, 393], [956, 440], [667, 375]]) {
+      expect(layoutFor(width, height)).toBe("phone");
+      expect(layoutAfter("phone", width, height)).toBe("phone");
+      expect(layoutAfter("split", width, height)).toBe("phone");
+    }
+  });
   it("keeps the phone's layout on a phone, and in a narrow Split View or Slide Over pane", () => {
     expect(layoutFor(393, 852)).toBe("phone");
     expect(layoutFor(440, 956)).toBe("phone");
