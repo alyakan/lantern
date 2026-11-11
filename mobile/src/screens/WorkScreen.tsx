@@ -271,7 +271,9 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   // Even a single project opens from a card, keeping the way into and out of its work consistent.
   const open: WorkGroup | undefined = page !== null ? groups.find((g) => g.key === page) : undefined;
   const features = open ? groupItems(open.items, "feature") : [];
-  const openFeature = feature !== null ? features.find((g) => g.key === feature) : undefined;
+  // A project whose work is all in no feature (always so without Linear) has nothing to choose: it opens on its tabs and rows.
+  const direct = features.length === 1 && features[0].plain;
+  const openFeature = feature !== null && !direct ? features.find((g) => g.key === feature) : undefined;
   useEffect(() => {
     if (feature !== null && !features.some((g) => g.key === feature)) setFeature(null);
   }, [page, feature, features.map((g) => g.key).join("\n")]);
@@ -444,13 +446,15 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   );
 
   /** One piece of work on a feature's page: its name, a quiet line, and its pipeline. Taller than a list row, since it carries the pipeline. A tap opens its details. */
-  const row = (i: RemoteWorkItem, heading: string | null, n: number) => {
+  const row = (i: RemoteWorkItem, heading: string | null, n: number, /** The project the page is inside, on a phone. */ project?: string) => {
     const attn = bucketOf(i) === "attn";
     const hue = hueOf(i, colors);
-    // Its project as the chats' chip, unless the page it is on is that project.
-    const chip = !!i.repo && heading !== i.repo;
-    const line = lineUnder(i, now, heading, chip);
-    const said = lineUnder(i, now, heading);
+    // The page already says its project when it is that project's, or inside it: then neither a chip nor the line repeats it.
+    const here = heading === i.repo || project === i.repo;
+    // Its project as the chats' chip, unless the page says it.
+    const chip = !!i.repo && !here;
+    const line = lineUnder(i, now, heading, chip || here);
+    const said = lineUnder(i, now, heading, here);
     return (
       <View key={i.key} style={n > 0 ? { borderTopWidth: 1, borderTopColor: colors.rule } : undefined}>
         <PressScale
@@ -487,7 +491,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
   };
 
   /** A project or feature page: how much is open, its tabs, and the rows under the one chosen. */
-  const groupPage = (g: WorkGroup, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode) => {
+  const groupPage = (g: WorkGroup, /** Beside its count, on a tablet: every step to take, across the features. */ review?: ReactNode, /** The project it is inside, on a phone. */ project?: string) => {
     const on = tab ?? openBucket(g.items);
     const rows = g.items.filter((i) => bucketOf(i) === on);
     const live = g.items.filter((i) => bucketOf(i) !== "shipped").length;
@@ -505,7 +509,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
             Nothing here.
           </Txt>
         ) : (
-          rows.map((i, n) => row(i, g.plain ? null : g.label, n))
+          rows.map((i, n) => row(i, g.plain ? null : g.label, n, project))
         )}
       </View>
     );
@@ -613,12 +617,18 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
       element: (
         <View style={{ flex: 1, backgroundColor: colors.paper }}>
           {pageBar(open)}
-          <ScrollView accessibilityLabel="Project features" style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
-            {features.map((g) => groupCard(g, () => {
-              setFeature(g.key);
-              setTab(null);
-            }, "Opens its work items"))}
-          </ScrollView>
+          {direct ? (
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
+              {groupPage(open)}
+            </ScrollView>
+          ) : (
+            <ScrollView accessibilityLabel="Project features" style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
+              {features.map((g) => groupCard(g, () => {
+                setFeature(g.key);
+                setTab(null);
+              }, "Opens its work items"))}
+            </ScrollView>
+          )}
         </View>
       ),
     });
@@ -630,7 +640,7 @@ export function WorkScreen({ beside, wide = false, onOpenChat, tabbed = false, o
           <View style={{ flex: 1, backgroundColor: colors.paper }}>
             {pageBar(openFeature, true)}
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ ...margins, paddingTop: 12 }}>
-              {groupPage(openFeature)}
+              {groupPage(openFeature, undefined, open.label)}
             </ScrollView>
           </View>
         ),
