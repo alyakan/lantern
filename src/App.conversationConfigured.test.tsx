@@ -96,7 +96,9 @@ describe("a chat's model changed in place", () => {
     // (On Codex the chip has no presets at all.)
     await waitFor(() => expect(chipTitle()).not.toContain("Balanced"));
     await configured(slot, CLAUDE, null, null);
-    await waitFor(() => expect(chipTitle()).toMatch(/Standard/));
+    await waitFor(() => expect(chipTitle()).toMatch(/^Model: /));
+    // Standard is no preset at all: the chip names none.
+    expect(chipTitle()).not.toContain("Preset:");
     expect(saved<Record<string, string>>("settings.harnessByFolder")?.[FOLDER]).toBe("balanced");
   });
 });

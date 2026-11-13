@@ -48,9 +48,8 @@ describe("single provider: the menus", () => {
     const withList = render(<ModelsPicker running="claude-opus-5-5" chosen={null} options={MODELS} effort={{ chosen: "high", levels: ["low", "high"], onChoose: () => {} }} presets={BUILT_IN} preset="default" onPreset={() => {}} onChoose={() => {}} />);
     expect(withList.container).toMatchSnapshot("closed");
     fireEvent.click(withList.container.querySelector("button.model-button")!);
-    expect(withList.container).toMatchSnapshot("presets");
-    fireEvent.click(screen.getByRole("menuitem", { name: /Customize/ }));
-    expect(withList.container).toMatchSnapshot("customize");
+    // One menu: the models, the effort, then the presets.
+    expect(withList.container).toMatchSnapshot("open");
     cleanup();
     const builtIn = render(<ModelsPicker running={null} chosen="sonnet" defaultModel="claude-opus-5-5" ids={{ sonnet: "claude-sonnet-5-5" }} onChoose={() => {}} />);
     fireEvent.click(builtIn.container.querySelector("button.model-button")!);

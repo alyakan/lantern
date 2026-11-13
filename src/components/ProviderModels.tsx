@@ -18,7 +18,7 @@ export interface ProviderDefault {
 
 /**
  * Every provider but Claude Code, for Settings → Models: what that provider's new chats start on. This is the app's default for
- * the provider, not a chat's own choice — the Models chip under the box changes one chat; this changes where the next one starts.
+ * the provider, not a chat's own choice — the Model chip under the box changes one chat; this changes where the next one starts.
  * The list doesn't change with the chat that happens to be open.
  */
 export function ProviderDefaults({ providers }: { providers: ProviderDefault[] }) {

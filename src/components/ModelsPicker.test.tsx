@@ -4,7 +4,6 @@ import { ModelsPicker } from "./ModelsPicker";
 import { MessageInput } from "./MessageInput";
 import { BUILT_IN, customOf } from "../lib/preset";
 
-const customize = () => fireEvent.click(screen.getByRole("menuitem", { name: /Customize/ }));
 const titles = () => screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent);
 
 describe("ModelsPicker (the model and effort choices)", () => {
@@ -105,7 +104,7 @@ describe("ModelsPicker (the model and effort choices)", () => {
     const onChoose = vi.fn();
     render(<ModelsPicker running={null} chosen="opus" onChoose={onChoose} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus/ }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Opus/ }));
+    fireEvent.click(screen.getAllByRole("menuitemradio", { name: /^Opus/ })[0]);
     expect(onChoose).not.toHaveBeenCalled();
   });
 
@@ -131,39 +130,48 @@ describe("ModelsPicker (the model and effort choices)", () => {
 
 describe("ModelsPicker (presets)", () => {
   const base = { running: "claude-sonnet-5-5", onChoose: vi.fn(), presets: BUILT_IN, onPreset: vi.fn() };
+  const presetTitles = () => screen.getAllByRole("menuitemradio").filter((r) => r.classList.contains("preset-choice")).map((r) => r.querySelector(".menu-row-title")?.textContent);
 
-  it("shows the preset and the main model on one chip", () => {
+  it("names the model it runs, then the preset that set it", () => {
     render(<ModelsPicker {...base} chosen="sonnet" preset="balanced" />);
-    expect(screen.getByRole("button", { name: "Balanced · Sonnet 5.5" })).toBeInTheDocument();
+    const chip = screen.getByRole("button", { name: "Sonnet 5.5 · Balanced" });
+    expect(chip).toHaveAttribute("title", expect.stringMatching(/^Model: Sonnet 5\.5 · Preset: Balanced · Sonnet · Opus advisor · Haiku subagents$/));
   });
 
-  it("lists the presets, switches one, and keeps Customize… and Edit presets… in the menu", () => {
+  it("on Standard names just the model: Standard is no preset", () => {
+    render(<ModelsPicker {...base} chosen={null} preset="default" />);
+    const chip = screen.getByRole("button", { name: "Sonnet 5.5" });
+    expect(chip.getAttribute("title")).not.toContain("Preset");
+  });
+
+  it("is one menu: the models first, then the presets, and Edit presets…", () => {
     const onPreset = vi.fn();
     const onEdit = vi.fn();
     render(<ModelsPicker {...base} chosen={null} preset="default" onPreset={onPreset} onEdit={onEdit} />);
-    fireEvent.click(screen.getByRole("button", { name: /Standard · Sonnet 5\.5/ }));
-    const menu = screen.getByRole("menu", { name: "Models" });
+    fireEvent.click(screen.getByRole("button", { name: "Sonnet 5.5" }));
+    const menu = screen.getByRole("menu", { name: "Model" });
+    const headings = [...menu.querySelectorAll(".menu-heading")].map((h) => h.textContent);
+    expect(headings[0]).toBe("Model");
+    expect(headings[headings.length - 1]).toBe("Presets: a model for each role");
+    expect(screen.queryByRole("menuitem", { name: /Customize/ })).toBeNull();
     expect(within(menu).getByText("Sonnet · Opus advisor · Haiku subagents")).toBeInTheDocument();
-    expect(titles()).toEqual(["Standard", "Balanced", "Thrifty", "Max"]);
+    expect(within(menu).getByText("No preset: the model and effort above")).toBeInTheDocument();
+    expect(presetTitles()).toEqual(["Standard", "Balanced", "Thrifty", "Max"]);
     fireEvent.click(within(menu).getByRole("menuitemradio", { name: /Balanced/ }));
     expect(onPreset).toHaveBeenCalledWith("balanced");
-    fireEvent.click(screen.getByRole("button", { name: /Standard/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Sonnet 5.5" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit presets…" }));
     expect(onEdit).toHaveBeenCalled();
   });
 
-  it("Customize… opens the model and effort choices, with a way back to the presets", () => {
+  it("on a preset, says a model picked here makes the chat Custom, and picks it", () => {
     const onChoose = vi.fn();
     render(<ModelsPicker {...base} chosen="sonnet" preset="balanced" onChoose={onChoose} effort={{ chosen: "high", levels: ["low", "high"], onChoose: () => {} }} />);
     fireEvent.click(screen.getByRole("button", { name: /Balanced/ }));
-    customize();
-    const menu = screen.getByRole("menu", { name: "Customize models" });
-    expect(within(menu).getByText(/Balanced becomes Custom/)).toBeInTheDocument();
+    const menu = screen.getByRole("menu", { name: "Model" });
+    expect(within(menu).getByText(/Balanced is on: a model or effort you pick here makes this chat Custom/)).toBeInTheDocument();
     expect(within(menu).getByText("Thinking effort")).toBeInTheDocument();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Presets" }));
-    expect(screen.getByRole("menu", { name: "Models" })).toBeInTheDocument();
-    customize();
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Opus/ }));
+    fireEvent.click(screen.getAllByRole("menuitemradio", { name: /^Opus/ })[0]);
     expect(onChoose).toHaveBeenCalledWith("opus");
   });
 
@@ -173,19 +181,18 @@ describe("ModelsPicker (presets)", () => {
     // Customizing a Custom one keeps what it began as.
     expect(customOf(custom, { effort: "low" }).from).toBe("Balanced");
     render(<ModelsPicker {...base} running="claude-opus-5-5" chosen="opus" presets={[...BUILT_IN, custom]} preset="custom" />);
-    const chip = screen.getByRole("button", { name: "Custom · Opus 5.5" });
+    const chip = screen.getByRole("button", { name: "Opus 5.5 · Custom" });
     expect(chip).toHaveAttribute("title", expect.stringContaining("Custom (Balanced, changed)"));
     fireEvent.click(chip);
-    expect(screen.getByRole("menuitemradio", { name: /Custom/ })).toHaveTextContent("Balanced, changed");
-    customize();
-    expect(screen.getByText(/Custom \(Balanced, changed\):/)).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /^Custom/ })).toHaveTextContent("Balanced, changed");
+    expect(screen.getByText(/Custom \(Balanced, changed\): a model or effort you pick here applies to this chat only/)).toBeInTheDocument();
   });
 
   it("without presets (no folder yet) the menu is just the model and effort choices", () => {
     render(<ModelsPicker running={null} chosen="opus" onChoose={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus/ }));
-    expect(screen.queryByRole("menuitem", { name: /Customize/ })).toBeNull();
-    expect(screen.getByRole("menu", { name: "Customize models" })).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "Model" })).toBeInTheDocument();
+    expect(screen.queryByText(/^Presets/)).toBeNull();
   });
 });
 
@@ -203,12 +210,12 @@ describe("MessageInput models chip", () => {
     expect(screen.queryByTitle(/^Preset/)).toBeNull();
   });
 
-  it("shows the chosen model's levels under Customize…, and none for a model with no effort setting", () => {
+  it("shows the chosen model's levels, and none for a model with no effort setting", () => {
     const models = { chosen: null as string | null, onChoose: () => {}, options };
     const effort = { chosen: null, onChoose: () => {} };
     const { rerender } = render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} models={models} effort={effort} />);
     fireEvent.click(screen.getByRole("button", { name: /Models|default/ }));
-    const menu = screen.getByRole("menu", { name: "Customize models" });
+    const menu = screen.getByRole("menu", { name: "Model" });
     expect(within(menu).getAllByRole("menuitemradio").filter((r) => r.classList.contains("effort-row")).map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Default", "Low", "High"]);
     rerender(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} models={{ ...models, chosen: "haiku" }} effort={effort} />);
     expect(screen.queryByText("Thinking effort")).toBeNull();

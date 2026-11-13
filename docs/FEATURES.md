@@ -67,7 +67,7 @@ Before an action that is hard to undo or reaches outside the project (merging a 
 
 Under the box:
 
-- **The Models chip** shows who does the work in this chat, like "Balanced · Sonnet 5.5". Its menu lists presets: Standard (your own model and effort, Claude Code's settings), Balanced (Sonnet, with Opus as the advisor Claude asks at decision points and Haiku subagents), Thrifty, Max, or your own. **Customize…** picks the model and thinking effort directly, and **Edit presets…** opens Settings → Harness. Changing a model on a preset makes the chat **Custom**, and the chip says so.
+- **The Model chip** names the model the chat runs on, and the preset after it when one is on, like "Sonnet 5.5 · Balanced". Its one menu lists the models first, then the thinking effort, then **Presets**: a model for each role, the main one, the advisor Claude asks at decision points and the subagents. They are Standard (no preset: the model and effort above), Balanced (Sonnet, with an Opus advisor and Haiku subagents), Thrifty, Max, or your own, and **Edit presets…** opens Settings → Models. Picking a model or effort on a preset makes the chat **Custom**, and the chip says so. With more than one provider, the **provider chip** before it says which agent runs the chat (Claude, Codex or an endpoint), and the Model chip lists that provider's models.
 - **Permissions and Workflow** chips, as above.
 
 ![The Models menu](images/models-menu.png)
