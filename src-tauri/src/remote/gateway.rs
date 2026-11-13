@@ -172,8 +172,6 @@ pub trait Host: Send + Sync + 'static {
     /// the `preset` (one of the presets listed), without changing what the window shows; the new chat's slot once it is open.
     /// `provider` (one of the providers listed, or None for the project's own) is where it runs.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>, images: Vec<protocol::RemoteImage>, model: NewChatModel) -> BoxFut<Result<String, String>>;
     /// Does the step `key` of the user's work, as the Desk's button does (the gateway has checked it is listed and `sig` is how it was
     /// shown): the window sends the chat on the item's branch a message it wrote, or starts a chat on Ask. Says what it did, as
