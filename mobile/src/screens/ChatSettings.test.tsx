@@ -277,6 +277,43 @@ describe("provider-neutral settings", () => {
     expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" } });
   });
 
+  describe("a Claude chat: the presets are in the Model menu, after the models", () => {
+    const claudeConfiguration = {
+      provider: "claude", model: "sonnet", effort: "high", models: ["opus", "sonnet", "haiku"], effort_levels: ["low", "high"],
+      capabilities: { supports_auto_mode: true, supports_advisor: true, supports_effort: true, model_switchable: true, supports_images: true, supports_compact: true, supports_clear: true },
+    };
+    const openClaude = (chatOver: Parameters<typeof chat>[0] = {}) => open({ features: ["controls", "conversation"], chatOver, answers: { conversation_settings: claudeConfiguration } });
+
+    it("is one row: the model it runs, then the preset that set it, and no Preset row of its own", async () => {
+      await openClaude();
+      await openSheet();
+      const menu = await screen.findByRole("menu", { name: "Model, sonnet · Balanced" });
+      expect(within(menu).getByText("Presets: a model for each role")).toBeTruthy();
+      expect(within(menu).getByRole("menuitem", { name: "Balanced" }).props.accessibilityState).toMatchObject({ checked: true });
+      expect(within(menu).getByRole("menuitem", { name: "sonnet" }).props.accessibilityState).toMatchObject({ checked: true });
+      expect(screen.queryByRole("menu", { name: /^Preset,/ })).toBeNull();
+      // What the preset does, under the row.
+      expect(screen.getByText("Sonnet · Opus advisor · Haiku subagents")).toBeTruthy();
+    });
+
+    it("on Standard names just the model", async () => {
+      await openClaude({ preset: "default" });
+      await openSheet();
+      await screen.findByRole("menu", { name: "Model, sonnet" });
+    });
+
+    it("sends a model as a model, and a preset as a preset", async () => {
+      const { lastOf } = await openClaude({ preset: "default" });
+      await openSheet();
+      await screen.findByRole("menu", { name: "Model, sonnet" });
+      await fireEvent.press(item("opus"));
+      expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "opus" } });
+      await fireEvent.press(item("Balanced"));
+      await waitFor(() => expect(lastOf("set_preset")).toEqual({ op: "set_preset", slot: "a", preset: "balanced" }));
+      expect(screen.getByRole("menu", { name: "Model, Switching…" })).toBeTruthy();
+    });
+  });
+
   it("offers installed providers and switches through the conversation operation", async () => {
     const { lastOf } = await open({ features: ["controls", "conversation"], answers: {
       controls: { allow_auto: false, presets, providers: [{ id: "claude", name: "Claude", auto: true, presets: true }, { id: "codex", name: "Codex", auto: false, presets: false }] },
