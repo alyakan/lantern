@@ -504,11 +504,12 @@ export class Sync {
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
    * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string } = {}, images: PickedImage[] = []): Promise<string> {
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string; model?: string; effort?: string } = {}, images: PickedImage[] = []): Promise<string> {
     if (images.length > 0 && !this.has("newchatimages")) throw new Error("This Mac can't take photos with a new chat yet. Update Lantern on it.");
-    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider
-    // and the pictures are left out altogether, not sent empty, when there are none.
-    const request: Request = { op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
+    if ((choice.model || choice.effort) && !this.has("newchatmodel")) throw new Error("This Mac can't start a chat on a model you pick yet. Update Lantern on it.");
+    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider,
+    // the model, the effort and the pictures are left out altogether, not sent empty, when there are none.
+    const request: Request = { op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(choice.model ? { model: choice.model } : {}), ...(choice.effort ? { effort: choice.effort } : {}), ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
     const started = await (images.length > 0 ? this.ask<StartedChat>(request, UPLOAD_WAIT) : this.ask<StartedChat>(request));
     return started.slot;
   }
@@ -596,7 +597,12 @@ export class Sync {
     if (!c || typeof c.allow_auto !== "boolean" || !Array.isArray(c.presets)) throw new Error("What you can choose didn't come through.");
     // Where a chat may run is optional (an older Mac leaves it out, and a Mac with only Claude says none): kept only what is well formed.
     const providers = (Array.isArray(c.providers) ? c.providers : []).filter((p) => p && typeof p.id === "string" && p.id.length > 0 && typeof p.name === "string" && p.name.length > 0).map((p) => ({ id: p.id, name: p.name, auto: p.auto === true, presets: p.presets === true }));
-    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers };
+    // Each provider's models, likewise (a Mac that can't take a model for a new chat leaves them out).
+    const text = (v: unknown): v is string => typeof v === "string" && v.length > 0;
+    const models = (Array.isArray(c.models) ? c.models : [])
+      .filter((m) => m && text(m.provider) && Array.isArray(m.models))
+      .map((m) => ({ provider: m.provider, models: m.models.filter((x) => x && text(x.value)).map((x) => ({ value: x.value, name: text(x.name) ? x.name : x.value, effort_levels: Array.isArray(x.effort_levels) ? x.effort_levels.filter(text) : [] })) }));
+    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers, models };
   }
 
   /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). `when`: see conversationSettings. */

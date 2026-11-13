@@ -451,7 +451,7 @@ describe("what a phone may choose for a chat", () => {
     sync.onSession(session);
     expect(sync.hasControls).toBe(true);
     // (A Mac that says nothing of providers is only Claude Code: none.)
-    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: "b", name: "B", summary: "" }], providers: [] });
+    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: "b", name: "B", summary: "" }], providers: [], models: [] });
     expect(asked).toContainEqual({ op: "controls" });
   });
 
@@ -478,7 +478,19 @@ describe("what a phone may choose for a chat", () => {
   it("reads a providers field that isn't a list as none, without refusing the rest", async () => {
     const { sync } = rig();
     sync.onSession(fakeSession(1, { controls: { allow_auto: true, presets: [], providers: "claude" } }, {}, ["controls"]).session);
-    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [], providers: [] });
+    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [], providers: [], models: [] });
+  });
+
+  it("keeps each provider's models that are well formed, and nothing else", async () => {
+    const { sync } = rig();
+    const models = [
+      { provider: "claude", models: [{ value: "opus", name: "Opus 5.5", effort_levels: ["low", 3, "max"] }, { value: "", name: "x", effort_levels: [] }, { value: "haiku", effort_levels: "high" }, null] },
+      { provider: "", models: [] },
+      { provider: "codex", models: "gpt" },
+      null,
+    ];
+    sync.onSession(fakeSession(1, { controls: { allow_auto: true, presets: [], models } }, {}, ["controls"]).session);
+    expect((await sync.controls())?.models).toEqual([{ provider: "claude", models: [{ value: "opus", name: "Opus 5.5", effort_levels: ["low", "max"] }, { value: "haiku", name: "haiku", effort_levels: [] }] }]);
   });
 
   it("never asks a Mac that can't say: it would end the connection at a request it doesn't know", async () => {
