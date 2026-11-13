@@ -55,7 +55,8 @@ export interface NewChatProps {
 /**
  * Starting a chat from the phone: which project, and what to start with. It starts on Ask unless Auto is chosen (and the
  * Mac lets phones use it), so Claude asks before it runs anything, and the questions come to this phone like any other.
- * The models are the project's own unless a preset is chosen. Only a project the user already works in on the Mac is
+ * Where it runs, then its model: the project's own, one of that provider's models (with an effort), or one of the presets (a model
+ * for each role), as on the Mac. Only a project the user already works in on the Mac is
  * offered (the Mac decides, whatever is sent).
  */
 export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, listen = false, onClose, onStarted }: NewChatProps) {
@@ -118,8 +119,32 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const providers = providersOf(controls);
   const [provider, setProvider] = useState<string | null>(null);
   const chosen = providers.find((p) => p.id === provider) ?? null;
+  // Its model: one of where it runs' models (a Mac that can take one), and the effort that model takes. A model and a preset are two
+  // ways to say the same thing, so picking one lets go of the other.
+  const canModel = useMacCan("newchatmodel");
+  const [model, setModel] = useState<string | null>(null);
+  const [effort, setEffort] = useState<string | null>(null);
+  // Where it runs, when the phone knows: the one chosen, or Claude Code when it is the only one (the project's own is the Mac's to know).
+  const runsOn = chosen?.id ?? (providers.length === 0 ? "claude" : null);
+  const models = (canModel && runsOn ? controls?.models?.find((m) => m.provider === runsOn)?.models : null) ?? [];
+  const pickedModel = models.find((m) => m.value === model) ?? null;
+  const pickModel = (value: string | null) => {
+    setModel(value);
+    setEffort(null);
+    if (value) setPreset(null);
+  };
+  const pickPreset = (id: string | null) => {
+    setPreset(id);
+    if (id) {
+      setModel(null);
+      setEffort(null);
+    }
+  };
   const chooseProvider = (id: string | null) => {
     setProvider(id);
+    // Another provider's models are its own.
+    setModel(null);
+    setEffort(null);
     // What the new one has none of is let go of, so a choice made for another provider is never sent to it (nor shown as if it were).
     const next = providers.find((p) => p.id === id);
     if (next && !next.auto) setPermissions("ask");
@@ -189,7 +214,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
       // Only what was chosen is sent, and only to a Mac that can take it.
       // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
       dictation.cancel();
-      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}) } : {}, canPhotos ? attach.images : []);
+      // (A model only from the list of where it runs, and its effort only if that model takes it.)
+      const ownModel = pickedModel ? { model: pickedModel.value, ...(effort && pickedModel.effort_levels.includes(effort) ? { effort } : {}) } : {};
+      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel } : {}, canPhotos ? attach.images : []);
       void saveLastProject(project);
       // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
       if (supported && !note) void saveNewChatPermissions(permissions);
@@ -202,6 +229,8 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
 
   const workflowName = WORKFLOWS.find((w) => w.value === workflow)?.label ?? "Chat";
   const presetLabel = controls?.presets.find((p) => p.id === preset)?.name ?? "Project's own";
+  // What it runs on, said in a word or two: the model picked (and its effort), the preset, or the project's own.
+  const modelLabel = pickedModel ? [pickedModel.name, effort ? EFFORT_WORDS[effort] ?? effort : null].filter(Boolean).join(", ") : presetLabel;
   // Where it runs has no Auto, or no presets (the Mac's presets are Claude Code's): what it can't do is shown off, with why.
   const noAuto = chosen && !chosen.auto ? noAutoOn(chosen.name) : null;
   const showPresets = (controls?.presets.length ?? 0) > 0 && (!chosen || chosen.presets);
@@ -209,7 +238,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const note = noAuto ?? autoNote(controls);
   // What it starts on: Ask where Auto can't be had (a remembered Auto included).
   const mode: RemotePermissions = note ? "ask" : permissions;
-  const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, chosen && !chosen.presets ? null : presetLabel].filter(Boolean).join(" · ");
+  const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, pickedModel || !chosen || chosen.presets ? modelLabel : null].filter(Boolean).join(" · ");
 
   return (
     <Sheet
@@ -377,14 +406,42 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                           {note ?? (mode === "auto" ? "It starts on Auto: a classifier approves most actions, so the agent rarely asks. Its questions come to this phone." : "It starts on Ask: the agent asks you before it runs anything, and its questions come to this phone.")}
                         </Txt>
                       </View>
-                      {showPresets && (
+                      {(models.length > 0 || showPresets) && (
                         <View>
-                          <Caption>Models</Caption>
+                          <Caption>Model</Caption>
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
-                            {[{ id: null as string | null, name: "Project's own" }, ...controls.presets].map((p) => (
-                              <Pill key={p.id ?? "own"} label={p.name} on={p.id === preset} onPress={() => setPreset(p.id)} />
+                            {[{ value: null as string | null, name: "Project's own" }, ...models].map((m) => (
+                              <Pill key={m.value ?? "own"} label={m.name} on={m.value === model && (m.value !== null || preset === null)} onPress={() => {
+                                pickModel(m.value);
+                                if (!m.value) pickPreset(null);
+                              }} />
                             ))}
                           </ScrollView>
+                          {pickedModel && pickedModel.effort_levels.length > 0 && (
+                            <View style={{ marginTop: 10 }}>
+                              <Caption>Effort</Caption>
+                              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                                {[null, ...pickedModel.effort_levels].map((e) => (
+                                  <Pill key={e ?? "own"} label={e ? (EFFORT_WORDS[e] ?? e) : "Its own"} on={e === effort} onPress={() => setEffort(e)} />
+                                ))}
+                              </View>
+                            </View>
+                          )}
+                          {showPresets && (
+                            <View style={{ marginTop: 10 }}>
+                              <Caption>Presets: a model for each role</Caption>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                                {controls.presets.map((p) => (
+                                  <Pill key={p.id} label={p.name} hint={p.summary} on={p.id === preset} onPress={() => pickPreset(p.id === preset ? null : p.id)} />
+                                ))}
+                              </ScrollView>
+                            </View>
+                          )}
+                          {canModel && models.length === 0 && providers.length > 0 && !chosen && (
+                            <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
+                              Pick where it runs to pick its model.
+                            </Txt>
+                          )}
                         </View>
                       )}
                     </View>
@@ -435,6 +492,9 @@ function PhotoGlyph({ color }: { color: string }) {
     </View>
   );
 }
+
+/** Effort's levels as words ("xhigh" is "Extra high"), as the chat's settings say them. */
+const EFFORT_WORDS: Record<string, string> = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
 
 /** A small label over a group of choices. */
 function Caption({ children }: { children: string }) {

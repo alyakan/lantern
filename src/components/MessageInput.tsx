@@ -72,11 +72,11 @@ interface Props {
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
   usage?: { used: number | null; window: number | null; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void; onFresh?: () => void }; session?: { cost: number | null; tokens: number } };
-  /** The Models chip: the model the user chose (null = default) and how to change it. */
+  /** The Model chip: the model the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
-  /** Thinking effort, under the chip's Customize…: the chosen level (null = default) and how to change it. */
+  /** Thinking effort, in the Model chip's menu under the models: the chosen level (null = default) and how to change it. */
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
-  /** The chat's preset (which models do what) and the presets the Models chip lists. */
+  /** The chat's preset (which models do what) and the presets the Model chip lists after the models. */
   preset?: { presets: Preset[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];

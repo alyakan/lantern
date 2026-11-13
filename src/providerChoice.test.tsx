@@ -39,8 +39,15 @@ const chip = (title: RegExp | string) => screen.queryByTitle(title);
 const rows = () => screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent);
 /** The Permissions menu's rows that can be picked. */
 const pickable = () => screen.getAllByRole("menuitemradio").filter((r) => !(r as HTMLButtonElement).disabled).map((r) => r.querySelector(".menu-row-title")?.textContent);
-/** The chip for who does the work: "Models: …" with the presets, "Model: …" without (a provider with no advisor). */
+/** The chip for what the chat runs on: its model, and the preset when one is on. */
 const modelChip = () => document.querySelector<HTMLElement>(".model-picker:not(.provider-picker) .model-button")!;
+/** Whether the Model chip's menu offers the presets (Claude's; a provider with no advisor has none). */
+const presetsOffered = () => {
+  fireEvent.click(modelChip());
+  const on = !!screen.queryByText("Presets: a model for each role");
+  fireEvent.keyDown(document, { key: "Escape" });
+  return on;
+};
 const openMode = () => fireEvent.click(document.querySelector<HTMLElement>(".mode-chip")!);
 const openProvider = () => fireEvent.click(within(document.querySelector<HTMLElement>(".provider-picker")!).getByRole("button"));
 
@@ -80,7 +87,8 @@ describe("with one provider", () => {
     localStorage.setItem("settings.effort", JSON.stringify("high"));
     await launch(false);
     expect(started()[0].settings).toMatchObject({ mode: "auto", model: "sonnet", effort: "high", auto_approve: false });
-    expect(modelChip().title).toMatch(/^Models: .* · Effort High$/);
+    expect(modelChip().title).toMatch(/^Model: .* · Effort High$/);
+    expect(presetsOffered()).toBe(true);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/" } });
     await screen.findByRole("listbox", { name: "Commands" });
   });
@@ -102,7 +110,8 @@ describe("with two providers", () => {
   it("offers the choice in a new chat, beside the model, and starts on Claude to begin with", async () => {
     await launch(true);
     expect(chip("Runs on Claude")).toBeInTheDocument();
-    expect(modelChip().title).toMatch(/^Models: /);
+    expect(modelChip().title).toMatch(/^Model: /);
+    expect(presetsOffered()).toBe(true);
     openProvider();
     expect(rows()).toEqual(["Claude", "Codex"]);
     // What Codex lacks is said where the choice is made.
@@ -124,6 +133,7 @@ describe("with two providers", () => {
     // Its models, as it lists them.
     // No presets (Codex has no advisor), but effort, and its own models.
     await waitFor(() => expect(modelChip().title).toMatch(/^Model: .* · Effort /));
+    expect(presetsOffered()).toBe(false);
     fireEvent.click(modelChip());
     // Its models, then the effort levels it takes.
     await waitFor(() => expect(rows()).toEqual(["Default (gpt-5-codex)", "gpt-5-codex", "gpt-5", "o3", "Default", "Low", "Medium", "High"]));
@@ -152,7 +162,8 @@ describe("with two providers", () => {
     await waitFor(() => expect(started()).toHaveLength(3));
     expect(started()[2].settings.provider).toBeUndefined();
     expect(started()[2].claudePath).toBe("/Users/you/.local/bin/claude");
-    expect(modelChip().title).toMatch(/^Models: /);
+    expect(modelChip().title).toMatch(/^Model: /);
+    expect(presetsOffered()).toBe(true);
     openMode();
     expect(pickable()).toEqual(["Ask", "Auto"]);
   });

@@ -4,7 +4,9 @@ import { permissionsOf, workflowOf } from "./workflow";
 import { summary, type Preset } from "./preset";
 import type { ProjectOpen } from "./sidebar";
 import { CLAUDE, CLAUDE_CAPABILITIES, capabilitiesOf } from "./provider";
-import type { ProviderInfo } from "../types";
+import type { ModelOption, ProviderInfo, ProviderListing } from "../types";
+import { choiceName, MODEL_CHOICES, modelLabel } from "./models";
+import { EFFORT_LEVELS } from "./effort";
 
 /**
  * What the window tells the backend's session hub about its open chats: the title it shows, and a chat that is asleep
@@ -81,6 +83,44 @@ export function windowProviders(listed: ProviderInfo[], nameOf: (id: string) => 
   return all.map((l) => ({ id: l.id, name: nameOf(l.id), auto: capabilitiesOf(l).supports_auto_mode, presets: capabilitiesOf(l).supports_advisor }));
 }
 
+/** One provider's models as a phone may pick them for a chat it starts (the backend's RemoteModels). */
+export interface WindowModels {
+  provider: string;
+  models: { value: string; name: string; effort_levels: string[] }[];
+}
+
+/**
+ * Each of `providers`' models, for a phone's New chat: Claude Code's as an open Claude chat last listed them (`claude`), else the
+ * short list the Model chip shows before it has, with every effort level, as the chip offers them; any other provider's as its
+ * listing names them, with no effort (an endpoint has none).
+ */
+export function windowModels(providers: WindowProvider[], claude: ModelOption[], listed: ProviderListing[]): WindowModels[] {
+  return providers.map((p) => {
+    if (p.id === CLAUDE) {
+      const own = claude.filter((o) => o.value !== "default").map((o) => ({ value: o.value, name: o.display_name || modelLabel(o.value), effort_levels: [...o.effort_levels] }));
+      const short = MODEL_CHOICES.flatMap((c) => (c.value ? [{ value: c.value, name: choiceName(c.value, null), effort_levels: [...EFFORT_LEVELS] as string[] }] : []));
+      return { provider: p.id, models: own.length ? own : short };
+    }
+    const models = listed.find((l) => l.id === p.id)?.models ?? [];
+    return { provider: p.id, models: models.map((value) => ({ value, name: value, effort_levels: [] })) };
+  });
+}
+
+/**
+ * Why a phone may not start a chat on this model and effort, or null: only one the window listed for where the chat runs (`models`,
+ * that provider's), with an effort its model takes (any its provider's take, with no model chosen), and never with a preset.
+ */
+export function checkRemoteModel(model: unknown, effort: unknown, preset: string | null, models: WindowModels | undefined): string | null {
+  if (model == null && effort == null) return null;
+  if (preset !== null) return "Pick a model or a preset, not both.";
+  if ((model != null && typeof model !== "string") || (effort != null && typeof effort !== "string")) return "That isn't one of its models.";
+  if (!models) return "Your Mac didn't list that provider's models.";
+  const m = model == null ? null : models.models.find((x) => x.value === model);
+  if (model != null && !m) return "That isn't one of its models.";
+  if (effort != null && !(m ? m.effort_levels : models.models.flatMap((x) => x.effort_levels)).includes(effort as string)) return "That model has no such effort.";
+  return null;
+}
+
 /** What a phone may choose between, as the backend lists it (Settings › Models): the preset's id, name and one line. */
 export interface WindowPreset {
   id: string;
@@ -100,6 +140,8 @@ export interface RemoteContext {
   presetIds: string[];
   /** Where the window lets a phone start a chat (see `windowProviders`); none listed: only the project's own. */
   providers?: WindowProvider[];
+  /** Those providers' models (see `windowModels`). */
+  models?: WindowModels[];
 }
 
 /** Why a phone may not have this workflow, or null: a chat or Step by step; a team is started and left on the Mac. */
@@ -139,6 +181,10 @@ export interface RemoteNewChat {
   provider?: string | null;
   /** The phone sent pictures with it: the chat starts without `text`, which the backend sends with them once the chat is ready. */
   hold_first?: boolean;
+  /** One of the models the window listed for where it runs, or null (missing too) for its own; never with a preset. */
+  model?: string | null;
+  /** One of the effort levels the window listed for it, or null (missing too) for its own; never with a preset. */
+  effort?: string | null;
 }
 
 /**

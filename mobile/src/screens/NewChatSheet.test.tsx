@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
-import { connectedWithControls, makeController, renderWith } from "../test/render";
+import { connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
 import { NewChatSheet } from "./NewChatSheet";
 import { loadNewChatPermissions, saveNewChatPermissions } from "../prefs";
 
@@ -339,6 +339,86 @@ describe("choosing where a new chat runs", () => {
     expect(screen.getAllByRole("radio", { name: "Project's own" })).toHaveLength(1);
     const sent = (await start(lastOf)) as Record<string, unknown>;
     expect("provider" in sent).toBe(false);
+  });
+});
+
+describe("choosing a new chat's model", () => {
+  const claude = { id: "claude", name: "Claude", auto: true, presets: true };
+  const ollama = { id: "gateway:ollama", name: "Ollama", auto: false, presets: false };
+  const presets = [{ id: "balanced", name: "Balanced", summary: "Sonnet · Opus advisor · Haiku subagents" }, { id: "max", name: "Max", summary: "Opus · Fable advisor" }];
+  const models = [
+    { provider: "claude", models: [{ value: "opus", name: "Opus 5.5", effort_levels: ["low", "high", "max"] }, { value: "haiku", name: "Haiku 4.5", effort_levels: [] }] },
+    { provider: "gateway:ollama", models: [{ value: "qwen3", name: "qwen3", effort_levels: [] }] },
+  ];
+  async function openWith(controls: Record<string, unknown>, features = ["controls", "workflow", "newchatmodel"]) {
+    const { controller } = makeController();
+    const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls }, features);
+    await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, { connection: connectedWith(features) }, controller);
+    await projectsHere();
+    return session;
+  }
+  const start = async (lastOf: (op: "new_chat") => unknown) => {
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toBeTruthy());
+    return lastOf("new_chat") as Record<string, unknown>;
+  };
+
+  it("offers Claude's models, then the effort the one picked takes, then the presets; and sends the model and effort", async () => {
+    const { lastOf } = await openWith({ allow_auto: false, presets, providers: [], models });
+    await openOptions();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Opus 5.5" }));
+    expect(screen.getByText("Presets: a model for each role")).toBeTruthy();
+    expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Its own", "Low", "High", "Max", "Balanced"]));
+    await fireEvent.press(screen.getByRole("radio", { name: "High" }));
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Opus 5.5, High" })).toBeTruthy();
+    const sent = await start(lastOf);
+    expect(sent).toMatchObject({ model: "opus", effort: "high", preset: null });
+    expect("provider" in sent).toBe(false);
+  });
+
+  it("has no effort for a model that takes none, and a preset lets go of the model (and the other way round)", async () => {
+    const { lastOf } = await openWith({ allow_auto: false, presets, providers: [], models });
+    await openOptions();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Haiku 4.5" }));
+    expect(screen.queryByText("Effort")).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
+    expect(screen.getByRole("radio", { name: "Haiku 4.5" }).props.accessibilityState).toMatchObject({ selected: false });
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Max" })).toBeTruthy();
+    const sent = await start(lastOf);
+    expect(sent).toMatchObject({ preset: "max" });
+    expect("model" in sent || "effort" in sent).toBe(false);
+  });
+
+  it("asks where it runs before offering models when there is more than Claude, then offers that provider's own", async () => {
+    const { lastOf } = await openWith({ allow_auto: false, presets, providers: [claude, ollama], models });
+    await openOptions();
+    await waitFor(() => expect(screen.getByText("Pick where it runs to pick its model.")).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Opus 5.5" })).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: "Ollama" }));
+    expect(screen.queryByRole("radio", { name: "Opus 5.5" })).toBeNull();
+    expect(screen.queryByText("Presets: a model for each role")).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: "qwen3" }));
+    expect(await start(lastOf)).toMatchObject({ provider: "gateway:ollama", model: "qwen3", preset: null });
+  });
+
+  it("lets go of a model when the provider changes", async () => {
+    const { lastOf } = await openWith({ allow_auto: false, presets, providers: [claude, ollama], models });
+    await openOptions();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Ollama" }));
+    await fireEvent.press(screen.getByRole("radio", { name: "qwen3" }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Claude" }));
+    const sent = await start(lastOf);
+    expect(sent).toMatchObject({ provider: "claude" });
+    expect("model" in sent).toBe(false);
+  });
+
+  it("offers no model to pick from a Mac that can't take one, even if it lists them", async () => {
+    const { lastOf } = await openWith({ allow_auto: false, presets, providers: [], models }, ["controls", "workflow"]);
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Balanced" })).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Opus 5.5" })).toBeNull();
+    expect("model" in (await start(lastOf))).toBe(false);
   });
 });
 

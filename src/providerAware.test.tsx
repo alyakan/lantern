@@ -52,8 +52,15 @@ const box = (provider: typeof PLAIN | null) => (
   />
 );
 
-/** The chip for who does the work: "Models: …" with the presets, "Model: …" without. */
+/** The chip for what the chat runs on: its model, and the preset when one is on. */
 const modelChip = () => document.querySelector<HTMLElement>(".model-picker:not(.provider-picker) .model-button")!;
+/** Whether the Model chip's menu offers the presets (Claude's; a provider with no advisor has none). */
+const presetsOffered = () => {
+  fireEvent.click(modelChip());
+  const on = !!screen.queryByText("Presets: a model for each role");
+  fireEvent.keyDown(document, { key: "Escape" });
+  return on;
+};
 
 describe("the Permissions choices", () => {
   const pickable = () => screen.getAllByRole("menuitemradio").filter((r) => !(r as HTMLButtonElement).disabled).map((r) => r.querySelector(".menu-row-title")?.textContent);
@@ -82,7 +89,8 @@ describe("the Permissions choices", () => {
 describe("the chat box, per provider", () => {
   it("offers a Claude chat effort, the presets, the slash menu and its context actions", () => {
     render(box(CLAUDE_INFO));
-    expect(modelChip().title).toMatch(/^Models: .* · Effort /);
+    expect(modelChip().title).toMatch(/^Model: .* · Effort /);
+    expect(presetsOffered()).toBe(true);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/" } });
     expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
     expect(screen.getByText("needs you to log in", { exact: false })).toBeInTheDocument();
@@ -90,7 +98,8 @@ describe("the chat box, per provider", () => {
 
   it("treats a chat whose provider isn't known as Claude's", () => {
     render(box(null));
-    expect(modelChip().title).toMatch(/^Models: /);
+    expect(modelChip().title).toMatch(/^Model: /);
+    expect(presetsOffered()).toBe(true);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/" } });
     expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
   });
@@ -99,6 +108,7 @@ describe("the chat box, per provider", () => {
     render(box(PLAIN));
     // No presets (they need an advisor), but effort, which the provider takes.
     expect(modelChip().title).toMatch(/^Model: .* · Effort /);
+    expect(presetsOffered()).toBe(false);
     // Auto is off in the Permissions menu.
     fireEvent.click(screen.getByRole("button", { name: /^Permissions/ }));
     expect(screen.getByRole("menuitemradio", { name: /Auto/ })).toBeDisabled();

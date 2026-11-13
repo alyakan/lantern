@@ -273,7 +273,7 @@ impl Host for FixtureHost {
         Ok(())
     }
 
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<super::protocol::RemoteImage>) -> BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<super::protocol::RemoteImage>, _model: super::gateway::NewChatModel) -> BoxFut<Result<String, String>> {
         let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
         self.hub.opened(&slot, &folder);
         // A chat that isn't on Claude carries the provider's name, as the window sends it for a real one.

@@ -123,7 +123,8 @@ jest.mock("@expo/ui/swift-ui", () => {
     Host: ({ children, style }: { children?: unknown; style?: unknown }) => React.createElement(View, { style }, children),
     HStack: box,
     VStack: box,
-    Section: box,
+    // A section shows its title, as iOS's menus do over a group.
+    Section: ({ title, children }: { title?: string; children?: unknown }) => React.createElement(View, null, title ? React.createElement(Text, null, title) : null, children),
     Spacer: () => null,
     Image: () => null,
     Text: ({ children }: { children?: unknown }) => React.createElement(Text, null, children),

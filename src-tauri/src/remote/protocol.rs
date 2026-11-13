@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -114,6 +114,8 @@ pub const INSIGHTS: &str = "insights";
 
 /// A phone may send pictures with the first message of a chat it starts (Request::NewChat's `images`).
 pub const NEW_CHAT_IMAGES: &str = "newchatimages";
+/// A phone may choose the model and effort of a chat it starts (Request::NewChat's `model` and `effort`, from Controls' `models`).
+pub const NEW_CHAT_MODEL: &str = "newchatmodel";
 
 /// A phone that shows Your work (the Work tab): it is pushed ServerMessage::Work, may ask for it (Request::Work), run one of its steps
 /// (Request::WorkStep) and ask the Mac to look again (Request::WorkRefresh).
@@ -551,6 +553,25 @@ pub struct RemoteProvider {
     pub presets: bool,
 }
 
+/// A model a phone may start a chat on, as the window lists it: what to send back, its name, and the effort levels it takes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteModel {
+    /// What a phone sends back to choose it. The Mac only takes one it listed.
+    pub value: String,
+    pub name: String,
+    /// Empty: it has no effort setting.
+    pub effort_levels: Vec<String>,
+}
+
+/// One provider's models: `provider` is its id as Controls' `providers` name it, or "claude" for Claude Code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteModels {
+    pub provider: String,
+    pub models: Vec<RemoteModel>,
+}
+
 /// What a phone may choose for a chat (the answer to Request::Controls).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -563,6 +584,11 @@ pub struct Controls {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub providers: Option<Vec<RemoteProvider>>,
+    /// Each provider's models, for a chat a phone starts (only from a Mac whose Welcome lists "newchatmodel"). A Mac that doesn't say
+    /// leaves it out: the phone then offers no model.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub models: Option<Vec<RemoteModels>>,
 }
 
 /// A pairing code made for a phone to show another device (the answer to Request::PairOffer). Secret until it is used or has
@@ -1081,6 +1107,15 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional)]
         images: Option<Vec<RemoteImage>>,
+        /// One of Controls' `models` for where it runs, else the project's own; never with a `preset`, which is a model of its own
+        /// for each role. Only sent to a Mac whose Welcome lists "newchatmodel" (left out, not null, when nothing was chosen).
+        #[serde(default)]
+        #[ts(optional)]
+        model: Option<String>,
+        /// One of the effort levels its model (or, with none chosen, its provider) takes; never with a `preset`. As `model` is sent.
+        #[serde(default)]
+        #[ts(optional)]
+        effort: Option<String>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
@@ -1421,7 +1456,7 @@ mod tests {
     fn what_an_older_phone_or_mac_says_still_reads() {
         // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
         let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
-        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None });
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None });
         // An older Mac's chat list and Welcome have neither field.
         let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
         assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow, chat.provider), (None, None, None, None, None));

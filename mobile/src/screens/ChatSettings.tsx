@@ -42,6 +42,11 @@ type Option = Choice;
 /** What is being switched, and to what: until the chat says it changed. */
 export type Switching = { kind: "mode" | "preset" | "workflow"; to: string } | null;
 
+/** The presets' id for Standard: no preset, just the model and effort. */
+const STANDARD = "default";
+/** The title over the presets in the Model menu, as on the Mac. */
+const PRESETS_TITLE = "Presets: a model for each role";
+
 /** Effort's levels as words ("xhigh" is "Extra high"). */
 const effortLabel = (e: string) => ({ xhigh: "Extra high", max: "Max", medium: "Medium", low: "Low", high: "High", minimal: "Minimal" })[e] ?? e.charAt(0).toUpperCase() + e.slice(1);
 
@@ -106,6 +111,13 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
   const hasUsage = !!context || !!plan || !!providerUsage || !!chat.provider;
   const models = configuration?.capabilities.model_switchable ? [{ value: "", label: "Provider default", off }, ...configuration.models.map((m) => ({ value: m, label: m, off }))] : [];
   const efforts = configuration?.capabilities.supports_effort ? configuration.effort_levels.map((e) => ({ value: e, label: effortLabel(e), off })) : [];
+  // The presets are one more way to pick the model (a model for each role), so they sit in the Model menu after the models. A
+  // preset that is on is named after the model it runs. Only a Mac that can't list the models still gets a row of its own for them.
+  const presetSelected = now("preset", chat.preset ?? "");
+  const presetSwitching = switching?.kind === "preset";
+  const presetOn = !!presetSelected && presetSelected !== STANDARD;
+  const presetNow = presets.find((p) => p.value === presetSelected);
+  const modelValue = presetSwitching ? "Switching…" : [configuration?.model ?? "Provider default", presetOn ? presetNow?.label : null].filter(Boolean).join(" · ");
   return (
     <Sheet onClose={() => { onClose(); next.current?.(); }}>
       {(close, scroll) => (
@@ -143,9 +155,9 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
                   {configuring && <PendingRow look={LOOKS.provider} title="Provider" />}
                   {configuring && <PendingRow look={LOOKS.model} title="Model" />}
                   {configuration && onConfigure && !!providers?.length && <MenuRow look={LOOKS.provider} title="Provider" value={providerName ?? ""} choices={providers.map((p) => ({ value: p.id, label: p.name, off }))} selected={configuration.provider} onPick={(provider) => onConfigure({ provider })} disabled={!!off} />}
-                  {configuration && onConfigure && models.length > 0 && <MenuRow look={LOOKS.model} title="Model" value={configuration.model ?? "Provider default"} choices={models} selected={configuration.model ?? ""} onPick={(m) => onConfigure({ model: m || null })} shown={6} moreLabel="Older models" disabled={!!off} />}
+                  {configuration && onConfigure && models.length > 0 && <MenuRow look={LOOKS.model} title="Model" value={modelValue} detail={presetOn ? presetNow?.hint : null} choices={models} selected={configuration.model ?? ""} onPick={(m) => onConfigure({ model: m || null })} shown={6} moreLabel="Older models" disabled={!!off || presetSwitching} section={presets.length > 0 ? { title: PRESETS_TITLE, choices: presets, selected: presetSelected, onPick: onPreset } : undefined} />}
                   {configuration && onConfigure && efforts.length > 0 && <SliderRow look={LOOKS.effort} title="Effort" choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} disabled={!!off} />}
-                  {presets.length > 0 && <MenuRow look={LOOKS.preset} title="Preset" value={switching?.kind === "preset" ? "Switching…" : (presetLabel ?? "Standard")} detail={presets.find((p) => p.value === now("preset", chat.preset ?? ""))?.hint} choices={presets} selected={now("preset", chat.preset ?? "")} onPick={onPreset} disabled={!!off || switching?.kind === "preset"} />}
+                  {presets.length > 0 && !configuring && models.length === 0 && <MenuRow look={LOOKS.preset} title="Preset" value={presetSwitching ? "Switching…" : (presetLabel ?? "Standard")} detail={presetNow?.hint} choices={presets} selected={presetSelected} onPick={onPreset} disabled={!!off || presetSwitching} />}
                 </SettingsSection>
                 {hasUsage && (
                   <>

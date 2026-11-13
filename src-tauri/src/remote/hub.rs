@@ -3,7 +3,7 @@
 //! client was sent; anything older than it keeps is read from the chat's transcript.
 
 use super::bus::BusEvent;
-use super::protocol::{RemotePreset, RemoteProvider};
+use super::protocol::{RemoteModel, RemoteModels, RemotePreset, RemoteProvider};
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -346,12 +346,17 @@ struct PlanSeen {
     week: Option<(f64, Option<u64>)>,
 }
 
+/// The effort levels a model may take (Claude Code's and Codex's words): anything else the window says is left out.
+pub const EFFORT_WORDS: &[&str] = &["minimal", "low", "medium", "high", "xhigh", "max"];
+
 pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
     /// The presets the window offers (Settings › Models), as it last said.
     presets: Mutex<Vec<RemotePreset>>,
     /// Where the window lets a phone start a chat (Claude Code, and an endpoint or two), as it last said; empty when there is only Claude Code.
     providers: Mutex<Vec<RemoteProvider>>,
+    /// Each provider's models, as the window last said (a phone's New chat offers them; the gateway takes only one listed here).
+    models: Mutex<Vec<RemoteModels>>,
     /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
     plan: Mutex<PlanSeen>,
     /// The Desk as the window last said it (see desk.rs).
@@ -390,7 +395,7 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
@@ -538,6 +543,38 @@ impl SessionHub {
         self.providers.lock().unwrap().clone()
     }
 
+    /// Each provider's models as the window says them: a few dozen providers, a few dozen models each, names cut short, effort
+    /// levels only of the few words there are, and no provider or model twice. A model with an empty or over-long value is left
+    /// out (it could never be a model's name, and the gateway takes only what is kept here).
+    pub fn set_models(&self, models: Vec<RemoteModels>) {
+        let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
+        let mut kept: Vec<RemoteModels> = Vec::new();
+        for m in models.into_iter().take(40) {
+            if m.provider.is_empty() || m.provider.chars().count() > 80 || kept.iter().any(|k| k.provider == m.provider) {
+                continue;
+            }
+            let mut list: Vec<RemoteModel> = Vec::new();
+            for model in m.models.into_iter().take(60) {
+                if model.value.is_empty() || model.value.chars().count() > 120 || model.value.chars().any(char::is_control) || list.iter().any(|l| l.value == model.value) {
+                    continue;
+                }
+                let mut levels: Vec<String> = Vec::new();
+                for l in model.effort_levels.into_iter().take(8) {
+                    if EFFORT_WORDS.contains(&l.as_str()) && !levels.contains(&l) {
+                        levels.push(l);
+                    }
+                }
+                list.push(RemoteModel { value: model.value, name: cut(model.name, 60), effort_levels: levels });
+            }
+            kept.push(RemoteModels { provider: m.provider, models: list });
+        }
+        *self.models.lock().unwrap() = kept;
+    }
+
+    pub fn models(&self) -> Vec<RemoteModels> {
+        self.models.lock().unwrap().clone()
+    }
+
     /// What a chat runs on when that isn't Claude Code, as the window names it ("Codex", an endpoint's name); None clears it.
     pub fn set_provider(&self, slot: &str, name: Option<&str>) {
         // Only a chat that is listed: this must never make one appear.
@@ -648,7 +685,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -745,7 +782,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -758,14 +795,14 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
 
     #[test]
     fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
         assert_eq!(hub.steps("a"), None, "no plan yet");
@@ -792,7 +829,7 @@ mod tests {
 
     #[test]
     fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
         feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
         feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
@@ -822,7 +859,7 @@ mod tests {
 
     #[test]
     fn what_runs_in_the_background_is_told_until_it_ends_or_the_chat_sleeps() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: 10, now: || 1 };
         let task = |d: &str| crate::ui_event::BackgroundTask { id: d.into(), task_type: "local_bash".into(), description: d.into() };
         use super::super::protocol::RemoteEvent as R;
         let background = |hub: &SessionHub| hub.extras("a").into_iter().find(|e| matches!(e, R::Background { .. }));
@@ -1059,7 +1096,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), providers: Mutex::default(), models: Mutex::default(), plan: Mutex::default(), desk: Default::default(), single: Default::default(), work: Default::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

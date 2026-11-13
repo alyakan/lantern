@@ -54,19 +54,17 @@ interface Props {
   agent?: string;
 }
 
-// The one chip under the box for who does the work: the preset and the main model ("Balanced · Sonnet 5.5").
-// Its menu lists the presets; Customize… opens the model and effort choices. A change applies from the next message
-// (effort and presets restart the chat's claude on the same session). On a preset, picking a model or effort makes the
-// chat Custom, which the chip and the note in that view say.
+// The one chip under the box for what a chat runs on: its model, and the preset when one is on ("Sonnet 5.5 · Balanced").
+// One menu: the models first, then thinking effort, then the presets (a model for each role: the main one, its advisor and
+// subagents). A change applies from the next message (effort and presets restart the chat's claude on the same session). On a
+// preset, picking a model or effort makes the chat Custom, which the chip and the note at the top of the menu say.
 export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, ids = {}, options = [], effort, presets, preset, onPreset, onEdit, disabled, agent = "Claude" }: Props) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"presets" | "customize">("presets");
   const [showOlder, setShowOlder] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const { ref: menu, style: menuStyle } = useMenuInside(open, [view, showOlder]);
+  const { ref: menu, style: menuStyle } = useMenuInside(open, [showOlder]);
   const keys = useMenuKeys(open, root);
   const withPresets = !!presets && !!onPreset;
-  const shownView = withPresets ? view : "customize";
 
   useEffect(() => {
     if (!open) return;
@@ -79,16 +77,6 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  // Moving to the other view puts focus on its checked (or first) item, like opening the menu does.
-  useEffect(() => {
-    if (!open) return;
-    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]') ?? [])];
-    (items.find((el) => el.getAttribute("aria-checked") === "true") ?? items[0])?.focus();
-  }, [view]);
-  const toggle = () => {
-    setView("presets");
-    setOpen(!open);
-  };
 
   const current = presets?.find((h) => h.id === preset) ?? presets?.[0];
   const resolvedDefault = (chosen === null && running) || options.find((o) => o.value === "default")?.resolved_model || defaultModel;
@@ -128,67 +116,24 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
   const effortRows: (string | null)[] = effort ? [null, ...EFFORT_LEVELS.filter((l) => effort.levels.includes(l))] : [];
 
   const custom = current?.id === CUSTOM_HARNESS;
-  const label = current ? `${current.name} · ${chipModel}` : chipModel;
-  const title = current
-    ? `Models: ${custom && current.from ? `Custom (${current.from}, changed)` : current.name} · ${summary(current)}${effort ? ` · Effort ${effortLabel(effort.chosen)}` : ""}`
-    : `Model: ${model}${effort ? ` · Effort ${effortLabel(effort.chosen)}` : ""}`;
-  // On a preset, a pick here turns the chat Custom: say so, and what it was made from.
+  // A preset is on (not Standard, which is just the model and effort): the chip names it after the model it runs.
   const onPresetOn = !!current && current.id !== DEFAULT_HARNESS;
+  const presetName = current && (custom && current.from ? `Custom (${current.from}, changed)` : current.name);
+  const label = onPresetOn ? `${chipModel} · ${current.name}` : chipModel;
+  const title = `Model: ${model}${effort ? ` · Effort ${effortLabel(effort.chosen)}` : ""}${onPresetOn ? ` · Preset: ${presetName} · ${summary(current)}` : ""}`;
 
   return (
     <div className="model-picker" ref={root} onClick={(e) => e.stopPropagation()}>
-      <button className={`composer-item model-button${onPresetOn ? " preset-on" : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={title} onClick={toggle}>
+      <button className={`composer-item model-button${onPresetOn ? " preset-on" : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={title} onClick={() => setOpen(!open)}>
         <SparkIcon />
         {label}
         <span className="chev down" aria-hidden />
       </button>
-      {open && shownView === "presets" && withPresets && (
-        <div className="menu model-menu preset-menu" ref={menu} style={menuStyle} role="menu" aria-label="Models" onKeyDown={keys.onKeyDown}>
-          <div className="menu-heading">Models: who does what</div>
-          {presets.map((h) => (
-            <button
-              key={h.id}
-              role="menuitemradio"
-              aria-checked={h.id === preset}
-              className={`menu-row${h.id === preset ? " current" : ""}`}
-              onClick={() => {
-                setOpen(false);
-                if (h.id !== preset) onPreset(h.id);
-              }}
-            >
-              <span className="menu-row-title">{h.name}</span>
-              <span className="menu-row-meta">{h.id === CUSTOM_HARNESS && h.from ? `${h.from}, changed · ${summary(h)}` : summary(h)}</span>
-            </button>
-          ))}
-          <button role="menuitem" className="menu-row preset-edit" onClick={() => setView("customize")}>
-            <span className="menu-row-title">Customize…</span>
-            <span className="menu-row-meta">Pick the model and thinking effort</span>
-          </button>
-          {onEdit && (
-            <button
-              role="menuitem"
-              className="menu-row"
-              onClick={() => {
-                setOpen(false);
-                onEdit();
-              }}
-            >
-              <span className="menu-row-title">Edit presets…</span>
-            </button>
-          )}
-        </div>
-      )}
-      {open && shownView === "customize" && (
-        <div className="menu model-menu customize-menu" ref={menu} style={menuStyle} role="menu" aria-label="Customize models" onKeyDown={keys.onKeyDown}>
-          {withPresets && (
-            <button role="menuitem" className="menu-heading menu-toggle" onClick={() => setView("presets")}>
-              <span className="chev back" aria-hidden />
-              Presets
-            </button>
-          )}
+      {open && (
+        <div className="menu model-menu customize-menu" ref={menu} style={menuStyle} role="menu" aria-label="Model" onKeyDown={keys.onKeyDown}>
           {onPresetOn && current && (
             <div className="menu-note">
-              {custom ? `Custom${current.from ? ` (${current.from}, changed)` : ""}: ` : `${current.name} becomes Custom: `}changes you make here apply to this chat only.
+              {custom ? `${presetName}: ` : `${current.name} is on: `}a model or effort you pick here {custom ? "applies" : "makes this chat Custom, and applies"} to this chat only.
             </div>
           )}
           <div className="menu-heading">Model</div>
@@ -221,6 +166,38 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
                   <span className="menu-row-meta">{level ? EFFORT_HINT[level] : "Claude Code's setting"}</span>
                 </button>
               ))}
+            </>
+          )}
+          {withPresets && (
+            <>
+              <div className="menu-heading preset-heading">Presets: a model for each role</div>
+              {presets.map((h) => (
+                <button
+                  key={h.id}
+                  role="menuitemradio"
+                  aria-checked={h.id === current?.id}
+                  className={`menu-row preset-choice${h.id === current?.id ? " current" : ""}`}
+                  onClick={() => {
+                    setOpen(false);
+                    if (h.id !== current?.id) onPreset(h.id);
+                  }}
+                >
+                  <span className="menu-row-title">{h.name}</span>
+                  <span className="menu-row-meta">{h.id === DEFAULT_HARNESS ? "No preset: the model and effort above" : h.id === CUSTOM_HARNESS && h.from ? `${h.from}, changed · ${summary(h)}` : summary(h)}</span>
+                </button>
+              ))}
+              {onEdit && (
+                <button
+                  role="menuitem"
+                  className="menu-row preset-edit"
+                  onClick={() => {
+                    setOpen(false);
+                    onEdit();
+                  }}
+                >
+                  <span className="menu-row-title">Edit presets…</span>
+                </button>
+              )}
             </>
           )}
         </div>

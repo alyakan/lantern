@@ -7,7 +7,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
 import { changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -487,6 +487,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
 
   // The chats routines started, by slot: each runs on the model its routine names (while it is on the standard preset), and is called "Routine: name".
   const routineSlots = useRef<Record<string, { name: string; model: string | null }>>({});
+  // A chat a phone started on a model or effort of its own (New chat's Model): it keeps them, on Standard, whatever the provider's
+  // own are, and a change to them in that chat is its alone. Every other chat on Standard follows its provider's.
+  const ownPrefs = useRef<Record<string, { model: string | null; effort: string | null }>>({});
+  // (A ref, so a chat started now reads them at once; a change to them draws the window again.)
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
   // The agent CLIs a chat can run on: Claude Code, and each other that is installed. Until the backend answers (or when it
   // can't) there is only Claude Code, which is all a window with one provider ever shows.
   const [providerList, setProviderList] = useState<ProviderListing[] | null>(null);
@@ -516,10 +521,34 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return l ? { id: l.id, capabilities: l.capabilities } : null;
   };
   const configuredRef = useRef<(r: Parameters<Parameters<typeof api.onConversationConfigured>[0]>[0]) => void>(() => {});
+  // A chat's provider, model or effort was changed in place (a phone's chat settings, or the provider chip on a chat with messages).
   configuredRef.current = (r) => {
+    const before = providerIdOf(chats.slots[r.slot]?.provider);
+    const h = presetOf(r.slot);
     to(r.slot)({ type: "provider_set", provider: r.provider });
     to(r.slot)({ type: "mode_changed", mode: r.mode, autoApprove: r.autoApprove });
     to(r.slot)({ type: "session_ready" });
+    if (r.provider.id !== before) {
+      // On another provider the backend dropped the preset's advisor and subagents: the chat is on Standard, which a preset
+      // left behind would put back (wrongly) at its next restart. What it runs there is this chat's: the provider's own model and
+      // effort (a phone's switch names neither) are left as they are.
+      setPresetBySlot((all) => ({ ...all, [r.slot]: DEFAULT_HARNESS }));
+      ownPrefs.current[r.slot] = { model: r.model, effort: r.effort };
+      return redraw();
+    } else if (h.id === DEFAULT_HARNESS && ownPrefs.current[r.slot]) {
+      // A chat with its own model and effort keeps them its own.
+      ownPrefs.current[r.slot] = { model: r.model, effort: r.effort };
+      return redraw();
+    } else if (h.id !== DEFAULT_HARNESS) {
+      // On a preset, the change is this chat's, as at the Mac: it becomes Custom (the backend has already applied it, so
+      // nothing restarts), and neither the app's own model nor the project's preset changes.
+      if (r.model !== h.model || r.effort !== h.effort) {
+        const custom = customOf(h, { model: r.model, effort: r.effort });
+        setSavedPresets([...savedPresets.filter((c) => c.id !== CUSTOM_HARNESS), custom]);
+        setPresetBySlot((all) => ({ ...all, [r.slot]: custom.id }));
+      }
+      return;
+    }
     if (r.provider.id === CLAUDE) { setModel(r.model); setEffort(r.effort); }
     else setProviderPrefs({ ...providerPrefs, [r.provider.id]: { model: r.model, effort: r.effort } });
   };
@@ -544,7 +573,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    */
   const settingsFor = (slot: string, h: Preset = presetOf(slot), provider: ProviderInfo | null = chats.slots[slot]?.provider ?? null) => {
     const id = providerIdOf(provider);
-    const prefs = id === CLAUDE && h.id === DEFAULT_HARNESS && slot in routineSlots.current ? { model: routineSlots.current[slot].model, effort } : prefsOf(id);
+    const own = h.id === DEFAULT_HARNESS ? ownPrefs.current[slot] : undefined;
+    const prefs = own ?? (id === CLAUDE && h.id === DEFAULT_HARNESS && slot in routineSlots.current ? { model: routineSlots.current[slot].model, effort } : prefsOf(id));
     const s = settingsOf(h, prefs);
     return capabilitiesOf(provider).supports_effort ? s : { ...s, effort: null };
   };
@@ -570,6 +600,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // safe for the chat left behind, even though `active` here still names it.
   const forget = (slot: string, agent = false) => {
     dispatchChats({ type: agent ? "close_agent" : "remove", slot });
+    delete ownPrefs.current[slot];
     delete drafts.current[slot];
     delete draftImages.current[slot];
     delete relaunch.current[slot];
@@ -720,7 +751,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * `providerId`: the agent CLI it runs on, by default the one the project's new chats start on (a team's Lead is always Claude
    * Code's: it is the one that has Lantern's tools to start agents with).
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps"; model?: string | null; effort?: string | null } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
     if (!agentReady) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
@@ -732,8 +763,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // A provider with no Auto runs on Ask.
     const { mode, autoApprove } = onProvider(remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team), can);
     const orchestrator = team;
-    const h = routine ? BUILT_IN[0] : presetFor(can, remote && remote.preset ? remote.preset : presetByFolder[folder]);
+    // A phone that chose the model or effort chose them instead of a preset (never both): the chat is on Standard with them, whatever
+    // the project's preset is (which stays the project's), and keeps them.
+    const phoneModel = !!remote && (remote.model != null || remote.effort != null);
+    const h = routine || phoneModel ? BUILT_IN[0] : presetFor(can, remote && remote.preset ? remote.preset : presetByFolder[folder]);
     setPresetBySlot((all) => ({ ...all, [slot]: h.id }));
+    if (remote && phoneModel) {
+      const base = prefsOf(providerId);
+      ownPrefs.current[slot] = { model: remote.model ?? base.model, effort: can.supports_effort ? (remote.effort ?? base.effort) : null };
+    }
     to(slot)({ type: "folder_opened", folder });
     // Known before the start answers, so what the provider lacks is never shown, even for a moment.
     if (info) to(slot)({ type: "provider_set", provider: info });
@@ -1023,9 +1061,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // request says) and which presets there are.
   // Where a phone may start a chat: Claude Code and each endpoint (not Codex, whose questions a phone can't answer yet).
   const phoneProviders = windowProviders(providers.list, providerName);
+  // Their models: Claude Code's as an open Claude chat last listed them (they are the same in every one).
+  const claudeOptions = Object.values(chats.slots).find((s) => providerIdOf(s.provider) === CLAUDE && s.models.length > 0)?.models ?? [];
+  const phoneModels = windowModels(phoneProviders, claudeOptions, providers.list);
   const remoteContext = async (): Promise<RemoteContext> => {
     const view = await api.remoteSettings().catch(() => null);
-    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders };
+    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders, models: phoneModels };
   };
   // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask or Auto, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
@@ -1039,14 +1080,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text), ctx);
         if (why) return fail(why);
         if (!agentReady) return fail("No agent provider is set up on your Mac yet.");
-        const slot = `s${++slotSeq.current}`;
-        dispatchChats({ type: "add", slot });
         // Where the phone chose, else the project's own; but a project on a provider whose questions a phone can't answer starts on
         // Claude here (the chat would stop at its first one). Never written down as the project's choice: it is this chat's alone.
         const own = providerFor(r.folder);
         const providerId = r.provider ?? (capabilitiesOf(infoOf(own)).phone_approvals ? own : CLAUDE);
+        // The model and effort, against where it really runs (the backend could only check the provider the phone named).
+        const badModel = checkRemoteModel(r.model ?? null, r.effort ?? null, r.preset ?? null, ctx.models?.find((m) => m.provider === providerId));
+        if (badModel) return fail(badModel);
+        const slot = `s${++slotSeq.current}`;
+        dispatchChats({ type: "add", slot });
         // (With pictures, the backend sends the first message itself once the chat is ready: they never come through here.)
-        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" }, providerId);
+        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat", model: r.model ?? null, effort: r.effort ?? null }, providerId);
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -1106,9 +1150,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, []);
   // The presets a phone may choose between, as Settings › Models has them, and where it may start a chat: told again when an
   // endpoint is added or removed, so a phone isn't left offering one that is gone (or missing one that was just set up).
-  const controlsKey = JSON.stringify([windowPresets(presets), phoneProviders]);
+  const controlsKey = JSON.stringify([windowPresets(presets), phoneProviders, phoneModels]);
   useEffect(() => {
-    void api.remoteWindowControls(windowPresets(presets), phoneProviders).catch(() => {});
+    void api.remoteWindowControls(windowPresets(presets), phoneProviders, phoneModels).catch(() => {});
   }, [controlsKey]);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
@@ -1796,7 +1840,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const changeEffort = (next: string | null) => {
     if (presetOn) return customize({ effort: next });
     unlessBackground(active, () => {
-      if (activeProvider === CLAUDE) setEffort(next);
+      const own = ownPrefs.current[active];
+      if (own) {
+        ownPrefs.current[active] = { ...own, effort: next };
+        redraw();
+      } else if (activeProvider === CLAUDE) setEffort(next);
       else setProviderPrefs({ ...providerPrefs, [activeProvider]: { ...prefsOf(activeProvider), effort: next } });
       if (state.folder) restart(active, state.mode, next);
     });
@@ -1806,10 +1854,17 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // is fixed while it runs, from its next start), and to new chats and restarts. Chats on a preset keep the preset's model.
   const chooseModel = (next: string | null) => {
     if (presetOn) return customize({ model: next });
+    const own = ownPrefs.current[active];
+    if (own) {
+      // A chat with its own model (a phone chose it): only this chat changes.
+      ownPrefs.current[active] = { ...own, model: next };
+      api.setModel(active, next).catch((e) => dispatch({ type: "failed", text: errText(e) }));
+      return redraw();
+    }
     if (activeProvider === CLAUDE) setModel(next);
     else setProviderPrefs({ ...providerPrefs, [activeProvider]: { ...prefsOf(activeProvider), model: next } });
     for (const slot of Object.keys(chats.slots)) {
-      if (providerIdOf(chats.slots[slot].provider) === activeProvider && presetOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+      if (providerIdOf(chats.slots[slot].provider) === activeProvider && presetOf(slot).id === DEFAULT_HARNESS && !ownPrefs.current[slot]) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
     }
   };
 

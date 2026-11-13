@@ -179,17 +179,29 @@ export function SliderRow({ look, title, choices, selected, onPick, disabled = f
   );
 }
 
+/** A titled group of choices at the end of a MenuRow's menu, with its own tick and what picking one does. */
+export interface MenuSectionOf {
+  title: string;
+  choices: Choice[];
+  selected: string;
+  onPick: (value: string) => void;
+  /** Its choices can't be picked now (one is being switched to). */
+  disabled?: boolean;
+}
+
 /**
  * A setting picked from a list: its row, with the value at the right, and the list as iOS's own menu over the row (a press
  * anywhere on the row opens it, with a tick by the one chosen). Choices past `shown` go in a menu of their own at the end
- * ("Older models"). Android has no such menu: the row opens the list under it.
+ * ("Older models"). `section`: more choices of another kind after them, under a title of their own and with their own tick (the
+ * presets after the models). Android has no such menu: the row opens the list under it.
  */
-export function MenuRow({ look, title, value, detail, choices, selected, onPick, shown, moreLabel = "More", disabled = false }: { look: Look; title: string; value: string; detail?: string | null; choices: Choice[]; selected: string; onPick: (value: string) => void; shown?: number; moreLabel?: string; disabled?: boolean }) {
+export function MenuRow({ look, title, value, detail, choices, selected, onPick, shown, moreLabel = "More", disabled = false, section }: { look: Look; title: string; value: string; detail?: string | null; choices: Choice[]; selected: string; onPick: (value: string) => void; shown?: number; moreLabel?: string; disabled?: boolean; section?: MenuSectionOf }) {
   const colors = useColors();
   const [open, setOpen] = useState(false);
   const first = shown === undefined ? choices : choices.filter((c, i) => i < shown || c.value === selected);
   const rest = shown === undefined ? [] : choices.filter((c, i) => i >= shown && c.value !== selected);
   const item = (c: Choice) => <MenuButton key={c.value} label={c.label} systemImage={c.value === selected ? "checkmark" : undefined} onPress={() => c.value !== selected && onPick(c.value)} modifiers={c.off || disabled ? [off(true)] : undefined} />;
+  const sectionItem = (s: MenuSectionOf) => (c: Choice) => <MenuButton key={`section-${c.value}`} label={c.label} systemImage={c.value === s.selected ? "checkmark" : undefined} onPress={() => c.value !== s.selected && s.onPick(c.value)} modifiers={c.off || disabled || s.disabled ? [off(true)] : undefined} />;
   if (Platform.OS === "ios") {
     return (
       <View>
@@ -209,6 +221,7 @@ export function MenuRow({ look, title, value, detail, choices, selected, onPick,
           >
             {first.map(item)}
             {rest.length > 0 && <MenuSection>{[<Menu key="more" label={moreLabel}>{rest.map(item)}</Menu>]}</MenuSection>}
+            {section && section.choices.length > 0 && <MenuSection title={section.title}>{section.choices.map(sectionItem(section))}</MenuSection>}
           </Menu>
         </Host>
       </View>
@@ -242,6 +255,24 @@ export function MenuRow({ look, title, value, detail, choices, selected, onPick,
             {c.value === selected && <Txt variant="body" tone="cobalt">✓</Txt>}
           </PressScale>
         ))}
+      {open && section && section.choices.length > 0 && (
+        <>
+          <Txt variant="tiny" tone="ink3" accessibilityRole="header" style={{ paddingTop: 8, paddingLeft: PAD + TILE + 11, paddingRight: PAD, fontWeight: "600" }}>
+            {section.title}
+          </Txt>
+          {section.choices.map((c) => {
+            const offNow = !!c.off || !!section.disabled;
+            return (
+              <PressScale key={`section-${c.value}`} accessibilityRole="radio" accessibilityLabel={c.label} accessibilityState={{ checked: c.value === section.selected, disabled: offNow }} disabled={offNow} opacity={offNow ? 0.45 : 1} onPress={() => { setOpen(false); if (c.value !== section.selected) section.onPick(c.value); }} style={{ paddingVertical: 10, paddingLeft: PAD + TILE + 11, paddingRight: PAD, flexDirection: "row" }}>
+                <Txt variant="body" style={{ flex: 1 }}>
+                  {c.label}
+                </Txt>
+                {c.value === section.selected && <Txt variant="body" tone="cobalt">✓</Txt>}
+              </PressScale>
+            );
+          })}
+        </>
+      )}
       {!!detail && (
         <Txt variant="tiny" tone="ink3" style={{ paddingLeft: PAD + TILE + 11, paddingBottom: 8 }}>
           {detail}

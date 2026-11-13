@@ -176,6 +176,68 @@ describe("a chat a paired phone starts on Auto or on a preset", () => {
   });
 });
 
+describe("a chat a paired phone starts on a model of its own", () => {
+  const last = (calls: Call[]) => sessions(calls)[sessions(calls).length - 1]?.[1]?.settings as { model: string | null; effort: string | null; advisor: string | null };
+  /** The models the window last told the backend a phone may pick, for one provider. */
+  const toldModels = (calls: Call[], provider: string) =>
+    (calls.filter(([c]) => c === "remote_window_controls").map(([, a]) => a?.models as { provider: string; models: { value: string; effort_levels: string[] }[] }[]).slice(-1)[0] ?? []).find((m) => m.provider === provider);
+
+  it("tells the backend Claude's models, with their effort levels", async () => {
+    const calls = await launch();
+    await waitFor(() => expect(toldModels(calls, "claude")?.models.length).toBeGreaterThan(0));
+    const claude = toldModels(calls, "claude")!;
+    expect(claude.models.some((m) => m.value === "default")).toBe(false);
+    expect(claude.models.map((m) => m.value)).toEqual(expect.arrayContaining(["opus", "sonnet"]));
+  });
+
+  it("starts on the model and effort the phone chose, on Standard, and leaves the Mac's own model alone", async () => {
+    localStorage.setItem("settings.model", JSON.stringify("haiku"));
+    const calls = await launch();
+    await waitFor(() => expect(toldModels(calls, "claude")?.models.some((m) => m.value === "opus")).toBe(true));
+    const levels = toldModels(calls, "claude")!.models.find((m) => m.value === "opus")!.effort_levels;
+    const effort = levels[levels.length - 1];
+    const before = sessions(calls).length;
+    await fromPhone(ask({ model: "opus", effort }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(last(calls)).toMatchObject({ model: "opus", effort, advisor: null });
+    expect(answers(calls)[0]).toMatchObject({ error: null });
+    expect(JSON.parse(localStorage.getItem("settings.model") ?? "null")).toBe("haiku");
+    // Changed again in that chat (its settings on the phone): still its own, and still not the Mac's.
+    const slot = String(answers(calls)[0]?.slot);
+    await fromPhoneEvent("conversation-configured", { slot, provider: { id: "claude", capabilities: {} }, mode: "ask", autoApprove: false, model: "sonnet", effort: null });
+    await quiet();
+    expect(JSON.parse(localStorage.getItem("settings.model") ?? "null")).toBe("haiku");
+  });
+
+  it("starts on the phone's model instead of the project's preset, and leaves the project's preset as it was", async () => {
+    localStorage.setItem("settings.harnessByFolder", JSON.stringify({ [FOLDER]: "balanced" }));
+    const calls = await launch();
+    await waitFor(() => expect(toldModels(calls, "claude")?.models.some((m) => m.value === "opus")).toBe(true));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ model: "opus" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(last(calls)).toMatchObject({ model: "opus", advisor: null });
+    expect(JSON.parse(localStorage.getItem("settings.harnessByFolder") ?? "{}")[FOLDER]).toBe("balanced");
+  });
+
+  it("starts nothing on a model the window didn't list, an effort its model hasn't, or a model with a preset", async () => {
+    const calls = await launch();
+    await waitFor(() => expect(toldModels(calls, "claude")?.models.length).toBeGreaterThan(0));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ id: "a", model: "gpt-5" }));
+    await fromPhone(ask({ id: "b", model: "opus", effort: "turbo" }));
+    await fromPhone(ask({ id: "c", model: "opus", preset: "balanced" }));
+    await fromPhone(ask({ id: "d", model: 42 }));
+    await waitFor(() => expect(answers(calls)).toHaveLength(4));
+    expect(sessions(calls).length).toBe(before);
+    const why = (id: string) => answers(calls).find((a) => a?.id === id)?.error;
+    expect(why("a")).toBe("That isn't one of its models.");
+    expect(why("b")).toBe("That model has no such effort.");
+    expect(why("c")).toBe("Pick a model or a preset, not both.");
+    expect(why("d")).toBe("That isn't one of its models.");
+  });
+});
+
 describe("a chat a paired phone starts on an endpoint", () => {
   const started = (calls: Call[]) => sessions(calls)[sessions(calls).length - 1]?.[1] as { claudePath: string; settings: Record<string, unknown> };
   /** An endpoint ("Ollama") and Codex beside Claude: a phone is offered the endpoint, not Codex. */
