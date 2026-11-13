@@ -180,7 +180,7 @@ describe("a chat a paired phone starts on a model of its own", () => {
   const last = (calls: Call[]) => sessions(calls)[sessions(calls).length - 1]?.[1]?.settings as { model: string | null; effort: string | null; advisor: string | null };
   /** The models the window last told the backend a phone may pick, for one provider. */
   const toldModels = (calls: Call[], provider: string) =>
-    (calls.filter(([c]) => c === "remote_window_controls").map(([, a]) => a?.models as { provider: string; models: { value: string; effort_levels: string[] }[] }[]).at(-1) ?? []).find((m) => m.provider === provider);
+    (calls.filter(([c]) => c === "remote_window_controls").map(([, a]) => a?.models as { provider: string; models: { value: string; effort_levels: string[] }[] }[]).slice(-1)[0] ?? []).find((m) => m.provider === provider);
 
   it("tells the backend Claude's models, with their effort levels", async () => {
     const calls = await launch();
@@ -207,6 +207,17 @@ describe("a chat a paired phone starts on a model of its own", () => {
     await fromPhoneEvent("conversation-configured", { slot, provider: { id: "claude", capabilities: {} }, mode: "ask", autoApprove: false, model: "sonnet", effort: null });
     await quiet();
     expect(JSON.parse(localStorage.getItem("settings.model") ?? "null")).toBe("haiku");
+  });
+
+  it("starts on the phone's model instead of the project's preset, and leaves the project's preset as it was", async () => {
+    localStorage.setItem("settings.harnessByFolder", JSON.stringify({ [FOLDER]: "balanced" }));
+    const calls = await launch();
+    await waitFor(() => expect(toldModels(calls, "claude")?.models.some((m) => m.value === "opus")).toBe(true));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ model: "opus" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(last(calls)).toMatchObject({ model: "opus", advisor: null });
+    expect(JSON.parse(localStorage.getItem("settings.harnessByFolder") ?? "{}")[FOLDER]).toBe("balanced");
   });
 
   it("starts nothing on a model the window didn't list, an effort its model hasn't, or a model with a preset", async () => {

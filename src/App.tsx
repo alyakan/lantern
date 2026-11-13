@@ -530,9 +530,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     to(r.slot)({ type: "session_ready" });
     if (r.provider.id !== before) {
       // On another provider the backend dropped the preset's advisor and subagents: the chat is on Standard, which a preset
-      // left behind would put back (wrongly) at its next restart. A model of its own was the old provider's.
+      // left behind would put back (wrongly) at its next restart. What it runs there is this chat's: the provider's own model and
+      // effort (a phone's switch names neither) are left as they are.
       setPresetBySlot((all) => ({ ...all, [r.slot]: DEFAULT_HARNESS }));
-      delete ownPrefs.current[r.slot];
+      ownPrefs.current[r.slot] = { model: r.model, effort: r.effort };
+      return redraw();
     } else if (h.id === DEFAULT_HARNESS && ownPrefs.current[r.slot]) {
       // A chat with its own model and effort keeps them its own.
       ownPrefs.current[r.slot] = { model: r.model, effort: r.effort };
@@ -761,10 +763,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     // A provider with no Auto runs on Ask.
     const { mode, autoApprove } = onProvider(remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team), can);
     const orchestrator = team;
-    const h = routine ? BUILT_IN[0] : presetFor(can, remote && remote.preset ? remote.preset : presetByFolder[folder]);
+    // A phone that chose the model or effort chose them instead of a preset (never both): the chat is on Standard with them, whatever
+    // the project's preset is (which stays the project's), and keeps them.
+    const phoneModel = !!remote && (remote.model != null || remote.effort != null);
+    const h = routine || phoneModel ? BUILT_IN[0] : presetFor(can, remote && remote.preset ? remote.preset : presetByFolder[folder]);
     setPresetBySlot((all) => ({ ...all, [slot]: h.id }));
-    // A phone chose the model or effort (never with a preset): the chat is on Standard with them, and keeps them.
-    if (remote && (remote.model != null || remote.effort != null) && h.id === DEFAULT_HARNESS) {
+    if (remote && phoneModel) {
       const base = prefsOf(providerId);
       ownPrefs.current[slot] = { model: remote.model ?? base.model, effort: can.supports_effort ? (remote.effort ?? base.effort) : null };
     }

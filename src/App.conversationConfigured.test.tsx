@@ -88,8 +88,10 @@ describe("a chat's model changed in place", () => {
     expect(chipTitle()).not.toContain("Custom");
   });
 
-  it("on another provider, leaves the preset behind, so coming back to Claude is Standard", async () => {
+  it("on another provider, leaves the preset behind, so coming back to Claude is Standard, and the Mac's own models alone", async () => {
     localStorage.setItem("settings.harnessByFolder", JSON.stringify({ [FOLDER]: "balanced" }));
+    localStorage.setItem("settings.model", JSON.stringify("haiku"));
+    localStorage.setItem("settings.providerPrefs", JSON.stringify({ codex: { model: "o3", effort: "high" } }));
     const slot = await launch();
     await waitFor(() => expect(chipTitle()).toContain("Balanced"));
     await configured(slot, CODEX, "gpt-5-codex", null);
@@ -99,6 +101,9 @@ describe("a chat's model changed in place", () => {
     await waitFor(() => expect(chipTitle()).toMatch(/^Model: /));
     // Standard is no preset at all: the chip names none.
     expect(chipTitle()).not.toContain("Preset:");
+    // A phone's switch names no model: the Mac's own for each provider stay as they were.
+    expect(saved("settings.model")).toBe("haiku");
+    expect(saved<Record<string, unknown>>("settings.providerPrefs")?.codex).toEqual({ model: "o3", effort: "high" });
     expect(saved<Record<string, string>>("settings.harnessByFolder")?.[FOLDER]).toBe("balanced");
   });
 });
