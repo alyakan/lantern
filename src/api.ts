@@ -6,7 +6,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
-import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, RemoteSingle, WindowChat, WindowPreset, WindowProvider, WindowSingle } from "./lib/remoteChats";
+import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, RemoteSingle, WindowChat, WindowModels, WindowPreset, WindowProvider, WindowSingle } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
@@ -489,7 +489,7 @@ export const api = {
   /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
   onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
   /** Which presets a phone may choose between (see lib/remoteChats.ts WindowPreset), and where it may start a chat (WindowProvider). */
-  remoteWindowControls: (presets: WindowPreset[], providers: WindowProvider[]) => invoke<void>("remote_window_controls", { presets, providers }),
+  remoteWindowControls: (presets: WindowPreset[], providers: WindowProvider[], models: WindowModels[]) => invoke<void>("remote_window_controls", { presets, providers, models }),
   /** A paired phone asked to put a chat on Ask or Auto: the window checks it (Auto only if Settings allows it) and switches it. */
   onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
   /** A paired phone asked to close a chat: the window checks it and closes it as the sidebar does. */

@@ -3,7 +3,7 @@ import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { BUILT_IN } from "./preset";
 import { PROJECT_COLORS } from "./projectColors";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type SwitchTarget } from "./remoteChats";
+import { checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type RemoteContext, type SwitchTarget } from "./remoteChats";
 import { CLAUDE_CAPABILITIES } from "./provider";
 import { PLAIN } from "../testProviders";
 import type { ProjectOpen } from "./sidebar";
@@ -221,5 +221,36 @@ describe("where a phone may start a chat", () => {
     expect(checkRemoteNewChat({ ...ask, permissions: "auto", provider: "gateway:ollama" }, true, true, ctx)).toBe("Ollama has no Auto mode: it asks before it acts.");
     expect(checkRemoteNewChat({ ...ask, preset: "balanced", provider: "gateway:ollama" }, true, true, ctx)).toBe("Ollama runs on its own model: the presets don't apply to it.");
     expect(checkRemoteNewChat({ ...ask, permissions: "auto", preset: "balanced", provider: "claude" }, true, true, ctx)).toBeNull();
+  });
+});
+
+describe("the models a phone may start a chat on", () => {
+  const claude = { id: "claude", name: "Claude", auto: true, presets: true };
+  const ollama = { id: "gateway:ollama", name: "Ollama", auto: false, presets: false };
+  const option = (value: string, levels: string[]) => ({ value, resolved_model: value, display_name: value === "opus" ? "Opus 5.5" : "", description: "", effort_levels: levels });
+
+  it("are Claude's as a chat listed them (not Default), else the short list; an endpoint's as it names them, with no effort", () => {
+    const listed = [{ id: "gateway:ollama", capabilities: CLAUDE_CAPABILITIES, models: ["qwen3"], binary: null }];
+    expect(windowModels([claude, ollama], [option("default", ["low"]), option("opus", ["low", "max"]), option("claude-haiku-9", [])], listed)).toEqual([
+      { provider: "claude", models: [{ value: "opus", name: "Opus 5.5", effort_levels: ["low", "max"] }, { value: "claude-haiku-9", name: "Haiku 9", effort_levels: [] }] },
+      { provider: "gateway:ollama", models: [{ value: "qwen3", name: "qwen3", effort_levels: [] }] },
+    ]);
+    const short = windowModels([claude], [], [])[0].models;
+    expect(short.map((m) => m.value)).toEqual(["opus", "sonnet", "haiku"]);
+    expect(short[0]).toMatchObject({ name: "Opus 5.5", effort_levels: ["low", "medium", "high", "xhigh", "max"] });
+  });
+
+  it("are checked against where the chat runs: a listed model, an effort it takes, and never with a preset", () => {
+    const list = { provider: "claude", models: [{ value: "opus", name: "Opus", effort_levels: ["low", "max"] }, { value: "haiku", name: "Haiku", effort_levels: [] }] };
+    expect(checkRemoteModel(null, null, "balanced", list)).toBeNull();
+    expect(checkRemoteModel("opus", "max", null, list)).toBeNull();
+    expect(checkRemoteModel(null, "low", null, list)).toBeNull();
+    expect(checkRemoteModel("opus", null, "balanced", list)).toBe("Pick a model or a preset, not both.");
+    expect(checkRemoteModel(null, "low", "balanced", list)).toBe("Pick a model or a preset, not both.");
+    expect(checkRemoteModel("gpt-5", null, null, list)).toBe("That isn't one of its models.");
+    expect(checkRemoteModel(["opus"], null, null, list)).toBe("That isn't one of its models.");
+    expect(checkRemoteModel("haiku", "low", null, list)).toBe("That model has no such effort.");
+    expect(checkRemoteModel(null, "medium", null, list)).toBe("That model has no such effort.");
+    expect(checkRemoteModel("opus", null, null, undefined)).toBe("Your Mac didn't list that provider's models.");
   });
 });

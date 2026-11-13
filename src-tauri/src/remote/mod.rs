@@ -89,6 +89,10 @@ pub struct NewChatRequest {
     /// The phone sent pictures with the first message: the window starts the chat without sending `text`, and the backend sends it,
     /// pictures and all, once the chat is ready (the pictures never pass through the window).
     pub hold_first: bool,
+    /// One of the models the window listed for where it runs, or None for its own; never with a `preset`.
+    pub model: Option<String>,
+    /// One of the effort levels the window listed for it, or None for its own; never with a `preset`.
+    pub effort: Option<String>,
 }
 
 /// What the window is asked when a phone asks for a step of the user's work (a button of Your work). The gateway has checked the item
