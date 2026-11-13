@@ -516,10 +516,27 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     return l ? { id: l.id, capabilities: l.capabilities } : null;
   };
   const configuredRef = useRef<(r: Parameters<Parameters<typeof api.onConversationConfigured>[0]>[0]) => void>(() => {});
+  // A chat's provider, model or effort was changed in place (a phone's chat settings, or the provider chip on a chat with messages).
   configuredRef.current = (r) => {
+    const before = providerIdOf(chats.slots[r.slot]?.provider);
+    const h = presetOf(r.slot);
     to(r.slot)({ type: "provider_set", provider: r.provider });
     to(r.slot)({ type: "mode_changed", mode: r.mode, autoApprove: r.autoApprove });
     to(r.slot)({ type: "session_ready" });
+    if (r.provider.id !== before) {
+      // On another provider the backend dropped the preset's advisor and subagents: the chat is on Standard, which a preset
+      // left behind would put back (wrongly) at its next restart.
+      setPresetBySlot((all) => ({ ...all, [r.slot]: DEFAULT_HARNESS }));
+    } else if (h.id !== DEFAULT_HARNESS) {
+      // On a preset, the change is this chat's, as at the Mac: it becomes Custom (the backend has already applied it, so
+      // nothing restarts), and neither the app's own model nor the project's preset changes.
+      if (r.model !== h.model || r.effort !== h.effort) {
+        const custom = customOf(h, { model: r.model, effort: r.effort });
+        setSavedPresets([...savedPresets.filter((c) => c.id !== CUSTOM_HARNESS), custom]);
+        setPresetBySlot((all) => ({ ...all, [r.slot]: custom.id }));
+      }
+      return;
+    }
     if (r.provider.id === CLAUDE) { setModel(r.model); setEffort(r.effort); }
     else setProviderPrefs({ ...providerPrefs, [r.provider.id]: { model: r.model, effort: r.effort } });
   };
