@@ -125,12 +125,10 @@ describe("the message box as a terminal", () => {
     expect(screen.getByLabelText("Shell command").props.value).toBe('git log --oneline "x"; head');
   });
 
-  it("wraps a long command and runs it on Return rather than making a new line", async () => {
+  it("is a one-line box: a multiline one on iOS never tells of a backspace once it is empty, and the terminal couldn't be left", async () => {
     await terminal();
     await type("!");
-    const field = screen.getByLabelText("Shell command");
-    expect(field.props.multiline).toBe(true);
-    expect(field.props.submitBehavior).toBe("submit");
+    expect(screen.getByLabelText("Shell command").props.multiline).toBeFalsy();
   });
 
   it("takes a pasted command as it would run: no line break at its end, Windows breaks and no-break spaces put right", async () => {
