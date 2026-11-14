@@ -1,4 +1,4 @@
-import { cleanOutput, commandOf, endLine, isTerminal, keepEnd, KEEP_CHARS, hasHiddenChars, lastLines, newShellId, plainTyped, tellClaude, TELL_LINES, took } from "./shell";
+import { cleanOutput, commandOf, commandTyped, endLine, isTerminal, keepEnd, KEEP_CHARS, hasHiddenChars, lastLines, newShellId, plainTyped, tellClaude, TELL_LINES, took } from "./shell";
 
 describe("terminal mode", () => {
   it("starts with a '!', which is not part of the command", () => {
@@ -71,6 +71,47 @@ describe("plainTyped", () => {
 
 /** Characters built from their code points, so the test says what it tries (they can't be seen in a source file). */
 const chars = (...codes: number[]) => codes.map((c) => String.fromCodePoint(c));
+
+describe("commandTyped", () => {
+  it("leaves a command typed on one line as it is, spaces at its end too (the next word is coming)", () => {
+    expect(commandTyped("git status ")).toBe("git status ");
+    expect(commandTyped("")).toBe("");
+  });
+  it("drops the line break a pasted command ends with, Windows ones and all", () => {
+    expect(commandTyped("git status\n")).toBe("git status");
+    expect(commandTyped("git status\r\n")).toBe("git status");
+    expect(commandTyped("git status\r")).toBe("git status");
+    expect(hasHiddenChars(commandTyped("npm test\r\n"))).toBe(false);
+  });
+  it("runs pasted lines one after the other, rather than gluing them into one word", () => {
+    expect(commandTyped("cd foo\nls")).toBe("cd foo; ls");
+    expect(commandTyped("cd foo\r\n\r\n  ls -la\n")).toBe("cd foo; ls -la");
+  });
+  it("goes on with a space after a line continued with \\ or ending in && | ; &", () => {
+    expect(commandTyped("docker run \\\n  -it ubuntu")).toBe("docker run -it ubuntu");
+    expect(commandTyped("npm ci &&\nnpm test")).toBe("npm ci && npm test");
+    expect(commandTyped("cat a |\ngrep b")).toBe("cat a | grep b");
+    expect(commandTyped("sleep 5 &\necho hi")).toBe("sleep 5 & echo hi");
+  });
+  it("turns the no-break spaces copied from web pages and notes into spaces, and undoes smart punctuation", () => {
+    const [nbsp, narrow, figure] = chars(0xa0, 0x202f, 0x2007);
+    expect(commandTyped(`ls${nbsp}-la${narrow}~${figure}x`)).toBe("ls -la ~ x");
+    expect(commandTyped("git log —oneline\n")).toBe("git log --oneline");
+  });
+  it("leaves in a character that can't be seen, so the command is refused rather than run as something else", () => {
+    const [zeroWidth, rtl] = chars(0x200b, 0x202e);
+    expect(hasHiddenChars(commandTyped(`rm${zeroWidth} x\n`))).toBe(true);
+    expect(hasHiddenChars(commandTyped(`echo ${rtl}abc`))).toBe(true);
+    // At the start or end of a pasted line too, where trimming the line could have taken it.
+    const [bom, lineSep] = chars(0xfeff, 0x2028);
+    expect(hasHiddenChars(commandTyped(`${bom}ls\npwd`))).toBe(true);
+    expect(hasHiddenChars(commandTyped(`ls${lineSep}\npwd`))).toBe(true);
+    expect(hasHiddenChars(commandTyped(`ls ${bom}\\\n-la`))).toBe(true);
+  });
+  it("gives the same command back when given its own result", () => {
+    for (const t of ["cd foo\nls", "a \\\nb", "x y\r\n"]) expect(commandTyped(commandTyped(t))).toBe(commandTyped(t));
+  });
+});
 
 describe("hasHiddenChars", () => {
   it("finds what can't be seen or draws backwards, and lets a tab and ordinary text through, accents and other scripts too", () => {

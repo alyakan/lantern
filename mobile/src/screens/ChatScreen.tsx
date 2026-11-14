@@ -457,7 +457,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const runCommand = async (command: string): Promise<boolean> => {
     // What can't be seen can't be read back to be approved: a command with such a character in it is not run.
     if (hasHiddenChars(command)) {
-      setProblem("That command has a character that can't be seen, so it wasn't run. Type it again.");
+      setProblem("That command has a character that can't be seen (pasted text sometimes brings one), so it wasn't run. Type it in yourself.");
       return false;
     }
     const proof = await lock.verify("Run a command on your Mac");

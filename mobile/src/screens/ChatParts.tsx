@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
 import { useLayout } from "../shell/useLayout";
 import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -14,7 +14,7 @@ import { Magnifier, SearchContents, ToolsGlyph, TrayContents, useSearchOpening, 
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
-import { commandOf, isTerminal, plainTyped } from "../view/shell";
+import { commandOf, commandTyped, isTerminal } from "../view/shell";
 import { term } from "../ui/terminal";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import { PlanCard, SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
@@ -39,7 +39,7 @@ import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import { markRanges } from "../view/mark";
-import { settledCuts } from "../view/markdown";
+import { parseMarkdown, settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -56,6 +56,10 @@ const TURN_GAP = 22;
 export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
+  // A message with code or a table in it is as wide as a message gets. Hugging its words, the bubble was laid out once around
+  // what scrolls sideways at no set width: it kept the height of its words wrapped a word to a line, a dark block over Claude's
+  // reply under it (seen on the simulator).
+  const wide = useMemo(() => !!item.text && parseMarkdown(item.text).some((b) => b.kind === "code" || b.kind === "table"), [item.text]);
   // Yours are on the right, Claude's words across the page from the left: who said what reads down the side.
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: TURN_GAP, alignItems: "flex-end" }}>
@@ -64,7 +68,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, width: wide ? "85%" : undefined, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           // One row of small squares (four fit): the words are the message, the photos go with it.
@@ -815,7 +819,8 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
   const terminal = !!onRun && isTerminal(text);
-  const command = commandOf(text);
+  // (A command pasted into the message box with its "!" is made one line here too.)
+  const command = commandTyped(commandOf(text));
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
   const dictation = useDictation(text, setText);
@@ -913,17 +918,19 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
       <View>
       <View {...inView(termState)}>
         <>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
-            <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
+            {/* The prompt sits by the first line: a long command wraps under it. */}
+            <Text accessibilityElementsHidden style={{ alignSelf: "flex-start", marginTop: 8, color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
               ›
             </Text>
             <TextInput
               ref={termInput}
               accessibilityLabel="Shell command"
               value={command}
-              // The "!" stays in what is kept (it is what says this is a terminal) but is not shown, and the keyboard's smart
-              // punctuation is undone: a shell reads "--" and straight quotes.
-              onChangeText={(v) => setText(`!${plainTyped(v.replace(/\n/g, ""))}`)}
+              // The "!" stays in what is kept (it is what says this is a terminal) but is not shown. What is typed or pasted is
+              // made the one line the Mac runs: line breaks between pasted lines, no-break spaces, smart punctuation (see
+              // commandTyped).
+              onChangeText={(v) => setText(`!${commandTyped(v)}`)}
               onKeyPress={(e) => {
                 // Backspace in an empty terminal leaves it, taking the "!" away.
                 if (e.nativeEvent.key === "Backspace" && command === "") setText("");
@@ -931,7 +938,9 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               onSubmitEditing={() => void run()}
               onFocus={() => setHolder("terminal")}
               returnKeyType="go"
-              blurOnSubmit={false}
+              // It wraps, so a long pasted command can be read whole before it is run; Return still runs it, and never makes a line.
+              multiline
+              submitBehavior="submit"
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -940,7 +949,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               placeholder="command"
               placeholderTextColor={term.dim}
               editable={!disabled && !running}
-              style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
+              style={{ flex: 1, minHeight: 36, maxHeight: tallest, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingTop: 8, paddingBottom: 8 }}
             />
             <PressScale
               accessibilityRole="button"

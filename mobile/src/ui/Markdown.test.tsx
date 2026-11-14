@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { fireEvent, render, screen } from "@testing-library/react-native";
-import { Markdown, pathNamed } from "./Markdown";
+import { laidOver, Markdown, pathNamed } from "./Markdown";
 import { lightColors } from "./theme";
 
 const table = ["| Step | Status | Time |", "|:--|:-:|--:|", "| Bump the version | **done** | 3 s |", "| Run `npm test` | passed | 41 s |", "| Open the PR | pending | |"].join("\n");
@@ -280,6 +280,26 @@ describe("what scrolls sideways", () => {
     await render(<Markdown text={"```ts\nconst a = 1;\n```"} />);
     await sized(300, 200);
     expect(screen.queryByTestId("side-fade")).toBeNull();
+  });
+
+  it("fades on your own bubble too, into the solid colour its see-through ground comes out as there", async () => {
+    await render(<Markdown tone="on-ink" text={"```sh\ncurl -sS -X POST https://api.example.com/v1/items --data-binary @payload.json\n```"} />);
+    await sized(300, 700);
+    const strips = screen.getByTestId("side-fade").props.children as { props: { style: { backgroundColor: string } } }[];
+    // White at 0x1f over the light theme's ink, then that colour's own alpha for the strip.
+    expect(strips[strips.length - 1].props.style.backgroundColor.slice(0, 7)).toBe(laidOver(`${lightColors.onInk}1f`, lightColors.ink));
+  });
+});
+
+describe("laidOver", () => {
+  it("lays a see-through colour over a solid one", () => {
+    expect(laidOver("#ffffff80", "#000000")).toBe("#808080");
+    expect(laidOver("#ffffff00", "#15212e")).toBe("#15212e");
+    expect(laidOver("#000000ff", "#ffffff")).toBe("#000000");
+  });
+  it("gives back what it can't read as it is", () => {
+    expect(laidOver("#fff", "#000000")).toBe("#fff");
+    expect(laidOver("#ffffff", "#000000")).toBe("#ffffff");
   });
 });
 
