@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
 import { useLayout } from "../shell/useLayout";
 import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -39,7 +39,7 @@ import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
 import { markRanges } from "../view/mark";
-import { settledCuts } from "../view/markdown";
+import { parseMarkdown, settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
 
 /** How long after the last key a draft is written to the phone. */
@@ -56,6 +56,10 @@ const TURN_GAP = 22;
 export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
+  // A message with code or a table in it is as wide as a message gets. Hugging its words, the bubble was laid out once around
+  // what scrolls sideways at no set width: it kept the height of its words wrapped a word to a line, a dark block over Claude's
+  // reply under it (seen on the simulator).
+  const wide = useMemo(() => !!item.text && parseMarkdown(item.text).some((b) => b.kind === "code" || b.kind === "table"), [item.text]);
   // Yours are on the right, Claude's words across the page from the left: who said what reads down the side.
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: TURN_GAP, alignItems: "flex-end" }}>
@@ -64,7 +68,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, width: wide ? "85%" : undefined, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
           // One row of small squares (four fit): the words are the message, the photos go with it.

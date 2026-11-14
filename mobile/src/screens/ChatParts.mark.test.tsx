@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { Item } from "../sync/reducer";
 import { lightColors } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
-import { PageRow, StepsRow, SUMMARY_HEIGHTS_KEPT, SummaryRow, withCaret } from "./ChatParts";
+import { PageRow, StepsRow, SUMMARY_HEIGHTS_KEPT, SummaryRow, UserRow, withCaret } from "./ChatParts";
 import { fileNamed } from "../ui/Markdown";
 
 const said = (id: string, text: string): Item => ({ kind: "assistant", id, text, streaming: false });
@@ -148,5 +148,24 @@ describe("a path in Claude's words", () => {
     expect(fileNamed("other.ts", files)).toBeNull();
     expect(fileNamed("ome.ts", files)).toBeNull();
     expect(fileNamed("npm test", files)).toBeNull();
+  });
+});
+
+describe("your own message's bubble", () => {
+  const mine = (text: string): Extract<Item, { kind: "user" }> => ({ kind: "user", id: "u1", text, at: null, sentBy: null });
+  const bubble = () => StyleSheet.flatten(screen.getByLabelText(/^You: /).props.style);
+
+  it("hugs a message of plain words", async () => {
+    await render(<UserRow item={mine("Can you help me debug something?")} />);
+    expect(bubble().width).toBeUndefined();
+    expect(bubble().maxWidth).toBe("85%");
+  });
+
+  it("is as wide as a message gets when it holds code or a table, so it isn't laid out around what scrolls sideways (it came out far too tall, over Claude's reply)", async () => {
+    for (const text of ["Here:\n\n```sh\ncurl -sS https://api.example.com/v1/items\n```\n\nThat fails.", "| a | b |\n| - | - |\n| 1 | 2 |"]) {
+      await render(<UserRow item={mine(text)} />);
+      expect(bubble().width).toBe("85%");
+      await screen.unmount();
+    }
   });
 });

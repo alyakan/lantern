@@ -203,6 +203,17 @@ function SideScroll({ children, surface, style, contentContainerStyle }: { child
   );
 }
 
+/**
+ * `top`, a colour with its own see-through-ness ("#rrggbbaa"), laid over `under` ("#rrggbb"), as the one solid colour it comes
+ * out as: an edge can only fade into a solid colour. Anything else gives back `top` as it is.
+ */
+export function laidOver(top: string, under: string): string {
+  if (!/^#[0-9a-f]{8}$/i.test(top) || !/^#[0-9a-f]{6}$/i.test(under)) return top;
+  const a = parseInt(top.slice(7, 9), 16) / 255;
+  const channel = (i: number) => Math.round(parseInt(top.slice(i, i + 2), 16) * a + parseInt(under.slice(i, i + 2), 16) * (1 - a));
+  return `#${[1, 3, 5].map((i) => channel(i).toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
 function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; tone: Tone; mark?: string }) {
   const [copied, setCopied] = useState(false);
@@ -237,7 +248,8 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
           </Txt>
         </PressScale>
       </View>
-      <SideScroll surface={l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
+      {/* On your own (ink) bubble the block's ground is see-through: its edge fades into what that comes out as, so a cut line reads as one that scrolls. */}
+      <SideScroll surface={tone === "on-ink" ? laidOver(l.raised, colors.ink) : l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
         <Text selectable style={[scale.mono, { color: l.code }]}>
           {shown.map((line, i) => (
             <Fragment key={i}>
