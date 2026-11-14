@@ -102,6 +102,11 @@ describe("commandTyped", () => {
     const [zeroWidth, rtl] = chars(0x200b, 0x202e);
     expect(hasHiddenChars(commandTyped(`rm${zeroWidth} x\n`))).toBe(true);
     expect(hasHiddenChars(commandTyped(`echo ${rtl}abc`))).toBe(true);
+    // At the start or end of a pasted line too, where trimming the line could have taken it.
+    const [bom, lineSep] = chars(0xfeff, 0x2028);
+    expect(hasHiddenChars(commandTyped(`${bom}ls\npwd`))).toBe(true);
+    expect(hasHiddenChars(commandTyped(`ls${lineSep}\npwd`))).toBe(true);
+    expect(hasHiddenChars(commandTyped(`ls ${bom}\\\n-la`))).toBe(true);
   });
   it("gives the same command back when given its own result", () => {
     for (const t of ["cd foo\nls", "a \\\nb", "x y\r\n"]) expect(commandTyped(commandTyped(t))).toBe(commandTyped(t));

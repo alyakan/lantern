@@ -92,11 +92,12 @@ export function commandTyped(text: string): string {
   if (lines.length === 1) return lines[0];
   let out = "";
   lines.forEach((raw, i) => {
-    // The last line is still being typed: its spaces are kept. The others lose the spaces at their ends.
-    const line = i === lines.length - 1 ? raw.trimStart() : raw.trim();
+    // The last line is still being typed: its spaces are kept. The others lose the spaces at their ends. Only spaces and tabs:
+    // trim() would also take a byte order mark or a line separator, which must stay to be refused.
+    const line = i === lines.length - 1 ? raw.replace(/^[ \t]+/, "") : raw.replace(/^[ \t]+|[ \t]+$/g, "");
     if (!line) return;
     if (!out) out = line;
-    else if (out.endsWith("\\")) out = `${out.slice(0, -1).trimEnd()} ${line}`;
+    else if (out.endsWith("\\")) out = `${out.slice(0, -1).replace(/[ \t]+$/, "")} ${line}`;
     else out = `${out}${JOINS.test(out) ? " " : "; "}${line}`;
   });
   return out;
