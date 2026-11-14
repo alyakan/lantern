@@ -14,7 +14,7 @@ import { Magnifier, SearchContents, ToolsGlyph, TrayContents, useSearchOpening, 
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
-import { commandOf, isTerminal, plainTyped } from "../view/shell";
+import { commandOf, commandTyped, isTerminal } from "../view/shell";
 import { term } from "../ui/terminal";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import { PlanCard, SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
@@ -815,7 +815,8 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
   const terminal = !!onRun && isTerminal(text);
-  const command = commandOf(text);
+  // (A command pasted into the message box with its "!" is made one line here too.)
+  const command = commandTyped(commandOf(text));
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
   const dictation = useDictation(text, setText);
@@ -913,17 +914,19 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
       <View>
       <View {...inView(termState)}>
         <>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
-            <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
+            {/* The prompt sits by the first line: a long command wraps under it. */}
+            <Text accessibilityElementsHidden style={{ alignSelf: "flex-start", marginTop: 8, color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
               ›
             </Text>
             <TextInput
               ref={termInput}
               accessibilityLabel="Shell command"
               value={command}
-              // The "!" stays in what is kept (it is what says this is a terminal) but is not shown, and the keyboard's smart
-              // punctuation is undone: a shell reads "--" and straight quotes.
-              onChangeText={(v) => setText(`!${plainTyped(v.replace(/\n/g, ""))}`)}
+              // The "!" stays in what is kept (it is what says this is a terminal) but is not shown. What is typed or pasted is
+              // made the one line the Mac runs: line breaks between pasted lines, no-break spaces, smart punctuation (see
+              // commandTyped).
+              onChangeText={(v) => setText(`!${commandTyped(v)}`)}
               onKeyPress={(e) => {
                 // Backspace in an empty terminal leaves it, taking the "!" away.
                 if (e.nativeEvent.key === "Backspace" && command === "") setText("");
@@ -931,7 +934,9 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               onSubmitEditing={() => void run()}
               onFocus={() => setHolder("terminal")}
               returnKeyType="go"
-              blurOnSubmit={false}
+              // It wraps, so a long pasted command can be read whole before it is run; Return still runs it, and never makes a line.
+              multiline
+              submitBehavior="submit"
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -940,7 +945,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               placeholder="command"
               placeholderTextColor={term.dim}
               editable={!disabled && !running}
-              style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
+              style={{ flex: 1, minHeight: 36, maxHeight: tallest, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingTop: 8, paddingBottom: 8 }}
             />
             <PressScale
               accessibilityRole="button"

@@ -75,6 +75,33 @@ export const plainTyped = (text: string) =>
     .replace(/[‘’‚]/g, "'")
     .replace(/…/g, "...");
 
+// Spaces that look like a space and aren't one to a shell: text copied from a web page, Slack or Notes brings them.
+const ODD_SPACES = /[   ]/g;
+// What a line can end with that already joins it to the next one.
+const JOINS = /(?:&&|\|\||\||;|&)$/;
+
+/**
+ * A command as it was typed or pasted, made into the one line the Mac runs: a pasted command often comes with line breaks
+ * (Windows ones too), lines continued with "\", and spaces that aren't spaces. A line break between two commands is a "; "
+ * (as it is in a script: the next runs after the last, whatever it did), a line that ends with "&&", "|" and the like or is
+ * continued with "\" goes on with a space, blank lines and the break at the very end go, and smart punctuation is undone.
+ * Only these harmless kinds are put right: a character that can't be seen is left in, to be refused (see `hasHiddenChars`).
+ */
+export function commandTyped(text: string): string {
+  const lines = plainTyped(text.replace(ODD_SPACES, " ")).replace(/\r\n?/g, "\n").split("\n");
+  if (lines.length === 1) return lines[0];
+  let out = "";
+  lines.forEach((raw, i) => {
+    // The last line is still being typed: its spaces are kept. The others lose the spaces at their ends.
+    const line = i === lines.length - 1 ? raw.trimStart() : raw.trim();
+    if (!line) return;
+    if (!out) out = line;
+    else if (out.endsWith("\\")) out = `${out.slice(0, -1).trimEnd()} ${line}`;
+    else out = `${out}${JOINS.test(out) ? " " : "; "}${line}`;
+  });
+  return out;
+}
+
 // Characters that draw nothing, or draw backwards, so a command can read one way and run another, as code point ranges:
 // controls (a tab is fine), the soft hyphen, the Arabic letter mark, the Mongolian vowel separator, zero-width and joining
 // marks and direction marks, line and paragraph separators and bidirectional overrides, word joiners and invisible operators,

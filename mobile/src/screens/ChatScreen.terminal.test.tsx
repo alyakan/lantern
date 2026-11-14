@@ -122,7 +122,32 @@ describe("the message box as a terminal", () => {
     await terminal();
     await type("!");
     await typeCommand("git log —oneline “x”\nhead");
-    expect(screen.getByLabelText("Shell command").props.value).toBe('git log --oneline "x"head');
+    expect(screen.getByLabelText("Shell command").props.value).toBe('git log --oneline "x"; head');
+  });
+
+  it("wraps a long command and runs it on Return rather than making a new line", async () => {
+    await terminal();
+    await type("!");
+    const field = screen.getByLabelText("Shell command");
+    expect(field.props.multiline).toBe(true);
+    expect(field.props.submitBehavior).toBe("submit");
+  });
+
+  it("takes a pasted command as it would run: no line break at its end, Windows breaks and no-break spaces put right", async () => {
+    const { lastOf } = await terminal();
+    await type("!");
+    await typeCommand("npm ci &&\r\nnpm test\r\n");
+    expect(screen.getByLabelText("Shell command").props.value).toBe("npm ci && npm test");
+    await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(screen.getByLabelText("Command: npm ci && npm test")).toBeTruthy());
+    await swipe();
+    await waitFor(() => expect(lastOf("shell")).toMatchObject({ command: "npm ci && npm test" }));
+  });
+
+  it("makes a command pasted into the message box with its \"!\" one line too", async () => {
+    await terminal();
+    await type("!git status\r\n");
+    expect(screen.getByLabelText("Shell command").props.value).toBe("git status");
   });
 
   it("can't run an empty command", async () => {
@@ -197,8 +222,9 @@ describe("running a command from the phone", () => {
   it("refuses a command with a character that can't be seen, before anything is asked of the phone or the Mac", async () => {
     const { asked, lastOf } = await terminal();
     await type("!");
-    // A right-to-left override, a zero-width space and a carriage return, by their code points (they can't be seen here either).
-    for (const hidden of [String.fromCodePoint(0x202e), String.fromCodePoint(0x200b), "\r"]) {
+    // A right-to-left override, a zero-width space and an escape, by their code points (they can't be seen here either). (A
+    // carriage return is a line break, put right like any pasted one: see commandTyped.)
+    for (const hidden of [String.fromCodePoint(0x202e), String.fromCodePoint(0x200b), String.fromCodePoint(0x1b)]) {
       // In the middle: one at the end is trimmed off like any space, and what is shown is what runs.
       await typeCommand(`echo ${hidden}ok`);
       await fireEvent.press(screen.getByRole("button", { name: "Run" }));
