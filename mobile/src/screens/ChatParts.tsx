@@ -918,9 +918,8 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
       <View>
       <View {...inView(termState)}>
         <>
-          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
-            {/* The prompt sits by the first line: a long command wraps under it. */}
-            <Text accessibilityElementsHidden style={{ alignSelf: "flex-start", marginTop: 8, color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
+            <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
               ›
             </Text>
             <TextInput
@@ -938,9 +937,9 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               onSubmitEditing={() => void run()}
               onFocus={() => setHolder("terminal")}
               returnKeyType="go"
-              // It wraps, so a long pasted command can be read whole before it is run; Return still runs it, and never makes a line.
-              multiline
-              submitBehavior="submit"
+              // One line, never multiline: a multiline box on iOS says nothing of a backspace once it is empty, so there was no way
+              // out of the terminal (seen on a phone, build 97). A long command scrolls here and is shown whole before it runs.
+              blurOnSubmit={false}
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -949,7 +948,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               placeholder="command"
               placeholderTextColor={term.dim}
               editable={!disabled && !running}
-              style={{ flex: 1, minHeight: 36, maxHeight: tallest, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingTop: 8, paddingBottom: 8 }}
+              style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
             />
             <PressScale
               accessibilityRole="button"
