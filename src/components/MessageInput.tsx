@@ -105,7 +105,7 @@ interface Props {
   /** In a new chat, with more than one provider: the agent CLIs to start it on, and how to change it (which starts the chat again). */
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
   /** A new Claude chat's account, when accounts have been added (Settings → Accounts). */
-  accounts?: { list: Account[]; chosen: string; onChoose: (id: string) => void };
+  accounts?: { list: Account[]; chosen: string; onChoose: (id: string) => void; /** The chat has been going: moving it restarts it on the same conversation. */ started?: boolean };
 }
 
 export function MessageInput({ todos = [], status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, accounts, pendingSwitch }: Props) {
@@ -646,7 +646,7 @@ export function MessageInput({ todos = [], status, waiting = false, idlePlacehol
             </span>
           )}
           {!terminal && providers && providers.options.length > 1 && <ProviderPicker options={providers.options} chosen={providers.chosen} onChoose={providers.onChoose} disabled={busy} />}
-          {!terminal && accounts && accounts.list.length > 0 && <AccountPicker accounts={accounts.list} chosen={accounts.chosen} onChoose={accounts.onChoose} disabled={busy} />}
+          {!terminal && accounts && accounts.list.length > 0 && <AccountPicker accounts={accounts.list} chosen={accounts.chosen} onChoose={accounts.onChoose} started={accounts.started} disabled={busy} />}
           {terminal ? (
             <span className="terminal-hint">{agent} sees the output with your next message · backspace to leave</span>
           ) : models ? (

@@ -428,6 +428,12 @@ impl Orchestra {
         inner.order.iter().filter(|id| inner.workers.get(*id).is_some_and(|w| w.parent == main)).cloned().collect()
     }
 
+    /// Whether a worker of this main agent is still running (one that ended or was stopped no longer holds its account).
+    pub fn has_live_workers(&self, main: &str) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.workers.values().any(|w| w.parent == main && w.status.live())
+    }
+
     pub fn is_main(&self, slot: &str) -> bool {
         self.inner.lock().unwrap().mains.contains_key(slot)
     }

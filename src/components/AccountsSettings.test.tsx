@@ -77,4 +77,12 @@ describe("The account picker", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Work" }));
     expect(onChoose).toHaveBeenCalledWith("work");
   });
+
+  it("says what moving a started chat does, and says nothing of it for a new one", () => {
+    const { rerender } = render(<AccountPicker accounts={[{ id: "work", name: "Work" }]} chosen="work" onChoose={() => {}} started />);
+    fireEvent.click(screen.getByRole("button", { name: /Work/ }));
+    expect(screen.getByText(/restarts the chat on the same conversation/)).toBeInTheDocument();
+    rerender(<AccountPicker accounts={[{ id: "work", name: "Work" }]} chosen="work" onChoose={() => {}} />);
+    expect(screen.queryByText(/restarts the chat on the same conversation/)).not.toBeInTheDocument();
+  });
 });

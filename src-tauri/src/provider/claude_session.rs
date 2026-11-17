@@ -100,7 +100,8 @@ fn command(cfg: &SessionConfig) -> Command {
     }
     // A chat on another Claude account runs on that account's folder, which is where its login is.
     // Its login is what runs: a key or token in Lantern's own environment would otherwise outrank it and bill another account.
-    if let Some(dir) = &cfg.config_dir {
+    // Never on an endpoint's chat: removing the token there would send the account's own login to the endpoint's URL.
+    if let (Some(dir), None) = (&cfg.config_dir, &cfg.endpoint) {
         cmd.env("CLAUDE_CONFIG_DIR", dir);
         for k in ACCOUNT_REMOVED_ENV {
             cmd.env_remove(k);
@@ -549,6 +550,22 @@ mod tests {
         for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
             assert_eq!(env.get(k), Some(&None), "{k} must be removed");
         }
+    }
+
+    /// An endpoint's chat keeps its own token and never gets an account's folder, even if its config still carries one:
+    /// removing the token there would send the account's own login to the endpoint's URL.
+    #[test]
+    fn a_gateway_chat_never_runs_on_an_account_folder() {
+        use crate::endpoints::{GatewayLaunch, Secret};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("/bin/claude".into(), dir.path(), None);
+        cfg.provider = crate::provider::ProviderId::Gateway;
+        cfg.model = Some("qwen3-coder:30b".into());
+        cfg.endpoint = Some(GatewayLaunch { id: "ollama".into(), url: "http://localhost:11434".into(), key: Some(Secret::new("sk-secret-value".into())), auto_mode: false });
+        cfg.config_dir = Some("/accounts/work".into());
+        let envs: std::collections::HashMap<String, Option<String>> = command(&cfg).as_std().get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(envs["ANTHROPIC_AUTH_TOKEN"].as_deref(), Some("sk-secret-value"));
+        assert!(!envs.contains_key("CLAUDE_CONFIG_DIR"), "an account's folder must not reach an endpoint's chat");
     }
 
     /// A gateway chat: the token is in the environment and never on the command line (any process of the user reads that),

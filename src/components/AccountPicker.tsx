@@ -8,6 +8,8 @@ interface Props {
   /** The account's id; "" is the default login. */
   chosen: string;
   onChoose: (id: string) => void;
+  /** The chat has been going: moving it restarts it on the same conversation, which the new account reads again from the start. */
+  started?: boolean;
   disabled?: boolean;
 }
 
@@ -21,9 +23,10 @@ function AccountIcon() {
   );
 }
 
-// In the chat box of a new Claude chat, only when accounts have been added: whose login the chat runs on (the default one, or one
-// from Settings → Accounts). Changing it starts the empty chat again on the other account.
-export function AccountPicker({ accounts, chosen, onChoose, disabled }: Props) {
+// In the chat box of a Claude chat, once accounts have been added: whose login the chat runs on (the default one, or one from
+// Settings → Accounts). Changing it starts an empty chat again on the other account, and restarts a started one on the same
+// conversation.
+export function AccountPicker({ accounts, chosen, onChoose, started, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const { ref: menu, style: menuStyle } = useMenuShift(open);
@@ -53,6 +56,7 @@ export function AccountPicker({ accounts, chosen, onChoose, disabled }: Props) {
       {open && (
         <div className="menu model-menu" ref={menu} style={menuStyle} role="menu" aria-label="Claude account" onKeyDown={keys.onKeyDown}>
           <div className="menu-heading">Which Claude account runs this chat</div>
+          {started && <div className="menu-note">Moving it restarts the chat on the same conversation. The other account reads the whole history again, so the next reply uses more of its limit.</div>}
           {options.map((o) => (
             <button
               key={o.id || "default"}

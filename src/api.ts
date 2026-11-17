@@ -131,6 +131,8 @@ export const api = {
   /** Restarts the chat's claude on the same session with another preset (main model and effort, advisor, subagents). */
   applyPreset: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null; plugins_off?: boolean }) =>
     invoke<void>("apply_preset", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model, pluginsOff: h.plugins_off ?? false }),
+  /** Moves a started Claude chat to another account (an id; null is the default login): its claude restarts on the same session. */
+  setAccount: (slot: string, account: string | null) => invoke<void>("set_account", { slot, account }),
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */

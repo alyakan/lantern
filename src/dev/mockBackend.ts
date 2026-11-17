@@ -1810,6 +1810,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return null;
         }
         case "apply_preset":
+        case "set_account":
         case "continue_fresh":
           return null;
         case "close_session":

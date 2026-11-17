@@ -848,12 +848,15 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           dispatch({ type: "provider_set", provider: { id: config.provider, capabilities: config.capabilities } });
           dispatch({ type: "session_ready" });
           setProviderByFolder({ ...providerByFolder, [folder]: id });
+          // Off Claude the chat has no account (the Mac drops it): the meter and the chip must not keep claiming one.
+          if (id !== CLAUDE) setAccountBySlot((m) => ({ ...m, [active]: "" }));
           if (state.sessionId) setProviderBySession({ ...providerBySession, [state.sessionId!]: id });
         }).catch((e) => { dispatch({ type: "session_ready" }); dispatch({ type: "failed", text: errText(e) }); });
       }
       return;
     }
     setProviderByFolder({ ...providerByFolder, [folder]: id });
+    if (id !== CLAUDE) setAccountBySlot((m) => ({ ...m, [active]: "" }));
     // A provider that can't lead a team starts it as a plain chat: its Workflow leaves Team.
     startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).can_lead_team, undefined, undefined, undefined, false, id);
   };
@@ -903,10 +906,31 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const news = Object.entries(chats.slots).filter(([slot, s]) => s.sessionId && slot in accountBySlot && (accountBySession[s.sessionId] ?? "") !== accountBySlot[slot]);
     if (news.length) setAccountBySession({ ...accountBySession, ...Object.fromEntries(news.map(([slot, s]) => [s.sessionId!, accountBySlot[slot]])) });
   }, [chats.slots, accountBySlot]);
-  /** An empty Claude chat is moved to another account (the project's new choice too): it starts again on that login, with nothing said yet. */
+  /**
+   * A Claude chat is moved to another account. An empty one starts again on that login with nothing said yet, and it is the
+   * project's new choice too. A started one restarts on the same conversation (the accounts share the history) when it is idle:
+   * only that chat moves, not the project's choice.
+   */
   const chooseAccount = (id: string) => {
     const folder = state.folder;
-    if (!folder || state.items.length > 0 || chats.agents[active]) return;
+    if (!folder || chats.agents[active]) return;
+    if (state.items.length > 0) {
+      if (isBusy(state) || state.status !== "idle") return;
+      if (state.backgroundTasks.length > 0) return dispatch({ type: "failed", text: "Stop this chat's background tasks before switching accounts." });
+      dispatch({ type: "restarting" });
+      const slot = active;
+      api.setAccount(slot, id || null).then(
+        () => {
+          setAccountBySlot((all) => ({ ...all, [slot]: id }));
+          dispatch({ type: "session_ready" });
+        },
+        (e) => {
+          dispatch({ type: "session_ready" });
+          dispatch({ type: "failed", text: errText(e) });
+        },
+      );
+      return;
+    }
     setAccountByFolder({ ...accountByFolder, [folder]: id });
     startIn(active, folder, false, state.orchestrator, undefined, undefined, undefined, false, activeProvider, id || null);
   };
@@ -3389,7 +3413,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
-      accounts={accounts.length > 0 && activeProvider === CLAUDE && state.folder && state.items.length === 0 && !chats.agents[active] ? { list: accounts, chosen: accountBySlot[active] ?? "", onChoose: chooseAccount } : undefined}
+      accounts={accounts.length > 0 && activeProvider === CLAUDE && state.folder && !chats.agents[active] ? { list: accounts, chosen: accountBySlot[active] ?? "", onChoose: chooseAccount, started: state.items.length > 0 } : undefined}
       onSend={(text, draft, images) => {
         if (!images && addTodoFromBox(text)) return;
         // Starting something new instead: the chats from last time aren't offered any more.

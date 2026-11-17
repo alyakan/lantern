@@ -1084,6 +1084,8 @@ impl orchestra::Host for AppHost {
                 let id = req.provider;
                 cfg.binary = tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.map_err(|e| e.to_string())??;
                 cfg.provider = id;
+                // An account is Claude Code's; another provider's chat never runs on one.
+                cfg.config_dir = None;
                 cfg.model = None;
                 cfg.effort = None;
                 cfg.advisor = None;
@@ -2281,6 +2283,8 @@ async fn conversation_settings_inner(app: &AppHandle, slot: &str, change: Option
             let previous_chat = chat.clone();
             let context = chat.handoff(80_000);
             cfg.provider = provider;
+            // An account is Claude Code's own: a chat moved to Codex or an endpoint leaves it behind.
+            cfg.config_dir = None;
             cfg.binary = binary;
             cfg.resume = None;
             cfg.model = change.get("model").and_then(|v| v.as_str()).map(str::to_string);
@@ -2505,6 +2509,35 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         }
     }
     Ok(())
+}
+
+/// Moves a started Claude chat to another account (`account`: its id; None is the default login): its claude restarts on the
+/// same session (`--resume`) with that account's folder. The conversation carries over because every account shares the user's
+/// `projects/` folder (see accounts.rs); what the new account reads is the whole history again, from scratch in its cache.
+/// A worker is on its Lead's account and a Lead with workers has them running on its own: neither moves alone.
+#[tauri::command]
+async fn set_account(app: AppHandle, state: State<'_, AppState>, slot: String, account: Option<String>) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
+    let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+    if cfg.provider != ProviderId::Claude {
+        return Err("Only a chat on Claude Code has an account.".into());
+    }
+    if matches!(cfg.helper.role, Role::Worker { .. }) {
+        return Err("An agent runs on its Lead's account. Move the Lead's chat instead.".into());
+    }
+    if state.orchestra.has_live_workers(&slot) {
+        return Err("This chat leads a team whose agents run on its account. Stop them first, then move it.".into());
+    }
+    // The account is looked up here, from the id the window sent (never a path); one that is gone is an error.
+    cfg.config_dir = match account.as_deref() {
+        Some(id) => Some(state.accounts.dir_for(id)?),
+        None => None,
+    };
+    cfg.resume = running_id.or(cfg.resume);
+    cfg.helper = helper_config(&s, cfg.provider, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
+    cfg.path_env = login_path(&state).await;
+    launch(&app, &slot, &s, cfg, false).await
 }
 
 /// Restarts a chat's claude on the same session with another preset: main model and effort, advisor, subagents' model.
@@ -4623,6 +4656,7 @@ pub fn run() {
             conversation_action,
             restart_session,
             apply_preset,
+            set_account,
             close_session,
             orchestra_sleep_agent,
             earlier_events,
