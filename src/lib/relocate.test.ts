@@ -28,6 +28,7 @@ describe("migrateFolderState", () => {
       "settings.promptHistory": { [OLD]: ["fix the retry"] },
       "settings.harnessByFolder": { [OLD]: "max" },
       "settings.providerByFolder": { [OLD]: "codex" },
+      "settings.accountByFolder": { [OLD]: "work" },
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
       "sidebar.projectColors": { [OLD]: 3 },
@@ -50,6 +51,7 @@ describe("migrateFolderState", () => {
     expect(read(store, "settings.promptHistory")).toEqual({ [OLD]: ["fix the retry"], [NEXT]: ["fix the retry"] });
     expect(read(store, "settings.harnessByFolder")).toEqual({ [OLD]: "max", [NEXT]: "max" });
     expect(read(store, "settings.providerByFolder")).toEqual({ [OLD]: "codex", [NEXT]: "codex" });
+    expect(read(store, "settings.accountByFolder")).toEqual({ [OLD]: "work", [NEXT]: "work" });
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
     expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });

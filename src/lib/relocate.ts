@@ -9,6 +9,7 @@ export const FOLDER_RECORDS = [
   "settings.promptHistory",
   "settings.harnessByFolder",
   "settings.providerByFolder",
+  "settings.accountByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
   // The command typed for a project's tests, when Lantern can't tell how it is tested (the merge card's Run tests).
@@ -62,6 +63,8 @@ export const NOT_FOLDER_KEYED = [
   "session.agentIds",
   // The provider a session runs on (set only for one that isn't Claude's), and each other provider's model and effort.
   "settings.providerBySession",
+  // The Claude account a session ran on (set only for one that isn't on the default login).
+  "settings.accountBySession",
   "settings.providerPrefs",
   "settings.model",
   "settings.effort",

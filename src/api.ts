@@ -14,7 +14,7 @@ import type { PastedImage } from "./lib/images";
 import type { TodoCount, TodoEdit, TodoListing, TodoReminder } from "./lib/todos";
 import type { Exchange, RouteCandidate, WindowDesk } from "./lib/desk";
 import type { WindowWork } from "./lib/phoneWork";
-import type { AsideEvent, AuthState, CaptureStatus, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, CaptureStatus, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Account, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -86,7 +86,15 @@ export interface ClaudeLogin {
 export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
   /** Whether the claude at this path is logged in, and as whom; rejects when claude can't say. */
-  claudeLogin: (claudePath: string) => invoke<ClaudeLogin>("claude_login", { claudePath }),
+  claudeLogin: (claudePath: string, account: string | null = null) => invoke<ClaudeLogin>("claude_login", { claudePath, account }),
+  /** The Claude accounts added besides the default login (Settings → Accounts). */
+  listAccounts: () => invoke<Account[]>("list_accounts"),
+  /** Adds an account, with the user's own setup shared into it; it is signed in with `accountLogin`. */
+  addAccount: (name: string) => invoke<Account>("add_account", { name }),
+  /** Signs the account out and takes it away (never the user's own setup it shares). */
+  removeAccount: (claudePath: string, id: string) => invoke<void>("remove_account", { claudePath, id }),
+  /** Opens the browser to sign the account in and waits for it; resolves with who it is now, rejects in words. */
+  accountLogin: (claudePath: string, id: string) => invoke<ClaudeLogin>("account_login", { claudePath, id }),
   /** The providers a chat can run on: Claude Code, and each other whose CLI is installed. */
   listProviders: () => invoke<ProviderListing[]>("list_providers"),
   /** The endpoints the user set up (Settings → Endpoints), with whether each one's key variable is set in their login shell. */

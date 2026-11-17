@@ -30,7 +30,7 @@ import { windowFocused } from "./lib/windowFocus";
 import { answerFailed, hasPendingPrompt, initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type State, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend, type Chats } from "./sessions";
-import type { Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
+import type { Account, Capabilities, ChatHit, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
 import { CLAUDE, CLAUDE_CAPABILITIES, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
@@ -237,6 +237,20 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // when it isn't Claude's. The model and effort of every provider but Claude, whose own are the app-wide ones above.
   const [providerByFolder, setProviderByFolder] = usePersistentState<Record<string, string>>("settings.providerByFolder", {});
   const [providerBySession, setProviderBySession] = usePersistentState<Record<string, string>>("settings.providerBySession", {});
+  // The Claude accounts added in Settings → Accounts, which account each project's new chats start on, each session's (to reopen it
+  // on the same login), and each open chat's own. Absent or "" is the default login.
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountByFolder, setAccountByFolder] = usePersistentState<Record<string, string>>("settings.accountByFolder", {});
+  const [accountBySession, setAccountBySession] = usePersistentState<Record<string, string>>("settings.accountBySession", {});
+  const [accountBySlot, setAccountBySlot] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.listAccounts().then((list) => {
+      setAccounts(list);
+      // A project whose new chats started on an account that is gone (a list that was lost, say) goes back to the default login.
+      const known = (id: string) => !id || list.some((a) => a.id === id);
+      if (!Object.values(accountByFolder).every(known)) setAccountByFolder(Object.fromEntries(Object.entries(accountByFolder).filter(([, id]) => known(id))));
+    }, () => {});
+  }, []);
   const [providerPrefs, setProviderPrefs] = usePersistentState<Record<string, { model: string | null; effort: string | null }>>("settings.providerPrefs", {});
   const prefsOf = (id: string) => {
     if (id === CLAUDE) return { model, effort };
@@ -751,8 +765,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * `providerId`: the agent CLI it runs on, by default the one the project's new chats start on (a team's Lead is always Claude
    * Code's: it is the one that has Lantern's tools to start agents with).
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps"; model?: string | null; effort?: string | null } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps"; model?: string | null; effort?: string | null } | false = false, providerId: string = team ? CLAUDE : providerFor(folder), account?: string | null) => {
     if (!agentReady) return;
+    // The Claude account: the one asked for (null: the default login), else the project's. Only a Claude chat has one, and a
+    // phone's chat is on the default login.
+    const accountId = providerId !== CLAUDE || remote ? "" : account === undefined ? (accountByFolder[folder] ?? "") : (account ?? "");
+    setAccountBySlot((all) => ({ ...all, [slot]: accountId }));
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
@@ -778,12 +796,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
     if (!binary) return to(slot)({ type: "failed", text: isGateway(providerId) ? `${providerName(providerId)} isn't set up any more: add it back in Settings → Endpoints.` : `${providerName(providerId)} isn't installed.` });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote, providerId);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote, providerId, accountId || null);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, binary, folder, { ...wireProvider(providerId), mode, ...settingsFor(slot, h, info), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
+    api.startSession(slot, binary, folder, { ...wireProvider(providerId), ...(accountId ? { account: accountId } : {}), mode, ...settingsFor(slot, h, info), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       (provider) => {
         if (startGen.current[slot] !== gen) return;
         // (The backend calls every endpoint "gateway": the chat is known by which one.)
@@ -874,6 +892,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const news = Object.values(chats.slots).filter((s) => s.sessionId && providerBySession[s.sessionId] !== providerIdOf(s.provider));
     if (news.length) setProviderBySession({ ...providerBySession, ...Object.fromEntries(news.map((s) => [s.sessionId!, providerIdOf(s.provider)])) });
   }, [chats.slots]);
+  // Likewise a session on another Claude account, so reopening it from History starts claude on that login.
+  useEffect(() => {
+    const news = Object.entries(chats.slots).filter(([slot, s]) => s.sessionId && slot in accountBySlot && (accountBySession[s.sessionId] ?? "") !== accountBySlot[slot]);
+    if (news.length) setAccountBySession({ ...accountBySession, ...Object.fromEntries(news.map(([slot, s]) => [s.sessionId!, accountBySlot[slot]])) });
+  }, [chats.slots, accountBySlot]);
+  /** An empty Claude chat is moved to another account (the project's new choice too): it starts again on that login, with nothing said yet. */
+  const chooseAccount = (id: string) => {
+    const folder = state.folder;
+    if (!folder || state.items.length > 0 || chats.agents[active]) return;
+    setAccountByFolder({ ...accountByFolder, [folder]: id });
+    startIn(active, folder, false, state.orchestrator, undefined, undefined, undefined, false, activeProvider, id || null);
+  };
 
   // Chats on another provider than Claude come back once the providers are known (with Claude alone there is nothing to wait for).
   const waitsForProviders = providerList === null && [...Object.values(providerBySession), ...Object.values(providerByFolder)].some((p) => p !== CLAUDE);
@@ -937,6 +967,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     reopened.current = true;
     // The provider it ran on: Claude's unless it was saved as another's (a session from before there was a choice is Claude's).
     const providerId = (await api.conversationMetadata(sessionId).catch(() => null)) ?? providerBySession[sessionId] ?? CLAUDE;
+    // The Claude account it ran on (the backend refuses one that was removed: its words never go to another login).
+    const accountId = providerId === CLAUDE ? (accountBySession[sessionId] ?? "") : "";
+    setAccountBySlot((all) => ({ ...all, [slot]: accountId }));
     const info = infoOf(providerId);
     const binary = binaryOf(providerId);
     const can = capabilitiesOf(info);
@@ -973,7 +1006,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         binary,
         folder,
         // An agent comes back on the model it had (or, on Claude, Sonnet, the agents' default), not on its project's own model.
-        { ...wireProvider(providerId), mode, ...settingsFor(slot, h, info), ...(as?.role === "worker" ? { model: as.model ?? (providerId === CLAUDE ? AGENT_MODEL : null) } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
+        { ...wireProvider(providerId), ...(accountId ? { account: accountId } : {}), mode, ...settingsFor(slot, h, info), ...(as?.role === "worker" ? { model: as.model ?? (providerId === CLAUDE ? AGENT_MODEL : null) } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -3350,6 +3383,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       provider={state.provider}
       // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
       providers={providers.multi && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
+      accounts={accounts.length > 0 && activeProvider === CLAUDE && state.folder && state.items.length === 0 && !chats.agents[active] ? { list: accounts, chosen: accountBySlot[active] ?? "", onChoose: chooseAccount } : undefined}
       onSend={(text, draft, images) => {
         if (!images && addTodoFromBox(text)) return;
         // Starting something new instead: the chats from last time aren't offered any more.
@@ -3756,6 +3790,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
             },
           }}
           endpoints={{ onSaved: () => void api.listProviders().then(setProviderList, () => {}) }}
+          accounts={{
+            claudePath: state.claudePath ?? null,
+            onChanged: (list, removed) => {
+              setAccounts(list);
+              // A project whose new chats started on the removed account goes back to the default login.
+              if (removed) setAccountByFolder(Object.fromEntries(Object.entries(accountByFolder).filter(([, id]) => id !== removed)));
+            },
+          }}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams, sortByActivity, onSortByActivity: setSortByActivity }}
           routines={{
             ...routines,
