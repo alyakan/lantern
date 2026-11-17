@@ -18,22 +18,50 @@ export const PLAN_WARN = 0.8;
 export const PLAN_STOP = 0.95;
 
 const CHANGED = "lantern-plan-usage";
-let latest: PlanUsage | null = null;
+/** The key Claude's usage is kept under. A Claude account added in Settings has its own limits: "claude:<account id>". */
+export const CLAUDE_KEY = "claude";
+export const claudeKey = (account?: string | null): string => (account ? `${CLAUDE_KEY}:${account}` : CLAUDE_KEY);
+export const isClaudeKey = (key: string): boolean => key === CLAUDE_KEY || key.startsWith(`${CLAUDE_KEY}:`);
 
-export function setPlanUsage(p: PlanUsage): void {
-  latest = p;
-  setProviderUsage({ provider: "claude", windows: [{ label: "Session", used: p.used, resets_at: p.resetsAt, minutes: 300 }], updated_at: Math.floor(Date.now() / 1000) });
+let plans: Record<string, PlanUsage> = {};
+
+/** The five-hour reading of the Claude login `key` (see `claudeKey`): the default login's unless an account is named. */
+export function setPlanUsage(p: PlanUsage, key: string = CLAUDE_KEY): void {
+  plans = { ...plans, [key]: p };
+  setProviderUsage({ provider: key, windows: [{ label: "Session", used: p.used, resets_at: p.resetsAt, minutes: 300 }], updated_at: Math.floor(Date.now() / 1000) });
   window.dispatchEvent(new Event(CHANGED));
 }
 
-export function usePlanUsage(): PlanUsage | null {
-  const [p, setP] = useState(latest);
+export function usePlanUsage(key: string = CLAUDE_KEY): PlanUsage | null {
+  const [p, setP] = useState(plans[key] ?? null);
   useEffect(() => {
-    const sync = () => setP(latest);
+    const sync = () => setP(plans[key] ?? null);
     window.addEventListener(CHANGED, sync);
+    sync();
     return () => window.removeEventListener(CHANGED, sync);
-  }, []);
+  }, [key]);
   return p;
+}
+
+// The Claude accounts added in Settings → Accounts, by id: what the meter calls each one's usage.
+let accountNames: Record<string, string> = {};
+
+export function setAccountNames(accounts: { id: string; name: string }[]): void {
+  accountNames = Object.fromEntries(accounts.map((a) => [a.id, a.name]));
+  // A new object, so the meters that read the usage draw again for the new names.
+  providers = { ...providers };
+  window.dispatchEvent(new Event("lantern-provider-usage"));
+}
+
+/** The usage keys of the added accounts, in the order they were added. */
+export const accountKeys = (): string[] => Object.keys(accountNames).map((id) => claudeKey(id));
+
+/** What the meter calls the Claude login `key`: null for a key that isn't one (a provider has its own name). With accounts, the default one says so. */
+export function accountLabel(key: string): string | null {
+  if (!isClaudeKey(key)) return null;
+  if (key === CLAUDE_KEY) return Object.keys(accountNames).length > 0 ? "Claude (default)" : "Claude";
+  const id = key.slice(CLAUDE_KEY.length + 1);
+  return `Claude (${accountNames[id] ?? id})`;
 }
 
 /** "Session 42% · resets 14:30". */
@@ -61,7 +89,7 @@ let providers: Record<string, ProviderUsage> = {};
 export function setProviderUsage(usage: ProviderUsage): void {
   const previous = providers[usage.provider];
   // Claude's weekly and session events arrive independently.
-  const windows = usage.provider === "claude" ? [...(previous?.windows ?? []).filter(w => !usage.windows.some(n => n.label === w.label)), ...usage.windows] : usage.windows;
+  const windows = isClaudeKey(usage.provider) ? [...(previous?.windows ?? []).filter(w => !usage.windows.some(n => n.label === w.label)), ...usage.windows] : usage.windows;
   providers = { ...providers, [usage.provider]: { ...usage, windows: [...windows].sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity)) } };
   window.dispatchEvent(new Event("lantern-provider-usage"));
 }

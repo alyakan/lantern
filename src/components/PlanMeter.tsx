@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { currentWindow, useProviderUsage } from "../lib/planUsage";
+import { accountKeys, accountLabel, claudeKey, currentWindow, isClaudeKey, useProviderUsage } from "../lib/planUsage";
 import { weekSentence } from "../lib/weekUsage";
 import { providerName } from "../lib/provider";
 import { DAY_SECS, HOUR_SECS, windowMarks, type Mark, type Marks } from "../lib/usageMarks";
@@ -10,7 +10,7 @@ import { ChevronIcon } from "./icons";
 
 interface Props {
   /** What the popover lists (computed when it opens), and opening one of the chats. Left out: the meter is only a reading. */
-  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void };
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void; switchToCodex?: () => void; account?: string };
 }
 
 const STATE_LABEL: Record<UsageState, string> = { working: "Working", waiting: "Needs you", idle: "Idle", ended: "Stopped" };
@@ -25,28 +25,34 @@ export function PlanMeter({ usage }: Props) {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
-  const summaries = [...new Set(["claude", "codex", ...Object.keys(providers)])].map(name => {
+  // Each Claude account has limits of its own: the pop-over lists them all, the bar the open chat's (with the other providers).
+  const active = claudeKey(usage?.account);
+  // A reading kept for an account that has since been removed is not listed.
+  const accounts = accountKeys();
+  const summaries = [...new Set(["claude", ...accounts, "codex", ...Object.keys(providers).filter(k => !isClaudeKey(k) || k === "claude" || accounts.includes(k))])].map(name => {
     const reading = providers[name];
     const windows = reading?.windows.filter(w => currentWindow(w, now)) ?? [];
     const used = windows.length ? Math.max(...windows.map(w => w.used)) : null;
     return { name, reading, windows, used };
   });
-  const label = summaries.map(p => `${providerName(p.name)}: ${p.used === null ? "usage unavailable" : `${pct(p.used)}% used`}`).join(", ");
+  const inBar = summaries.filter(p => !isClaudeKey(p.name) || p.name === active);
+  const nameOf = (key: string) => accountLabel(key) ?? providerName(key);
+  const label = summaries.map(p => `${nameOf(p.name)}: ${p.used === null ? "usage unavailable" : `${pct(p.used)}% used`}`).join(", ");
   return (
     <div className="plan-meter-box" ref={box}>
       <button
         ref={button}
         className="plan-meter"
-        title="Usage is separate for each provider. Each number is its fullest reported window."
-        aria-label={`Usage by provider. ${label}`}
+        title="Usage is separate for each provider and Claude account. Each number is its fullest reported window; the Claude one is the open chat's account."
+        aria-label={`Usage by provider and account. ${label}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? id : undefined}
         onClick={() => setOpen(!open)}
       >
-        {summaries.map(p => (
+        {inBar.map(p => (
           <span key={p.name} className={`mini-meter ${usageLevel(p.used)}`}>
-            <span>{providerName(p.name)} {p.used === null ? "—" : `${pct(p.used)}%`}</span>
+            <span>{nameOf(p.name)} {p.used === null ? "—" : `${pct(p.used)}%`}</span>
             <span className="mini-meter-track" aria-hidden>
               {p.used !== null && <span className="mini-meter-fill" style={{ width: `${pct(p.used)}%` }} />}
             </span>
@@ -55,10 +61,10 @@ export function PlanMeter({ usage }: Props) {
         <ChevronIcon up={open} />
       </button>
       {open && (
-        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Usage by provider">
+        <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Usage by provider and account">
           {summaries.map(({ name, reading, windows }) => (
-            <section key={name} aria-label={`${providerName(name)} usage`}>
-              <p className="usage-heading">{providerName(name)}</p>
+            <section key={name} aria-label={`${nameOf(name)} usage`}>
+              <p className="usage-heading">{nameOf(name)}</p>
               {windows.length === 0 ? <p className="usage-empty">Usage unavailable</p> : windows.map(w => (
                 <UsageBar
                   key={w.label}
@@ -74,7 +80,7 @@ export function PlanMeter({ usage }: Props) {
                   unit={w.minutes === 10080 ? "day" : "hour"}
                 />
               ))}
-              {name === "claude" && windows.some(w => w.used >= .95) && usage?.switchToCodex && (
+              {name === active && windows.some(w => w.used >= .95) && usage?.switchToCodex && (
                 <button className="soft" onClick={() => { setOpen(false); usage.switchToCodex!(); }}>Switch this chat to Codex</button>
               )}
               {reading && <p className="usage-note">Last updated {new Date(reading.updated_at * 1000).toLocaleTimeString()}</p>}
