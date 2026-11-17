@@ -1,4 +1,4 @@
-import { setProviderUsage, setPlanUsage } from "./lib/planUsage";
+import { claudeKey, setAccountNames, setProviderUsage, setPlanUsage } from "./lib/planUsage";
 import { EFFORT_LEVELS } from "./lib/effort";
 import { setWeekUsage } from "./lib/weekUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
@@ -243,6 +243,10 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const [accountByFolder, setAccountByFolder] = usePersistentState<Record<string, string>>("settings.accountByFolder", {});
   const [accountBySession, setAccountBySession] = usePersistentState<Record<string, string>>("settings.accountBySession", {});
   const [accountBySlot, setAccountBySlot] = useState<Record<string, string>>({});
+  // The usage events are heard by a listener made once: it reads each chat's account from here.
+  const accountBySlotRef = useRef(accountBySlot);
+  accountBySlotRef.current = accountBySlot;
+  useEffect(() => setAccountNames(accounts), [accounts]);
   useEffect(() => {
     api.listAccounts().then((list) => {
       setAccounts(list);
@@ -441,10 +445,12 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       for (const { slot, event } of items) dispatchChats({ type: "in", slot, action: { type: "ui_event", event } });
     });
     const unlisten = api.onUiEvent((slot, event) => {
-      // The plan's usage is the account's, not the chat's: kept once, for the top bar and the canvas.
-      if (event.kind === "provider_usage") setProviderUsage(event.usage);
-      else if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
-      else if (event.kind === "week_usage") setWeekUsage({ used: event.used, resetsAt: event.resets_at });
+      // The plan's usage is the account's, not the chat's: kept once per Claude account (the chat's own, see `claudeKey`), for
+      // the top bar and the canvas.
+      const key = claudeKey(accountBySlotRef.current[slot]);
+      if (event.kind === "provider_usage") setProviderUsage(event.usage.provider === "claude" ? { ...event.usage, provider: key } : event.usage);
+      else if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at }, key);
+      else if (event.kind === "week_usage") setWeekUsage({ used: event.used, resetsAt: event.resets_at }, key);
       else batch.push({ slot, event });
     });
     locate(null);
@@ -3513,7 +3519,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
-          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo, switchToCodex: activeProvider === CLAUDE && isAvailable("codex") && state.status === "idle" && !isBusy(state) && !state.orchestrator && !chats.agents[active] && state.backgroundTasks.length === 0 ? () => chooseProvider("codex") : undefined }}
+          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo, account: accountBySlot[active] ?? "", switchToCodex: activeProvider === CLAUDE && isAvailable("codex") && state.status === "idle" && !isBusy(state) && !state.orchestrator && !chats.agents[active] && state.backgroundTasks.length === 0 ? () => chooseProvider("codex") : undefined }}
           back={goBack && { run: goBack, label: backToProjects ? "Back to all projects" : backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
           inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}

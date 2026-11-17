@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { planLevel, planLine, planSentence, setProviderUsage, setPlanUsage } from "../lib/planUsage";
+import { claudeKey, planLevel, planLine, planSentence, setAccountNames, setProviderUsage, setPlanUsage } from "../lib/planUsage";
 import type { UsageRow } from "../lib/usage";
 import { setWeekUsage } from "../lib/weekUsage";
 import { DAY_SECS, HOUR_SECS, SESSION_SECS, windowMarks } from "../lib/usageMarks";
@@ -47,6 +47,53 @@ describe("the plan meter", () => {
     fireEvent.click(button);
     fireEvent.click(screen.getByRole("button", { name: "Switch this chat to Codex" }));
     expect(switchToCodex).toHaveBeenCalledOnce();
+  });
+
+  it("keeps each Claude account's limits apart: the bar follows the open chat's account and the pop-over lists them all", () => {
+    act(() => {
+      setAccountNames([{ id: "work", name: "Work" }]);
+      setPlanUsage({ used: 0.9, resetsAt: null }, claudeKey(null));
+      setPlanUsage({ used: 0.1, resetsAt: null }, claudeKey("work"));
+      setWeekUsage({ used: 0.3, resetsAt: null }, claudeKey("work"));
+    });
+    const { rerender } = render(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn(), account: "work" }} />);
+    const button = screen.getByRole("button", { name: /^Usage by provider/ });
+    expect(button).toHaveTextContent("Claude (Work) 30%");
+    expect(button).not.toHaveTextContent("Claude (default)");
+    // The same readings, for a chat on the default login: its own account's number leads.
+    rerender(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn(), account: "" }} />);
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).toHaveTextContent("Claude (default) 90%");
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).not.toHaveTextContent("Claude (Work)");
+    fireEvent.click(screen.getByRole("button", { name: /^Usage by provider/ }));
+    const pop = screen.getByRole("dialog");
+    expect(within(pop).getByRole("region", { name: "Claude (default) usage" })).toHaveTextContent("90%");
+    const work = within(pop).getByRole("region", { name: "Claude (Work) usage" });
+    expect(within(work).getByRole("region", { name: "Session" })).toHaveTextContent("10%");
+    expect(within(work).getByRole("region", { name: "Week" })).toHaveTextContent("30%");
+    act(() => {
+      setAccountNames([]);
+      setPlanUsage({ used: 0, resetsAt: null }, claudeKey("work"));
+    });
+  });
+
+  it("stops listing an account's usage once the account is removed", () => {
+    act(() => {
+      setAccountNames([{ id: "home", name: "Home" }]);
+      setPlanUsage({ used: 0.4, resetsAt: null }, claudeKey("home"));
+    });
+    render(<PlanMeter usage={{ rows: () => [], onOpen: vi.fn(), account: "home" }} />);
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).toHaveTextContent("Claude (Home) 40%");
+    act(() => setAccountNames([]));
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).not.toHaveTextContent("Home");
+  });
+
+  it("calls the login plain Claude when no account has been added", () => {
+    act(() => {
+      setAccountNames([]);
+      setPlanUsage({ used: 0.5, resetsAt: null });
+    });
+    render(<PlanMeter />);
+    expect(screen.getByRole("button", { name: /^Usage by provider/ })).toHaveTextContent("Claude 50%");
   });
 
   it("does not reuse expired percentages", () => {

@@ -15,8 +15,9 @@ export const WEEK_SECS = 7 * 24 * 3600;
 /** Less of the window than this has gone and a pace means nothing (the first hours of a week would say it ends in a day). */
 export const MIN_ELAPSED_SECS = 6 * 3600;
 
-export function setWeekUsage(w: WeekUsage): void {
-  setProviderUsage({ provider: "claude", windows: [{ label: "Week", used: w.used, resets_at: w.resetsAt, minutes: 10080 }], updated_at: Math.floor(Date.now() / 1000) });
+/** The weekly reading of the Claude login `key` (see `claudeKey` in planUsage.ts): the default login's unless an account is named. */
+export function setWeekUsage(w: WeekUsage, key: string = "claude"): void {
+  setProviderUsage({ provider: key, windows: [{ label: "Week", used: w.used, resets_at: w.resetsAt, minutes: 10080 }], updated_at: Math.floor(Date.now() / 1000) });
 }
 
 export interface WeekForecast {
