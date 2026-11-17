@@ -43,6 +43,8 @@ pub struct SessionConfig {
     pub path_env: Option<String>,
     /// A gateway chat's endpoint and key (see endpoints.rs); None for every other chat.
     pub endpoint: Option<GatewayLaunch>,
+    /// A Claude chat's account: the Claude folder it runs on (`CLAUDE_CONFIG_DIR`, see accounts.rs); None is the default login.
+    pub config_dir: Option<PathBuf>,
 }
 
 /// Image input shared by all clients. Wire encodings belong to each provider adapter.

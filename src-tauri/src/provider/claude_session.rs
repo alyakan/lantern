@@ -98,8 +98,19 @@ fn command(cfg: &SessionConfig) -> Command {
     if let Some(p) = &cfg.path_env {
         cmd.env("PATH", p);
     }
+    // A chat on another Claude account runs on that account's folder, which is where its login is.
+    // Its login is what runs: a key or token in Lantern's own environment would otherwise outrank it and bill another account.
+    if let Some(dir) = &cfg.config_dir {
+        cmd.env("CLAUDE_CONFIG_DIR", dir);
+        for k in ACCOUNT_REMOVED_ENV {
+            cmd.env_remove(k);
+        }
+    }
     cmd
 }
+
+/// What would make Claude Code run as someone other than the account a chat was given.
+const ACCOUNT_REMOVED_ENV: &[&str] = &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"];
 
 /// What turns on Claude Code's Artifact tool in a `-p` session.
 const PUBLISH_ARTIFACTS_ENV: &str = "CLAUDE_CODE_ARTIFACT";
@@ -109,7 +120,8 @@ impl ClaudeSession {
         let mut cmd = command(cfg);
         // On the user's API key when they chose it for Claude Code. A gateway chat has the endpoint's own token and never this
         // key (it is Anthropic's). If the key is wanted and can't be had the chat doesn't start: never on the sign-in instead.
-        if cfg.endpoint.is_none() {
+        // An account chat runs on that account's own login, never on the default's key.
+        if cfg.endpoint.is_none() && cfg.config_dir.is_none() {
             crate::provider_keys::apply_claude_tokio_in(&mut cmd, &cfg.folder)?;
         }
         Self::start(cmd, &cfg.binary, &cfg.folder, cfg.resume.clone(), sink, on_edit)
@@ -424,6 +436,7 @@ mod tests {
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         }
     }
 
@@ -521,6 +534,21 @@ mod tests {
         cfg.helper.publish_artifacts = false;
         assert_eq!(command(&cfg).as_std().get_envs().count(), 0);
         assert!(!prompt(&cfg).contains("Artifact tool"));
+    }
+
+    /// A chat on another Claude account runs on that account's folder; one on the default login sets nothing.
+    #[test]
+    fn a_chat_on_another_account_runs_on_its_claude_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("/bin/claude".into(), dir.path(), None);
+        assert!(!command(&cfg).as_std().get_envs().any(|(k, _)| k == "CLAUDE_CONFIG_DIR"));
+        cfg.config_dir = Some("/accounts/work".into());
+        let env: std::collections::HashMap<String, Option<String>> = command(&cfg).as_std().get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["CLAUDE_CONFIG_DIR"].as_deref(), Some("/accounts/work"));
+        // Its login is what runs: a key or token from Lantern's own environment is taken out (None: removed).
+        for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+            assert_eq!(env.get(k), Some(&None), "{k} must be removed");
+        }
     }
 
     /// A gateway chat: the token is in the environment and never on the command line (any process of the user reads that),

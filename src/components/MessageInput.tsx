@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
 import { AgentPlanSheet } from "./AgentPlanSheet";
-import type { AgentTodo, FoundFile, ModelOption, ProviderInfo, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import type { Account, AgentTodo, FoundFile, ModelOption, ProviderInfo, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
 import { agentName, capabilitiesOf } from "../lib/provider";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
@@ -18,6 +18,7 @@ import { EFFORT_LEVELS } from "../lib/effort";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { ProviderPicker, type ProviderOption } from "./ProviderPicker";
+import { AccountPicker } from "./AccountPicker";
 import type { Flavour } from "../lib/flavour";
 import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelsPicker } from "./ModelsPicker";
@@ -103,9 +104,11 @@ interface Props {
   provider?: ProviderInfo | null;
   /** In a new chat, with more than one provider: the agent CLIs to start it on, and how to change it (which starts the chat again). */
   providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
+  /** A new Claude chat's account, when accounts have been added (Settings → Accounts). */
+  accounts?: { list: Account[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ todos = [], status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, pendingSwitch }: Props) {
+export function MessageInput({ todos = [], status, waiting = false, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, preset: allPreset, update, history, provider, providers, accounts, pendingSwitch }: Props) {
   const caps = capabilitiesOf(provider);
   const agent = agentName(provider);
   // What the provider hasn't got isn't offered: its box has no effort, preset or "/" menu to show.
@@ -643,6 +646,7 @@ export function MessageInput({ todos = [], status, waiting = false, idlePlacehol
             </span>
           )}
           {!terminal && providers && providers.options.length > 1 && <ProviderPicker options={providers.options} chosen={providers.chosen} onChoose={providers.onChoose} disabled={busy} />}
+          {!terminal && accounts && accounts.list.length > 0 && <AccountPicker accounts={accounts.list} chosen={accounts.chosen} onChoose={accounts.onChoose} disabled={busy} />}
           {terminal ? (
             <span className="terminal-hint">{agent} sees the output with your next message · backspace to leave</span>
           ) : models ? (

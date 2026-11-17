@@ -31,6 +31,7 @@ const providerInfo = (id: unknown) => (id === "codex" ? CODEX_INFO : id === "gat
 const slotProvider: Record<string, string> = {};
 /** The endpoints saved (with `endpoints`: one to begin with, as Settings → Endpoints lists them). */
 type MockEndpoint = { id: string; name: string; url: string; key_env: string | null; models: string[] };
+const mockAccounts: { id: string; name: string }[] = typeof location !== "undefined" && new URLSearchParams(location.search).get("accounts") === "1" ? [{ id: "work", name: "Work" }] : [];
 let mockEndpoints: MockEndpoint[] = [];
 const MOCK_DEEPSEEK = { url: "https://api.deepseek.com/anthropic", models: ["deepseek-v4-pro", "deepseek-flash"] };
 const mockHosted = () => {
@@ -1652,6 +1653,19 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return new URLSearchParams(location.search).get("claude") === "missing" ? Promise.reject("Could not find the `claude` CLI. Install Claude Code, or enter its path.") : "/Users/you/.local/bin/claude";
         case "claude_login":
           return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
+        // Accounts: ?accounts=1 starts with a "Work" account added and signed in.
+        case "list_accounts":
+          return mockAccounts;
+        case "add_account": {
+          const account = { id: String(a.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "account", name: String(a.name) };
+          mockAccounts.push(account);
+          return account;
+        }
+        case "remove_account":
+          mockAccounts.splice(0, mockAccounts.length, ...mockAccounts.filter((x) => x.id !== a.id));
+          return null;
+        case "account_login":
+          return { logged_in: true, account: "sam@home.dev" };
         case "list_providers":
           return [
             ...(new URLSearchParams(location.search).get("claude") === "missing" ? [] : [{ ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null }]),

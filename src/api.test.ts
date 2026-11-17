@@ -21,7 +21,12 @@ const folderRule: RuleEntry = { scope: "folder", folder: "/repo", tool: "Bash", 
 
 const wrappers: [string, () => unknown, unknown[]][] = [
   ["locateClaude", () => api.locateClaude(null), ["locate_claude", { pathOverride: null }]],
-  ["claudeLogin", () => api.claudeLogin("/bin/claude"), ["claude_login", { claudePath: "/bin/claude" }]],
+  ["claudeLogin", () => api.claudeLogin("/bin/claude"), ["claude_login", { claudePath: "/bin/claude", account: null }]],
+  ["claudeLogin on an account", () => api.claudeLogin("/bin/claude", "work"), ["claude_login", { claudePath: "/bin/claude", account: "work" }]],
+  ["listAccounts", () => api.listAccounts(), ["list_accounts"]],
+  ["addAccount", () => api.addAccount("Work"), ["add_account", { name: "Work" }]],
+  ["removeAccount", () => api.removeAccount("/bin/claude", "work"), ["remove_account", { claudePath: "/bin/claude", id: "work" }]],
+  ["accountLogin", () => api.accountLogin("/bin/claude", "work"), ["account_login", { claudePath: "/bin/claude", id: "work" }]],
   ["listProviders", () => api.listProviders(), ["list_providers"]],
   // A worker on the main agent's own provider sends exactly what it always did; another provider is named.
   ["spawnWorker", () => api.spawnWorker("s1", { task: "Read it", name: null, isolation: "shared", model: null }), ["orchestra_spawn", { main: "s1", task: "Read it", name: null, isolation: "shared", model: null, role: null }]],

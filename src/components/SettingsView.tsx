@@ -16,6 +16,7 @@ import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { PresetSettings, type PresetSettingsProps } from "./PresetSettings";
 import { ApiKeysSettings } from "./ApiKeysSettings";
+import { AccountsSettings, type AccountsSettingsProps } from "./AccountsSettings";
 import { EndpointsSettings, type EndpointsSettingsProps } from "./EndpointsSettings";
 import { LinearSettings, type LinearSettingsProps } from "./LinearSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
@@ -29,15 +30,15 @@ import { ProviderDefaults, type ProviderDefault } from "./ProviderModels";
 import { SettingsHint, SettingsRow } from "./SettingsRow";
 import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "preset" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks" | "integrations";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", preset: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "preset" | "updates" | "permissions" | "routines" | "prs" | "remote" | "accounts" | "endpoints" | "apikeys" | "hooks" | "integrations";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", preset: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", accounts: "Accounts", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
 
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
   { title: "Lantern", tabs: ["general", "appearance", "updates"] },
   { title: "Agent", tabs: ["preset", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
-  { title: "Connected", tabs: ["mcp", "endpoints", "apikeys", "integrations", "remote"] },
+  { title: "Connected", tabs: ["mcp", "accounts", "endpoints", "apikeys", "integrations", "remote"] },
 ];
 
 /** What else a page can be found by: the search matches these as well as its name. */
@@ -52,6 +53,7 @@ const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
   hooks: ["pre", "post", "prompts"],
   prs: ["pull request", "checks", "merge", "tests"],
   mcp: ["servers", "tools"],
+  accounts: ["claude", "login", "sign in", "second", "work", "personal", "plan", "subscription"],
   endpoints: ["api", "provider", "url"],
   apikeys: ["api", "key", "keys", "token"],
   integrations: ["linear", "issues", "teams", "github", "slack"],
@@ -95,6 +97,7 @@ const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
   hooks: LinkIcon,
   prs: BranchIcon,
   mcp: ServerIcon,
+  accounts: KeyIcon,
   endpoints: GlobeIcon,
   apikeys: KeyIcon,
   integrations: PlugIcon,
@@ -144,6 +147,8 @@ interface Props {
   hooks?: HooksSettingsProps;
   /** The endpoints a chat can run on besides Anthropic's, for the Endpoints page. */
   endpoints?: EndpointsSettingsProps;
+  /** The Claude accounts a chat can run on besides the default login, for the Accounts page. */
+  accounts?: AccountsSettingsProps;
   /** Linear: the key, and the team of each project, for the Linear page. */
   linear?: LinearSettingsProps;
   /** The agent CLI the chat runs on: with no skills, or no advisor to set up a preset for, those pages aren't offered. Absent: Claude Code's. */
@@ -153,7 +158,7 @@ interface Props {
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, preset, providers, updates, general, routines, prChecks, hooks, endpoints, linear, mcpIssues = [], ...page }: Props) {
+export function SettingsView({ open, onClose, preset, providers, updates, general, routines, prChecks, hooks, endpoints, accounts, linear, mcpIssues = [], ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
@@ -165,7 +170,7 @@ export function SettingsView({ open, onClose, preset, providers, updates, genera
   const searchRef = useRef<HTMLInputElement>(null);
   // A page with nothing to show (no prop, or the provider doesn't offer it) isn't in the nav.
   const available = (t: SettingsTab) =>
-    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "preset" || preset) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
+    (t !== "integrations" || linear) && (t !== "general" || general) && (t !== "appearance" || general) && (t !== "preset" || preset) && (t !== "endpoints" || endpoints) && (t !== "accounts" || accounts) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t);
   const q = query.trim().toLowerCase();
   const found = (t: SettingsTab) => !q || TAB_LABEL[t].toLowerCase().includes(q) || (KEYWORDS[t] ?? []).some((k) => k.includes(q));
   const groups = GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((t) => available(t) && found(t)) })).filter((g) => g.tabs.length > 0);
@@ -284,6 +289,8 @@ export function SettingsView({ open, onClose, preset, providers, updates, genera
                 <PresetSettings {...preset} />
                 {providers && providers.length > 0 && <ProviderDefaults providers={providers} />}
               </>
+            ) : tab === "accounts" && accounts ? (
+              <AccountsSettings {...accounts} />
             ) : tab === "endpoints" && endpoints ? (
               <EndpointsSettings {...endpoints} />
             ) : tab === "apikeys" ? (

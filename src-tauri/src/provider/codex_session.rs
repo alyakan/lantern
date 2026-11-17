@@ -997,6 +997,7 @@ done
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         }
     }
 

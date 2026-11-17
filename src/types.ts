@@ -76,6 +76,12 @@ export interface ProviderListing extends ProviderInfo {
   endpoint?: { id: string; name: string } | null;
 }
 
+/** A Claude account added in Settings → Accounts (the backend's `Account`): a login of its own, besides the default one. */
+export interface Account {
+  id: string;
+  name: string;
+}
+
 /** An endpoint the user set up in Settings → Endpoints (the backend's `Endpoint`): where Claude Code sends a chat's requests. */
 export interface Endpoint {
   /** Made by the backend when it is first saved; empty for one not saved yet. */
@@ -419,6 +425,8 @@ export interface Settings {
   provider?: string;
   /** For a chat on an endpoint the user set up (`provider` is "gateway"): which one. */
   endpoint?: string;
+  /** For a Claude chat: the account it runs on (an `Account` id); absent is the default login. */
+  account?: string;
   mode: Mode;
   model: string | null;
   effort: string | null;
