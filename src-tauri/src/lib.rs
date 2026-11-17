@@ -6,6 +6,7 @@ pub mod changes;
 pub mod checks;
 pub mod cli_locator;
 pub mod diagnostics;
+pub mod accounts;
 pub mod endpoints;
 pub mod files;
 pub mod git;
@@ -83,6 +84,8 @@ pub struct AppState {
     folder_rules: Arc<permission::rules::FolderRules>,
     /// The endpoints chats can run on besides Anthropic's (Settings → Endpoints), saved in app data (see endpoints.rs).
     endpoints: Arc<endpoints::EndpointStore>,
+    /// The Claude accounts a chat can run on besides the default login (Settings → Accounts), see accounts.rs.
+    accounts: Arc<accounts::AccountStore>,
     /// API keys for the agent CLIs, an alternative to their own sign-in (Settings → API keys), kept in the Keychain (see
     /// provider_keys.rs).
     provider_keys: Arc<provider_keys::ProviderKeys>,
@@ -1690,6 +1693,10 @@ struct Settings {
     /// For a gateway chat: the endpoint it runs on (its id, see endpoints.rs).
     #[serde(default)]
     endpoint: Option<String>,
+    /// For a Claude chat: the Claude account it runs on (its id, see accounts.rs); None is the default login. Chats saved
+    /// before there were accounts don't say, and are on it.
+    #[serde(default)]
+    account: Option<String>,
     mode: Mode,
     model: Option<String>,
     effort: Option<String>,
@@ -1811,6 +1818,19 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
     } else {
         (None, checked_model(settings.model.clone())?)
     };
+    // A Claude chat's account: its folder is looked up here, from the id the window sent (never a path). Only Claude Code has
+    // accounts: a gateway chat runs on its endpoint's key and must not be given a login, and Codex has its own. A worker has
+    // its Lead's, whatever it sends. An account that is gone is an error, never a start on the default login.
+    let config_dir = if settings.provider != ProviderId::Claude {
+        None
+    } else if let Some(w) = &settings.worker {
+        state.slots.get(&w.parent).ok().and_then(|s| s.config.lock().unwrap().as_ref().and_then(|c| c.config_dir.clone()))
+    } else {
+        match settings.account.as_deref() {
+            Some(id) => Some(state.accounts.dir_for(id)?),
+            None => None,
+        }
+    };
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
     // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
     let notes = match &settings.worker {
@@ -1841,6 +1861,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         )?,
         path_env: login_path(state).await,
         endpoint,
+        config_dir,
     };
     cap_mode(&mut cfg, ceiling);
     Ok(cfg)
@@ -1878,18 +1899,27 @@ struct Login {
 /// Asks the claude at `claude_path` whether it is logged in, for the first-launch screen. An error means claude couldn't
 /// say (too old to have `auth status`, or it didn't answer): the screen then leaves it to the first chat to find out.
 #[tauri::command]
-async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result<Login, String> {
+async fn claude_login(state: State<'_, AppState>, claude_path: String, account: Option<String>) -> Result<Login, String> {
     let path_env = login_path(&state).await;
-    let mut cmd = tokio::process::Command::new(&claude_path);
+    let config_dir = account.as_deref().map(|id| state.accounts.dir_for(id)).transpose()?;
+    // On the API key there is no login to ask about: it needn't be signed in. (A named account has its own login.)
+    if config_dir.is_none() && provider_keys::claude_on_key() {
+        return Ok(Login { logged_in: true, account: Some("API key".into()) });
+    }
+    auth_status(&claude_path, path_env, config_dir.as_deref()).await
+}
+
+/// `claude auth status` for the claude at `claude_path`, on the Claude folder `config_dir` (None: the default login).
+async fn auth_status(claude_path: &str, path_env: Option<String>, config_dir: Option<&std::path::Path>) -> Result<Login, String> {
+    let mut cmd = tokio::process::Command::new(claude_path);
     // A claude that hangs (a wrapper waiting on a terminal, a login prompt) mustn't leave the first screen spinning:
     // the timeout drops the wait, and kill_on_drop stops the process.
     cmd.args(["auth", "status"]).stdin(std::process::Stdio::null()).kill_on_drop(true);
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
-    // On the API key there is no login to ask about: it needn't be signed in.
-    if provider_keys::claude_on_key() {
-        return Ok(Login { logged_in: true, account: Some("API key".into()) });
+    if let Some(dir) = config_dir {
+        cmd.env("CLAUDE_CONFIG_DIR", dir);
     }
     let out = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output())
         .await
@@ -1898,6 +1928,83 @@ async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result
     // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
     let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
     Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
+}
+
+/// The user's own Claude folder: what the default login uses, and what a new account shares its setup from.
+fn default_config_dir() -> Result<std::path::PathBuf, String> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) => Ok(std::path::PathBuf::from(dir)),
+        None => Ok(std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?).join(".claude")),
+    }
+}
+
+#[tauri::command]
+async fn list_accounts(state: State<'_, AppState>) -> Result<Vec<accounts::Account>, String> {
+    Ok(state.accounts.list())
+}
+
+/// Adds a Claude account called `name`, with the user's own setup (CLAUDE.md, skills, plugins, hooks, history) shared into it.
+/// It is signed in afterwards, with `account_login`.
+#[tauri::command]
+async fn add_account(state: State<'_, AppState>, name: String) -> Result<accounts::Account, String> {
+    let from = default_config_dir()?;
+    let accounts = state.accounts.clone();
+    tauri::async_runtime::spawn_blocking(move || accounts.create(&name, Some(&from))).await.map_err(|e| e.to_string())?
+}
+
+/// Takes an account out: its login (best effort) and its folder, never the user's own setup it shares.
+#[tauri::command]
+async fn remove_account(state: State<'_, AppState>, claude_path: String, id: String) -> Result<(), String> {
+    if let Ok(dir) = state.accounts.dir_for(&id) {
+        // A chat that is open on it would lose its login under it.
+        if state.slots.uses_config_dir(&dir) {
+            return Err("A chat is open on this account. Close it first, then remove the account.".into());
+        }
+        let path_env = login_path(&state).await;
+        let mut cmd = tokio::process::Command::new(&claude_path);
+        cmd.args(["auth", "logout"]).env("CLAUDE_CONFIG_DIR", &dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+        if let Some(path) = path_env {
+            cmd.env("PATH", path);
+        }
+        // Signed out before its folder goes: a login left behind would be found again by a new account of the same name. An
+        // account that was never signed in has nothing to sign out of, which `claude` reports as a failure too, so that is told apart.
+        let signed_in = auth_status(&claude_path, login_path(&state).await, Some(&dir)).await.map(|l| l.logged_in).unwrap_or(true);
+        if signed_in {
+            let out = tokio::time::timeout(std::time::Duration::from_secs(15), cmd.status()).await;
+            if !matches!(out, Ok(Ok(s)) if s.success()) {
+                return Err("Couldn't sign this account out, so it was kept. Try again, or run `claude auth logout` with CLAUDE_CONFIG_DIR set to its folder.".into());
+            }
+        }
+    }
+    let accounts = state.accounts.clone();
+    tauri::async_runtime::spawn_blocking(move || accounts.remove(&id)).await.map_err(|e| e.to_string())?
+}
+
+/// Signs account `id` in: `claude auth login` on its folder opens the browser and waits for the sign-in to finish.
+#[tauri::command]
+async fn account_login(state: State<'_, AppState>, claude_path: String, id: String) -> Result<Login, String> {
+    let dir = state.accounts.dir_for(&id)?;
+    let path_env = login_path(&state).await;
+    let mut cmd = tokio::process::Command::new(&claude_path);
+    // Claude opens the browser itself and waits for it to come back; its output is kept to say why when it doesn't. Its keys
+    // from Lantern's own environment are taken out: it signs in this account, not the default's key.
+    cmd.args(["auth", "login"]).env("CLAUDE_CONFIG_DIR", &dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+    for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+        cmd.env_remove(k);
+    }
+    if let Some(path) = &path_env {
+        cmd.env("PATH", path);
+    }
+    // Someone has to finish the sign-in in the browser: a few minutes, and then the wait is dropped and claude stopped.
+    let out = tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output())
+        .await
+        .map_err(|_| "The sign-in wasn't finished in the browser. Try again.".to_string())?
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let said = String::from_utf8_lossy(&[out.stderr.as_slice(), out.stdout.as_slice()].concat()).trim().chars().rev().take(300).collect::<String>().chars().rev().collect::<String>();
+        return Err(if said.is_empty() { "The sign-in didn't finish. Try again.".into() } else { format!("The sign-in didn't finish: {said}") });
+    }
+    auth_status(&claude_path, path_env, Some(&dir)).await
 }
 
 /// An agent CLI the window can offer for a chat: what it can do, the models it takes, and where its program is (always None
@@ -2445,10 +2552,10 @@ async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), S
 async fn aside_ask(app: AppHandle, state: State<'_, AppState>, slot: String, aside: String, text: String, model: Option<String>) -> Result<bool, String> {
     let model = checked_model(model)?;
     let s = state.slots.get(&slot)?;
-    let (provider, binary, folder, path_env, chat_model) = {
+    let (provider, binary, folder, path_env, chat_model, config_dir) = {
         let cfg = s.config.lock().unwrap();
         let cfg = cfg.as_ref().ok_or("No folder is open")?;
-        (cfg.provider, cfg.binary.clone(), cfg.folder.clone(), cfg.path_env.clone(), cfg.model.clone())
+        (cfg.provider, cfg.binary.clone(), cfg.folder.clone(), cfg.path_env.clone(), cfg.model.clone(), cfg.config_dir.clone())
     };
     if provider != ProviderId::Claude {
         return Err("Side chats need Claude Code.".into());
@@ -2456,7 +2563,7 @@ async fn aside_ask(app: AppHandle, state: State<'_, AppState>, slot: String, asi
     let session_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     // From the folder's own transcripts only: that is where the claude it starts looks.
     let resume = aside::forkable(&projects_root()?, &folder, &[], session_id.as_deref());
-    let launch = aside::Launch { binary, folder, path_env, resume, model: model.or(chat_model) };
+    let launch = aside::Launch { binary, folder, path_env, resume, model: model.or(chat_model), config_dir };
     let emit: Arc<dyn Fn(aside::AsideEvent) + Send + Sync> = Arc::new(move |ev| {
         let _ = app.emit("aside-event", &ev);
     });
@@ -4407,7 +4514,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, capture, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), accounts: Arc::new(accounts::AccountStore::load(app.path().app_data_dir().ok().map(|d| d.join("accounts.json")), app.path().app_data_dir().map(|d| d.join("accounts")).unwrap_or_else(|_| std::env::temp_dir().join("lantern-accounts")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, capture, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -4486,6 +4593,10 @@ pub fn run() {
             remote_new_chat_done,
             remote_claude_path,
             claude_login,
+            list_accounts,
+            add_account,
+            remove_account,
+            account_login,
             sidebar_menu,
             keep_awake,
             sleep_log,
@@ -4716,6 +4827,7 @@ mod hooks_flow_tests {
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         };
         // What the window and the phones are told: every event goes through the chat's hooks first, as the emitter does.
         let (tx, rx) = mpsc::unbounded_channel();
@@ -4968,6 +5080,7 @@ mod tests {
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         }
     }
 

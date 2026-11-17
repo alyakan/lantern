@@ -55,6 +55,7 @@ async fn a_real_claudes_helper_gets_through_and_nothing_else_does() {
         helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false },
         path_env: std::env::var("PATH").ok(),
         endpoint: None,
+        config_dir: None,
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
     claude_pid.store(session.pid(), Ordering::SeqCst);
@@ -138,6 +139,7 @@ async fn a_real_claude_takes_the_servers_instructions_and_calls_a_tool() {
         helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false },
         path_env: std::env::var("PATH").ok(),
         endpoint: None,
+        config_dir: None,
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
     claude_pid.store(session.pid(), Ordering::SeqCst);
@@ -207,6 +209,7 @@ async fn a_real_read_only_agent_has_a_git_tool_that_reads_and_no_shell_in_ask_an
             helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Worker { name: "reader".into(), read_only: true }, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: std::env::var("PATH").ok(),
             endpoint: None,
+            config_dir: None,
         };
         let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
         claude_pid.store(session.pid(), Ordering::SeqCst);
@@ -299,6 +302,7 @@ async fn a_chat_on_an_endpoint_raises_a_card_a_phone_can_see_and_answer() {
         helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None, publish_artifacts: false },
         path_env: std::env::var("PATH").ok(),
         endpoint: Some(GatewayLaunch { id: "fake".into(), url, key: None, auto_mode: false }),
+        config_dir: None,
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
     claude_pid.store(session.pid(), Ordering::SeqCst);

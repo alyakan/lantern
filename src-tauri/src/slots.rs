@@ -164,6 +164,12 @@ impl Slots {
         slots.iter().filter(|s| s.session.try_lock().map(|g| g.is_some()).unwrap_or(true)).filter_map(|s| s.folder().ok()).collect()
     }
 
+    /// Whether a chat that is open (running or asleep) is on the Claude account whose folder is `dir`.
+    pub fn uses_config_dir(&self, dir: &std::path::Path) -> bool {
+        let slots: Vec<Arc<Slot>> = self.slots.lock().unwrap().values().cloned().collect();
+        slots.iter().any(|s| s.config.lock().unwrap().as_ref().is_some_and(|c| c.config_dir.as_deref() == Some(dir)))
+    }
+
     /// The conversations open in a chat, running or asleep: the session its claude runs, or the one it resumes on waking.
     pub fn session_ids(&self) -> Vec<String> {
         let slots: Vec<Arc<Slot>> = self.slots.lock().unwrap().values().cloned().collect();
@@ -332,6 +338,7 @@ mod tests {
             helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         };
         let slots = Slots::default();
         let mut open = vec![];

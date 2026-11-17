@@ -53,6 +53,8 @@ pub struct Launch {
     pub resume: Option<String>,
     /// `--model`; None is Claude Code's default.
     pub model: Option<String>,
+    /// The chat's Claude account folder (see accounts.rs), so the side chat is on its login and quota; None is the default login.
+    pub config_dir: Option<std::path::PathBuf>,
 }
 
 /// Ids come from the window and name a side chat in a map, so they are short and plain.
@@ -103,6 +105,12 @@ fn command(launch: &Launch) -> Command {
     cmd.args(args(launch.resume.as_deref(), launch.model.as_deref())).current_dir(&launch.folder);
     if let Some(p) = &launch.path_env {
         cmd.env("PATH", p);
+    }
+    if let Some(dir) = &launch.config_dir {
+        cmd.env("CLAUDE_CONFIG_DIR", dir);
+        for k in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"] {
+            cmd.env_remove(k);
+        }
     }
     cmd
 }
@@ -348,7 +356,7 @@ mod tests {
     fn the_command_is_the_program_with_those_arguments_and_nothing_through_a_shell() {
         // A value that would mean something to a shell stays one argument, whatever it holds.
         let hostile = "abc; rm -rf ~ && echo $(whoami)";
-        let launch = Launch { binary: "/bin/claude".into(), folder: "/tmp".into(), path_env: Some("/usr/bin".into()), resume: Some(hostile.into()), model: None };
+        let launch = Launch { binary: "/bin/claude".into(), folder: "/tmp".into(), path_env: Some("/usr/bin".into()), resume: Some(hostile.into()), model: None, config_dir: None };
         let cmd = command(&launch);
         let cmd = cmd.as_std();
         assert_eq!(cmd.get_program(), "/bin/claude");
@@ -432,7 +440,7 @@ mod tests {
     }
 
     fn launch(binary: std::path::PathBuf, folder: &Path) -> Launch {
-        Launch { binary, folder: folder.to_path_buf(), path_env: None, resume: Some("2e1f7a52-aaaa-4bbb-8ccc-0123456789ab".into()), model: Some("haiku".into()) }
+        Launch { binary, folder: folder.to_path_buf(), path_env: None, resume: Some("2e1f7a52-aaaa-4bbb-8ccc-0123456789ab".into()), model: Some("haiku".into()), config_dir: None }
     }
 
     fn channel() -> (Emit, mpsc::UnboundedReceiver<AsideEvent>) {
