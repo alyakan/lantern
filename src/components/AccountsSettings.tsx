@@ -124,8 +124,8 @@ export function AccountsSettings({ claudePath, onChanged }: AccountsSettingsProp
       ) : (
         <ul className="settings-list">
           {accounts.map((a) => (
-            <li key={a.id} className="settings-row">
-              <div>
+            <li key={a.id} className="settings-row account-row">
+              <div className="account-who">
                 <div>{a.name}</div>
                 <span className="settings-row-sub">{who[a.id] === undefined ? "Checking…" : who[a.id] ? `Signed in as ${who[a.id]}` : "Not signed in"}</span>
               </div>
@@ -142,7 +142,7 @@ export function AccountsSettings({ claudePath, onChanged }: AccountsSettingsProp
         </ul>
       )}
       <form
-        className="endpoint-add"
+        className="endpoint-add account-add"
         onSubmit={(e) => {
           e.preventDefault();
           if (name.trim() && busy === null) add();

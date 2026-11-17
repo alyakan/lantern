@@ -3332,7 +3332,12 @@ button.summary-main:hover:not(:disabled) { background: none; }
 .endpoint-actions, .endpoint-add { display: flex; align-items: center; gap: 8px; }
 .endpoint-add { padding-top: 4px; }
 .endpoint-spacer { flex: 1; }
-/* A key being saved or saved already: its field beside Save key, or the note beside Remove key (on an endpoint's grid, across it). */
+/* Settings → Accounts: a row is the account and who it is signed in as, with its buttons at the end, inside its border. */
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
+.account-who { min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.account-row .endpoint-actions { flex: none; }
+.account-add { margin-top: 12px; padding-top: 0; }
+.account-add input { flex: 1; min-width: 0; }/* A key being saved or saved already: its field beside Save key, or the note beside Remove key (on an endpoint's grid, across it). */
 .endpoint-keybox { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .endpoint-keybox input { flex: 1; min-width: 180px; }
 .endpoint-fields > .endpoint-keybox { grid-column: 1 / -1; }
