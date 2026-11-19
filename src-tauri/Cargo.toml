@@ -1,6 +1,6 @@
 [package]
 name = "lantern"
-version = "0.1.124"
+version = "0.1.125"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
