@@ -15,7 +15,7 @@ import { Sheet } from "../ui/Sheet";
 import { Bar, Pulse } from "../ui/skeleton";
 import { SheetBar } from "../ui/Sheet";
 import { barButton, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
-import { autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
+import { accountsOf, autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 import { loadLastProject, loadNewChatPermissions, saveLastProject, saveNewChatPermissions } from "../prefs";
 import { useAttachments } from "../ui/useAttachments";
@@ -150,6 +150,12 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     if (next && !next.auto) setPermissions("ask");
     if (next && !next.presets) setPreset(null);
   };
+  // Which Claude account it runs on: the default login unless chosen. Only for a chat that is known to run on Claude Code (the project's
+  // own provider is the Mac's to know), on a Mac that lists accounts.
+  const canAccount = useMacCan("accounts");
+  const accounts = canAccount && runsOn === "claude" ? accountsOf(controls) : [];
+  const [account, setAccount] = useState<string | null>(null);
+  const chosenAccount = accounts.find((a) => a.id === account) ?? null;
   const canFlow = useMacCan("workflow");
   const [workflow, setWorkflow] = useState<Exclude<RemoteWorkflow, "team">>("chat");
   // The options behind the line that says what it runs on.
@@ -216,7 +222,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
       dictation.cancel();
       // (A model only from the list of where it runs, and its effort only if that model takes it.)
       const ownModel = pickedModel ? { model: pickedModel.value, ...(effort && pickedModel.effort_levels.includes(effort) ? { effort } : {}) } : {};
-      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel } : {}, canPhotos ? attach.images : []);
+      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {}, canPhotos ? attach.images : []);
       void saveLastProject(project);
       // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
       if (supported && !note) void saveNewChatPermissions(permissions);
@@ -238,7 +244,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const note = noAuto ?? autoNote(controls);
   // What it starts on: Ask where Auto can't be had (a remembered Auto included).
   const mode: RemotePermissions = note ? "ask" : permissions;
-  const summary = [chosen?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, pickedModel || !chosen || chosen.presets ? modelLabel : null].filter(Boolean).join(" · ");
+  const summary = [chosen?.name, chosenAccount?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, pickedModel || !chosen || chosen.presets ? modelLabel : null].filter(Boolean).join(" · ");
 
   return (
     <Sheet
@@ -378,6 +384,19 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                           </ScrollView>
                           <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
                             {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac uses this project’s selected provider."}
+                          </Txt>
+                        </View>
+                      )}
+                      {accounts.length > 0 && (
+                        <View>
+                          <Caption>Claude account</Caption>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                            {[{ id: null as string | null, name: "Default login" }, ...accounts].map((a) => (
+                              <Pill key={a.id ?? "default"} label={a.name} on={a.id === (chosenAccount?.id ?? null)} onPress={() => setAccount(a.id)} />
+                            ))}
+                          </ScrollView>
+                          <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
+                            {chosenAccount ? `The chat uses ${chosenAccount.name}'s sign-in and limits.` : "The chat uses your own Claude sign-in."}
                           </Txt>
                         </View>
                       )}

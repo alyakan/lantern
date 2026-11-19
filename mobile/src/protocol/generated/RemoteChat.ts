@@ -34,6 +34,11 @@ workflow: RemoteWorkflow | null,
  */
 provider?: string | null, 
 /**
+ * The id of the Claude account the chat runs on, one of Controls' `accounts`. None for the default login, for a chat on another
+ * provider, and from a Mac that doesn't say.
+ */
+account?: string | null, 
+/**
  * One short line for the chat's row: the tool it is in while it works, else the last thing it said (None until it has done
  * either, and from a Mac that doesn't say).
  */

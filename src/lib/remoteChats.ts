@@ -33,6 +33,8 @@ export interface WindowChat {
    * that isn't open yet too.
    */
   provider?: string;
+  /** The id of the Claude account it runs on, for a phone to show. Left out for the default login and for a chat not on Claude Code. */
+  account?: string;
   /** A change to its settings that waits for it (made while it worked), for a phone to show. Left out when none waits. */
   pending?: WindowPending;
 }
@@ -50,13 +52,14 @@ export interface WindowPending {
  * `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into
  * PROJECT_COLORS (see assignColors). `providerOf`: the name of what a chat runs on when that isn't Claude Code, else null.
  */
-export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}, providerOf: (slot: string) => string | null = () => null, pendingOf: (slot: string) => WindowPending | null = () => null): WindowChat[] {
+export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}, providerOf: (slot: string) => string | null = () => null, pendingOf: (slot: string) => WindowPending | null = () => null, accountOf: (slot: string) => string | null = () => null): WindowChat[] {
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
       const provider = providerOf(item.slot);
       const pending = pendingOf(item.slot);
-      return { ...(pending ? { pending } : {}), slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null, ...(provider ? { provider } : {}) };
+      const account = accountOf(item.slot);
+      return { ...(pending ? { pending } : {}), ...(account ? { account } : {}), slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null, ...(provider ? { provider } : {}) };
     }),
   );
 }
@@ -81,6 +84,23 @@ export function windowProviders(listed: ProviderInfo[], nameOf: (id: string) => 
   // Claude Code is always one of them, whether or not the list has it yet.
   const all = listed.length ? offered : [{ id: CLAUDE, capabilities: CLAUDE_CAPABILITIES }];
   return all.map((l) => ({ id: l.id, name: nameOf(l.id), auto: capabilitiesOf(l).supports_auto_mode, presets: capabilitiesOf(l).supports_advisor }));
+}
+
+/** A Claude account a phone may put a chat on, as the backend lists it: Settings → Accounts' id and name (the default login is always there). */
+export interface WindowAccount {
+  id: string;
+  name: string;
+}
+
+/**
+ * Why a phone may not put a chat on this account, or null: none is the default login; one has to be among the window's own
+ * (`ctx.accounts`, never named by the phone), and only a chat on Claude Code has one.
+ */
+export function checkRemoteAccount(account: unknown, providerId: string, ctx: RemoteContext): string | null {
+  if (account == null) return null;
+  if (typeof account !== "string" || !(ctx.accounts ?? []).some((a) => a.id === account)) return "That isn't one of your accounts.";
+  if (providerId !== CLAUDE) return "An account is for a chat on Claude Code.";
+  return null;
 }
 
 /** One provider's models as a phone may pick them for a chat it starts (the backend's RemoteModels). */
@@ -142,6 +162,8 @@ export interface RemoteContext {
   providers?: WindowProvider[];
   /** Those providers' models (see `windowModels`). */
   models?: WindowModels[];
+  /** The Claude accounts besides the default login (Settings → Accounts). */
+  accounts?: WindowAccount[];
 }
 
 /** Why a phone may not have this workflow, or null: a chat or Step by step; a team is started and left on the Mac. */
@@ -185,6 +207,8 @@ export interface RemoteNewChat {
   model?: string | null;
   /** One of the effort levels the window listed for it, or null (missing too) for its own; never with a preset. */
   effort?: string | null;
+  /** One of the Claude accounts the window listed, or null (missing too) for the default login. */
+  account?: string | null;
 }
 
 /**
@@ -215,6 +239,42 @@ export interface RemoteSetPreset {
 export interface RemoteSetWorkflow {
   slot: string;
   workflow: string;
+}
+/** A phone moves a chat to a Claude account (null: the default login; see remote::SetAccountRequest). */
+export interface RemoteSetAccount {
+  slot: string;
+  account: string | null;
+}
+
+/** What the window knows of the chat a phone wants to move to another account. */
+export interface AccountTarget {
+  /** The window has this chat. */
+  known: boolean;
+  /** A team's Lead or one of its agents: its account is a decision about the whole team, made at the Mac. */
+  team: boolean;
+  /** Whether the chat runs on Claude Code (an account is Claude Code's login). */
+  onClaude: boolean;
+  idle: boolean;
+  asleep: boolean;
+  /** Background tasks that the restart would stop: the window asks the user about that, and nobody is at the Mac to answer. */
+  background: number;
+}
+
+/**
+ * Whether the window moves a chat to an account for a phone, and why not (the backend checked the same; any window can emit what
+ * this one listens for): only one of the window's own accounts, only an idle chat on Claude Code that isn't a team's, and never
+ * over background tasks.
+ */
+export function checkRemoteSetAccount(account: unknown, target: AccountTarget, ctx: RemoteContext): string | null {
+  const why = checkRemoteAccount(account, target.onClaude ? CLAUDE : "other", ctx);
+  if (why) return why;
+  if (!target.known) return "That chat isn't open on your Mac.";
+  if (target.team) return "That chat is part of a team: move it on your Mac.";
+  if (!target.onClaude) return "An account is for a chat on Claude Code.";
+  if (target.asleep) return "This chat is asleep. Wake it first.";
+  if (!target.idle) return "Claude is busy in this chat. Move it once it has finished.";
+  if (target.background > 0) return "This chat has background tasks running, which moving it would stop.";
+  return null;
 }
 
 /** What the backend asks of the window when a phone closes a chat (see remote::CloseRequest). */

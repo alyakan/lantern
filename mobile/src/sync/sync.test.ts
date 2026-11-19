@@ -493,6 +493,40 @@ describe("what a phone may choose for a chat", () => {
     expect((await sync.controls())?.models).toEqual([{ provider: "claude", models: [{ value: "opus", name: "Opus 5.5", effort_levels: ["low", "max"] }, { value: "haiku", name: "haiku", effort_levels: [] }] }]);
   });
 
+  it("keeps the Claude accounts a Mac lists that are well formed, each once, and leaves the field out when there are none", async () => {
+    const { sync } = rig();
+    const accounts = [{ id: "work", name: "Work" }, { id: "work", name: "Again" }, { id: "", name: "No id" }, { id: "x", name: "" }, { id: 4, name: "Number" }, null];
+    sync.onSession(fakeSession(1, { controls: { allow_auto: true, presets: [], accounts } }, {}, ["controls"]).session);
+    expect((await sync.controls())?.accounts).toEqual([{ id: "work", name: "Work" }]);
+    const none = rig().sync;
+    none.onSession(fakeSession(1, { controls: { allow_auto: true, presets: [], accounts: "work" } }, {}, ["controls"]).session);
+    expect("accounts" in ((await none.controls()) as object)).toBe(false);
+  });
+
+  it("sends a new chat's account and moves a chat between accounts, only to a Mac that lists them", async () => {
+    const { sync } = rig();
+    const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["controls", "accounts"]);
+    sync.onSession(session);
+    await sync.newChat("/p", "hi", { account: "work" });
+    await sync.newChat("/p", "hi");
+    await sync.setAccount("a", "work");
+    await sync.setAccount("a", null);
+    expect(asked.filter((r) => r.op !== "list_waiting")).toEqual([
+      { op: "new_chat", project: "/p", text: "hi", permissions: null, preset: null, workflow: null, account: "work" },
+      // No account chosen: the field isn't there at all.
+      { op: "new_chat", project: "/p", text: "hi", permissions: null, preset: null, workflow: null },
+      { op: "set_account", slot: "a", account: "work" },
+      { op: "set_account", slot: "a", account: null },
+    ]);
+    // An older Mac ends the connection at a request it doesn't know: nothing is sent.
+    const old = rig().sync;
+    const oldSession = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["controls"]);
+    old.onSession(oldSession.session);
+    await expect(old.newChat("/p", "hi", { account: "work" })).rejects.toThrow("Update Lantern");
+    await expect(old.setAccount("a", "work")).rejects.toThrow("Update Lantern");
+    expect(oldSession.asked.some((r) => r.op === "set_account" || r.op === "new_chat")).toBe(false);
+  });
+
   it("never asks a Mac that can't say: it would end the connection at a request it doesn't know", async () => {
     const { sync } = rig();
     const { session, asked } = fakeSession(1);

@@ -675,6 +675,10 @@ impl remote::gateway::Host for RemoteHost {
         self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
     }
 
+    fn set_account(&self, slot: &str, account: Option<&str>) -> Result<(), String> {
+        self.app.emit("remote-set-account", remote::SetAccountRequest { slot: slot.to_string(), account: account.map(String::from) }).map_err(|e| e.to_string())
+    }
+
     fn queue_switch(&self, slot: &str, change: serde_json::Value, when: remote::protocol::RemoteWhen) -> Result<(), String> {
         self.app.emit("remote-queue-switch", serde_json::json!({ "slot": slot, "change": change, "when": when.as_str() })).map_err(|e| e.to_string())
     }
@@ -3388,10 +3392,14 @@ async fn respond_permission(state: State<'_, AppState>, slot: String, request_id
 /// where a chat may run (Claude Code, and an endpoint or two; the window leaves out any whose questions a phone can't answer), and
 /// each of those providers' models.
 #[tauri::command]
-fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>, providers: Option<Vec<remote::protocol::RemoteProvider>>, models: Option<Vec<remote::protocol::RemoteModels>>) {
+fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>, providers: Option<Vec<remote::protocol::RemoteProvider>>, models: Option<Vec<remote::protocol::RemoteModels>>, accounts: Option<Vec<remote::protocol::RemoteAccount>>) {
     state.remote.hub.set_presets(presets);
     state.remote.hub.set_providers(providers.unwrap_or_default());
     state.remote.hub.set_models(models.unwrap_or_default());
+    // Only an account the Mac really has (what the window says is checked against its own list), under the name the Mac keeps.
+    let known = state.accounts.list();
+    let listed = accounts.unwrap_or_default().into_iter().filter_map(|a| known.iter().find(|k| k.id == a.id).map(|k| remote::protocol::RemoteAccount { id: k.id.clone(), name: k.name.clone() })).collect();
+    state.remote.hub.set_accounts(listed);
 }
 
 /// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
@@ -3545,7 +3553,7 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, by: Str
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
     let hold_first = !images.is_empty();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first, model: model.model, effort: model.effort };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first, model: model.model, effort: model.effort, account: model.account };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());

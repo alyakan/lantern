@@ -3,7 +3,7 @@ import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { BUILT_IN } from "./preset";
 import { PROJECT_COLORS } from "./projectColors";
-import { checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type RemoteContext, type SwitchTarget } from "./remoteChats";
+import { checkRemoteAccount, checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSetAccount, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type AccountTarget, type RemoteContext, type SwitchTarget } from "./remoteChats";
 import { CLAUDE_CAPABILITIES } from "./provider";
 import { PLAIN } from "../testProviders";
 import type { ProjectOpen } from "./sidebar";
@@ -252,5 +252,39 @@ describe("the models a phone may start a chat on", () => {
     expect(checkRemoteModel("haiku", "low", null, list)).toBe("That model has no such effort.");
     expect(checkRemoteModel(null, "medium", null, list)).toBe("That model has no such effort.");
     expect(checkRemoteModel("opus", null, null, undefined)).toBe("Your Mac didn't list that provider's models.");
+  });
+});
+
+describe("a phone's Claude account", () => {
+  const ctx: RemoteContext = { allowAuto: false, presetIds: [], accounts: [{ id: "work", name: "Work" }] };
+  const target = (over: Partial<AccountTarget> = {}): AccountTarget => ({ known: true, team: false, onClaude: true, idle: true, asleep: false, background: 0, ...over });
+
+  it("tells the hub which account each Claude chat runs on, and nothing for the default login", () => {
+    const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "idle" }), b: chat({ status: "idle" }) } };
+    const open = { "/work/lantern": project([{ slot: "a", title: "A" }, { slot: "b", title: "B" }]) };
+    const told = windowChats(chats, open, {}, {}, () => null, () => null, (slot) => (slot === "a" ? "work" : null));
+    expect(told.map((c) => [c.slot, c.account])).toEqual([["a", "work"], ["b", undefined]]);
+  });
+
+  it("takes only an account the window listed, and only for a chat on Claude Code", () => {
+    expect(checkRemoteAccount(null, "claude", ctx)).toBeNull();
+    expect(checkRemoteAccount("work", "claude", ctx)).toBeNull();
+    expect(checkRemoteAccount("made-up", "claude", ctx)).toBe("That isn't one of your accounts.");
+    expect(checkRemoteAccount("../work", "claude", ctx)).toBe("That isn't one of your accounts.");
+    expect(checkRemoteAccount(7, "claude", ctx)).toBe("That isn't one of your accounts.");
+    expect(checkRemoteAccount("work", "gateway:ollama", ctx)).toBe("An account is for a chat on Claude Code.");
+    expect(checkRemoteAccount("work", "claude", { allowAuto: false, presetIds: [] })).toBe("That isn't one of your accounts.");
+  });
+
+  it("moves an idle Claude chat, and says why not for any other", () => {
+    expect(checkRemoteSetAccount("work", target(), ctx)).toBeNull();
+    expect(checkRemoteSetAccount(null, target(), ctx)).toBeNull();
+    expect(checkRemoteSetAccount("made-up", target(), ctx)).toBe("That isn't one of your accounts.");
+    expect(checkRemoteSetAccount("work", target({ known: false }), ctx)).toBe("That chat isn't open on your Mac.");
+    expect(checkRemoteSetAccount("work", target({ team: true }), ctx)).toBe("That chat is part of a team: move it on your Mac.");
+    expect(checkRemoteSetAccount("work", target({ onClaude: false }), ctx)).toBe("An account is for a chat on Claude Code.");
+    expect(checkRemoteSetAccount("work", target({ asleep: true, idle: false }), ctx)).toBe("This chat is asleep. Wake it first.");
+    expect(checkRemoteSetAccount("work", target({ idle: false }), ctx)).toBe("Claude is busy in this chat. Move it once it has finished.");
+    expect(checkRemoteSetAccount("work", target({ background: 2 }), ctx)).toBe("This chat has background tasks running, which moving it would stop.");
   });
 });
