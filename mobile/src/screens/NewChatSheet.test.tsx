@@ -438,3 +438,74 @@ describe("starting a chat as Step by step", () => {
     await waitFor(() => expect(session.lastOf("new_chat")).toMatchObject({ op: "new_chat", workflow: "steps", permissions: "ask" }));
   });
 });
+
+describe("choosing a new chat's Claude account", () => {
+  const claude = { id: "claude", name: "Claude", auto: true, presets: true };
+  const ollama = { id: "gateway:ollama", name: "Ollama", auto: false, presets: false };
+  const presets = [{ id: "balanced", name: "Balanced", summary: "Sonnet" }];
+  const accounts = [{ id: "work", name: "Work" }];
+  async function openWith(controls: Record<string, unknown>, features = ["controls", "workflow", "accounts"]) {
+    const { controller } = makeController();
+    const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls }, features);
+    await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, { connection: connectedWith(features) }, controller);
+    await projectsHere();
+    return session;
+  }
+  const start = async (lastOf: (op: "new_chat") => unknown) => {
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toBeTruthy());
+    return lastOf("new_chat") as Record<string, unknown>;
+  };
+
+  it("offers the default login and each account when Claude Code is the only provider, and sends none unless one is chosen", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [], accounts });
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Work" })).toBeTruthy());
+    expect(screen.getByRole("radio", { name: "Default login" })).toBeTruthy();
+    expect(screen.getByText("The chat uses your own Claude sign-in.")).toBeTruthy();
+    const sent = await start(lastOf);
+    expect("account" in sent).toBe(false);
+  });
+
+  it("starts on the account that was chosen, and says whose sign-in it uses", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [], accounts });
+    await openOptions();
+    await fireEvent.press(await screen.findByRole("radio", { name: "Work" }));
+    expect(screen.getByText("The chat uses Work's sign-in and limits.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Runs on: Work · Chat · Ask · Project's own" })).toBeTruthy();
+    expect(await start(lastOf)).toMatchObject({ op: "new_chat", account: "work" });
+  });
+
+  it("offers no account for another provider, or where the project's own is unknown, and sends none from a choice made before", async () => {
+    const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama], accounts });
+    await openOptions();
+    // The project's own provider is the Mac's to know: no account until Claude is chosen.
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Ollama" })).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Work" })).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: "Claude" }));
+    await fireEvent.press(await screen.findByRole("radio", { name: "Work" }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Ollama" }));
+    expect(screen.queryByRole("radio", { name: "Work" })).toBeNull();
+    const sent = await start(lastOf);
+    expect(sent).toMatchObject({ provider: "gateway:ollama" });
+    expect("account" in sent).toBe(false);
+  });
+
+  it.each([
+    ["has none", { allow_auto: true, presets, providers: [], accounts: [] }],
+    ["is older and doesn't say", { allow_auto: true, presets, providers: [] }],
+  ])("offers no account when the Mac %s", async (_, controls) => {
+    await openWith(controls);
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Default login" })).toBeNull();
+  });
+
+  it("offers no account to a Mac that doesn't list accounts, even if it sent some", async () => {
+    await openWith({ allow_auto: true, presets, providers: [], accounts }, ["controls", "workflow"]);
+    await openOptions();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Work" })).toBeNull();
+  });
+});

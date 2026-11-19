@@ -404,3 +404,69 @@ describe("changing a working chat, on a Mac that can", () => {
     await waitFor(() => expect(lastOf("conversation_settings")).toEqual({ op: "conversation_settings", slot: "a", change: { model: "gpt-example" }, when: "finished" }));
   });
 });
+
+describe("the Claude account", () => {
+  const accounts = [{ id: "work", name: "Work" }, { id: "home", name: "Home" }];
+  const withAccounts = { answers: { controls: { allow_auto: false, presets, accounts } } as Parameters<typeof attachSession>[1], features: ["controls", "close", "workflow", "accounts"] };
+
+  it("says which account a chat runs on first after Claude in the title bar's line, and nothing for the default login", async () => {
+    await open({ ...withAccounts, chatOver: { account: "work" } });
+    await waitFor(() => expect(screen.getByText("under the title: Work · Ask · Balanced")).toBeTruthy());
+    await open({ ...withAccounts, chatOver: { account: null } });
+    await waitFor(() => expect(screen.getAllByText("under the title: Ask · Balanced").length).toBeGreaterThan(0));
+  });
+
+  it("is moved in place from its menu, with Switching… until the chat says it is on the account", async () => {
+    const { controller, lastOf, c } = await open({ ...withAccounts });
+    await openSheet();
+    expect(screen.getByRole("menu", { name: "Account, Default login" })).toBeTruthy();
+    expect(screen.getByText(/Moving it restarts the chat on the same conversation/)).toBeTruthy();
+    await fireEvent.press(item("Work"));
+    await waitFor(() => expect(lastOf("set_account")).toEqual({ op: "set_account", slot: "a", account: "work" }));
+    await waitFor(() => expect(screen.getByRole("menu", { name: "Account, Switching…" })).toBeTruthy());
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [{ ...c, account: "work" }] } }));
+  });
+
+  it("moves a chat back to the default login by sending no account", async () => {
+    const { lastOf } = await open({ ...withAccounts, chatOver: { account: "work" } });
+    await openSheet();
+    await fireEvent.press(item("Default login"));
+    await waitFor(() => expect(lastOf("set_account")).toEqual({ op: "set_account", slot: "a", account: null }));
+  });
+
+  it("says why in the sheet when the Mac refuses, and goes back to the account it was on", async () => {
+    const { onProblem } = await open({ ...withAccounts, answers: { controls: { allow_auto: false, presets, accounts }, set_account: new Error("That isn't one of your accounts.") } });
+    await openSheet();
+    await fireEvent.press(item("Work"));
+    await waitFor(() => expect(onProblem).toHaveBeenCalledWith("That isn't one of your accounts."));
+    expect(screen.getByRole("menu", { name: "Account, Default login" })).toBeTruthy();
+  });
+
+  it("does not ask the Mac to move a chat to the account it is on", async () => {
+    const { asked } = await open({ ...withAccounts, chatOver: { account: "work" } });
+    await openSheet();
+    await fireEvent.press(item("Work"));
+    expect(asked.some((r) => r.op === "set_account")).toBe(false);
+  });
+
+  it("is held while Claude is busy, with why, and is not asked for later", async () => {
+    await open({ ...withAccounts, chatOver: { status: "working" }, allowAuto: true });
+    await openSheet();
+    await waitFor(() => expect(screen.getByRole("menu", { name: "Account, Default login" })).toBeTruthy());
+    expect(item("Work").props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
+  const notOffered: [string, Parameters<typeof open>[0]][] = [
+    ["a chat on another provider", { ...withAccounts, chatOver: { provider: "Ollama" } }],
+    ["a team's Lead", { ...withAccounts, chatOver: { workflow: "team" } }],
+    ["a Mac that doesn't list accounts", { answers: withAccounts.answers }],
+  ];
+  it.each(notOffered)("is not offered for %s", async (_, opts) => {
+    await open(opts);
+    await openSheet();
+    // (The sheet is up: its other rows are there, and this one isn't.)
+    expect(screen.getByText("Permissions")).toBeTruthy();
+    expect(screen.queryByText("Account")).toBeNull();
+    expect(screen.queryByText("Default login")).toBeNull();
+  });
+});

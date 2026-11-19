@@ -7,7 +7,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sleepNote, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowPending } from "./lib/remoteChats";
+import { checkRemoteAccount, checkRemoteClose, checkRemoteModel, checkRemoteNewChat, checkRemoteSetAccount, checkRemoteSwitch, windowChats, windowModels, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetAccount, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow, type WindowAccount, type WindowPending } from "./lib/remoteChats";
 import { changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as queueChange, ready as switchReady, wasStopped, type Change, type ConversationChange, type Current, type Pending, type When } from "./lib/pendingSwitch";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -774,8 +774,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps"; model?: string | null; effort?: string | null } | false = false, providerId: string = team ? CLAUDE : providerFor(folder), account?: string | null) => {
     if (!agentReady) return;
     // The Claude account: the one asked for (null: the default login), else the project's. Only a Claude chat has one, and a
-    // phone's chat is on the default login.
-    const accountId = providerId !== CLAUDE || remote ? "" : account === undefined ? (accountByFolder[folder] ?? "") : (account ?? "");
+    // phone's chat is on the default login unless it asked for one.
+    const accountId = providerId !== CLAUDE ? "" : account === undefined ? (remote ? "" : (accountByFolder[folder] ?? "")) : (account ?? "");
     setAccountBySlot((all) => ({ ...all, [slot]: accountId }));
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
@@ -911,24 +911,28 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
    * project's new choice too. A started one restarts on the same conversation (the accounts share the history) when it is idle:
    * only that chat moves, not the project's choice.
    */
+  // A started chat (idle, the checks made) restarts on the same conversation with this account's login. Any chat, not only the open
+  // one: a phone moves its own.
+  const moveToAccount = (slot: string, id: string) => {
+    to(slot)({ type: "restarting" });
+    api.setAccount(slot, id || null).then(
+      () => {
+        setAccountBySlot((all) => ({ ...all, [slot]: id }));
+        to(slot)({ type: "session_ready" });
+      },
+      (e) => {
+        to(slot)({ type: "session_ready" });
+        to(slot)({ type: "failed", text: errText(e) });
+      },
+    );
+  };
   const chooseAccount = (id: string) => {
     const folder = state.folder;
     if (!folder || chats.agents[active]) return;
     if (state.items.length > 0) {
       if (isBusy(state) || state.status !== "idle") return;
       if (state.backgroundTasks.length > 0) return dispatch({ type: "failed", text: "Stop this chat's background tasks before switching accounts." });
-      dispatch({ type: "restarting" });
-      const slot = active;
-      api.setAccount(slot, id || null).then(
-        () => {
-          setAccountBySlot((all) => ({ ...all, [slot]: id }));
-          dispatch({ type: "session_ready" });
-        },
-        (e) => {
-          dispatch({ type: "session_ready" });
-          dispatch({ type: "failed", text: errText(e) });
-        },
-      );
+      moveToAccount(active, id);
       return;
     }
     setAccountByFolder({ ...accountByFolder, [folder]: id });
@@ -1127,9 +1131,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // Their models: Claude Code's as an open Claude chat last listed them (they are the same in every one).
   const claudeOptions = Object.values(chats.slots).find((s) => providerIdOf(s.provider) === CLAUDE && s.models.length > 0)?.models ?? [];
   const phoneModels = windowModels(phoneProviders, claudeOptions, providers.list);
+  // The Claude accounts a phone may choose besides the default login (Settings → Accounts).
+  const phoneAccounts: WindowAccount[] = accounts.map((a) => ({ id: a.id, name: a.name }));
   const remoteContext = async (): Promise<RemoteContext> => {
     const view = await api.remoteSettings().catch(() => null);
-    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders, models: phoneModels };
+    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders, models: phoneModels, accounts: phoneAccounts };
   };
   // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask or Auto, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
@@ -1150,10 +1156,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         // The model and effort, against where it really runs (the backend could only check the provider the phone named).
         const badModel = checkRemoteModel(r.model ?? null, r.effort ?? null, r.preset ?? null, ctx.models?.find((m) => m.provider === providerId));
         if (badModel) return fail(badModel);
+        // The account, against the window's own list and where the chat really runs.
+        const badAccount = checkRemoteAccount(r.account ?? null, providerId, ctx);
+        if (badAccount) return fail(badAccount);
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
         // (With pictures, the backend sends the first message itself once the chat is ready: they never come through here.)
-        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat", model: r.model ?? null, effort: r.effort ?? null }, providerId);
+        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat", model: r.model ?? null, effort: r.effort ?? null }, providerId, r.account ?? null);
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -1197,6 +1206,25 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
       offs.forEach((p) => p.then((f) => f?.()));
     };
   }, []);
+  // A paired phone asked to move a chat to a Claude account (the backend checked it; any window can emit this, so this one checks again
+  // against its own accounts and the chat as it is now). Nothing is asked of the user: a chat that is busy, or has background tasks
+  // the restart would stop, just doesn't move. The project's own choice of account isn't changed.
+  const remoteAccountRef = useRef<(slot: string, account: string | null) => void>(() => {});
+  remoteAccountRef.current = (slot, account) => {
+    const s = chats.slots[slot];
+    remoteContext().then((ctx) => {
+      const target = { known: !!s, team: !!s && (!!s.orchestrator || !!chats.agents[slot]), onClaude: !s?.provider || providerIdOf(s.provider) === CLAUDE, idle: s?.status === "idle", asleep: s?.status === "asleep", background: s?.backgroundTasks.length ?? 0 };
+      if (checkRemoteSetAccount(account, target, ctx)) return;
+      if ((accountBySlotRef.current[slot] ?? "") === (account ?? "")) return;
+      moveToAccount(slot, account ?? "");
+    });
+  };
+  useEffect(() => {
+    const off = api.onRemoteSetAccount((r: RemoteSetAccount) => remoteAccountRef.current(r.slot, r.account)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
+    };
+  }, []);
   // A paired phone asked to close a chat (the backend checked it is listed and not busy): closed as the sidebar closes one, and
   // nothing is asked of the user, so one with background tasks, or a team's, is left open.
   const remoteCloseRef = useRef<(slot: string) => void>(() => {});
@@ -1213,9 +1241,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, []);
   // The presets a phone may choose between, as Settings › Models has them, and where it may start a chat: told again when an
   // endpoint is added or removed, so a phone isn't left offering one that is gone (or missing one that was just set up).
-  const controlsKey = JSON.stringify([windowPresets(presets), phoneProviders, phoneModels]);
+  const controlsKey = JSON.stringify([windowPresets(presets), phoneProviders, phoneModels, phoneAccounts]);
   useEffect(() => {
-    void api.remoteWindowControls(windowPresets(presets), phoneProviders, phoneModels).catch(() => {});
+    void api.remoteWindowControls(windowPresets(presets), phoneProviders, phoneModels, phoneAccounts).catch(() => {});
   }, [controlsKey]);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
@@ -2932,7 +2960,14 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     const { permissions, workflow, preset } = p.change;
     return { when: p.when, text: describeChange(p.change, presetLabel), ...(permissions ? { permissions } : {}), ...(workflow ? { workflow } : {}), ...(preset ? { preset } : {}) };
   };
-  const hubList = windowChats(chats, openByProject, presetBySlot, projectColors, providerLabel, pendingOf);
+  // The account a Claude chat runs on, by id, for a phone to show (none for the default login, and none off Claude Code).
+  // (A chat restored and not opened yet has no slot entry: it is on the account saved for its session.)
+  const accountLabel = (slot: string) => {
+    if (providerLabel(slot) !== null) return null;
+    const sid = chats.slots[slot]?.sessionId;
+    return (accountBySlot[slot] ?? (sid ? accountBySession[sid] : "")) || null;
+  };
+  const hubList = windowChats(chats, openByProject, presetBySlot, projectColors, providerLabel, pendingOf, accountLabel);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});

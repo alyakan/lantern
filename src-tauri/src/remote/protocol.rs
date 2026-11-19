@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, ACCOUNTS, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -116,6 +116,9 @@ pub const INSIGHTS: &str = "insights";
 pub const NEW_CHAT_IMAGES: &str = "newchatimages";
 /// A phone may choose the model and effort of a chat it starts (Request::NewChat's `model` and `effort`, from Controls' `models`).
 pub const NEW_CHAT_MODEL: &str = "newchatmodel";
+/// A phone may choose which Claude account a chat runs on (Request::NewChat's `account`, Request::SetAccount, from Controls'
+/// `accounts`), and sees the one each chat is on (RemoteChat's `account`).
+pub const ACCOUNTS: &str = "accounts";
 
 /// A phone that shows Your work (the Work tab): it is pushed ServerMessage::Work, may ask for it (Request::Work), run one of its steps
 /// (Request::WorkStep) and ask the Mac to look again (Request::WorkRefresh).
@@ -424,6 +427,11 @@ pub struct RemoteChat {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub provider: Option<String>,
+    /// The id of the Claude account the chat runs on, one of Controls' `accounts`. None for the default login, for a chat on another
+    /// provider, and from a Mac that doesn't say.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub account: Option<String>,
     /// One short line for the chat's row: the tool it is in while it works, else the last thing it said (None until it has done
     /// either, and from a Mac that doesn't say).
     #[serde(default)]
@@ -553,6 +561,16 @@ pub struct RemoteProvider {
     pub presets: bool,
 }
 
+/// A Claude account a chat may run on besides the user's own login, as a phone lists it (the default login is "no account" and is
+/// always there). Only the id and the name: where its folder is and who it is signed in as stay on the Mac.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteAccount {
+    /// What a phone sends back to choose it. The Mac only takes one it listed.
+    pub id: String,
+    pub name: String,
+}
+
 /// A model a phone may start a chat on, as the window lists it: what to send back, its name, and the effort levels it takes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -589,6 +607,11 @@ pub struct Controls {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub models: Option<Vec<RemoteModels>>,
+    /// The Claude accounts a chat may run on besides the default login (only from a Mac whose Welcome lists "accounts"). Empty or
+    /// left out: there is only the default login, and a phone shows no choice.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub accounts: Option<Vec<RemoteAccount>>,
 }
 
 /// A pairing code made for a phone to show another device (the answer to Request::PairOffer). Secret until it is used or has
@@ -727,7 +750,7 @@ impl From<crate::storage::phone::PhoneView> for RemoteStorage {
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, preview: c.preview, pending: c.pending }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse), provider: c.provider, account: c.account, preview: c.preview, pending: c.pending }
     }
 }
 
@@ -1116,6 +1139,11 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional)]
         effort: Option<String>,
+        /// One of Controls' `accounts` ids: the Claude account it runs on, else the default login. Only sent to a Mac whose Welcome
+        /// lists "accounts" (left out, not null, when nothing was chosen). Refused with a provider other than Claude Code.
+        #[serde(default)]
+        #[ts(optional)]
+        account: Option<String>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
@@ -1151,6 +1179,10 @@ pub enum Request {
         #[ts(optional)]
         when: Option<RemoteWhen>,
     },
+    /// Moves a chat to one of Controls' `accounts` (`account` null: the default login). Its claude restarts on the same conversation,
+    /// which the other account reads again from the start. Only while the chat is idle (never held for later), never a team's Lead or
+    /// agent, and never a chat on another provider than Claude Code. Only sent to a Mac whose Welcome lists "accounts".
+    SetAccount { slot: String, account: Option<String> },
     /// Puts a chat on Chat or Step by step (its claude restarts on the same session), under the same conditions. Not a team's
     /// Lead, and not onto Team: a team is started and left on the Mac. Only sent to a Mac whose Welcome lists "workflow".
     SetWorkflow {
@@ -1456,7 +1488,7 @@ mod tests {
     fn what_an_older_phone_or_mac_says_still_reads() {
         // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
         let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
-        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None });
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None });
         // An older Mac's chat list and Welcome have neither field.
         let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
         assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow, chat.provider), (None, None, None, None, None));
@@ -1543,7 +1575,7 @@ mod tests {
 
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
-        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, preview: None, pending: None };
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None, provider: None, account: None, preview: None, pending: None };
         let auto = RemoteChat::from(info(Some("auto")));
         assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
@@ -1704,7 +1736,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, preview: Some("Bash npm test".into()), pending: None };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()), provider: None, account: None, preview: Some("Bash npm test".into()), pending: None };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }

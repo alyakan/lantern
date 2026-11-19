@@ -1,5 +1,6 @@
 /** What a phone may choose for a chat (Ask or Auto, and which preset of models), in words. */
 import type { Controls } from "../protocol/generated/Controls";
+import type { RemoteAccount } from "../protocol/generated/RemoteAccount";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteProvider } from "../protocol/generated/RemoteProvider";
@@ -29,6 +30,14 @@ export function autoNote(controls: Controls | null): string | null {
 
 /** Where a chat may be started, when the Mac offers more than Claude Code. A Mac that is older leaves the field out: only Claude, as before. */
 export const providersOf = (controls: Controls | null): RemoteProvider[] => controls?.providers ?? [];
+
+/** The Claude accounts a chat may run on besides the default login (a Mac with none, or an older one, leaves the field out). */
+export const accountsOf = (controls: Controls | null): RemoteAccount[] => controls?.accounts ?? [];
+
+/** An account's name by its id; null for the default login, and for an account the Mac no longer lists. */
+export function accountName(controls: Controls | null, id: string | null | undefined): string | null {
+  return id ? (accountsOf(controls).find((a) => a.id === id)?.name ?? null) : null;
+}
 
 /** Why Auto can't be chosen on a provider that has none, or null. */
 export const noAutoOn = (provider: string): string => `${provider} has no Auto mode: it asks before it acts.`;

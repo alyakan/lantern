@@ -20,7 +20,7 @@ import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
 import { UsageRing } from "../ui/UsageRing";
-import { autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
+import { accountName, accountsOf, autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
@@ -40,7 +40,7 @@ const SHOW: Option[] = [
 type Option = Choice;
 
 /** What is being switched, and to what: until the chat says it changed. */
-export type Switching = { kind: "mode" | "preset" | "workflow"; to: string } | null;
+export type Switching = { kind: "mode" | "preset" | "workflow" | "account"; to: string } | null;
 
 /** The presets' id for Standard: no preset, just the model and effort. */
 const STANDARD = "default";
@@ -51,10 +51,10 @@ const PRESETS_TITLE = "Presets: a model for each role";
 const effortLabel = (e: string) => ({ xhigh: "Extra high", max: "Max", medium: "Medium", low: "Low", high: "High", minimal: "Minimal" })[e] ?? e.charAt(0).toUpperCase() + e.slice(1);
 
 /** The chat, in a card at the top: its name, where it runs and on what, and how full its context is. */
-function Summary({ chat, model, context }: { chat: RemoteChat; model: string | null; context?: { tokens: number; window: number | null } | null }) {
+function Summary({ chat, model, account, context }: { chat: RemoteChat; model: string | null; /** The Claude account's name, for a chat on one. */ account?: string | null; context?: { tokens: number; window: number | null } | null }) {
   const colors = useColors();
   const held = context ? contextOf(context) : null;
-  const line = [chat.project, chat.provider ?? "Claude", model].filter(Boolean).join(" · ");
+  const line = [chat.project, chat.provider ?? "Claude", account, model].filter(Boolean).join(" · ");
   return (
     <View accessible accessibilityLabel={`${chat.title?.trim() || "This chat"}. ${line}${held ? `. ${held.label}` : ""}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.inner, backgroundColor: colors.wash }}>
       <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: LOOKS.provider.tint, alignItems: "center", justifyContent: "center" }}>
@@ -86,13 +86,14 @@ function Summary({ chat, model, context }: { chat: RemoteChat; model: string | n
  * provider, the model, its effort, the preset); its usage; how this phone shows it; and closing it. A choice is changed in place
  * and the sheet stays: what is switching says so until the chat does, and a refusal is said here.
  */
-function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, switching, problem, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, configuring, providers, onConfigure }: { configuration?: ConversationSettings | null; /** The provider's settings are still being asked of the Mac: their rows are held. */ configuring?: boolean; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; switching: Switching; /** Why the last change didn't happen, while the sheet is up. */ problem: string | null; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workflows, modes, presets, pages, switching, problem, onWorkflow, onMode, onPreset, onAskClose, onClose, configuration, configuring, providers, onConfigure, accounts, accountOff, onAccount }: { /** The Claude accounts to move the chat between, with the default login first; empty when it has no choice (another provider, a team, an older Mac). */ accounts?: Option[]; /** Why the chat can't be moved now (busy, asleep), or null. */ accountOff?: string | null; onAccount?: (v: string) => void; configuration?: ConversationSettings | null; /** The provider's settings are still being asked of the Mac: their rows are held. */ configuring?: boolean; providers?: { id: string; name: string }[]; onConfigure?: (change: {provider?: string; model?: string | null; effort?: string | null}) => void; chat: RemoteChat; /** Step by step's pages or one list: how this phone shows the chat (Claude isn't restarted). */ pages?: PagesChoice; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; providerUsage?: ProviderUsage; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; switching: Switching; /** Why the last change didn't happen, while the sheet is up. */ problem: string | null; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
   const next = useRef<(() => void) | null>(null);
   // What is chosen is what the chat says, or what it is switching to, or what the Mac holds for it: a refused switch goes back on its own.
   const pending = chat.pending ?? null;
-  const held = (kind: NonNullable<Switching>["kind"]) => (kind === "mode" ? pending?.permissions : kind === "workflow" ? pending?.workflow : pending?.preset) ?? null;
+  // (An account move is never held for later: only an idle chat is moved.)
+  const held = (kind: NonNullable<Switching>["kind"]) => (kind === "account" ? null : kind === "mode" ? pending?.permissions : kind === "workflow" ? pending?.workflow : pending?.preset) ?? null;
   const now = (kind: NonNullable<Switching>["kind"], value: string) => (switching?.kind === kind ? switching.to : (held(kind) ?? value));
   // Ask or Auto, Chat or Step by step: a menu, with what the chosen one does (or why one is off) under it, and Switching… while it does.
   const choiceRow = ({ look, title, kind, choices, value, onPick }: { look: Look; title: string; kind: NonNullable<Switching>["kind"]; choices: Option[]; value: string; onPick: (v: string) => void }) => {
@@ -106,6 +107,10 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
   const providerName = configuration ? (providers?.find((p) => p.id === configuration.provider)?.name ?? chat.provider ?? (configuration.provider === "claude" ? "Claude" : configuration.provider)) : null;
   const presetLabel = presets.find((p) => p.value === chat.preset)?.label ?? null;
   const model = configuration?.model ?? presetLabel;
+  // The account the chat is on (or is moving to), as the menu names it; the default login is "" and is named only in the menu.
+  const accountSelected = now("account", chat.account ?? "");
+  const accountSwitching = switching?.kind === "account";
+  const accountLabel = accounts?.find((a) => a.value === accountSelected)?.label ?? null;
   const activeUsage = currentUsageWindows(providerUsage);
   const exhausted = (activeUsage.some((w) => w.used >= 0.95) || (!!plan && Math.max(plan.used, plan.week?.used ?? 0) >= 0.95)) && configuration?.provider === "claude" && !off && !!providers?.some((p) => p.id === "codex") && !!onConfigure;
   const hasUsage = !!context || !!plan || !!providerUsage || !!chat.provider;
@@ -124,7 +129,7 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
         <View style={{ flexShrink: 1 }}>
           <SheetHeader title="Chat settings" onDone={close} />
           <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 6, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 6 }}>
-            <Summary chat={chat} model={model} context={context} />
+            <Summary chat={chat} model={model} account={chat.account ? accountLabel : null} context={context} />
             {pending && (
               <View accessible accessibilityLabel={pending.when === "now" ? `Stopping to change to ${pending.text}` : `Changes to ${pending.text} once ${chat.provider ?? "Claude"} finishes`} style={{ backgroundColor: colors.wash, borderRadius: radius.inner, padding: 12, marginTop: 6 }}>
                 <Txt variant="small" tone="ink2">
@@ -154,6 +159,7 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
                 <SettingsSection label="Model">
                   {configuring && <PendingRow look={LOOKS.provider} title="Provider" />}
                   {configuring && <PendingRow look={LOOKS.model} title="Model" />}
+                  {!!accounts?.length && onAccount && <MenuRow look={LOOKS.provider} title="Account" value={accountSwitching ? "Switching…" : (accountLabel ?? "Default login")} detail={accountOff ?? "Moving it restarts the chat on the same conversation. The other account reads the whole history again, so its next reply uses more of its limit."} choices={accounts.map((a) => ({ ...a, off: accountOff ?? null }))} selected={accountSelected} onPick={onAccount} disabled={!!accountOff || accountSwitching} />}
                   {configuration && onConfigure && !!providers?.length && <MenuRow look={LOOKS.provider} title="Provider" value={providerName ?? ""} choices={providers.map((p) => ({ value: p.id, label: p.name, off }))} selected={configuration.provider} onPick={(provider) => onConfigure({ provider })} disabled={!!off} />}
                   {configuration && onConfigure && models.length > 0 && <MenuRow look={LOOKS.model} title="Model" value={modelValue} detail={presetOn ? presetNow?.hint : null} choices={models} selected={configuration.model ?? ""} onPick={(m) => onConfigure({ model: m || null })} shown={6} moreLabel="Older models" disabled={!!off || presetSwitching} section={presets.length > 0 ? { title: PRESETS_TITLE, choices: presets, selected: presetSelected, onPick: onPreset } : undefined} />}
                   {configuration && onConfigure && efforts.length > 0 && <SliderRow look={LOOKS.effort} title="Effort" choices={efforts} selected={configuration.effort ?? ""} onPick={(effort) => onConfigure({ effort })} disabled={!!off} />}
@@ -216,6 +222,8 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const canFlow = useMacCan("workflow");
   // A Mac that can change a working chat: it stops the turn and carries on, or waits for it, as asked.
   const canBusy = useMacCan("switchbusy");
+  // A Mac that lists Claude accounts (a hook, so before the early return below).
+  const canAccount = useMacCan("accounts");
   const [switching, setSwitching] = useState<Switching>(null);
   // Why the last change didn't happen: said in the sheet while it is up (it stays up now), and to the screen.
   const [problem, setProblem] = useState<string | null>(null);
@@ -225,7 +233,7 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   };
 
   // The switch is over once the chat reports it, or has had long enough.
-  const reported = switching && (switching.kind === "mode" ? chat?.permissions === switching.to : switching.kind === "workflow" ? chat?.workflow === switching.to : chat?.preset === switching.to);
+  const reported = switching && (switching.kind === "mode" ? chat?.permissions === switching.to : switching.kind === "workflow" ? chat?.workflow === switching.to : switching.kind === "account" ? (chat?.account ?? "") === switching.to : chat?.preset === switching.to);
   useEffect(() => {
     if (!switching) return;
     if (reported) return setSwitching(null);
@@ -263,6 +271,19 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
         say(e.message);
       });
     });
+  // The Claude accounts a chat may be moved between: a chat on Claude Code that isn't a team's, on a Mac that lists them. Only while
+  // it is idle (a move is never held for later, so a working chat gets no choice, with the reason).
+  const accountChoices = canAccount && !chat.provider && chat.workflow !== "team" ? accountsOf(controls) : [];
+  const moveTo = (to: string) => {
+    if (to === (chat.account ?? "")) return;
+    setSwitching({ kind: "account", to });
+    setProblem(null);
+    sync.setAccount(slot, to || null).catch((e: Error) => {
+      setSwitching(null);
+      say(e.message);
+    });
+  };
+  const accountOn = !chat.provider ? accountName(controls, chat.account) : null;
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
   // (A chat on another provider than Claude's runs on its own model: the Mac records a preset for every chat, but it isn't one it runs on.)
   const preset = switching?.kind === "preset" ? "Switching…" : chat.preset && !chat.provider ? presetName(controls, chat.preset) : null;
@@ -274,7 +295,7 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
   const held = context ? contextOf(context) : null;
   // What it runs on, said first when that isn't Claude Code ("Ollama · Ask · 12k tokens"); a Claude chat's line is as it always was.
   const provider = chat.provider ?? null;
-  const line = [provider, flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
+  const line = [provider, accountOn, flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -301,6 +322,9 @@ export function ChatSettings({ slot, chat, plan, providerUsage, context, pages, 
           context={context}
           off={off}
           loading={!controls}
+          accounts={accountChoices.length > 0 ? [{ value: "", label: "Default login" }, ...accountChoices.map((a) => ({ value: a.id, label: a.name }))] : []}
+          accountOff={whyNotNow(chat)}
+          onAccount={moveTo}
           workflows={canFlow && (chat.workflow === "chat" || chat.workflow === "steps") ? WORKFLOWS.map((w) => ({ value: w.value, label: w.label, hint: w.hint, off })) : []}
           onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
           // Another provider than Claude's has no Auto mode, and the Mac's presets are Claude Code's models: neither is offered for its chat.
