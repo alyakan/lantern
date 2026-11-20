@@ -64,6 +64,8 @@ export interface ConnectionDeps {
   fixedEphemeral?: Uint8Array;
   /** How long the Mac gets to answer when the app comes back to the foreground on a connection that looks up. */
   probeWait?: number;
+  /** How often an app in front checks that the Mac still answers (see `watch`). */
+  heartbeatMs?: number;
   now?: () => number;
 }
 
@@ -77,6 +79,8 @@ const FIND_WAIT = 1500;
 /** See `probeWait`: a Mac on the same network answers in milliseconds, one over Tailscale in well under a second. A big catch-up
  * going the other way can hold the answer up on a slow link, but anything heard from the Mac meanwhile counts (see Session.alive). */
 const PROBE_WAIT = 3000;
+/** See `watch`: short enough that a dead link is found within about half a minute, long enough to cost nothing. */
+const HEARTBEAT_MS = 15_000;
 /** A connection that lasted less than this before it dropped counts as a failed try: the next one waits its turn. */
 const STEADY_MS = 10_000;
 
@@ -216,19 +220,49 @@ export class Connection {
   resume() {
     const session = this.session;
     if (session) {
-      void session.alive(this.d.probeWait ?? PROBE_WAIT).then((up) => {
-        if (this.session !== session) return;
+      void this.probe(session).then((up) => {
         // One that closed while it was asked is the dialling loop's to replace, not one to follow chats over.
-        if (up) return void (session.isOpen && this.d.onStillUp?.(session));
-        this.hangUp();
-        // It was up until now: the dialling that follows starts from the shortest pause.
-        this.tries = 0;
-        void this.start();
+        if (up) this.session === session && session.isOpen && this.d.onStillUp?.(session);
       });
       return;
     }
     if (this.looping) this.wakeUp?.();
     else void this.start();
+  }
+
+  /** Asks `session` something small; one the Mac doesn't answer is hung up and dialled again from the shortest pause. Resolves to whether it answered. */
+  private async probe(session: Session): Promise<boolean> {
+    const up = await session.alive(this.d.probeWait ?? PROBE_WAIT);
+    if (this.session !== session) return false;
+    if (!up) {
+      this.hangUp();
+      // It was up until now: the dialling that follows starts from the shortest pause.
+      this.tries = 0;
+      void this.start();
+    }
+    return up;
+  }
+
+  private watchGen = 0;
+
+  /**
+   * While the app is in front, checks every so often that the Mac still answers. A link can die without either side hearing
+   * (the Mac slept, or this phone changed network) and then nothing more is pushed: the chats sat there out of date, looking
+   * connected, until the app was quit and opened again. A silent link is now hung up and dialled again, which brings the chats
+   * up to date (and shows the connecting state meanwhile).
+   */
+  watch(inFront: boolean) {
+    const my = ++this.watchGen;
+    if (!inFront) return;
+    void (async () => {
+      for (;;) {
+        await this.wait(this.d.heartbeatMs ?? HEARTBEAT_MS);
+        if (my !== this.watchGen) return;
+        const session = this.session;
+        if (session?.isOpen) await this.probe(session);
+        if (my !== this.watchGen) return;
+      }
+    })();
   }
 
   /**

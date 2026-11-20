@@ -306,6 +306,32 @@ describe("what goes wrong around a connection", () => {
     r.conn.stop();
   });
 
+  it("a link that goes silent while the app stays in front is found and dialled again, without quitting the app", async () => {
+    const r = rig(connectCase);
+    r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };
+    const d = (r.conn as unknown as { d: { probeWait: number; heartbeatMs: number } }).d;
+    d.probeWait = 20;
+    d.heartbeatMs = 5;
+    await r.conn.start();
+    for (let i = 0; i < 10; i++) await flush();
+    expect(r.states.at(-1)).toMatchObject({ kind: "connected" });
+    try {
+      r.conn.watch(true);
+      // While it answers the checks keep it.
+      await new Promise((res) => setTimeout(res, 60));
+      expect(r.mac.opened).toHaveLength(1);
+      expect(r.mac.requests.map((q) => q.op)).toContain("list_waiting");
+      r.mac.silent = true;
+      await new Promise((res) => setTimeout(res, 80));
+      r.mac.silent = false;
+      for (let i = 0; i < 30 && r.mac.opened.length < 2; i++) await flush();
+      expect(r.mac.opened.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      r.conn.watch(false);
+      r.conn.stop();
+    }
+  });
+
   it("coming back to the foreground on a link that still answers keeps it", async () => {
     const r = rig(connectCase);
     r.store.mac = { macKey: toBase64Url(r.k.macKey), deviceKey: toBase64Url(r.k.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "Test Mac" };

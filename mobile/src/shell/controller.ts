@@ -105,6 +105,8 @@ export class Controller {
   /** The app came to the front, or went to the back. */
   setForeground(active: boolean) {
     this.foreground = active;
+    // In front, the link is checked now and then; away, iOS suspends the app and a check would only find it asleep.
+    this.connection.watch(active);
     this.lookAtCard();
   }
 
