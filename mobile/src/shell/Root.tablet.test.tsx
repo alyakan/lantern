@@ -479,8 +479,8 @@ describe("the changed files, beside the chat or over it", () => {
     await press(/Release 0.1.53/);
     await settle();
     expect(screen.queryByTestId("todos-pane")).toBeNull();
-    await press("Tools");
-    await press("To-dos");
+    // The to-dos are an item of the + menu, beside the photos.
+    await fireEvent.press(screen.getByRole("menuitem", { name: "To-dos" }));
     await settle();
     expect(screen.getByTestId("todos-pane")).toBeTruthy();
     expect(lastOf("todos")).toMatchObject({ op: "todos" });

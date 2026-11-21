@@ -31,6 +31,9 @@ const openEdit = async (file: string) => {
   await fireEvent.press(screen.getByRole("button", { name: `Edited ${file}` }));
 };
 
+/** The items of a sheet's own menu: not the + menu's (photos, search and the tools). */
+const sheetItems = () => screen.getAllByRole("menuitem").filter((m) => !["Photo Library", "Take Photo", "Search this chat", "Compact", "Clear", "To-dos", "Rename", "Cruise"].includes(m.props.accessibilityLabel));
+
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
 const turn: RemoteEvent[] = [
@@ -189,8 +192,7 @@ describe("a chat", () => {
 
     // The search is the first of the tools: Tools opens them, and Search turns the box into the field.
     const openSearch = async () => {
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Search" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Search this chat" }));
     };
 
     it("searches from the message box: it becomes the search field, which steps through the matches, and Cancel puts it all back", async () => {
@@ -198,7 +200,7 @@ describe("a chat", () => {
       expect(screen.getByLabelText("Message")).toBeTruthy();
       await openSearch();
       // The box is the search field: the message box is out of the way (and keeps what was in it).
-      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
+      expect(screen.queryByRole("menu", { name: "Attach and tools" })).toBeNull();
       expect(screen.queryByLabelText("Message")).toBeNull();
       expect(screen.getByLabelText("Search")).toBeTruthy();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
@@ -219,7 +221,7 @@ describe("a chat", () => {
       await waitFor(() => expect(screen.getByText("1 of 2")).toBeTruthy());
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+      expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
       expect(screen.getByLabelText("Message")).toBeTruthy();
       // Not searching, nothing is marked.
       expect(washed()).toHaveLength(0);
@@ -247,20 +249,21 @@ describe("a chat", () => {
       return false;
     };
 
-    it("is one box: the words on top, and the tools in a row under them with Send at its end", async () => {
+    it("is one box, one row: the + with the tools, the words, and Send at its end", async () => {
       await withSession(talk);
       const box = screen.getByTestId("chat-box");
       const row = screen.getByTestId("chat-box-tools");
       expect(within(screen.getByLabelText("Message"), box)).toBe(true);
-      expect(within(screen.getByLabelText("Message"), row)).toBe(false);
-      for (const name of ["Tools", "Send"]) expect(within(screen.getByRole("button", { name }), row)).toBe(true);
+      expect(within(screen.getByLabelText("Message"), row)).toBe(true);
+      expect(within(screen.getByRole("menu", { name: "Attach and tools" }), row)).toBe(true);
+      expect(within(screen.getByRole("button", { name: "Send" }), row)).toBe(true);
     });
 
-    it("keeps the tools in the box while words are typed in it", async () => {
+    it("keeps the + in the box while words are typed in it", async () => {
       await withSession(talk);
       await fireEvent(screen.getByLabelText("Message"), "focus");
       await fireEvent.changeText(screen.getByLabelText("Message"), "typing a message");
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+      expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
     });
 
     // Whether this node, or anything above it, takes no touches (by prop or by style).
@@ -282,7 +285,7 @@ describe("a chat", () => {
         // The box is there, reachable, and nothing over or around it takes its touches.
         expect(blocked(screen.getByLabelText("Message"))).toBe(false);
         expect(screen.getByLabelText("Message").props.editable).not.toBe(false);
-        expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+        expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
       }
       // And it takes what is typed in it.
       await fireEvent.changeText(screen.getByLabelText("Message"), "still works");
@@ -359,8 +362,8 @@ describe("a chat", () => {
       expect(titleHeight).toBe(control);
       expect(titleBox?.height).toBeUndefined();
       expect(screen.getByRole("header").props.maxFontSizeMultiplier).toBe(BAR_TEXT_SCALE);
-      // The message field's minimum is the shared height less the box's own padding.
-      expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 12);
+      // The message field's minimum is the shared height less the round buttons' own room.
+      expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 8);
     });
 
     it("keeps the room under the chat bar the same when the keyboard comes, so nothing changes size at that moment", async () => {
@@ -390,7 +393,9 @@ describe("a chat", () => {
     it("can still be searched while it sleeps: the tools circle is beside the Wake button, and the field replaces it while searching", async () => {
       await withSession(talk, {}, {}, { status: "asleep" });
       expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy();
-      await openSearch();
+      // A sleeping chat's bar is still the tools circle, which grows into the row of tools.
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Search" }));
       expect(screen.queryByRole("button", { name: "Wake this chat" })).toBeNull();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
       await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
@@ -510,7 +515,7 @@ describe("a chat", () => {
     expect(screen.getByLabelText("lantern, 1 running in the background: npm run dev")).toBeTruthy();
   });
 
-  it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps Tools", async () => {
+  it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps the +", async () => {
     const quiet = await withSession(turn);
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     await quiet.unmount();
@@ -524,7 +529,7 @@ describe("a chat", () => {
     };
     expect(inRow("Stop")).toBe(true);
     expect(inRow("Send")).toBe(true);
-    expect(inRow("Tools")).toBe(true);
+    expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
   });
 
   it("keeps Stop while a message is typed during a turn", async () => {
@@ -535,8 +540,7 @@ describe("a chat", () => {
 
   it("can still be searched while Claude works, from Tools", async () => {
     await withSession(turn, {}, {}, { status: "working" });
-    await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Search" }));
+    await fireEvent.press(screen.getByRole("menuitem", { name: "Search this chat" }));
     expect(screen.getByLabelText("Search")).toBeTruthy();
   });
 
@@ -557,39 +561,30 @@ describe("a chat", () => {
       await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(["cruise"]) }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
       expect(screen.queryByRole("button", { name: /Cruise/ })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Cruise" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Cruise" }));
       // On, its card shows over the box, with its way to stop.
       await waitFor(() => expect(screen.getByRole("button", { name: "Stop Cruise" })).toBeTruthy());
     });
 
-    it("open in the box's row: Search, Compact, Clear, and a way out that closes it", async () => {
+    it("are in the + menu: Search, Compact and Clear, beside the photos, with Send kept in the row", async () => {
       await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      for (const name of ["Search", "Compact", "Clear", "Close tools"]) expect(screen.getByRole("button", { name })).toBeTruthy();
-      // The row takes the place of the box's own buttons; the words stay above it.
-      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-      expect(screen.getByLabelText("Message")).toBeTruthy();
-      await fireEvent.press(screen.getByRole("button", { name: "Close tools" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy());
-      expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+      for (const name of ["Search this chat", "Compact", "Clear"]) expect(screen.getByRole("menuitem", { name })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
       expect(screen.getByLabelText("Message")).toBeTruthy();
     });
 
-    it("compacts: Compact sends /compact and the row closes", async () => {
+    it("compacts: Compact sends /compact", async () => {
       const { lastOf } = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Compact" }));
       await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "/compact" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy());
     });
 
     it("asks before Clear, as the Mac does, and sends /clear only when it is confirmed", async () => {
       const { Alert } = jest.requireActual<typeof import("react-native")>("react-native");
       const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
       const { lastOf } = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Clear" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Clear" }));
       expect(alert).toHaveBeenCalledTimes(1);
       expect(lastOf("send")).toBeUndefined();
       const buttons = alert.mock.calls[0][2] as { text: string; onPress?: () => void }[];
@@ -601,15 +596,13 @@ describe("a chat", () => {
     it("has no Compact or Clear in Step by step, whose pages they would cut across, but the circle is still the tools circle, not a search circle", async () => {
       await withSession(turn, {}, {}, { workflow: "steps" });
       expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+      expect(screen.getByRole("menuitem", { name: "Search this chat" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "Compact" })).toBeNull();
     });
 
     it("opens the tools while Claude works in Step by step too", async () => {
       await withSession(turn, {}, {}, { workflow: "steps", status: "working" });
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Search this chat" })).toBeTruthy();
     });
 
     it("is the tools circle in a sleeping chat too, with Compact and Clear waiting for it to wake", async () => {
@@ -623,10 +616,9 @@ describe("a chat", () => {
 
     it("waits for the turn to end before Compact or Clear, as the Mac does", async () => {
       const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
-      expect(screen.getByRole("button", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
-      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      expect(screen.getByRole("menuitem", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
+      expect(screen.getByRole("menuitem", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Compact" }));
       expect(lastOf("send")).toBeUndefined();
     });
 
@@ -634,15 +626,13 @@ describe("a chat", () => {
       const { Alert } = jest.requireActual<typeof import("react-native")>("react-native");
       const prompt = jest.spyOn(Alert, "prompt").mockImplementation(() => {});
       const old = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
       await old.unmount();
       const { controller } = makeController();
       const { lastOf } = attachSession(controller, { rename: null }, ["rename"]);
       await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ title: "Old name" })], events: { a: turn }, connection: connectedWith(["rename"]) }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Rename" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Rename" }));
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(prompt.mock.calls[0][0]).toBe("Rename this chat");
       expect(prompt.mock.calls[0][3]).toBe("plain-text");
@@ -658,8 +648,7 @@ describe("a chat", () => {
 
     it("offers To-dos only from a Mac that keeps them, and opens this chat's list in its sheet, beside Changes", async () => {
       const quiet = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.queryByRole("button", { name: "To-dos" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "To-dos" })).toBeNull();
       await quiet.unmount();
       const { controller } = makeController();
       // ("another" comes first by name: the list opened is the chat's own project's, not the first.)
@@ -670,8 +659,7 @@ describe("a chat", () => {
       const { lastOf } = attachSession(controller, { projects, todos: { project: "/Users/me/lantern", name: "lantern", items: [] } }, ["todos"]);
       await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(["todos"]) }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "To-dos" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "To-dos" }));
       await waitFor(() => expect(lastOf("todos")).toEqual({ op: "todos", project: "/Users/me/lantern" }));
       expect(await screen.findByRole("button", { name: "To-dos of lantern" })).toBeTruthy();
       // The sheet's heading is its menu, which goes back to the changes.
@@ -1570,8 +1558,8 @@ describe("what a turn changed", () => {
     expect(screen.getByText("2 files · +5 −1")).toBeTruthy();
     // The sheet's heading is a menu of what it can show: only Changes for now.
     await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }]);
-    await fireEvent.press(screen.getByRole("menuitem"));
+    expect(sheetItems().map((m) => m.props.accessibilityState)).toEqual([{ selected: true }]);
+    await fireEvent.press(sheetItems()[0]);
     // The newest first, and open on it.
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/docs/notes.md" }));
     await fireEvent.press(screen.getByRole("button", { name: "Cargo.toml, 1 added, 1 removed" }));
@@ -1591,7 +1579,7 @@ describe("what a turn changed", () => {
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
     await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }, { selected: false }]);
+    expect(sheetItems().map((m) => m.props.accessibilityState)).toEqual([{ selected: true }, { selected: false }]);
     await fireEvent.press(screen.getByRole("menuitem", { name: /Artifacts/ }));
     expect(await screen.findByText("The map")).toBeTruthy();
     expect(lastOf("artifact_read")).toEqual({ op: "artifact_read", slot: "a", name: "map.md" });
