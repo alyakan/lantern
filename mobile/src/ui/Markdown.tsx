@@ -1,5 +1,5 @@
 import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Linking, ScrollView, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
 import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
@@ -216,7 +216,7 @@ export function laidOver(top: string, under: string): string {
 }
 
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
-function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; tone: Tone; mark?: string }) {
+function CodeBlock({ lang, text, tone, mark, onCard = false }: { lang: string; text: string; tone: Tone; mark?: string; /** It sits on a card (your bubble), not on the page. */ onCard?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,7 +228,10 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
     timer.current = setTimeout(() => setCopied(false), 1500);
   };
   const colors = useColors();
-  const l = look(tone, colors);
+  const base = look(tone, colors);
+  // A tile you can see against what it sits on, as the Claude app sets its code: a card on the page, the page's colour inside a
+  // card (your bubble), and a hairline round it either way.
+  const l = tone === "ink" ? { ...base, raised: onCard ? colors.paper : colors.card } : base;
   const { lines: total, folds } = useMemo(() => foldOf(text), [text]);
   // Colour only on the page itself: on an ink bubble or the night screens the words stay one colour, as they always were.
   const lines = useMemo(() => highlight(text, tone === "ink" ? lang : ""), [text, lang, tone]);
@@ -238,7 +241,7 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
   const shown = folded ? lines.slice(0, FOLDED_LINES) : lines;
   const hit = useHit();
   return (
-    <View style={{ backgroundColor: l.raised, borderRadius: 14, overflow: "hidden" }}>
+    <View style={{ backgroundColor: l.raised, borderRadius: 14, overflow: "hidden", borderWidth: tone === "ink" ? StyleSheet.hairlineWidth : 0, borderColor: colors.rule }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
         {/* As the Claude app has a code block's bar: the language in quiet words, and a small copy mark, not a word-button. */}
         <Txt variant="tiny" tone={l.label}>
@@ -391,7 +394,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", voice, sele
           case "rule":
             return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
           case "code": {
-            const code = <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} />;
+            const code = <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} onCard={voice === "you"} />;
             return b.lang.toLowerCase() === "architecture" ? <ArchitectureDiagram key={i} text={b.text} fallback={code} /> : code;
           }
         }
