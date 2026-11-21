@@ -30,6 +30,7 @@ import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motio
 import { Sheet, SheetBar } from "../ui/Sheet";
 import { isLong, pastedPart } from "../view/paste";
 import { LongMessage, PastedCards, PastedSheet } from "./PastedText";
+import { PhotoViewer } from "./PhotoViewer";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { ToolIcon } from "../ui/ToolIcon";
@@ -57,12 +58,15 @@ type UserItem = Extract<Item, { kind: "user" }>;
 /** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
 const TURN_GAP = 22;
 
-export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
+export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true, saved }: { item: UserItem; /** The photos this phone kept of it, when the message no longer carries them (the Mac only says how many). */ saved?: string[]; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
   // A page of pasted words is a card that opens, not a page in the chat (a chat search still finds it: it shows in full then).
   const long = !!item.text && !mark && isLong(item.text);
   const [reading, setReading] = useState(false);
+  // The pictures to show: the ones just sent, or the ones this phone kept of an earlier message. A tap opens one whole.
+  const pics = item.thumbs?.length ? item.thumbs : (saved ?? []);
+  const [viewing, setViewing] = useState<number | null>(null);
   // A message with code or a table in it is as wide as a message gets. Hugging its words, the bubble was laid out once around
   // what scrolls sideways at no set width: it kept the height of its words wrapped a word to a line, a dark block over Claude's
   // reply under it (seen on the simulator).
@@ -77,15 +81,17 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
       )}
       <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ alignItems: "flex-end", maxWidth: "100%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1 }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
-        {!!item.thumbs?.length && (
+        {pics.length > 0 && (
           // Above the words, as the Claude app lays them: tall pictures on their own, the message under them.
           <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginBottom: item.text ? 6 : 0, maxWidth: "100%" }}>
-            {item.thumbs.map((uri, i) => (
-              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_W, height: SENT_H, borderRadius: 16, backgroundColor: colors.card }} />
+            {pics.map((uri, i) => (
+              <PressScale key={uri} accessibilityRole="button" accessibilityLabel={`Open photo ${i + 1}`} onPress={() => setViewing(i)} haptic="select" scaleTo={0.97} reach={false}>
+                <Image accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_W, height: SENT_H, borderRadius: 16, backgroundColor: colors.card }} />
+              </PressScale>
             ))}
           </View>
         )}
-        {!item.thumbs?.length && !!item.images && (
+        {pics.length === 0 && !!item.images && (
           <Txt variant="small" tone="ink3" style={{ marginBottom: item.text ? 6 : 0 }}>
             {photos(item.images)} sent
           </Txt>
@@ -97,6 +103,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           </View>
         )}
       </Pressable>
+      {viewing !== null && <PhotoViewer uris={pics} first={viewing} onClose={() => setViewing(null)} />}
       {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>

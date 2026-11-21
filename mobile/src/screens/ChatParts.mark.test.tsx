@@ -197,3 +197,18 @@ describe("the chat as the Claude app sets it", () => {
     expect(screen.queryByRole("button", { name: "Copy reply" })).toBeNull();
   });
 });
+
+describe("photos in your message", () => {
+  it("shows the ones this phone kept when the message only says how many, and a tap opens one whole", async () => {
+    await render(<UserRow item={{ kind: "user", id: "u7", text: "Look", at: null, sentBy: null, images: 1 }} saved={["file:///kept.jpg"]} />);
+    expect(screen.getByLabelText("Photo 1 you sent")).toBeTruthy();
+    expect(screen.queryByText("1 photo sent")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Open photo 1" }));
+    expect(screen.getByLabelText("Photo 1 of 1")).toBeTruthy();
+  });
+
+  it("says how many when nothing was kept", async () => {
+    await render(<UserRow item={{ kind: "user", id: "u6", text: "Look", at: null, sentBy: null, images: 2 }} />);
+    expect(screen.getByText(/2 photos sent/)).toBeTruthy();
+  });
+});

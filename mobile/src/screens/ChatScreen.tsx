@@ -55,6 +55,7 @@ import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, Hook
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
+import { loadSent, photosFor, rememberSent, type SentEntry } from "../view/sentPhotos";
 
 /** What no search, or a search that finds nothing, marks: the same each time, so the list has nothing to draw again for it. */
 const NO_MATCHES: ReturnType<typeof findRows> = [];
@@ -544,6 +545,15 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
   // Cruise is a tool in the message box's tray; its card shows over the box only while it is on.
   const cruiseOffered = canCruise && !asleep && !stepsChat;
+  // The photos this phone sent, kept on it: a message the Mac gives back says only how many there were.
+  const [kept, setKept] = useState<SentEntry[]>([]);
+  // (Only a chat that has some changes anything: no needless second drawing.)
+  useEffect(() => void loadSent().then((list) => list.length > 0 && setKept(list)), []);
+  const sentPhotos = useMemo(() => {
+    if (kept.length === 0) return new Map<string, string[]>();
+    const asked = rows.flatMap((r) => (r.kind === "user" && !!r.item.images && !r.item.thumbs?.length ? [{ id: r.item.id, text: r.item.text }] : []));
+    return asked.length > 0 ? photosFor(kept, slot, asked) : new Map<string, string[]>();
+  }, [kept, rows, slot]);
   const send = (text: string) => {
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
@@ -658,7 +668,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
           return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
@@ -879,6 +889,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             setAway(null);
             list.current?.scrollToEnd({ animated: true });
             // A command (it may hold a secret) is never kept on the phone to go later: it says it didn't go, as before.
+            if (images?.length) void rememberSent(slot, text, images).then(setKept);
             if (online || images?.length || isTerminal(text)) void sync.send(slot, text, images);
             else sync.hold(slot, text);
           }} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
