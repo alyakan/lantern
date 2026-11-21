@@ -258,9 +258,9 @@ function CodeBlock({ lang, text, tone, mark, onCard = false }: { lang: string; t
         </PressScale>
       </View>
       {/* On your own (ink) bubble the block's ground is see-through: its edge fades into what that comes out as, so a cut line reads as one that scrolls. */}
-      <SideScroll surface={tone === "on-ink" ? laidOver(l.raised, colors.ink) : l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
-        {/* Not selectable: the text took the sideways drag (a long line could not be scrolled to). Copy is the icon above. */}
-        <Text style={[scale.mono, { color: l.code }]}>
+      {/* Long lines wrap: the sideways scroll could not be dragged on the phone, and a line off the screen cannot be read. */}
+      <View style={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
+        <Text selectable style={[scale.mono, { color: l.code }]}>
           {shown.map((line, i) => (
             <Fragment key={i}>
               {i > 0 ? "\n" : ""}
@@ -277,7 +277,7 @@ function CodeBlock({ lang, text, tone, mark, onCard = false }: { lang: string; t
             </Fragment>
           ))}
         </Text>
-      </SideScroll>
+      </View>
       {folds && (
         <PressScale accessibilityRole="button" accessibilityLabel={folded ? `Show ${total - FOLDED_LINES} more lines of code` : "Show less code"} accessibilityState={{ expanded: !folded }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
           <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "700" }}>
