@@ -8,6 +8,7 @@ import { useAccent } from "./accent";
 import { fonts, radius, replyHeading, replyText, type as scale, useColors, yourText, type Palette } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
+import { ToolIcon } from "./ToolIcon";
 import { ArchitectureDiagram } from "./ArchitectureDiagram";
 
 /** The colour of the words: ink on the page, night or white on a dark background, on-ink on an ink one (your own message). */
@@ -237,15 +238,20 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
   const shown = folded ? lines.slice(0, FOLDED_LINES) : lines;
   const hit = useHit();
   return (
-    <View style={{ backgroundColor: l.raised, borderRadius: radius.inner, overflow: "hidden" }}>
+    <View style={{ backgroundColor: l.raised, borderRadius: 14, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
-        <Txt variant="tiny" tone={l.label} style={{ fontWeight: "700" }}>
+        {/* As the Claude app has a code block's bar: the language in quiet words, and a small copy mark, not a word-button. */}
+        <Txt variant="tiny" tone={l.label}>
           {lang}
         </Txt>
-        <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy code"} onPress={copy} hitSlop={6} haptic="light" scaleTo={0.92} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-          <Txt variant="tiny" tone={copied ? "go" : "cobalt"} style={{ fontWeight: "700" }}>
-            {copied ? "Copied" : "Copy"}
-          </Txt>
+        <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy code"} onPress={copy} hitSlop={8} haptic="light" scaleTo={0.9} style={{ paddingHorizontal: 8, paddingVertical: 4, minWidth: 30, alignItems: "center" }}>
+          {copied ? (
+            <Txt variant="tiny" tone="go" style={{ fontWeight: "600" }}>
+              Copied
+            </Txt>
+          ) : (
+            <ToolIcon name="copy" color={colors.ink3} />
+          )}
         </PressScale>
       </View>
       {/* On your own (ink) bubble the block's ground is see-through: its edge fades into what that comes out as, so a cut line reads as one that scrolls. */}
