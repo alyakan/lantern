@@ -190,7 +190,7 @@ function SideScroll({ children, surface, style, contentContainerStyle }: { child
   const hex = surface.length === 7 ? surface : null;
   return (
     <View style={style}>
-      <ScrollView testID="side-scroll" horizontal showsHorizontalScrollIndicator={false} onLayout={(e) => setBox(e.nativeEvent.layout.width)} onContentSizeChange={(w) => setInner(w)} onScroll={(e) => setX(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32} contentContainerStyle={contentContainerStyle}>
+      <ScrollView testID="side-scroll" horizontal directionalLockEnabled nestedScrollEnabled showsHorizontalScrollIndicator={false} onLayout={(e) => setBox(e.nativeEvent.layout.width)} onContentSizeChange={(w) => setInner(w)} onScroll={(e) => setX(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32} contentContainerStyle={contentContainerStyle}>
         {children}
       </ScrollView>
       {more && hex && (
@@ -259,7 +259,8 @@ function CodeBlock({ lang, text, tone, mark, onCard = false }: { lang: string; t
       </View>
       {/* On your own (ink) bubble the block's ground is see-through: its edge fades into what that comes out as, so a cut line reads as one that scrolls. */}
       <SideScroll surface={tone === "on-ink" ? laidOver(l.raised, colors.ink) : l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
-        <Text selectable style={[scale.mono, { color: l.code }]}>
+        {/* Not selectable: the text took the sideways drag (a long line could not be scrolled to). Copy is the icon above. */}
+        <Text style={[scale.mono, { color: l.code }]}>
           {shown.map((line, i) => (
             <Fragment key={i}>
               {i > 0 ? "\n" : ""}
