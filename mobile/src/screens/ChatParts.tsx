@@ -1199,13 +1199,13 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
 }
 
 /** The message box's corners: a capsule, as the Claude app's. */
-const BOX_RADIUS = 28;
+export const BOX_RADIUS = 28;
 
 /** The words typed in the box. */
-const FIELD = { fontSize: 17, lineHeight: 22 };
+export const FIELD = { fontSize: 17, lineHeight: 22 };
 
 /** The pictures of the tools in the + menu, from the system's own set. */
-type SfName = NonNullable<ComponentProps<typeof MenuButton>["systemImage"]>;
+export type SfName = NonNullable<ComponentProps<typeof MenuButton>["systemImage"]>;
 const TOOL_SYMBOL: Record<BarTool["icon"], SfName> = { compact: "arrow.down.right.and.arrow.up.left", clear: "trash", todos: "checklist", rename: "pencil", cruise: "sparkles", copy: "doc.on.doc", more: "ellipsis" };
 
 /**
@@ -1320,7 +1320,7 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
  * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
  * opens the sheet (`onPress`).
  */
-function PlusButton({ busy, full, canAttach, items, onPress, onPick }: { busy: boolean; full: boolean; canAttach: boolean; /** What else the menu offers: the chat's search and tools. */ items: { label: string; symbol: SfName; disabled?: boolean; onPress: () => void }[]; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
+export function PlusButton({ busy, full, canAttach, items, onPress, onPick }: { busy: boolean; full: boolean; canAttach: boolean; /** What else the menu offers: the chat's search and tools. */ items: { label: string; symbol: SfName; disabled?: boolean; onPress: () => void }[]; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
   const colors = useColors();
   const off = busy || full;
   // A soft circle, as the Claude app draws it, in the box's own ink.
