@@ -305,7 +305,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                   placeholderTextColor={colors.ink3}
                   multiline
                   editable={!busy}
-                  style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 11, paddingBottom: 11, textAlignVertical: "top" }}
+                  style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 14, paddingBottom: 8, textAlignVertical: "top" }}
                 />
                 {/* Once there are words, the box is for sending them: the microphone steps aside (unless it is listening). */}
                 {dictation.available && !busy && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
