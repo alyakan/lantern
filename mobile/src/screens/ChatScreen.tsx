@@ -50,6 +50,7 @@ import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
+import { ActivitySheet } from "./ActivitySheet";
 import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
@@ -203,6 +204,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const canCruise = useMacCan("cruise");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
+  // The run of steps whose Activity sheet is open (its row's key): drawn here, not in the row, which a list may reuse for another.
+  const [activity, setActivity] = useState<string | null>(null);
   // A Review page's file whose change is open, and the verdicts picked on each page not yet sent (by the page's message id).
   const [reviewed, setReviewed] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
@@ -396,6 +399,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return () => clearTimeout(t);
   }, [waking, asleep]);
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
+  const loadOutput = useCallback((id: string) => sync.stepOutput(slot, id), [sync, slot]);
   const loadReviewed = useCallback((path: string) => (canReviewDiff ? sync.reviewDiff(slot, path) : sync.diff(slot, path)), [sync, slot, canReviewDiff]);
   /** A Review file page's parts, when its message has them. */
   const reviewOf = (row: Extract<Row, { kind: "page" }>): ReviewFile | null => (row.page.kind === "file" ? parseReviewFile(row.page.title, row.page.body) : null);
@@ -655,7 +659,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
         case "steps":
-          return <StepsRow rowKey={row.key} chips={row.chips} entries={row.entries} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} entries={row.entries} onActivity={steady(`${row.key}:activity`, () => setActivity(row.key))} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so
@@ -1050,6 +1054,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
         )}
       </PageSheet>
+      {(() => {
+        const run = activity === null ? undefined : rows.find((r) => r.key === activity);
+        return run?.kind === "steps" ? <ActivitySheet entries={run.entries} took={run.took} mark={find?.query} files={run.files} onFile={openFile} loadDiff={loadDiff} loadOutput={canOutput ? loadOutput : undefined} onClose={() => setActivity(null)} /> : null;
+      })()}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {reviewed && <DiffSheet files={[reviewed]} load={loadReviewed} onClose={() => setReviewed(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}

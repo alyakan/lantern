@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import { ActivitySheet, filtered, filtersFor } from "./ActivitySheet";
 import type { ActivityEntry } from "../view/timeline";
 
-const step = (id: string, group: "read" | "edit" | "run" | "test" | "search" | "other", text: string, over: Partial<Extract<ActivityEntry, { kind: "step" }>> = {}): ActivityEntry => ({ key: id, kind: "step", id, group, text, bad: false, running: false, files: [], added: 0, removed: 0, ...over });
+const step = (id: string, group: "read" | "edit" | "run" | "test" | "search" | "other", text: string, over: Partial<Extract<ActivityEntry, { kind: "step" }>> = {}): ActivityEntry => ({ key: id, kind: "step", id, group, text, bad: false, running: false, outputs: group === "run" || group === "test", files: [], added: 0, removed: 0, ...over });
 const note = (id: string, text: string): ActivityEntry => ({ key: id, kind: "note", text });
 
 const entries: ActivityEntry[] = [
@@ -26,7 +26,7 @@ describe("what the Activity sheet filters", () => {
 });
 
 describe("the Activity sheet", () => {
-  const open = (props: Partial<Parameters<typeof ActivitySheet>[0]> = {}) => render(<ActivitySheet entries={entries} took="42 s" onFiles={() => {}} onClose={() => {}} {...props} />);
+  const open = (props: Partial<Parameters<typeof ActivitySheet>[0]> = {}) => render(<ActivitySheet entries={entries} took="42 s" loadDiff={async () => ""} onClose={() => {}} {...props} />);
 
   it("lists every step and message in order, with how long it took", async () => {
     await open();
@@ -50,19 +50,32 @@ describe("the Activity sheet", () => {
     expect(screen.getByText("Read a.ts")).toBeTruthy();
   });
 
-  it("hands an edit to its diff, and a command to what it printed, once the sheet is away", async () => {
-    jest.useFakeTimers();
-    const onFiles = jest.fn();
-    const onOutput = jest.fn();
-    await open({ onFiles, onOutput });
+  it("opens an edit to its diff, and a command to what it printed, inside the sheet, with a way back", async () => {
+    const loadDiff = jest.fn(async () => "--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n");
+    const loadOutput = jest.fn(async () => "FAIL ChatParts.test");
+    await open({ loadDiff, loadOutput });
     await fireEvent.press(screen.getByRole("button", { name: "Edited a.ts" }));
-    expect(onFiles).not.toHaveBeenCalled();
-    await act(async () => void jest.advanceTimersByTime(500));
-    expect(onFiles).toHaveBeenCalledWith(["/p/a.ts"]);
+    await waitFor(() => expect(screen.getByLabelText("Added, line 1: new")).toBeTruthy());
+    expect(loadDiff).toHaveBeenCalledWith("/p/a.ts");
+    expect(screen.getByText("What changed")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Activity" }));
+    expect(screen.getByText("Read a.ts")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Ran npm test" }));
-    await act(async () => void jest.advanceTimersByTime(500));
-    expect(onOutput).toHaveBeenCalledWith({ id: "4", text: "Ran npm test" });
-    jest.useRealTimers();
+    await waitFor(() => expect(screen.getByText("FAIL ChatParts.test")).toBeTruthy());
+    expect(loadOutput).toHaveBeenCalledWith("4");
+  });
+
+  it("opens a subagent's, a skill's or an MCP tool's output as well as a command's", async () => {
+    const loadOutput = jest.fn(async () => "done");
+    await open({ entries: [{ ...(step("9", "other", "Ran a helper") as Extract<ActivityEntry, { kind: "step" }>), outputs: true }], loadOutput });
+    await fireEvent.press(screen.getByRole("button", { name: "Ran a helper" }));
+    await waitFor(() => expect(loadOutput).toHaveBeenCalledWith("9"));
+  });
+
+  it("says why a diff couldn't be read", async () => {
+    await open({ loadDiff: async () => Promise.reject(new Error("That file wasn't changed in this chat.")) });
+    await fireEvent.press(screen.getByRole("button", { name: "Edited a.ts" }));
+    await waitFor(() => expect(screen.getByText("That file wasn't changed in this chat.")).toBeTruthy());
   });
 
   it("does not make a row a button when nothing can be opened from it", async () => {

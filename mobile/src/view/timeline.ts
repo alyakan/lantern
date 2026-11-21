@@ -112,6 +112,8 @@ export type ActivityEntry =
       text: string;
       bad: boolean;
       running: boolean;
+      /** The Mac can say what it printed (a command, a skill, a subagent, the advisor, an MCP tool: not "another tool"). */
+      outputs: boolean;
       /** The files an edit changed: a tap opens their diffs. */
       files: string[];
       added: number;
@@ -135,6 +137,7 @@ export function stepEntry(s: Step): ActivityEntry {
     text: clip(text, 200),
     bad: s.isError || (s.tests?.failed ?? 0) > 0,
     running: !s.done,
+    outputs: group === "run" || group === "test" || ["Skill", "Agent", "Task", "advisor"].includes(s.name) || /^mcp__.+?__/.test(s.name),
     files: s.edits.map((e) => e.path),
     added: s.edits.reduce((n, e) => n + e.added, 0),
     removed: s.edits.reduce((n, e) => n + e.removed, 0),

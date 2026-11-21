@@ -1545,8 +1545,10 @@ describe("what a turn changed", () => {
     await waitFor(() => expect(screen.getByLabelText("Added, line 3: version = \"0.1.53\"")).toBeTruthy());
     expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" });
     expect(screen.getByText("What changed")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    // The diff is a page of the Activity sheet: its pill goes back to the list.
+    await fireEvent.press(screen.getByRole("button", { name: "Activity" }));
     await waitFor(() => expect(screen.queryByText("What changed")).toBeNull());
+    expect(screen.getByText("Edited Cargo.toml")).toBeTruthy();
   });
 
   it("lists every file the chat changed from the title bar, each opening its diff", async () => {

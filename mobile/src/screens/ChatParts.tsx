@@ -38,7 +38,6 @@ import { DiffPreviewCard } from "./DiffPreviewCard";
 import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
 import { activityLine, lastLine, turnLine, type ActivityEntry, type Row, type StepChip } from "../view/timeline";
-import { ActivitySheet } from "./ActivitySheet";
 import { markRanges } from "../view/mark";
 import { parseMarkdown, settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
@@ -323,19 +322,18 @@ const NO_NOTES: string[] = [];
  * A run of steps. With `entries` (the chat's own) it is one quiet line that opens the Activity sheet; without (a hook's steps) it
  * is the row of chips that open in place.
  */
-export const StepsRow = memo(function StepsRow(props: ComponentProps<typeof ChipsRow> & { entries?: ActivityEntry[] }) {
-  return props.entries ? <ActivityLine {...props} entries={props.entries} /> : <ChipsRow {...props} />;
+export const StepsRow = memo(function StepsRow(props: ComponentProps<typeof ChipsRow> & { entries?: ActivityEntry[]; /** The line was tapped: the screen opens the Activity sheet for this run of steps (a sheet drawn inside a list's cell would go with the cell). */ onActivity?: () => void }) {
+  return props.entries ? <ActivityLine {...props} onActivity={props.onActivity} /> : <ChipsRow {...props} />;
 });
 
 /** The quiet line a run of steps becomes: what it did, in a few words (the three that matter most), and a › that opens everything in order. */
-const ActivityLine = memo(function ActivityLine({ rowKey, chips, entries, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: ComponentProps<typeof ChipsRow> & { entries: ActivityEntry[] }) {
+const ActivityLine = memo(function ActivityLine({ chips, notes = NO_NOTES, files, onFile, mark, took = null, inset = space.lg, onActivity }: ComponentProps<typeof ChipsRow> & { onActivity?: () => void }) {
   const colors = useColors();
-  const [open, setOpen] = useRecyclingState(false, [rowKey]);
   const line = activityLine(chips);
   const marked = !!mark && notes.some((n) => markRanges(n, mark).length > 0);
   return (
     <View style={{ paddingHorizontal: inset, paddingTop: 4 }}>
-      <PressScale accessibilityRole="button" accessibilityLabel={`${line.text}. Open what happened`} onPress={() => setOpen(true)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={`${line.text}. Open what happened`} onPress={onActivity} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
         {line.running ? <View testID="activity-busy"><Dots /></View> :<Txt variant="small" tone={line.bad ? "stop" : "ink3"}>{line.bad ? "!" : "›_"}</Txt>}
         <Txt tone={line.bad ? "stop" : "ink3"} numberOfLines={1} style={{ flexShrink: 1 }}>
           {line.text}
@@ -355,7 +353,6 @@ const ActivityLine = memo(function ActivityLine({ rowKey, chips, entries, notes 
           ))}
         </View>
       )}
-      {open && <ActivitySheet entries={entries} took={took} mark={mark} files={files} onFile={onFile} onFiles={onFiles} onOutput={onOutput} onClose={() => setOpen(false)} />}
     </View>
   );
 });
