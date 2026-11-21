@@ -551,6 +551,18 @@ describe("a chat", () => {
   });
 
   describe("the tools", () => {
+    it("hold Cruise: nothing hangs over the box until it is turned on from the tray", async () => {
+      const { controller } = makeController();
+      attachSession(controller, {}, ["cruise"]);
+      await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(["cruise"]) }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+      expect(screen.queryByRole("button", { name: /Cruise/ })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Cruise" }));
+      // On, its card shows over the box, with its way to stop.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Stop Cruise" })).toBeTruthy());
+    });
+
     it("open in the box's row: Search, Compact, Clear, and a way out that closes it", async () => {
       await withSession(turn);
       await fireEvent.press(screen.getByRole("button", { name: "Tools" }));

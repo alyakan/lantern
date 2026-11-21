@@ -1,9 +1,9 @@
 import { StyleSheet } from "react-native";
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, within } from "@testing-library/react-native";
 import type { Item } from "../sync/reducer";
 import { lightColors } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
-import { PageRow, StepsRow, SUMMARY_HEIGHTS_KEPT, SummaryRow, UserRow, withCaret } from "./ChatParts";
+import { AssistantRow, PageRow, StepsRow, SUMMARY_HEIGHTS_KEPT, SummaryRow, UserRow, withCaret } from "./ChatParts";
 import { fileNamed } from "../ui/Markdown";
 
 const said = (id: string, text: string): Item => ({ kind: "assistant", id, text, streaming: false });
@@ -153,7 +153,7 @@ describe("a path in Claude's words", () => {
 
 describe("your own message's bubble", () => {
   const mine = (text: string): Extract<Item, { kind: "user" }> => ({ kind: "user", id: "u1", text, at: null, sentBy: null });
-  const bubble = () => StyleSheet.flatten(screen.getByLabelText(/^You: /).props.style);
+  const bubble = () => StyleSheet.flatten(screen.getByTestId("your-bubble").props.style);
 
   it("hugs a message of plain words", async () => {
     await render(<UserRow item={mine("Can you help me debug something?")} />);
@@ -167,5 +167,33 @@ describe("your own message's bubble", () => {
       expect(bubble().width).toBe("85%");
       await screen.unmount();
     }
+  });
+});
+
+describe("the chat as the Claude app sets it", () => {
+  it("sets Claude's words in the serif at 18, and yours in the sans at 17", async () => {
+    await render(<AssistantRow item={{ kind: "assistant", id: "a1", text: "Here is the answer.", streaming: false }} />);
+    const reply = StyleSheet.flatten(screen.getByText("Here is the answer.").props.style);
+    expect(reply).toMatchObject({ fontFamily: "Georgia", fontSize: 18, lineHeight: 28 });
+    await screen.unmount();
+    await render(<UserRow item={{ kind: "user", id: "u1", text: "Fix it", at: null, sentBy: null }} />);
+    expect(StyleSheet.flatten(screen.getByText("Fix it").props.style)).toMatchObject({ fontSize: 17, lineHeight: 24 });
+  });
+
+  it("puts the photos you sent above your words, not inside the bubble", async () => {
+    await render(<UserRow item={{ kind: "user", id: "u2", text: "Look", at: null, sentBy: null, images: 1, thumbs: ["file:///a.jpg"] }} />);
+    const photo = screen.getByLabelText("Photo 1 you sent");
+    expect(StyleSheet.flatten(photo.props.style)).toMatchObject({ width: 96, height: 128 });
+    expect(within(screen.getByTestId("your-bubble")).queryByLabelText("Photo 1 you sent")).toBeNull();
+  });
+
+  it("puts Copy and More under the last reply only", async () => {
+    const reply = { kind: "assistant" as const, id: "a2", text: "Done.", streaming: false };
+    await render(<AssistantRow item={reply} last onActions={() => {}} />);
+    expect(screen.getByRole("button", { name: "Copy reply" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+    await screen.unmount();
+    await render(<AssistantRow item={reply} onActions={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Copy reply" })).toBeNull();
   });
 });

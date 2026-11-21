@@ -5,7 +5,7 @@ import { parseMarkdown, plainText, type Align, type Block, type Span } from "../
 import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
 import { hasMark, markTokens, splitMarked } from "../view/mark";
 import { useAccent } from "./accent";
-import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
+import { fonts, radius, replyHeading, replyText, type as scale, useColors, yourText, type Palette } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
 import { ArchitectureDiagram } from "./ArchitectureDiagram";
@@ -321,9 +321,10 @@ function Table({ block, tone, mark, surface }: { block: Extract<Block, { kind: "
 const BULLET_WIDTH = 10;
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile, surface }: { text: string; tone?: Tone; /** What the words sit on (a table's edge fades into it while it scrolls sideways): the page unless said. */ surface?: string; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", voice, selectable = true, mark, files, onFile, surface }: { text: string; tone?: Tone; /** Whose words these are, in a chat: Claude's are set in the serif at 18, yours at 17. Left out, the body type of a card or a page. */ voice?: "reply" | "you"; /** What the words sit on (a table's edge fades into it while it scrolls sideways): the page unless said. */ surface?: string; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
+  const set = voice === "reply" ? replyText : voice === "you" ? yourText : undefined;
   // Where a tap can open a change: a link to a file always can, and code naming one of the turn's files too.
   const links = useMemo(() => (onFile ? { files: files ?? NO_FILES, onFile } : null), [files, onFile]);
   const body = (
@@ -332,17 +333,17 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
         switch (b.kind) {
           case "heading":
             return b.level <= 2 ? (
-              <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={{ marginTop: 4 }}>
+              <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={[voice === "reply" ? replyHeading : null, { marginTop: 4 }]}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             ) : (
-              <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={{ fontWeight: "700", marginTop: 2 }}>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={[set, { fontWeight: "700", marginTop: 2 }]}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
           case "paragraph":
             return (
-              <Txt key={i} variant="body" tone={tone} selectable={selectable}>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable} style={set}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
@@ -358,11 +359,11 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
                           <TaskBox checked={m.checked} />
                         </View>
                       ) : (
-                        <Txt variant="body" tone={tone} style={{ minWidth: b.ordered ? 22 : BULLET_WIDTH }}>
+                        <Txt variant="body" tone={tone} style={[set, { minWidth: b.ordered ? 22 : BULLET_WIDTH }]}>
                           {m.marker}
                         </Txt>
                       )}
-                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
+                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={[set, { flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }]}>
                         <Spans spans={item} tone={tone} mark={mark} />
                       </Txt>
                     </View>
@@ -374,7 +375,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
             return (
               // In the quote's own tone: on your ink bubble a grey quote was dark on dark.
               <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: look(tone, colors).bar, paddingLeft: 10, opacity: tone === "on-ink" ? 0.8 : 1 }}>
-                <Txt variant="body" tone={look(tone, colors).quote} selectable={selectable}>
+                <Txt variant="body" tone={look(tone, colors).quote} selectable={selectable} style={set}>
                   <Spans spans={b.spans} tone={tone} mark={mark} />
                 </Txt>
               </View>

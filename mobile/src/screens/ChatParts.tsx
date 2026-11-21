@@ -3,6 +3,7 @@ import { useRecyclingState } from "@shopify/flash-list";
 import { useLayout } from "../shell/useLayout";
 import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import { Host, Image as SwiftImage, Menu, Button as MenuButton } from "@expo/ui/swift-ui";
 import { accessibilityLabel, disabled as disabledMod } from "@expo/ui/swift-ui/modifiers";
 import type { Item } from "../sync/reducer";
@@ -29,6 +30,7 @@ import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motio
 import { Sheet, SheetBar } from "../ui/Sheet";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
+import { ToolIcon } from "../ui/ToolIcon";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
@@ -68,23 +70,27 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, width: wide ? "85%" : undefined, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ alignItems: "flex-end", maxWidth: "100%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1 }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
         {!!item.thumbs?.length && (
-          // One row of small squares (four fit): the words are the message, the photos go with it.
-          <View style={{ flexDirection: "row", gap: 6, marginBottom: item.text ? 8 : 0 }}>
+          // Above the words, as the Claude app lays them: tall pictures on their own, the message under them.
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginBottom: item.text ? 6 : 0, maxWidth: "100%" }}>
             {item.thumbs.map((uri, i) => (
-              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_THUMB, height: SENT_THUMB, borderRadius: 8 }} />
+              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_W, height: SENT_H, borderRadius: 16, backgroundColor: colors.card }} />
             ))}
           </View>
         )}
         {!item.thumbs?.length && !!item.images && (
-          <Txt variant="small" tone="on-ink" style={{ opacity: 0.8, marginBottom: item.text ? 6 : 0 }}>
+          <Txt variant="small" tone="ink3" style={{ marginBottom: item.text ? 6 : 0 }}>
             {photos(item.images)} sent
           </Txt>
         )}
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
+        {!!item.text && (
+          <View testID="your-bubble" style={{ backgroundColor: colors.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 11, width: wide ? "85%" : undefined, maxWidth: "85%", borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+            <Markdown text={item.text} voice="you" surface={colors.card} selectable={!onActions} mark={mark} />
+          </View>
+        )}
       </Pressable>
       {item.failed && (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>
@@ -182,7 +188,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
           </View>
           <Pressable onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View testID="summary-words" onLayout={(e) => measured(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
+              <Markdown text={row.item.text} voice="reply" selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {long && clipped && (
@@ -224,13 +230,45 @@ export function withCaret(text: string): string {
   return fences % 2 === 1 ? text : `${text.trimEnd()} ▍`;
 }
 
-export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void }) {
+export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile, last = false }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void; /** The chat's last reply, finished: Copy and More sit under it, as the Claude app has them. */ last?: boolean }) {
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
+      {last && !item.streaming && <ReplyActions text={item.text} onMore={onActions} />}
     </Pressable>
   );
 });
+
+/** Copy and More under a reply, small and quiet. */
+function ReplyActions({ text, onMore }: { text: string; onMore?: () => void }) {
+  const colors = useColors();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  const copy = () => {
+    void Promise.resolve(Clipboard.setStringAsync(text)).catch(() => {});
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 6, marginLeft: -10 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy reply"} onPress={copy} haptic="light" scaleTo={0.9} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 }}>
+        <ToolIcon name="copy" color={colors.ink3} />
+        {copied && (
+          <Txt variant="small" tone="ink3">
+            Copied
+          </Txt>
+        )}
+      </PressScale>
+      {onMore && (
+        <PressScale accessibilityRole="button" accessibilityLabel="More" onPress={onMore} haptic="select" scaleTo={0.9} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, alignItems: "center", justifyContent: "center" }}>
+          <ToolIcon name="more" color={colors.ink3} />
+        </PressScale>
+      )}
+    </View>
+  );
+}
 
 /**
  * A reply cut into its blocks (see settledCuts), each its own Markdown keyed by where it starts: while it streams, the ones
@@ -243,7 +281,7 @@ function Blocks({ text, streaming, ...rest }: { text: string; streaming: boolean
     <View style={{ gap: 8 }}>
       {starts.map((start, i) => {
         const part = text.slice(start, starts[i + 1] ?? text.length);
-        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} {...rest} />;
+        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} voice="reply" {...rest} />;
       })}
     </View>
   );
@@ -263,19 +301,30 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
   );
 });
 
-/** Where the conversation was compacted, between two hairlines like a new day: what came before is a summary now. While it runs (a minute or so), it says so. */
+/** A wavy line, as the Claude app draws the break where a conversation was compacted. */
+function Squiggle({ color }: { color: string }) {
+  // A wave a few points tall, repeated across a fixed width and stretched to the room there is.
+  const d = `M0 5 ${Array.from({ length: 50 }, () => "q4 -5 8 0 t8 0").join(" ")}`;
+  return (
+    <View accessibilityElementsHidden style={{ flex: 1, height: 10 }}>
+      <Svg width="100%" height="10" viewBox="0 0 1600 10" preserveAspectRatio="none">
+        <Path d={d} stroke={color} strokeWidth={1} fill="none" />
+      </Svg>
+    </View>
+  );
+}
+
+/** Where the conversation was compacted, between two wavy lines: what came before is a summary now. While it runs (a minute or so), it says so. */
 export const CompactRow = memo(function CompactRow({ item }: { item: Extract<Item, { kind: "compact" }> }) {
   const colors = useColors();
   const running = item.state === "running";
-  const label = running ? "Compacting the chat…" : item.state === "done" ? "Chat compacted" : "Compacting stopped";
+  const label = running ? "Compacting the chat…" : item.state === "done" ? "Compacted conversation" : "Compacting stopped";
   return (
-    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingVertical: 14 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 18 }}>
+      <Squiggle color={colors.rule} />
       {running && <ActivityIndicator size="small" color={colors.ink3} />}
-      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "600" }}>
-        {label}
-      </Txt>
-      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+      <Txt tone="ink3">{label}</Txt>
+      <Squiggle color={colors.rule} />
     </View>
   );
 });
@@ -1338,7 +1387,9 @@ export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage
 /** A picture's side in the message box. */
 const THUMB = 60;
 /** A sent picture's side in your message. */
-const SENT_THUMB = 56;
+const SENT_W = 96;
+/** A photo you sent, as tall as the Claude app shows it: portrait, over the words. */
+const SENT_H = 128;
 
 /** Where to get the pictures from. Choosing closes the sheet; the Composer then opens the picker (see its `choosing`). */
 function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source: ImageSource) => void }) {

@@ -513,6 +513,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const lastWords = rows.findLast((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
   const lastTurn = rows.findLast((r) => r.kind === "turn" || r.kind === "user");
+  // The chat's last reply (no message of yours after it): the one that has Copy and More under it.
+  const lastReply = useMemo(() => {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].kind === "user") return null;
+      if (rows[i].kind === "assistant") return rows[i].key;
+    }
+    return null;
+  }, [rows]);
   // The turn Cruise asks about: the last one Claude finished (a message you just sent is no turn yet).
   const turnKey = lastTurn?.kind === "turn" ? lastTurn.key : "";
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
@@ -534,8 +542,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const openFiles = useCallback((paths: string[]) => void ((paths.length === 1 && pane.current?.onFile?.(paths[0])) || setFiles(paths)), []);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
-  // Cruise has a row over the message box (its pill, or its card once on).
-  const cruiseRow = canCruise && !asleep && !stepsChat;
+  // Cruise is a tool in the message box's tray; its card shows over the box only while it is on.
+  const cruiseOffered = canCruise && !asleep && !stepsChat;
   const send = (text: string) => {
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
@@ -574,6 +582,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               setPanel("todos");
               setChangesOpen(true);
             },
+          },
+        ]
+      : []),
+    ...(cruiseOffered
+      ? [
+          {
+            label: cruise.on ? "Cruise on" : "Cruise",
+            icon: "cruise" as const,
+            hint: cruise.on ? "Stops suggesting the next step" : "Suggests the next step each time the chat is idle",
+            onPress: cruise.toggle,
           },
         ]
       : []),
@@ -642,7 +660,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "user":
           return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
+          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
           return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
@@ -815,16 +833,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           }}
         />
       )}
-      {cruiseRow && (
+      {cruiseOffered && cruise.on && (
         <CruiseBar
-          replies={cruise.on ? undefined : replies}
-          onReply={send}
-          on={cruise.on}
           resting={!working && !open}
           asking={cruise.asking}
           draft={cruise.draft}
           error={cruise.error}
-          onToggle={cruise.toggle}
           onAsk={cruise.nextStep}
           onDo={cruise.doIt}
           onAnother={cruise.another}
@@ -973,8 +987,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
   // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
   // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
-  // With Cruise's pill over the box, the replies are chips in its row (CruiseBar); otherwise they float over the chat's end.
-  const replyBar = replies.length > 0 && !pageBar && !(cruiseRow && !cruise.on) ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
+  // The replies float over the chat's end.
+  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (

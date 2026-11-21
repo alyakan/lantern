@@ -31,11 +31,12 @@ const edited: RemoteEvent[] = [
 const done: RemoteEvent = { kind: "turn_done", is_error: false, result: "ok", duration_ms: 9000, context_window: null };
 
 describe("your messages", () => {
-  it("are on the right, with the corner by the tail on the right too", async () => {
+  it("are on the right, in a rounded grey bubble with no tail, as the Claude app has them", async () => {
     await withSession([asked]);
-    const bubble = StyleSheet.flatten(screen.getByLabelText("You: Fix the login bug").props.style);
-    expect(bubble.borderBottomRightRadius).toBe(6);
-    expect(bubble.borderBottomLeftRadius).toBeUndefined();
+    expect(StyleSheet.flatten(screen.getByLabelText("You: Fix the login bug").props.style).alignItems).toBe("flex-end");
+    const bubble = StyleSheet.flatten(screen.getByTestId("your-bubble").props.style);
+    expect(bubble.borderRadius).toBe(22);
+    expect(bubble.borderBottomRightRadius).toBeUndefined();
   });
 
   it("can be shared, and say when they were sent when held down", async () => {
