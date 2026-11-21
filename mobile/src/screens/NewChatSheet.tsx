@@ -279,7 +279,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
 
             {/* The chat's own message box: the words, and under them its row of tools, photos and options at the left, the
                 microphone and send at the right. */}
-            <View testID="new-chat-box" style={{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, padding: 6 }}>
+            <View testID="new-chat-box" style={{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, paddingHorizontal: 6, paddingTop: 3, paddingBottom: 9 }}>
               {pasted.length > 0 && <PastedCards items={pasted} onOpen={(id) => setReadingPaste(pasted.find((p) => p.id === id)?.text ?? null)} onRemove={(id) => setPasted((l) => l.filter((x) => x.id !== id))} />}
               {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
               {/* One row, as the chat's box is: the + (photos, the options), the words, the microphone, and Send. */}
@@ -305,7 +305,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                   placeholderTextColor={colors.ink3}
                   multiline
                   editable={!busy}
-                  style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 13, paddingBottom: 9, textAlignVertical: "top" }}
+                  style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 11, paddingBottom: 11, textAlignVertical: "top" }}
                 />
                 {/* Once there are words, the box is for sending them: the microphone steps aside (unless it is listening). */}
                 {dictation.available && !busy && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
