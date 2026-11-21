@@ -25,6 +25,15 @@ jest.mock("../prefs", () => ({
 }));
 beforeEach(() => resetSeen());
 
+/** A run of steps is one quiet line that opens a sheet; an edit's row there opens its diff. */
+const openEdit = async (file: string) => {
+  await fireEvent.press(screen.getByRole("button", { name: /Open what happened/ }));
+  await fireEvent.press(screen.getByRole("button", { name: `Edited ${file}` }));
+};
+
+/** The items of a sheet's own menu: not the + menu's (photos, search and the tools). */
+const sheetItems = () => screen.getAllByRole("menuitem").filter((m) => !["Photo Library", "Take Photo", "Search this chat", "Compact", "Clear", "To-dos", "Rename", "Cruise"].includes(m.props.accessibilityLabel));
+
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
 const turn: RemoteEvent[] = [
@@ -57,22 +66,21 @@ describe("a chat", () => {
     expect(readableSide(402)).toBe(0);
   });
 
-  it("reads as a timeline: your message with its time, Claude's text, a row of chips, and how long it took", async () => {
+  it("reads as a timeline: your message with its time, Claude's text, one quiet line for its steps, and how long it took", async () => {
     await withSession(turn);
     expect(screen.getByText("Release 0.1.53")).toBeTruthy();
     expect(screen.getByText("lantern")).toBeTruthy();
     expect(screen.getByText("Cut 0.1.53 with the context menu fix.")).toBeTruthy();
     expect(screen.getByText(new Date(1_000_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))).toBeTruthy();
     expect(screen.getByText("Bumping the version, then running the tests.")).toBeTruthy();
-    expect(screen.getByText("Read 1 file")).toBeTruthy();
-    expect(screen.getByText("Edited 1 file +1 −1")).toBeTruthy();
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
-    // How long it took ends the row of chips, rather than a line of its own.
+    // What it did is one quiet line: what changed and what ran first, the looking around last.
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
+    // How long it took ends the line, rather than a line of its own.
     expect(screen.getByLabelText("Finished in 3 s")).toBeTruthy();
     expect(screen.queryByText("Finished in 3 s")).toBeNull();
   });
 
-  it("groups the commands into one chip that opens to each of them", async () => {
+  it("folds the commands into the quiet line, which opens a sheet with each of them in order", async () => {
     const commands: RemoteEvent[] = [
       { kind: "user_text", text: "Check it.", at: 1_000_000, sent_by: "desktop" },
       { kind: "tool_started", tool_use_id: "c1", name: "Bash", summary: "git status" },
@@ -82,14 +90,12 @@ describe("a chat", () => {
       { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
     ];
     await withSession(commands);
-    expect(screen.queryByText("git status")).toBeNull();
-    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: false });
-    await fireEvent.press(screen.getByText("Ran 2 commands"));
-    expect(screen.getByText("git status")).toBeTruthy();
-    expect(screen.getByText("cargo build")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: true });
-    await fireEvent.press(screen.getByText("Ran 2 commands"));
-    expect(screen.queryByText("git status")).toBeNull();
+    expect(screen.queryByText("Ran git status")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: /Open what happened/ }));
+    expect(screen.getByText("Ran git status")).toBeTruthy();
+    expect(screen.getByText("Ran cargo build")).toBeTruthy();
+    // A step that failed is told apart from the ones that did not.
+    expect(screen.getByText("Problems 1")).toBeTruthy();
   });
 
   it("shows what a turn did as a card: the closing message, how long it took, and what it changed and ran", async () => {
@@ -186,8 +192,7 @@ describe("a chat", () => {
 
     // The search is the first of the tools: Tools opens them, and Search turns the box into the field.
     const openSearch = async () => {
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Search" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Search this chat" }));
     };
 
     it("searches from the message box: it becomes the search field, which steps through the matches, and Cancel puts it all back", async () => {
@@ -195,7 +200,7 @@ describe("a chat", () => {
       expect(screen.getByLabelText("Message")).toBeTruthy();
       await openSearch();
       // The box is the search field: the message box is out of the way (and keeps what was in it).
-      expect(screen.queryByRole("button", { name: "Tools" })).toBeNull();
+      expect(screen.queryByRole("menu", { name: "Attach and tools" })).toBeNull();
       expect(screen.queryByLabelText("Message")).toBeNull();
       expect(screen.getByLabelText("Search")).toBeTruthy();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
@@ -216,7 +221,7 @@ describe("a chat", () => {
       await waitFor(() => expect(screen.getByText("1 of 2")).toBeTruthy());
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+      expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
       expect(screen.getByLabelText("Message")).toBeTruthy();
       // Not searching, nothing is marked.
       expect(washed()).toHaveLength(0);
@@ -244,20 +249,21 @@ describe("a chat", () => {
       return false;
     };
 
-    it("is one box: the words on top, and the tools in a row under them with Send at its end", async () => {
+    it("is one box, one row: the + with the tools, the words, and Send at its end", async () => {
       await withSession(talk);
       const box = screen.getByTestId("chat-box");
       const row = screen.getByTestId("chat-box-tools");
       expect(within(screen.getByLabelText("Message"), box)).toBe(true);
-      expect(within(screen.getByLabelText("Message"), row)).toBe(false);
-      for (const name of ["Tools", "Send"]) expect(within(screen.getByRole("button", { name }), row)).toBe(true);
+      expect(within(screen.getByLabelText("Message"), row)).toBe(true);
+      expect(within(screen.getByRole("menu", { name: "Attach and tools" }), row)).toBe(true);
+      expect(within(screen.getByRole("button", { name: "Send" }), row)).toBe(true);
     });
 
-    it("keeps the tools in the box while words are typed in it", async () => {
+    it("keeps the + in the box while words are typed in it", async () => {
       await withSession(talk);
       await fireEvent(screen.getByLabelText("Message"), "focus");
       await fireEvent.changeText(screen.getByLabelText("Message"), "typing a message");
-      expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+      expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
     });
 
     // Whether this node, or anything above it, takes no touches (by prop or by style).
@@ -279,7 +285,7 @@ describe("a chat", () => {
         // The box is there, reachable, and nothing over or around it takes its touches.
         expect(blocked(screen.getByLabelText("Message"))).toBe(false);
         expect(screen.getByLabelText("Message").props.editable).not.toBe(false);
-        expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy();
+        expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
       }
       // And it takes what is typed in it.
       await fireEvent.changeText(screen.getByLabelText("Message"), "still works");
@@ -356,8 +362,8 @@ describe("a chat", () => {
       expect(titleHeight).toBe(control);
       expect(titleBox?.height).toBeUndefined();
       expect(screen.getByRole("header").props.maxFontSizeMultiplier).toBe(BAR_TEXT_SCALE);
-      // The message field's minimum is the shared height less the box's own padding.
-      expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 12);
+      // The message field's minimum is the shared height less the round buttons' own room.
+      expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 8);
     });
 
     it("keeps the room under the chat bar the same when the keyboard comes, so nothing changes size at that moment", async () => {
@@ -387,7 +393,9 @@ describe("a chat", () => {
     it("can still be searched while it sleeps: the tools circle is beside the Wake button, and the field replaces it while searching", async () => {
       await withSession(talk, {}, {}, { status: "asleep" });
       expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy();
-      await openSearch();
+      // A sleeping chat's bar is still the tools circle, which grows into the row of tools.
+      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Search" }));
       expect(screen.queryByRole("button", { name: "Wake this chat" })).toBeNull();
       await fireEvent.changeText(screen.getByLabelText("Search"), "login");
       await waitFor(() => expect(screen.getByText("2 of 2")).toBeTruthy());
@@ -507,7 +515,7 @@ describe("a chat", () => {
     expect(screen.getByLabelText("lantern, 1 running in the background: npm run dev")).toBeTruthy();
   });
 
-  it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps Tools", async () => {
+  it("puts Stop beside Send in the box's row while Claude works, not in the header, and keeps the +", async () => {
     const quiet = await withSession(turn);
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     await quiet.unmount();
@@ -521,7 +529,7 @@ describe("a chat", () => {
     };
     expect(inRow("Stop")).toBe(true);
     expect(inRow("Send")).toBe(true);
-    expect(inRow("Tools")).toBe(true);
+    expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy();
   });
 
   it("keeps Stop while a message is typed during a turn", async () => {
@@ -532,8 +540,7 @@ describe("a chat", () => {
 
   it("can still be searched while Claude works, from Tools", async () => {
     await withSession(turn, {}, {}, { status: "working" });
-    await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-    await fireEvent.press(screen.getByRole("button", { name: "Search" }));
+    await fireEvent.press(screen.getByRole("menuitem", { name: "Search this chat" }));
     expect(screen.getByLabelText("Search")).toBeTruthy();
   });
 
@@ -548,33 +555,36 @@ describe("a chat", () => {
   });
 
   describe("the tools", () => {
-    it("open in the box's row: Search, Compact, Clear, and a way out that closes it", async () => {
+    it("hold Cruise: nothing hangs over the box until it is turned on from the tray", async () => {
+      const { controller } = makeController();
+      attachSession(controller, {}, ["cruise"]);
+      await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(["cruise"]) }, controller);
+      await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+      expect(screen.queryByRole("button", { name: /Cruise/ })).toBeNull();
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Cruise" }));
+      // On, its card shows over the box, with its way to stop.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Stop Cruise" })).toBeTruthy());
+    });
+
+    it("are in the + menu: Search, Compact and Clear, beside the photos, with Send kept in the row", async () => {
       await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      for (const name of ["Search", "Compact", "Clear", "Close tools"]) expect(screen.getByRole("button", { name })).toBeTruthy();
-      // The row takes the place of the box's own buttons; the words stay above it.
-      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-      expect(screen.getByLabelText("Message")).toBeTruthy();
-      await fireEvent.press(screen.getByRole("button", { name: "Close tools" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy());
-      expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+      for (const name of ["Search this chat", "Compact", "Clear"]) expect(screen.getByRole("menuitem", { name })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
       expect(screen.getByLabelText("Message")).toBeTruthy();
     });
 
-    it("compacts: Compact sends /compact and the row closes", async () => {
+    it("compacts: Compact sends /compact", async () => {
       const { lastOf } = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Compact" }));
       await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "/compact" }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Tools" })).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole("menu", { name: "Attach and tools" })).toBeTruthy());
     });
 
     it("asks before Clear, as the Mac does, and sends /clear only when it is confirmed", async () => {
       const { Alert } = jest.requireActual<typeof import("react-native")>("react-native");
       const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
       const { lastOf } = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Clear" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Clear" }));
       expect(alert).toHaveBeenCalledTimes(1);
       expect(lastOf("send")).toBeUndefined();
       const buttons = alert.mock.calls[0][2] as { text: string; onPress?: () => void }[];
@@ -586,15 +596,13 @@ describe("a chat", () => {
     it("has no Compact or Clear in Step by step, whose pages they would cut across, but the circle is still the tools circle, not a search circle", async () => {
       await withSession(turn, {}, {}, { workflow: "steps" });
       expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+      expect(screen.getByRole("menuitem", { name: "Search this chat" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "Compact" })).toBeNull();
     });
 
     it("opens the tools while Claude works in Step by step too", async () => {
       await withSession(turn, {}, {}, { workflow: "steps", status: "working" });
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Search this chat" })).toBeTruthy();
     });
 
     it("is the tools circle in a sleeping chat too, with Compact and Clear waiting for it to wake", async () => {
@@ -608,10 +616,9 @@ describe("a chat", () => {
 
     it("waits for the turn to end before Compact or Clear, as the Mac does", async () => {
       const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.getByRole("button", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
-      expect(screen.getByRole("button", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
-      await fireEvent.press(screen.getByRole("button", { name: "Compact" }));
+      expect(screen.getByRole("menuitem", { name: "Compact" }).props.accessibilityState).toMatchObject({ disabled: true });
+      expect(screen.getByRole("menuitem", { name: "Clear" }).props.accessibilityState).toMatchObject({ disabled: true });
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Compact" }));
       expect(lastOf("send")).toBeUndefined();
     });
 
@@ -619,15 +626,13 @@ describe("a chat", () => {
       const { Alert } = jest.requireActual<typeof import("react-native")>("react-native");
       const prompt = jest.spyOn(Alert, "prompt").mockImplementation(() => {});
       const old = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
       await old.unmount();
       const { controller } = makeController();
       const { lastOf } = attachSession(controller, { rename: null }, ["rename"]);
       await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ title: "Old name" })], events: { a: turn }, connection: connectedWith(["rename"]) }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "Rename" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "Rename" }));
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(prompt.mock.calls[0][0]).toBe("Rename this chat");
       expect(prompt.mock.calls[0][3]).toBe("plain-text");
@@ -643,8 +648,7 @@ describe("a chat", () => {
 
     it("offers To-dos only from a Mac that keeps them, and opens this chat's list in its sheet, beside Changes", async () => {
       const quiet = await withSession(turn);
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      expect(screen.queryByRole("button", { name: "To-dos" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "To-dos" })).toBeNull();
       await quiet.unmount();
       const { controller } = makeController();
       // ("another" comes first by name: the list opened is the chat's own project's, not the first.)
@@ -655,8 +659,7 @@ describe("a chat", () => {
       const { lastOf } = attachSession(controller, { projects, todos: { project: "/Users/me/lantern", name: "lantern", items: [] } }, ["todos"]);
       await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: connectedWith(["todos"]) }, controller);
       await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
-      await fireEvent.press(screen.getByRole("button", { name: "Tools" }));
-      await fireEvent.press(screen.getByRole("button", { name: "To-dos" }));
+      await fireEvent.press(screen.getByRole("menuitem", { name: "To-dos" }));
       await waitFor(() => expect(lastOf("todos")).toEqual({ op: "todos", project: "/Users/me/lantern" }));
       expect(await screen.findByRole("button", { name: "To-dos of lantern" })).toBeTruthy();
       // The sheet's heading is its menu, which goes back to the changes.
@@ -727,7 +730,7 @@ describe("a chat", () => {
     const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
     // A catch-up starts the chat over: the messages already there stay while its pages come.
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 30, page: 0, done: false, hidden: 0, events: turn.slice(0, 1) } }));
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
     // Something sent from here meanwhile shows at once.
     await act(async () => void controller.sync.send("a", "Quick one."));
     expect(screen.getByText("Quick one.")).toBeTruthy();
@@ -735,16 +738,16 @@ describe("a chat", () => {
     expect(screen.queryByText("And the changelog.")).toBeNull();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 32, page: 2, done: true, hidden: 0, events: later } }));
     expect(screen.getByText("And the changelog.")).toBeTruthy();
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
   });
 
   it("opens a long chat on the shape of a chat until all its pages have come", async () => {
     const { controller } = await withSession([]);
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
-    expect(screen.queryByText("412 tests passed")).toBeNull();
+    expect(screen.queryByText("Edited 1 file, 412 tests passed and read 1 file")).toBeNull();
     expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: true, hidden: 0, events: [] } }));
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
   });
 
   it("stops holding a chat back when its pages stop coming on a link that stays up, and holds it again with the next page", async () => {
@@ -752,9 +755,9 @@ describe("a chat", () => {
     jest.useFakeTimers();
     try {
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
-      expect(screen.queryByText("412 tests passed")).toBeNull();
+      expect(screen.queryByText("Edited 1 file, 412 tests passed and read 1 file")).toBeNull();
       await act(async () => void jest.advanceTimersByTime(PAGES_STALL_MS + 100));
-      expect(screen.getByText("412 tests passed")).toBeTruthy();
+      expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
       // A page that does come after that is held until the chat is whole, as before.
       const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: false, hidden: 0, events: later } }));
@@ -837,8 +840,8 @@ describe("while more of a chat is coming", () => {
 
   it("shows the shape of a diff while it comes, in the sheet", async () => {
     const { releases } = await slow(["diff"], turn);
-    await waitFor(() => expect(screen.getByText("Edited 1 file +1 −1")).toBeTruthy(), { timeout: 3000 });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open what happened/ })).toBeTruthy(), { timeout: 3000 });
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy(), { timeout: 3000 });
     await act(async () => releases.diff("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"));
     await waitFor(() => expect(screen.getByLabelText("Added, line 1: new")).toBeTruthy(), { timeout: 3000 });
@@ -1374,7 +1377,7 @@ describe("a Review, a file page at a time", () => {
     await fireEvent.press(screen.getByText("/wt/stack/src/lib/token.ts:7"));
     await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "/wt/stack/src/lib/token.ts" }));
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
-    await fireEvent.press(screen.getByText(/Edited 1 file/));
+    await openEdit("auth.ts");
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/lib/auth.ts" }));
   });
 
@@ -1536,14 +1539,16 @@ describe("a Review, a file page at a time", () => {
 });
 
 describe("what a turn changed", () => {
-  it("opens the diff of an edited file from its chip, with added and removed lines told apart", async () => {
+  it("opens the diff of an edited file from its row in the Activity sheet, with added and removed lines told apart", async () => {
     const { lastOf } = await withSession(turn, {}, { diff: "--- /p/Cargo.toml\n+++ /p/Cargo.toml\n@@ -3 +3 @@\n-version = \"0.1.52\"\n+version = \"0.1.53\"\n" });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByLabelText("Added, line 3: version = \"0.1.53\"")).toBeTruthy());
     expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" });
     expect(screen.getByText("What changed")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Close" }));
+    // The diff is a page of the Activity sheet: its pill goes back to the list.
+    await fireEvent.press(screen.getByRole("button", { name: "Activity" }));
     await waitFor(() => expect(screen.queryByText("What changed")).toBeNull());
+    expect(screen.getByText("Edited Cargo.toml")).toBeTruthy();
   });
 
   it("lists every file the chat changed from the title bar, each opening its diff", async () => {
@@ -1553,8 +1558,8 @@ describe("what a turn changed", () => {
     expect(screen.getByText("2 files · +5 −1")).toBeTruthy();
     // The sheet's heading is a menu of what it can show: only Changes for now.
     await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }]);
-    await fireEvent.press(screen.getByRole("menuitem"));
+    expect(sheetItems().map((m) => m.props.accessibilityState)).toEqual([{ selected: true }]);
+    await fireEvent.press(sheetItems()[0]);
     // The newest first, and open on it.
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/docs/notes.md" }));
     await fireEvent.press(screen.getByRole("button", { name: "Cargo.toml, 1 added, 1 removed" }));
@@ -1574,7 +1579,7 @@ describe("what a turn changed", () => {
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     await fireEvent.press(screen.getByRole("button", { name: "Changes" }));
     await fireEvent.press(screen.getByRole("button", { name: "Showing Changes" }));
-    expect(screen.getAllByRole("menuitem").map((m) => m.props.accessibilityState)).toEqual([{ selected: true }, { selected: false }]);
+    expect(sheetItems().map((m) => m.props.accessibilityState)).toEqual([{ selected: true }, { selected: false }]);
     await fireEvent.press(screen.getByRole("menuitem", { name: /Artifacts/ }));
     expect(await screen.findByText("The map")).toBeTruthy();
     expect(lastOf("artifact_read")).toEqual({ op: "artifact_read", slot: "a", name: "map.md" });
@@ -1612,7 +1617,7 @@ describe("what a turn changed", () => {
 
   it("says why a diff couldn't be read", async () => {
     await withSession(turn, {}, { diff: new Error("That file wasn't changed in this chat.") });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByText("That file wasn't changed in this chat.")).toBeTruthy());
   });
 });

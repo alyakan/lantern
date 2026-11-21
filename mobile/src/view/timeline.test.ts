@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { dayLabel, keepSame, lastLine, stepChips, summaryOf, timeline, turnLine } from "./timeline";
+import { activityLine, dayLabel, keepSame, lastLine, stepChips, stepEntry, summaryOf, timeline, turnLine } from "./timeline";
 import { parseInline, settledCuts } from "./markdown";
 
 type Step = Extract<Item, { kind: "step" }>;
@@ -388,5 +388,58 @@ describe("rows kept from one drawing to the next", () => {
     expect(more).not.toBe(before);
     expect(more[0]).toBe(before[0]);
     expect(keepSame([], before)).toBe(before);
+  });
+});
+
+describe("a run of steps as one quiet line", () => {
+  const line = (steps: Step[]) => activityLine(stepChips(steps));
+  const edit = (id: string, path: string) => step(id, "Edit", { edits: [{ path, created: false, added: 3, removed: 1 }] });
+
+  it("says what changed and what ran first, and counts the rest", () => {
+    const steps = [step("1", "Read"), step("2", "Grep"), edit("3", "a.ts"), edit("4", "b.ts"), step("5", "Bash", { summary: "tsc" }), step("6", "Bash", { summary: "lint" })];
+    expect(line(steps).text).toBe("Edited 2 files, ran 2 commands, read 1 file and 1 more");
+  });
+
+  it("drops the +/− counts: the sheet holds them", () => {
+    expect(line([edit("1", "a.ts")]).text).toBe("Edited 1 file");
+  });
+
+  it("lists up to three kinds without a 'more'", () => {
+    expect(line([step("1", "Read"), step("2", "Grep")]).text).toBe("Read 1 file and searched 1 time");
+  });
+
+  it("leads with a failure, and marks the line bad", () => {
+    const steps = [edit("1", "a.ts"), step("2", "Bash", { summary: "npm test", tests: { passed: 41, failed: 1, skipped: 0 } })];
+    const l = line(steps);
+    expect(l.text.startsWith("1 failed, 41 passed")).toBe(true);
+    expect(l.bad).toBe(true);
+  });
+
+  it("is running while a step still goes", () => {
+    expect(line([step("1", "Bash", { done: false })]).running).toBe(true);
+    expect(line([step("1", "Bash")]).running).toBe(false);
+  });
+});
+
+describe("the entries a run of steps leaves for the Activity sheet", () => {
+  it("keeps steps and the agent's notes in the order they happened", () => {
+    const items: Item[] = [
+      { kind: "user", id: "u", text: "go", at: null } as Item,
+      step("1", "Read", { summary: "a.ts" }),
+      { kind: "assistant", id: "n", text: "Looking at it.", streaming: false },
+      step("2", "Bash", { summary: "npm test", isError: true }),
+      { kind: "assistant", id: "r", text: "Done.", streaming: false },
+      { kind: "turn", id: "t", isError: false, durationMs: 1000 } as Item,
+    ];
+    const row = timeline(items).find((r) => r.kind === "steps");
+    if (row?.kind !== "steps") throw new Error("no steps row");
+    expect(row.entries.map((e) => `${e.kind}:${e.kind === "step" ? e.group : "note"}`)).toEqual(["step:read", "note:note", "step:run"]);
+    const bad = row.entries[2];
+    expect(bad.kind === "step" && bad.bad).toBe(true);
+  });
+
+  it("names an edit by its files, with what it changed", () => {
+    const e = stepEntry(step("1", "Edit", { edits: [{ path: "src/a.ts", created: true, added: 9, removed: 0 }] }));
+    expect(e).toMatchObject({ kind: "step", group: "edit", text: "Created a.ts", files: ["src/a.ts"], added: 9, removed: 0 });
   });
 });

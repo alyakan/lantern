@@ -31,11 +31,12 @@ const edited: RemoteEvent[] = [
 const done: RemoteEvent = { kind: "turn_done", is_error: false, result: "ok", duration_ms: 9000, context_window: null };
 
 describe("your messages", () => {
-  it("are on the right, with the corner by the tail on the right too", async () => {
+  it("are on the right, in a rounded grey bubble with no tail, as the Claude app has them", async () => {
     await withSession([asked]);
-    const bubble = StyleSheet.flatten(screen.getByLabelText("You: Fix the login bug").props.style);
-    expect(bubble.borderBottomRightRadius).toBe(6);
-    expect(bubble.borderBottomLeftRadius).toBeUndefined();
+    expect(StyleSheet.flatten(screen.getByLabelText("You: Fix the login bug").props.style).alignItems).toBe("flex-end");
+    const bubble = StyleSheet.flatten(screen.getByTestId("your-bubble").props.style);
+    expect(bubble.borderRadius).toBe(22);
+    expect(bubble.borderBottomRightRadius).toBeUndefined();
   });
 
   it("can be shared, and say when they were sent when held down", async () => {
@@ -52,8 +53,8 @@ describe("while Claude works", () => {
   it("says what it is doing right now", async () => {
     await withSession([asked, { kind: "tool_started", tool_use_id: "t9", name: "Bash", summary: "npm test" }], { status: "working" });
     expect(screen.getByText(/^Running npm test/)).toBeTruthy();
-    // The chip of the step still going has a spinner.
-    expect(screen.getByTestId("chip-busy")).toBeTruthy();
+    // The quiet line of the steps, while one is still going, has dots in place of its glyph.
+    expect(screen.getByTestId("activity-busy")).toBeTruthy();
   });
 
   it("shows a caret at the end of words still coming in", async () => {

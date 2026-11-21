@@ -59,12 +59,12 @@ describe("dictating into the message box", () => {
     expect(box().props.value).toBe("fix the login bug");
   });
 
-  it("adds to what is already typed", async () => {
+  it("steps aside once there are words (the box is for sending them), and is back when they are gone", async () => {
     await chatWithMic();
     await fireEvent.changeText(box(), "Please");
-    await tapMic();
-    await heard("fix the login bug");
-    expect(box().props.value).toBe("Please fix the login bug");
+    expect(screen.queryByRole("button", { name: "Dictate" })).toBeNull();
+    await fireEvent.changeText(box(), "");
+    expect(screen.getByRole("button", { name: "Dictate" })).toBeTruthy();
   });
 
   it("stops on a second tap, keeping the words, and the words can be sent", async () => {
@@ -75,7 +75,8 @@ describe("dictating into the message box", () => {
     expect(module.stop).toHaveBeenCalled();
     // The recognizer says it has ended: the microphone goes back to being a microphone, the words stay.
     await act(async () => __emit("end", null));
-    expect(screen.getByRole("button", { name: "Dictate" })).toBeTruthy();
+    // (The words are in the box, so the microphone steps aside for Send.)
+    expect(screen.queryByRole("button", { name: "Dictate" })).toBeNull();
     expect(box().props.value).toBe("ship it");
     await fireEvent.press(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "ship it" }));

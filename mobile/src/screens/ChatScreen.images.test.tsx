@@ -28,7 +28,7 @@ async function attach(source: "Photo library" | "Take a photo") {
   await fireEvent.press(screen.getByRole("menuitem", { name: source === "Photo library" ? "Photo Library" : "Take Photo" }));
   await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
 }
-const plus = () => screen.queryByRole("menu", { name: "Attach photos" });
+const plus = () => screen.queryByRole("menu", { name: "Attach and tools" });
 const thumbs = () => screen.queryAllByLabelText(/^Photo \d$/);
 
 beforeEach(() => {
@@ -37,9 +37,10 @@ beforeEach(() => {
 });
 
 describe("attaching photos to a message", () => {
-  it("has no + on a Mac that can't take photos", async () => {
+  it("offers no photos on a Mac that can't take them (the + still holds the tools)", async () => {
     await chatWith([]);
-    expect(plus()).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Photo Library" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Take Photo" })).toBeNull();
   });
 
   it("opens the photo library from the +, shows what was picked above the box, and sends it with the message", async () => {
@@ -88,7 +89,7 @@ describe("attaching photos to a message", () => {
     await waitFor(() => expect(lastOf("send")).toMatchObject({ images: [{ data: "/9j/DATA2" }] }));
   });
 
-  it("asks for only as many as there is room for, and stops offering the + when four are on", async () => {
+  it("asks for only as many as there is room for, and stops offering photos when four are on", async () => {
     pick.mockResolvedValueOnce({ images: [photo(1), photo(2)] });
     await chatWith();
     await attach("Photo library");
@@ -97,7 +98,7 @@ describe("attaching photos to a message", () => {
     await attach("Photo library");
     await waitFor(() => expect(thumbs()).toHaveLength(4));
     expect(pick).toHaveBeenLastCalledWith("library", 2);
-    expect(plus()?.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByRole("menuitem", { name: "Photo Library" }).props.accessibilityState).toMatchObject({ disabled: true });
   });
 
   it("backing out of the picker changes nothing", async () => {

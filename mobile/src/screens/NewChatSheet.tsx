@@ -14,14 +14,16 @@ import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Bar, Pulse } from "../ui/skeleton";
 import { SheetBar } from "../ui/Sheet";
-import { barButton, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
+import { barButton, MIN_TARGET, radius, space, useColors } from "../ui/theme";
 import { accountsOf, autoNote, MODES, noAutoOn, providersOf, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 import { loadLastProject, loadNewChatPermissions, saveLastProject, saveNewChatPermissions } from "../prefs";
 import { useAttachments } from "../ui/useAttachments";
 import { useDictation } from "../ui/useDictation";
 import { guessProject } from "../view/compose";
-import { MicButton, SendButton, Thumbnails } from "./ChatParts";
+import { BOX_RADIUS, FIELD, MicButton, PlusButton, SendButton, Thumbnails, type SfName } from "./ChatParts";
+import { PastedCards, PastedSheet } from "./PastedText";
+import { pastedPart } from "../view/paste";
 import { MarkupSheet } from "./MarkupSheet";
 import type { PickedImage } from "../view/attachments";
 
@@ -61,8 +63,6 @@ export interface NewChatProps {
  */
 export function NewChatSheet({ initialText = "", initialProject, initialProjectName, continueChat, listen = false, onClose, onStarted }: NewChatProps) {
   const colors = useColors();
-  // The box takes the chat's type: 16 on a phone, 17 on a tablet.
-  const body = useBody();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
@@ -72,6 +72,12 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initialProject ?? null);
   const [text, setText] = useState(initialText);
+  // Long pastes are held above the box as cards, as in the chat's box, and the one open to read.
+  const [pasted, setPasted] = useState<{ id: string; text: string }[]>([]);
+  const [readingPaste, setReadingPaste] = useState<string | null>(null);
+  const hasWords = text.trim().length > 0 || pasted.length > 0;
+  // What goes out: what was pasted first, then what was typed.
+  const message = () => [...pasted.map((p) => p.text.trim()), text.trim()].filter(Boolean).join("\n\n");
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
   const [busy, setBusy] = useState(false);
@@ -205,12 +211,12 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     setChoosingProject(false);
   };
 
-  const ready = (!!continueChat || !!project) && text.trim().length > 0 && !busy && !attach.busy;
+  const ready = (!!continueChat || !!project) && hasWords && !busy && !attach.busy;
   const start = async () => {
     if (!ready) return;
     if (continueChat) {
       // A send never throws: it shows in the chat at once, and says there if it didn't go.
-      void sync.send(continueChat.slot, text.trim());
+      void sync.send(continueChat.slot, message());
       return finish(continueChat.slot);
     }
     if (!project) return;
@@ -222,7 +228,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
       dictation.cancel();
       // (A model only from the list of where it runs, and its effort only if that model takes it.)
       const ownModel = pickedModel ? { model: pickedModel.value, ...(effort && pickedModel.effort_levels.includes(effort) ? { effort } : {}) } : {};
-      const slot = await sync.newChat(project, text.trim(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {}, canPhotos ? attach.images : []);
+      const slot = await sync.newChat(project, message(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {}, canPhotos ? attach.images : []);
       void saveLastProject(project);
       // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
       if (supported && !note) void saveNewChatPermissions(permissions);
@@ -245,6 +251,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   // What it starts on: Ask where Auto can't be had (a remembered Auto included).
   const mode: RemotePermissions = note ? "ask" : permissions;
   const summary = [chosen?.name, chosenAccount?.name, canFlow ? workflowName : null, MODES.find((m) => m.value === mode)?.label, pickedModel || !chosen || chosen.presets ? modelLabel : null].filter(Boolean).join(" · ");
+
+  // What the + offers besides photos: the options behind "Runs on" (where it runs, how it works, permissions, model).
+  const menu: { label: string; symbol: SfName; onPress: () => void }[] = !continueChat && supported && controls ? [{ label: opened ? "Hide options" : "Options", symbol: "slider.horizontal.3", onPress: () => setOpened((o) => !o) }] : [];
 
   return (
     <Sheet
@@ -270,38 +279,36 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
 
             {/* The chat's own message box: the words, and under them its row of tools, photos and options at the left, the
                 microphone and send at the right. */}
-            <View testID="new-chat-box" style={[{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, padding: 6 }, shadow.card, { shadowOpacity: 0.05 }]}>
+            <View testID="new-chat-box" style={{ backgroundColor: colors.card, borderRadius: BOX_RADIUS, borderWidth: 1, borderColor: colors.rule, paddingHorizontal: 6, paddingTop: 3, paddingBottom: 9 }}>
+              {pasted.length > 0 && <PastedCards items={pasted} onOpen={(id) => setReadingPaste(pasted.find((p) => p.id === id)?.text ?? null)} onRemove={(id) => setPasted((l) => l.filter((x) => x.id !== id))} />}
               {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-              <TextInput
-                accessibilityLabel="What to start with"
-                value={text}
-                {...list}
-                onChangeText={(t) => {
-                  dictation.edited();
-                  list.onChangeText(t);
-                }}
-                autoFocus={!listen}
-                placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
-                placeholderTextColor={colors.ink3}
-                multiline
-                editable={!busy}
-                style={{ minHeight: 96, maxHeight: 200, color: colors.ink, fontSize: body.fontSize, lineHeight: body.lineHeight, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4, textAlignVertical: "top" }}
-              />
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
-                {canPhotos && (
-                  <PressScale accessibilityRole="button" accessibilityLabel="Add photos" accessibilityHint="Hold to take a photo" disabled={attach.busy || attach.full} opacity={attach.busy || attach.full ? 0.4 : 1} onPress={() => void attach.add("library")} onLongPress={() => void attach.add("camera")} accessibilityActions={[{ name: "longpress", label: "Take a photo" }]} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && void attach.add("camera")} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
-                    <PhotoGlyph color={colors.ink2} />
-                  </PressScale>
-                )}
-                {!continueChat && supported && controls && (
-                  <PressScale accessibilityRole="button" accessibilityLabel={`Runs on: ${summary}`} accessibilityHint={opened ? "Hides the options" : "Shows the options"} accessibilityState={{ expanded: opened }} onPress={() => setOpened(!opened)} haptic="select" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: opened ? colors.ink : "transparent" }}>
-                      <MoreGlyph color={opened ? colors.onInk : colors.ink2} />
-                    </View>
-                  </PressScale>
-                )}
-                <View style={{ flex: 1 }} />
-                {dictation.available && !busy && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+              {/* One row, as the chat's box is: the + (photos, the options), the words, the microphone, and Send. */}
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 4 }}>
+                {(canPhotos || menu.length > 0) && <PlusButton busy={attach.busy} full={attach.full} canAttach={canPhotos} items={menu} onPress={() => void attach.add("library")} onPick={(source) => setTimeout(() => void attach.add(source), 350)} />}
+                <TextInput
+                  accessibilityLabel="What to start with"
+                  value={text}
+                  {...list}
+                  onChangeText={(t) => {
+                    dictation.edited();
+                    // A long paste is taken out of the box and held above it.
+                    const out = pastedPart(text, t);
+                    if (out) {
+                      setPasted((l) => [...l, { id: `p${Date.now()}${l.length}`, text: out.pasted }]);
+                      list.onChangeText(out.rest);
+                      return;
+                    }
+                    list.onChangeText(t);
+                  }}
+                  autoFocus={!listen}
+                  placeholder={dictation.listening ? (dictation.ready ? "Listening\u2026" : "Getting ready\u2026") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
+                  placeholderTextColor={colors.ink3}
+                  multiline
+                  editable={!busy}
+                  style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 14, paddingBottom: 8, textAlignVertical: "top" }}
+                />
+                {/* Once there are words, the box is for sending them: the microphone steps aside (unless it is listening). */}
+                {dictation.available && !busy && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
                 <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={() => void start()} />
               </View>
             </View>
@@ -330,9 +337,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                     No projects yet. Open a folder in Lantern on your Mac first.
                   </Txt>
                 ) : (
-                  <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} hitSlop={{ top: 6, bottom: 6 }} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 32, borderRadius: radius.pill, backgroundColor: colors.wash }}>
+                  <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} hitSlop={{ top: 6, bottom: 6 }} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 34, borderRadius: radius.pill, backgroundColor: colors.wash }}>
                     <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(projects.find((p) => p.id === project)?.name ?? "") }} />
-                    <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1 }}>
+                    <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1, lineHeight: 18 }}>
                       {projects.find((p) => p.id === project)?.name ?? "Pick a project"}
                     </Txt>
                     {guessed && (
@@ -373,7 +380,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                 </Txt>
                 {opened && (
                   <FadeSlideIn from={6} ms={180}>
-                    <View style={{ gap: 12, paddingTop: 12 }}>
+                    <View testID="new-chat-options" style={{ gap: 18, marginTop: 10, padding: 16, borderRadius: 22, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
                       {providers.length > 1 && (
                         <View>
                           <Caption>Provider</Caption>
@@ -480,35 +487,12 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               </Txt>
             )}
           </ScrollView>
+          {readingPaste !== null && <PastedSheet text={readingPaste} onClose={() => setReadingPaste(null)} />}
           {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
         </View>
         );
       }}
     </Sheet>
-  );
-}
-
-/** The box's corners, as the chat's message box has them. */
-const BOX_RADIUS = 18;
-
-/** More, drawn: three dots in a row, in the middle of the circle (a "⋯" glyph sits on the type's baseline, low in it). */
-function MoreGlyph({ color }: { color: string }) {
-  return (
-    <View accessibilityElementsHidden style={{ flexDirection: "row", gap: 3 }}>
-      {[0, 1, 2].map((i) => (
-        <View key={i} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
-      ))}
-    </View>
-  );
-}
-
-/** A photo, drawn: a frame with a sun and a hill. */
-function PhotoGlyph({ color }: { color: string }) {
-  return (
-    <View accessibilityElementsHidden style={{ width: 18, height: 14, borderRadius: 3, borderWidth: 1.8, borderColor: color, overflow: "hidden" }}>
-      <View style={{ position: "absolute", left: 3, top: 2, width: 4, height: 4, borderRadius: 2, backgroundColor: color }} />
-      <View style={{ position: "absolute", left: 4, bottom: -6, width: 12, height: 12, backgroundColor: color, transform: [{ rotate: "45deg" }] }} />
-    </View>
   );
 }
 
@@ -518,7 +502,7 @@ const EFFORT_WORDS: Record<string, string> = { minimal: "Minimal", low: "Low", m
 /** A small label over a group of choices. */
 function Caption({ children }: { children: string }) {
   return (
-    <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700", marginBottom: 6 }}>
+    <Txt variant="small" style={{ fontWeight: "600", marginBottom: 8 }}>
       {children}
     </Txt>
   );
@@ -527,11 +511,12 @@ function Caption({ children }: { children: string }) {
 /** One choice of a group: filled when it is the one chosen. A radio for a screen reader, with what it means as its hint. */
 function Pill({ label, on, onPress, hint, disabled, dot }: { label: string; on: boolean; onPress: () => void; hint?: string; disabled?: boolean; /** A project's colour, as a dot before its name. */ dot?: string }) {
   const colors = useColors();
+  // The one chosen is a soft tint with an ink edge, not a solid black block; the rest are quiet outlines.
   return (
-    <PressScale accessibilityRole="radio" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ selected: on, checked: on, disabled: !!disabled }} disabled={disabled} opacity={disabled ? 0.45 : 1} onPress={onPress} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
+    <PressScale accessibilityRole="radio" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ selected: on, checked: on, disabled: !!disabled }} disabled={disabled} opacity={disabled ? 0.45 : 1} onPress={onPress} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? `${colors.ink}14` : "transparent", borderRadius: radius.pill, paddingHorizontal: 14, minHeight: 36, justifyContent: "center", borderWidth: on ? 1.5 : 1, borderColor: on ? colors.ink : colors.rule }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         {dot && <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dot }} />}
-        <Txt variant="small" tone={on ? "on-ink" : "ink"} style={{ fontWeight: "700" }}>
+        <Txt variant="small" tone={on ? "ink" : "ink2"} style={{ fontWeight: on ? "700" : "500", lineHeight: 18 }}>
           {label}
         </Txt>
       </View>

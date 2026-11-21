@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
 import { useLayout } from "../shell/useLayout";
 import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import { Host, Image as SwiftImage, Menu, Button as MenuButton } from "@expo/ui/swift-ui";
 import { accessibilityLabel, disabled as disabledMod } from "@expo/ui/swift-ui/modifiers";
 import type { Item } from "../sync/reducer";
@@ -10,7 +11,7 @@ import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt, WorkGlow } from "../ui/components";
 import { barRoom } from "../ui/keyboard";
-import { Magnifier, SearchContents, ToolsGlyph, TrayContents, useSearchOpening, type BarSearch, type BarTool } from "./SearchBar";
+import { Magnifier, SearchContents, useSearchOpening, type BarSearch, type BarTool } from "./SearchBar";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
 import { loadDraft, saveDraft } from "../drafts";
@@ -27,8 +28,12 @@ import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
+import { isLong, pastedPart } from "../view/paste";
+import { LongMessage, PastedCards, PastedSheet } from "./PastedText";
+import { PhotoViewer } from "./PhotoViewer";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
+import { ToolIcon } from "../ui/ToolIcon";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { barButton, control, fonts, MIN_TARGET, radius, shadow, space, useBody, useColors } from "../ui/theme";
@@ -37,7 +42,7 @@ import { approvalOf, fieldsOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
-import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
+import { activityLine, lastLine, turnLine, type ActivityEntry, type Row, type StepChip } from "../view/timeline";
 import { markRanges } from "../view/mark";
 import { parseMarkdown, settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
@@ -53,9 +58,15 @@ type UserItem = Extract<Item, { kind: "user" }>;
 /** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
 const TURN_GAP = 22;
 
-export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
+export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true, saved }: { item: UserItem; /** The photos this phone kept of it, when the message no longer carries them (the Mac only says how many). */ saved?: string[]; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
+  // A page of pasted words is a card that opens, not a page in the chat (a chat search still finds it: it shows in full then).
+  const long = !!item.text && !mark && isLong(item.text);
+  const [reading, setReading] = useState(false);
+  // The pictures to show: the ones just sent, or the ones this phone kept of an earlier message. A tap opens one whole.
+  const pics = item.thumbs?.length ? item.thumbs : (saved ?? []);
+  const [viewing, setViewing] = useState<number | null>(null);
   // A message with code or a table in it is as wide as a message gets. Hugging its words, the bubble was laid out once around
   // what scrolls sideways at no set width: it kept the height of its words wrapped a word to a line, a dark block over Claude's
   // reply under it (seen on the simulator).
@@ -68,24 +79,32 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 13, paddingVertical: 9, width: wide ? "85%" : undefined, maxWidth: "85%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1, borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ alignItems: "flex-end", maxWidth: "100%", opacity: item.sending || item.held ? 0.6 : failed ? 0.75 : 1 }}>
         {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
-        {!!item.thumbs?.length && (
-          // One row of small squares (four fit): the words are the message, the photos go with it.
-          <View style={{ flexDirection: "row", gap: 6, marginBottom: item.text ? 8 : 0 }}>
-            {item.thumbs.map((uri, i) => (
-              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_THUMB, height: SENT_THUMB, borderRadius: 8 }} />
+        {pics.length > 0 && (
+          // Above the words, as the Claude app lays them: tall pictures on their own, the message under them.
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, marginBottom: item.text ? 6 : 0, maxWidth: "100%" }}>
+            {pics.map((uri, i) => (
+              <PressScale key={uri} accessibilityRole="button" accessibilityLabel={`Open photo ${i + 1}`} onPress={() => setViewing(i)} haptic="select" scaleTo={0.97} reach={false}>
+                <Image accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: SENT_W, height: SENT_H, borderRadius: 16, backgroundColor: colors.card }} />
+              </PressScale>
             ))}
           </View>
         )}
-        {!item.thumbs?.length && !!item.images && (
-          <Txt variant="small" tone="on-ink" style={{ opacity: 0.8, marginBottom: item.text ? 6 : 0 }}>
+        {pics.length === 0 && !!item.images && (
+          <Txt variant="small" tone="ink3" style={{ marginBottom: item.text ? 6 : 0 }}>
             {photos(item.images)} sent
           </Txt>
         )}
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} mark={mark} />}
+        {!!item.text && (
+          <View testID="your-bubble" style={{ backgroundColor: colors.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 11, width: wide ? "85%" : undefined, maxWidth: "85%", borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
+            {long ? <LongMessage text={item.text} onOpen={() => setReading(true)} /> : <Markdown text={item.text} voice="you" surface={colors.card} selectable={!onActions} mark={mark} />}
+          </View>
+        )}
       </Pressable>
+      {viewing !== null && <PhotoViewer uris={pics} first={viewing} onClose={() => setViewing(null)} />}
+      {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>
           <Txt variant="small" tone="stop" style={{ textAlign: "right", flexShrink: 1, paddingVertical: 4 }}>
@@ -182,7 +201,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
           </View>
           <Pressable onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View testID="summary-words" onLayout={(e) => measured(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
+              <Markdown text={row.item.text} voice="reply" selectable={!onActions} mark={mark} files={row.files} onFile={onFile} surface={colors.card} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {long && clipped && (
@@ -224,13 +243,45 @@ export function withCaret(text: string): string {
   return fences % 2 === 1 ? text : `${text.trimEnd()} ▍`;
 }
 
-export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void }) {
+export const AssistantRow = memo(function AssistantRow({ item, onActions, mark, files, onFile, last = false }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void; /** The chat's last reply, finished: Copy and More sit under it, as the Claude app has them. */ last?: boolean }) {
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
+      {last && !item.streaming && <ReplyActions text={item.text} onMore={onActions} />}
     </Pressable>
   );
 });
+
+/** Copy and More under a reply, small and quiet. */
+function ReplyActions({ text, onMore }: { text: string; onMore?: () => void }) {
+  const colors = useColors();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  const copy = () => {
+    void Promise.resolve(Clipboard.setStringAsync(text)).catch(() => {});
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 6, marginLeft: -10 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy reply"} onPress={copy} haptic="light" scaleTo={0.9} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 }}>
+        <ToolIcon name="copy" color={colors.ink3} />
+        {copied && (
+          <Txt variant="small" tone="ink3">
+            Copied
+          </Txt>
+        )}
+      </PressScale>
+      {onMore && (
+        <PressScale accessibilityRole="button" accessibilityLabel="More" onPress={onMore} haptic="select" scaleTo={0.9} style={{ minHeight: MIN_TARGET, minWidth: MIN_TARGET, alignItems: "center", justifyContent: "center" }}>
+          <ToolIcon name="more" color={colors.ink3} />
+        </PressScale>
+      )}
+    </View>
+  );
+}
 
 /**
  * A reply cut into its blocks (see settledCuts), each its own Markdown keyed by where it starts: while it streams, the ones
@@ -243,7 +294,7 @@ function Blocks({ text, streaming, ...rest }: { text: string; streaming: boolean
     <View style={{ gap: 8 }}>
       {starts.map((start, i) => {
         const part = text.slice(start, starts[i + 1] ?? text.length);
-        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} {...rest} />;
+        return <Markdown key={start} text={streaming && i === starts.length - 1 ? withCaret(part) : part} voice="reply" {...rest} />;
       })}
     </View>
   );
@@ -263,19 +314,30 @@ export const DayRow = memo(function DayRow({ label }: { label: string }) {
   );
 });
 
-/** Where the conversation was compacted, between two hairlines like a new day: what came before is a summary now. While it runs (a minute or so), it says so. */
+/** A wavy line, as the Claude app draws the break where a conversation was compacted. */
+function Squiggle({ color }: { color: string }) {
+  // A wave a few points tall, repeated across a fixed width and stretched to the room there is.
+  const d = `M0 5 ${Array.from({ length: 50 }, () => "q4 -5 8 0 t8 0").join(" ")}`;
+  return (
+    <View accessibilityElementsHidden style={{ flex: 1, height: 10 }}>
+      <Svg width="100%" height="10" viewBox="0 0 1600 10" preserveAspectRatio="none">
+        <Path d={d} stroke={color} strokeWidth={1} fill="none" />
+      </Svg>
+    </View>
+  );
+}
+
+/** Where the conversation was compacted, between two wavy lines: what came before is a summary now. While it runs (a minute or so), it says so. */
 export const CompactRow = memo(function CompactRow({ item }: { item: Extract<Item, { kind: "compact" }> }) {
   const colors = useColors();
   const running = item.state === "running";
-  const label = running ? "Compacting the chat…" : item.state === "done" ? "Chat compacted" : "Compacting stopped";
+  const label = running ? "Compacting the chat…" : item.state === "done" ? "Compacted conversation" : "Compacting stopped";
   return (
-    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.xl, paddingVertical: 14 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+    <View accessible accessibilityRole={running ? "progressbar" : "text"} accessibilityLabel={label} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 18 }}>
+      <Squiggle color={colors.rule} />
       {running && <ActivityIndicator size="small" color={colors.ink3} />}
-      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "600" }}>
-        {label}
-      </Txt>
-      <View style={{ flex: 1, height: 1, backgroundColor: colors.rule }} />
+      <Txt tone="ink3">{label}</Txt>
+      <Squiggle color={colors.rule} />
     </View>
   );
 });
@@ -318,7 +380,46 @@ export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: 
 /** No notes: the same list every time, so a row without any is not drawn again. */
 const NO_NOTES: string[] = [];
 
-export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
+/**
+ * A run of steps. With `entries` (the chat's own) it is one quiet line that opens the Activity sheet; without (a hook's steps) it
+ * is the row of chips that open in place.
+ */
+export const StepsRow = memo(function StepsRow(props: ComponentProps<typeof ChipsRow> & { entries?: ActivityEntry[]; /** The line was tapped: the screen opens the Activity sheet for this run of steps (a sheet drawn inside a list's cell would go with the cell). */ onActivity?: () => void }) {
+  return props.entries ? <ActivityLine {...props} onActivity={props.onActivity} /> : <ChipsRow {...props} />;
+});
+
+/** The quiet line a run of steps becomes: what it did, in a few words (the three that matter most), and a › that opens everything in order. */
+const ActivityLine = memo(function ActivityLine({ chips, notes = NO_NOTES, files, onFile, mark, took = null, inset = space.lg, onActivity }: ComponentProps<typeof ChipsRow> & { onActivity?: () => void }) {
+  const colors = useColors();
+  const line = activityLine(chips);
+  const marked = !!mark && notes.some((n) => markRanges(n, mark).length > 0);
+  return (
+    <View style={{ paddingHorizontal: inset, paddingTop: 4 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={`${line.text}. Open what happened`} onPress={onActivity} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
+        {line.running ? <View testID="activity-busy"><Dots /></View> :<Txt variant="small" tone={line.bad ? "stop" : "ink3"}>{line.bad ? "!" : "›_"}</Txt>}
+        <Txt tone={line.bad ? "stop" : "ink3"} numberOfLines={1} style={{ flexShrink: 1 }}>
+          {line.text}
+        </Txt>
+        <Chevron open={false} size={7} />
+        {!!took && (
+          <Txt variant="tiny" tone="ink3" accessibilityLabel={`Finished in ${took}`}>
+            · {took}
+          </Txt>
+        )}
+      </PressScale>
+      {marked && (
+        // A chat search that finds its words in a message shows them here, marked, without opening the sheet.
+        <View accessibilityLabel="Messages" style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 10 }}>
+          {notes.map((n, i) => (
+            <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} surface={colors.card} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+});
+
+const ChipsRow = memo(function ChipsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useRecyclingState<string | null>(null, [rowKey]);
@@ -767,7 +868,7 @@ const HANDOFF_MS = 300;
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ todos = [], onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { todos?: RemoteTodo[]; /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ todos = [], onSend, onRun, canAttach, disabled, placeholder = "Reply to Claude", seed, commands = [], draftKey, search, tools, working = false, onStop, glow = null }: { todos?: RemoteTodo[]; /** Claude is in the middle of a turn: Stop is beside Send, and Send queues what is typed. */ working?: boolean; /** The colour the box's edge glows in while the chat works (the title bar's), or none. */ glow?: string | null; /** Stops the turn. */ onStop?: () => void;  /** The chat's search: the box becomes its field. */ search?: BarSearch; /** The box's tools besides Search: its Tools button turns the row under the words into them. */ tools?: BarTool[];  /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // The box's words are body type: 16 on a phone, 17 on a tablet. The hidden copy measures in the same size.
   const body = useBody();
@@ -830,6 +931,9 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const [choosing, setChoosing] = useState(false);
   // The photo being drawn on.
   const [marking, setMarking] = useState<PickedImage | null>(null);
+  // Long pastes held above the box, and the one open to read.
+  const [pasted, setPasted] = useState<{ id: string; text: string }[]>([]);
+  const [readingPaste, setReadingPaste] = useState<string | null>(null);
   const chosen = useRef<ImageSource | null>(null);
   useEffect(() => {
     if (choosing || !chosen.current) return;
@@ -873,21 +977,24 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const insets = useSafeAreaInsets();
   // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
-  const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
+  const ready = (text.trim().length > 0 || attach.images.length > 0 || pasted.length > 0) && !disabled && !attach.busy;
+  const hasWords = text.trim().length > 0 || pasted.length > 0;
   const searching = useSearchOpening(search, () => input.current?.focus());
   const noMatch = !!search && search.query.trim().length >= 2 && search.count === 0;
-  // The row of tools is out, in place of the box's own buttons. Claude starting a turn puts it away: Stop is needed there.
-  const [tray, setTray] = useState(false);
-  useEffect(() => {
-    if (working) setTray(false);
-  }, [working]);
+  // What the + offers besides photos: the chat's search and its tools, as one menu (there is no row of tools to open).
+  const menu = [
+    ...(search ? [{ label: "Search this chat", symbol: "magnifyingglass" as SfName, onPress: searching.open }] : []),
+    ...(tools ?? []).map((t) => ({ label: t.label, symbol: TOOL_SYMBOL[t.icon], disabled: t.disabled, onPress: t.onPress })),
+  ];
   const problem = dictation.problem ?? attach.problem;
   // Sends what is typed (and the pictures attached), and empties the box.
   const submit = () => {
     dictation.cancel();
-    onSend(text.trim(), attach.images.length > 0 ? attach.images : undefined);
+    // What was pasted goes first, then what was typed round it.
+    onSend([...pasted.map((p) => p.text.trim()), text.trim()].filter(Boolean).join("\n\n"), attach.images.length > 0 ? attach.images : undefined);
     attach.clear();
     setText("");
+    setPasted([]);
   };
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
@@ -896,7 +1003,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   // On an iPad's keyboard, Return sends (queued while Claude works, as Send does then) and Shift+Return is the new line.
   // Not while a sheet is over the box (the box may still have the keyboard behind it), and a half-typed "/command" is completed to
   // the first match rather than sent.
-  useReturnToSend(typing && !choosing && !marking, () => {
+  useReturnToSend(typing && !choosing && !marking && readingPaste === null, () => {
     const first = matches[0];
     if (first && text.trim() !== `/${first.name}`) {
       setText(`/${first.name} `);
@@ -1004,7 +1111,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
       )}
       <PlanCard key={draftKey} todos={todos} />
       <View>
-      <Glass testID="chat-box" lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: BOX_RADIUS, paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
+      <Glass testID="chat-box" lift={0.12} fill={COMPOSER_FILL} style={{ borderRadius: BOX_RADIUS, padding: 6 }}>
         {searching.active && search && (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 10, minHeight: barButton }}>
             <Magnifier />
@@ -1013,79 +1120,74 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
         )}
         {/* The message box stays while searching, out of sight, so what was typed and the keyboard hand-over survive. */}
         <View style={{ display: searching.active ? "none" : "flex" }}>
+        {pasted.length > 0 && <PastedCards items={pasted} onOpen={(id) => setReadingPaste(pasted.find((p) => p.id === id)?.text ?? null)} onRemove={(id) => setPasted((p) => p.filter((x) => x.id !== id))} />}
         {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-        {/* The hidden copy, at the box's width and in its type: dictation writes words in without typing, and the box grows by this. */}
-        <Text
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          pointerEvents="none"
-          onLayout={(e) => setWordsHeight(e.nativeEvent.layout.height)}
-          style={{ position: "absolute", left: 0, right: 0, opacity: 0, fontSize: body.fontSize, lineHeight: body.lineHeight, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
-        >
-          {/* A last empty line counts, as it does in the box. */}
-          {text.endsWith("\n") || !text ? `${text} ` : text}
-        </Text>
-        <TextInput
-          ref={input}
-          accessibilityLabel="Message"
-          value={text}
-          {...list}
-          // Typing by hand takes over from the microphone.
-          onChangeText={(v) => {
-            dictation.edited();
-            list.onChangeText(v);
-          }}
-          onFocus={() => {
-            setTyping(true);
-            setHolder("message");
-          }}
-          onBlur={() => setTyping(false)}
-          placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : placeholder}
-          placeholderTextColor={colors.ink3}
-          multiline
-          editable={!disabled}
-          style={{ maxHeight: tallest, minHeight: control - 12, height: wordsHeight === null ? undefined : Math.min(tallest, Math.max(control - 12, wordsHeight)), fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4 }}
-        />
-        {/* The box's tools, under the words: the row of tools takes the whole of it while it is out. */}
-        <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: barButton }}>
-          {tray && tools ? (
-            <TrayContents
-              tools={tools}
-              onSearch={search ? () => {
-                setTray(false);
-                searching.open();
-              } : undefined}
-              onPick={(t) => {
-                setTray(false);
-                t.onPress();
-              }}
-              onClose={() => setTray(false)}
+        {/* One row, as the Claude app has its box: the + (photos, search, tools), the words, the microphone and Send. */}
+        <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "flex-end", gap: 4 }}>
+          {(canAttach || menu.length > 0) && (
+            <PlusButton
+              busy={attach.busy}
+              full={attach.full}
+              canAttach={!!canAttach}
+              items={menu}
+              onPress={() => setChoosing(true)}
+              // The picker is a screen of its own, so it waits for the menu to have gone.
+              onPick={(source) => setTimeout(() => void attach.add(source), 350)}
             />
-          ) : (
-            <>
-              {canAttach && (
-                <PlusButton
-                  busy={attach.busy}
-                  full={attach.full}
-                  onPress={() => setChoosing(true)}
-                  // The picker is a screen of its own, so it waits for the menu to have gone.
-                  onPick={(source) => setTimeout(() => void attach.add(source), 350)}
-                />
-              )}
-              {dictation.available && !disabled && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-              {tools ? <ToolsButton onPress={() => setTray(true)} /> : search && <BoxSearchButton onPress={searching.open} />}
-              <View style={{ flex: 1 }} />
-              {/* While Claude works Stop is beside Send, and Send queues. */}
-              {working && onStop && <StopButton onPress={onStop} />}
-              <SendButton ready={ready} queues={working} onPress={submit} />
-            </>
           )}
+          <View style={{ flex: 1 }}>
+            {/* The hidden copy, at the field's width and in its type: dictation writes words in without typing, and the box grows by this. */}
+            <Text
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              onLayout={(e) => setWordsHeight(e.nativeEvent.layout.height)}
+              style={{ position: "absolute", left: 0, right: 0, opacity: 0, fontSize: FIELD.fontSize, lineHeight: FIELD.lineHeight, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 7 }}
+            >
+              {/* A last empty line counts, as it does in the box. */}
+              {text.endsWith("\n") || !text ? `${text} ` : text}
+            </Text>
+            <TextInput
+              ref={input}
+              accessibilityLabel="Message"
+              value={text}
+              {...list}
+              // Typing by hand takes over from the microphone.
+              onChangeText={(v) => {
+                dictation.edited();
+                // A long paste is taken out of the box and held above it (the box keeps what was typed).
+                const out = pastedPart(text, v);
+                if (out) {
+                  setPasted((p) => [...p, { id: `p${Date.now()}${p.length}`, text: out.pasted }]);
+                  list.onChangeText(out.rest);
+                  return;
+                }
+                list.onChangeText(v);
+              }}
+              onFocus={() => {
+                setTyping(true);
+                setHolder("message");
+              }}
+              onBlur={() => setTyping(false)}
+              placeholder={dictation.listening ? (dictation.ready ? "Listening…" : "Getting ready…") : placeholder}
+              placeholderTextColor={colors.ink3}
+              multiline
+              editable={!disabled}
+              style={{ maxHeight: tallest, minHeight: barButton, height: wordsHeight === null ? undefined : Math.min(tallest, Math.max(barButton, wordsHeight)), fontSize: FIELD.fontSize, lineHeight: FIELD.lineHeight, color: colors.ink, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 7 }}
+            />
+          </View>
+          {/* Once there are words, the box is for sending them: the microphone (unless it is listening) and Stop step aside. */}
+          {dictation.available && !disabled && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+          {/* While Claude works Stop is beside Send, and Send queues. */}
+          {working && onStop && !hasWords && <StopButton onPress={onStop} />}
+          <SendButton ready={ready} queues={working} onPress={submit} />
         </View>
         </View>
       </Glass>
       {/* While the chat works, the box's edge glows like the title bar's, in the same colour. */}
       {glow && <WorkGlow color={glow} radius={BOX_RADIUS} />}
       </View>
+      {readingPaste !== null && <PastedSheet text={readingPaste} onClose={() => setReadingPaste(null)} />}
       {marking &&<MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
@@ -1103,27 +1205,15 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   );
 }
 
-/** The message box's corners: a rectangle with its words on top and its tools in a row under them. */
-const BOX_RADIUS = 18;
+/** The message box's corners: a capsule, as the Claude app's. */
+export const BOX_RADIUS = 28;
 
-/** The box's tools button: four squares; pressed, the row under the words becomes the tools. */
-function ToolsButton({ onPress }: { onPress: () => void }) {
-  const still = useRef(new Animated.Value(0)).current;
-  return (
-    <PressScale accessibilityRole="button" accessibilityLabel="Tools" accessibilityHint="Search, compact and more" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
-      <ToolsGlyph work={still} />
-    </PressScale>
-  );
-}
+/** The words typed in the box. */
+export const FIELD = { fontSize: 17, lineHeight: 22 };
 
-/** Search, in the box's row, where there are no other tools. */
-function BoxSearchButton({ onPress }: { onPress: () => void }) {
-  return (
-    <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}>
-      <Magnifier />
-    </PressScale>
-  );
-}
+/** The pictures of the tools in the + menu, from the system's own set. */
+export type SfName = NonNullable<ComponentProps<typeof MenuButton>["systemImage"]>;
+const TOOL_SYMBOL: Record<BarTool["icon"], SfName> = { compact: "arrow.down.right.and.arrow.up.left", clear: "trash", todos: "checklist", rename: "pencil", cruise: "sparkles", copy: "doc.on.doc", more: "ellipsis" };
 
 /**
  * Stop, while Claude works: a square on a dark circle, beside Send (a square, no words: the label is for a screen reader).
@@ -1177,9 +1267,10 @@ export function SendButton({ ready, queues = false, onPress, label = "Send" }: {
   return (
     <Animated.View style={{ transform: [{ scale: spring }] }}>
       <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={queues ? "Sends it once Claude has finished" : undefined} accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: barButton, height: barButton, borderRadius: barButton / 2, overflow: "hidden" }}>
-        <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
+        <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [`${colors.ink}1F`, colors.ink] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
-            <Txt variant="heading" tone={colors.isDark ? "on-ink" : "white"}>
+            {/* The arrow reads on the soft disc while there is nothing to send, and on the ink one once there is. */}
+            <Txt variant="heading" tone={ready ? "on-ink" : "ink3"}>
               ↑
             </Txt>
           </Animated.View>
@@ -1236,18 +1327,23 @@ export function MicButton({ listening, ready, onPress }: { listening: boolean; r
  * On iOS it is the system's own menu, opening from the + with a symbol for each source, as Messages has it; elsewhere it
  * opens the sheet (`onPress`).
  */
-function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: boolean; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
+export function PlusButton({ busy, full, canAttach, items, onPress, onPick }: { busy: boolean; full: boolean; canAttach: boolean; /** What else the menu offers: the chat's search and tools. */ items: { label: string; symbol: SfName; disabled?: boolean; onPress: () => void }[]; onPress: () => void; /** A source picked from the iOS menu. */ onPick: (source: ImageSource) => void }) {
   const colors = useColors();
   const off = busy || full;
+  // A soft circle, as the Claude app draws it, in the box's own ink.
+  const disc = { width: barButton, height: barButton, borderRadius: barButton / 2, backgroundColor: `${colors.ink}1F` };
   if (Platform.OS === "ios")
     return (
-      <View style={{ width: barButton, height: barButton, opacity: off ? 0.4 : 1 }}>
+      <View style={disc}>
         {/* A SwiftUI host keeps out of the safe area, the keyboard's included, by default: with the keyboard up it moved the +
             up inside its own frame, over the words (seen on an iPhone). It is a button in a row, so it ignores all of it. */}
         <Host ignoreSafeArea="all" alignment="center" style={{ width: barButton, height: barButton }}>
-          <Menu modifiers={[accessibilityLabel("Attach photos"), ...(off ? [disabledMod(true)] : [])]} label={<SwiftImage systemName="plus.circle" size={26} color={colors.ink2} />}>
-            <MenuButton label="Photo Library" systemImage="photo.on.rectangle" onPress={() => onPick("library")} />
-            <MenuButton label="Take Photo" systemImage="camera" onPress={() => onPick("camera")} />
+          <Menu modifiers={[accessibilityLabel("Attach and tools")]} label={<SwiftImage systemName="plus" size={18} color={colors.ink} />}>
+            {canAttach && <MenuButton label="Photo Library" systemImage="photo.on.rectangle" modifiers={off ? [disabledMod(true)] : []} onPress={() => onPick("library")} />}
+            {canAttach && <MenuButton label="Take Photo" systemImage="camera" modifiers={off ? [disabledMod(true)] : []} onPress={() => onPick("camera")} />}
+            {items.map((it) => (
+              <MenuButton key={it.label} label={it.label} systemImage={it.symbol} modifiers={it.disabled ? [disabledMod(true)] : []} onPress={it.onPress} />
+            ))}
           </Menu>
         </Host>
       </View>
@@ -1263,12 +1359,10 @@ function PlusButton({ busy, full, onPress, onPick }: { busy: boolean; full: bool
       haptic="light"
       scaleTo={0.88}
       opacity={off ? 0.4 : 1}
-      style={{ width: barButton, height: barButton, alignItems: "center", justifyContent: "center" }}
+      style={[disc, { alignItems: "center", justifyContent: "center" }]}
     >
-      <View accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ position: "absolute", width: 12, height: 2, borderRadius: 1, backgroundColor: colors.ink2 }} />
-        <View style={{ position: "absolute", width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink2 }} />
-      </View>
+      <View accessibilityElementsHidden style={{ position: "absolute", width: 14, height: 2, borderRadius: 1, backgroundColor: colors.ink }} />
+      <View accessibilityElementsHidden style={{ position: "absolute", width: 2, height: 14, borderRadius: 1, backgroundColor: colors.ink }} />
     </PressScale>
   );
 }
@@ -1299,7 +1393,9 @@ export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage
 /** A picture's side in the message box. */
 const THUMB = 60;
 /** A sent picture's side in your message. */
-const SENT_THUMB = 56;
+const SENT_W = 96;
+/** A photo you sent, as tall as the Claude app shows it: portrait, over the words. */
+const SENT_H = 128;
 
 /** Where to get the pictures from. Choosing closes the sheet; the Composer then opens the picker (see its `choosing`). */
 function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source: ImageSource) => void }) {

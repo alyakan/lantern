@@ -269,7 +269,7 @@ describe("what scrolls sideways", () => {
   };
 
   it("fades its right edge while there is more of it to see, and not once it is scrolled to the end", async () => {
-    await render(<Markdown text={"```ts\nconst aVeryLongLineThatRunsWellPastTheEdgeOfAPhone = 1;\n```"} />);
+    await render(<Markdown text={"| a | b |\n| - | - |\n| 1 | 2 |"} />);
     await sized(300, 700);
     expect(screen.getByTestId("side-fade")).toBeTruthy();
     await fireEvent.scroll(screen.getByTestId("side-scroll"), { nativeEvent: { contentOffset: { x: 400, y: 0 } } });
@@ -277,17 +277,17 @@ describe("what scrolls sideways", () => {
   });
 
   it("has no fade when it all fits", async () => {
-    await render(<Markdown text={"```ts\nconst a = 1;\n```"} />);
+    await render(<Markdown text={"| a | b |\n| - | - |\n| 1 | 2 |"} />);
     await sized(300, 200);
     expect(screen.queryByTestId("side-fade")).toBeNull();
   });
+});
 
-  it("fades on your own bubble too, into the solid colour its see-through ground comes out as there", async () => {
-    await render(<Markdown tone="on-ink" text={"```sh\ncurl -sS -X POST https://api.example.com/v1/items --data-binary @payload.json\n```"} />);
-    await sized(300, 700);
-    const strips = screen.getByTestId("side-fade").props.children as { props: { style: { backgroundColor: string } } }[];
-    // White at 0x1f over the light theme's ink, then that colour's own alpha for the strip.
-    expect(strips[strips.length - 1].props.style.backgroundColor.slice(0, 7)).toBe(laidOver(`${lightColors.onInk}1f`, lightColors.ink));
+describe("a code block's long lines", () => {
+  it("wrap, so none runs off the screen (the sideways scroll could not be dragged on the phone)", async () => {
+    await render(<Markdown text={"```sh\ncurl -sS -X POST https://api.example.com/v1/items --data-binary @payload.json\n```"} />);
+    expect(screen.queryByTestId("side-scroll")).toBeNull();
+    expect(screen.getByText(/curl -sS/)).toBeTruthy();
   });
 });
 

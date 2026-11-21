@@ -62,7 +62,7 @@ describe("composing a new chat", () => {
   it("sends photos with the first message to a Mac that takes them", async () => {
     pick.mockResolvedValue({ images: [{ id: "img-1", uri: "file:///1.jpg", data: "/9j/DATA", mediaType: "image/jpeg", width: 10, height: 10 }] });
     const { lastOf } = await open(["newchatimages"]);
-    await fireEvent.press(screen.getByRole("button", { name: "Add photos" }));
+    await fireEvent.press(screen.getByRole("menuitem", { name: "Photo Library" }));
     await waitFor(() => expect(screen.getByLabelText("Photo 1")).toBeTruthy());
     expect(pick).toHaveBeenCalledWith("library", expect.any(Number));
     await write("what's wrong on this screen?");
@@ -70,9 +70,20 @@ describe("composing a new chat", () => {
     await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ text: "what's wrong on this screen?", images: [{ media_type: "image/jpeg", data: "/9j/DATA" }] }));
   });
 
+  it("holds a long paste in a card above the box, and sends it with what was typed", async () => {
+    const big = "a pasted line of something long\n".repeat(20);
+    const { lastOf } = await open();
+    await write("Explain: ");
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), `Explain: ${big}`);
+    expect(screen.getByLabelText("What to start with").props.value).toBe("Explain: ");
+    expect(screen.getByText("PASTED")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ text: `${big.trim()}\n\nExplain:` }));
+  });
+
   it("offers no photos to a Mac that can't take them with a new chat, and sends none", async () => {
     const { lastOf } = await open();
-    expect(screen.queryByRole("button", { name: "Add photos" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Photo Library" })).toBeNull();
     await write("fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toBeTruthy());

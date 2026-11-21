@@ -250,6 +250,16 @@ export function useBody(): TextStyle {
   return layoutFor(width, height) === "phone" ? phoneBody : type.body;
 }
 
+/**
+ * Claude's words in a chat, set as the Claude app sets them: a serif, a size up from the body, and room between the lines, so a
+ * long answer reads like a page. Georgia, which every iPhone has (the app's own serif is not a name an app can ask for).
+ */
+export const replyText: TextStyle = { fontFamily: Platform.select({ ios: "Georgia", default: "serif" }) as string, fontSize: 18, lineHeight: 28 };
+/** A heading inside Claude's words: the same serif, bold. */
+export const replyHeading: TextStyle = { ...replyText, fontWeight: "700", fontSize: 20, lineHeight: 28 };
+/** Your own words in a chat: the sans, at 17, with the same room between lines. */
+export const yourText: TextStyle = { fontSize: 17, lineHeight: 24 };
+
 // Black shadows: they read on Daylight's page and are simply not seen on Night's (its cards are lighter than its page instead).
 export const shadow = {
   card: Platform.select({

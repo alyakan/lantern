@@ -1,13 +1,14 @@
 import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Linking, ScrollView, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
 import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
 import { hasMark, markTokens, splitMarked } from "../view/mark";
 import { useAccent } from "./accent";
-import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
+import { fonts, radius, replyHeading, replyText, type as scale, useColors, yourText, type Palette } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
+import { ToolIcon } from "./ToolIcon";
 import { ArchitectureDiagram } from "./ArchitectureDiagram";
 
 /** The colour of the words: ink on the page, night or white on a dark background, on-ink on an ink one (your own message). */
@@ -189,7 +190,7 @@ function SideScroll({ children, surface, style, contentContainerStyle }: { child
   const hex = surface.length === 7 ? surface : null;
   return (
     <View style={style}>
-      <ScrollView testID="side-scroll" horizontal showsHorizontalScrollIndicator={false} onLayout={(e) => setBox(e.nativeEvent.layout.width)} onContentSizeChange={(w) => setInner(w)} onScroll={(e) => setX(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32} contentContainerStyle={contentContainerStyle}>
+      <ScrollView testID="side-scroll" horizontal directionalLockEnabled nestedScrollEnabled showsHorizontalScrollIndicator={false} onLayout={(e) => setBox(e.nativeEvent.layout.width)} onContentSizeChange={(w) => setInner(w)} onScroll={(e) => setX(e.nativeEvent.contentOffset.x)} scrollEventThrottle={32} contentContainerStyle={contentContainerStyle}>
         {children}
       </ScrollView>
       {more && hex && (
@@ -215,7 +216,7 @@ export function laidOver(top: string, under: string): string {
 }
 
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
-function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; tone: Tone; mark?: string }) {
+function CodeBlock({ lang, text, tone, mark, onCard = false }: { lang: string; text: string; tone: Tone; mark?: string; /** It sits on a card (your bubble), not on the page. */ onCard?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -227,7 +228,10 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
     timer.current = setTimeout(() => setCopied(false), 1500);
   };
   const colors = useColors();
-  const l = look(tone, colors);
+  const base = look(tone, colors);
+  // A tile you can see against what it sits on, as the Claude app sets its code: a card on the page, the page's colour inside a
+  // card (your bubble), and a hairline round it either way.
+  const l = tone === "ink" ? { ...base, raised: onCard ? colors.paper : colors.card } : base;
   const { lines: total, folds } = useMemo(() => foldOf(text), [text]);
   // Colour only on the page itself: on an ink bubble or the night screens the words stay one colour, as they always were.
   const lines = useMemo(() => highlight(text, tone === "ink" ? lang : ""), [text, lang, tone]);
@@ -237,19 +241,25 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
   const shown = folded ? lines.slice(0, FOLDED_LINES) : lines;
   const hit = useHit();
   return (
-    <View style={{ backgroundColor: l.raised, borderRadius: radius.inner, overflow: "hidden" }}>
+    <View style={{ backgroundColor: l.raised, borderRadius: 14, overflow: "hidden", borderWidth: tone === "ink" ? StyleSheet.hairlineWidth : 0, borderColor: colors.rule }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
-        <Txt variant="tiny" tone={l.label} style={{ fontWeight: "700" }}>
+        {/* As the Claude app has a code block's bar: the language in quiet words, and a small copy mark, not a word-button. */}
+        <Txt variant="tiny" tone={l.label}>
           {lang}
         </Txt>
-        <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy code"} onPress={copy} hitSlop={6} haptic="light" scaleTo={0.92} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-          <Txt variant="tiny" tone={copied ? "go" : "cobalt"} style={{ fontWeight: "700" }}>
-            {copied ? "Copied" : "Copy"}
-          </Txt>
+        <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy code"} onPress={copy} hitSlop={8} haptic="light" scaleTo={0.9} style={{ paddingHorizontal: 8, paddingVertical: 4, minWidth: 30, alignItems: "center" }}>
+          {copied ? (
+            <Txt variant="tiny" tone="go" style={{ fontWeight: "600" }}>
+              Copied
+            </Txt>
+          ) : (
+            <ToolIcon name="copy" color={colors.ink3} />
+          )}
         </PressScale>
       </View>
       {/* On your own (ink) bubble the block's ground is see-through: its edge fades into what that comes out as, so a cut line reads as one that scrolls. */}
-      <SideScroll surface={tone === "on-ink" ? laidOver(l.raised, colors.ink) : l.raised} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
+      {/* Long lines wrap: the sideways scroll could not be dragged on the phone, and a line off the screen cannot be read. */}
+      <View style={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
         <Text selectable style={[scale.mono, { color: l.code }]}>
           {shown.map((line, i) => (
             <Fragment key={i}>
@@ -267,7 +277,7 @@ function CodeBlock({ lang, text, tone, mark }: { lang: string; text: string; ton
             </Fragment>
           ))}
         </Text>
-      </SideScroll>
+      </View>
       {folds && (
         <PressScale accessibilityRole="button" accessibilityLabel={folded ? `Show ${total - FOLDED_LINES} more lines of code` : "Show less code"} accessibilityState={{ expanded: !folded }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
           <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "700" }}>
@@ -321,9 +331,10 @@ function Table({ block, tone, mark, surface }: { block: Extract<Block, { kind: "
 const BULLET_WIDTH = 10;
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true, mark, files, onFile, surface }: { text: string; tone?: Tone; /** What the words sit on (a table's edge fades into it while it scrolls sideways): the page unless said. */ surface?: string; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", voice, selectable = true, mark, files, onFile, surface }: { text: string; tone?: Tone; /** Whose words these are, in a chat: Claude's are set in the serif at 18, yours at 17. Left out, the body type of a card or a page. */ voice?: "reply" | "you"; /** What the words sit on (a table's edge fades into it while it scrolls sideways): the page unless said. */ surface?: string; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean; /** What a chat search looks for: marked wherever it is in the text. Leave it out when not searching, so the text is not drawn again. */ mark?: string; /** The files this message's turn edited: a path to one of them in the words is a link to its diff. */ files?: string[]; onFile?: (path: string) => void }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const colors = useColors();
+  const set = voice === "reply" ? replyText : voice === "you" ? yourText : undefined;
   // Where a tap can open a change: a link to a file always can, and code naming one of the turn's files too.
   const links = useMemo(() => (onFile ? { files: files ?? NO_FILES, onFile } : null), [files, onFile]);
   const body = (
@@ -332,17 +343,17 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
         switch (b.kind) {
           case "heading":
             return b.level <= 2 ? (
-              <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={{ marginTop: 4 }}>
+              <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={[voice === "reply" ? replyHeading : null, { marginTop: 4 }]}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             ) : (
-              <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={{ fontWeight: "700", marginTop: 2 }}>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={[set, { fontWeight: "700", marginTop: 2 }]}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
           case "paragraph":
             return (
-              <Txt key={i} variant="body" tone={tone} selectable={selectable}>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable} style={set}>
                 <Spans spans={b.spans} tone={tone} mark={mark} />
               </Txt>
             );
@@ -358,11 +369,11 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
                           <TaskBox checked={m.checked} />
                         </View>
                       ) : (
-                        <Txt variant="body" tone={tone} style={{ minWidth: b.ordered ? 22 : BULLET_WIDTH }}>
+                        <Txt variant="body" tone={tone} style={[set, { minWidth: b.ordered ? 22 : BULLET_WIDTH }]}>
                           {m.marker}
                         </Txt>
                       )}
-                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
+                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={[set, { flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }]}>
                         <Spans spans={item} tone={tone} mark={mark} />
                       </Txt>
                     </View>
@@ -374,7 +385,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
             return (
               // In the quote's own tone: on your ink bubble a grey quote was dark on dark.
               <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: look(tone, colors).bar, paddingLeft: 10, opacity: tone === "on-ink" ? 0.8 : 1 }}>
-                <Txt variant="body" tone={look(tone, colors).quote} selectable={selectable}>
+                <Txt variant="body" tone={look(tone, colors).quote} selectable={selectable} style={set}>
                   <Spans spans={b.spans} tone={tone} mark={mark} />
                 </Txt>
               </View>
@@ -384,7 +395,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
           case "rule":
             return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
           case "code": {
-            const code = <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} />;
+            const code = <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} mark={mark} onCard={voice === "you"} />;
             return b.lang.toLowerCase() === "architecture" ? <ArchitectureDiagram key={i} text={b.text} fallback={code} /> : code;
           }
         }

@@ -50,10 +50,12 @@ import { TodosPane } from "./TodosPane";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
+import { ActivitySheet } from "./ActivitySheet";
 import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
+import { loadSent, photosFor, rememberSent, type SentEntry } from "../view/sentPhotos";
 
 /** What no search, or a search that finds nothing, marks: the same each time, so the list has nothing to draw again for it. */
 const NO_MATCHES: ReturnType<typeof findRows> = [];
@@ -203,6 +205,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const canCruise = useMacCan("cruise");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
+  // The run of steps whose Activity sheet is open (its row's key): drawn here, not in the row, which a list may reuse for another.
+  const [activity, setActivity] = useState<string | null>(null);
   // A Review page's file whose change is open, and the verdicts picked on each page not yet sent (by the page's message id).
   const [reviewed, setReviewed] = useState<string | null>(null);
   const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
@@ -396,6 +400,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     return () => clearTimeout(t);
   }, [waking, asleep]);
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
+  const loadOutput = useCallback((id: string) => sync.stepOutput(slot, id), [sync, slot]);
   const loadReviewed = useCallback((path: string) => (canReviewDiff ? sync.reviewDiff(slot, path) : sync.diff(slot, path)), [sync, slot, canReviewDiff]);
   /** A Review file page's parts, when its message has them. */
   const reviewOf = (row: Extract<Row, { kind: "page" }>): ReviewFile | null => (row.page.kind === "file" ? parseReviewFile(row.page.title, row.page.body) : null);
@@ -509,6 +514,14 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const lastWords = rows.findLast((r) => r.kind !== "turn" && r.kind !== "steps" && r.kind !== "hook" && r.kind !== "day");
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
   const lastTurn = rows.findLast((r) => r.kind === "turn" || r.kind === "user");
+  // The chat's last reply (no message of yours after it): the one that has Copy and More under it.
+  const lastReply = useMemo(() => {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].kind === "user") return null;
+      if (rows[i].kind === "assistant") return rows[i].key;
+    }
+    return null;
+  }, [rows]);
   // The turn Cruise asks about: the last one Claude finished (a message you just sent is no turn yet).
   const turnKey = lastTurn?.kind === "turn" ? lastTurn.key : "";
   // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
@@ -530,8 +543,17 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   const openFiles = useCallback((paths: string[]) => void ((paths.length === 1 && pane.current?.onFile?.(paths[0])) || setFiles(paths)), []);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
-  // Cruise has a row over the message box (its pill, or its card once on).
-  const cruiseRow = canCruise && !asleep && !stepsChat;
+  // Cruise is a tool in the message box's tray; its card shows over the box only while it is on.
+  const cruiseOffered = canCruise && !asleep && !stepsChat;
+  // The photos this phone sent, kept on it: a message the Mac gives back says only how many there were.
+  const [kept, setKept] = useState<SentEntry[]>([]);
+  // (Only a chat that has some changes anything: no needless second drawing.)
+  useEffect(() => void loadSent().then((list) => list.length > 0 && setKept(list)), []);
+  const sentPhotos = useMemo(() => {
+    if (kept.length === 0) return new Map<string, string[]>();
+    const asked = rows.flatMap((r) => (r.kind === "user" && !!r.item.images && !r.item.thumbs?.length ? [{ id: r.item.id, text: r.item.text }] : []));
+    return asked.length > 0 ? photosFor(kept, slot, asked) : new Map<string, string[]>();
+  }, [kept, rows, slot]);
   const send = (text: string) => {
     if (lastWords) setRepliedTo(lastWords.key);
     void sync.send(slot, text);
@@ -570,6 +592,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
               setPanel("todos");
               setChangesOpen(true);
             },
+          },
+        ]
+      : []),
+    ...(cruiseOffered
+      ? [
+          {
+            label: cruise.on ? "Cruise on" : "Cruise",
+            icon: "cruise" as const,
+            hint: cruise.on ? "Stops suggesting the next step" : "Suggests the next step each time the chat is idle",
+            onPress: cruise.toggle,
           },
         ]
       : []),
@@ -636,9 +668,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
+          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
           return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
@@ -655,7 +687,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
         case "steps":
-          return <StepsRow rowKey={row.key} chips={row.chips} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} entries={row.entries} onActivity={steady(`${row.key}:activity`, () => setActivity(row.key))} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so
@@ -811,16 +843,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           }}
         />
       )}
-      {cruiseRow && (
+      {cruiseOffered && cruise.on && (
         <CruiseBar
-          replies={cruise.on ? undefined : replies}
-          onReply={send}
-          on={cruise.on}
           resting={!working && !open}
           asking={cruise.asking}
           draft={cruise.draft}
           error={cruise.error}
-          onToggle={cruise.toggle}
           onAsk={cruise.nextStep}
           onDo={cruise.doIt}
           onAnother={cruise.another}
@@ -861,6 +889,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
             setAway(null);
             list.current?.scrollToEnd({ animated: true });
             // A command (it may hold a secret) is never kept on the phone to go later: it says it didn't go, as before.
+            if (images?.length) void rememberSent(slot, text, images).then(setKept);
             if (online || images?.length || isTerminal(text)) void sync.send(slot, text, images);
             else sync.hold(slot, text);
           }} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} tools={barTools} working={working} onStop={() => sync.interrupt(slot).catch(fail)} glow={glowing ? glowColor : null} />
@@ -969,8 +998,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   // What the last message asks for, as buttons floating over the end of the chat, as a page's are (and not with them: a page's own
   // buttons are its answers). Not while the chat is scrolled away from its end, where they would answer what isn't in view.
   // (Hidden, not taken away, while scrolled away: going would give back its room, which moved the end and brought them back.)
-  // With Cruise's pill over the box, the replies are chips in its row (CruiseBar); otherwise they float over the chat's end.
-  const replyBar = replies.length > 0 && !pageBar && !(cruiseRow && !cruise.on) ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
+  // The replies float over the chat's end.
+  const replyBar = replies.length > 0 && !pageBar ? <QuickReplies replies={replies} onSend={send} lift={glass ? bottom : 0} onHeight={setReplyHeight} hidden={!!away} /> : null;
   const jump = away && !paged && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
@@ -1050,6 +1079,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           <ChangesPane slot={slot} inSheet hideLabel="Close" title={<PanelMenu value="changes" artifacts={canArtifacts} todos={canTodos} onPick={setPanel} />} onHide={() => setChangesOpen(false)} />
         )}
       </PageSheet>
+      {(() => {
+        const run = activity === null ? undefined : rows.find((r) => r.key === activity);
+        return run?.kind === "steps" ? <ActivitySheet entries={run.entries} took={run.took} mark={find?.query} files={run.files} onFile={openFile} loadDiff={loadDiff} loadOutput={canOutput ? loadOutput : undefined} onClose={() => setActivity(null)} /> : null;
+      })()}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {reviewed && <DiffSheet files={[reviewed]} load={loadReviewed} onClose={() => setReviewed(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}

@@ -28,7 +28,8 @@ async function open(answers: Parameters<typeof attachSession>[1] = { projects, n
 }
 
 /** The line that says what it runs on opens its options. */
-const openOptions = (summary: string | RegExp = /^Runs on/) => fireEvent.press(screen.getByRole("button", { name: summary }));
+// (The options open from the + menu's "Options"; the line under the box says what it runs on.)
+const openOptions = () => fireEvent.press(screen.getByRole("menuitem", { name: "Options" }));
 const write = (text: string) => fireEvent.changeText(screen.getByLabelText("What to start with"), text);
 /** The chip that says which project it starts in (a guess until one is picked), and picking another from it. */
 const chip = (name: string) => screen.getByRole("button", { name: new RegExp(`^Project: ${name}`) });
@@ -191,7 +192,7 @@ describe("choosing what a new chat runs on", () => {
   it("starts on Ask with the project's own models unless something else is chosen", async () => {
     const { lastOf } = await openWithControls(true);
     // Said in a line first; the options are behind it.
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    expect(screen.getByText("Runs on Chat · Ask · Project's own")).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "Auto" })).toBeNull();
     await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
@@ -208,7 +209,7 @@ describe("choosing what a new chat runs on", () => {
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     expect(screen.getByText(/starts on Auto/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Max" })).toBeTruthy();
+    expect(screen.getByText("Runs on Chat · Auto · Max")).toBeTruthy();
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "auto", preset: "max", workflow: null }));
@@ -227,7 +228,7 @@ describe("choosing what a new chat runs on", () => {
   it("starts on Ask or Auto as the last chat was started, whatever the project, and remembers what this one starts on", async () => {
     loadPermissions.mockImplementation(async () => "auto");
     const { lastOf } = await openWithControls(true);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Project's own" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Runs on Chat · Auto · Project's own")).toBeTruthy());
     await pick("website");
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
@@ -239,7 +240,9 @@ describe("choosing what a new chat runs on", () => {
     loadPermissions.mockImplementation(async () => "auto");
     const { lastOf } = await openWithControls(false);
     await waitFor(() => expect(loadPermissions).toHaveBeenCalled());
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    // (Its note stands in for the line until the options are opened.)
+    await openOptions();
+    expect(screen.getByText("Runs on Chat · Ask · Project's own")).toBeTruthy();
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ permissions: "ask" }));
@@ -291,7 +294,7 @@ describe("choosing where a new chat runs", () => {
     const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
     await openOptions();
     await fireEvent.press(await screen.findByRole("radio", { name: "Ollama" }));
-    expect(screen.getByRole("button", { name: "Runs on: Ollama · Chat · Ask" })).toBeTruthy();
+    expect(screen.getByText("Runs on Ollama · Chat · Ask")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getByText("Ollama has no Auto mode: it asks before it acts.")).toBeTruthy();
     // The Mac's presets are Claude Code's models: not offered for a provider that runs its own.
@@ -305,12 +308,12 @@ describe("choosing where a new chat runs", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Max" })).toBeTruthy();
+    expect(screen.getByText("Runs on Chat · Auto · Max")).toBeTruthy();
     await fireEvent.press(screen.getByRole("radio", { name: "Ollama" }));
-    expect(screen.getByRole("button", { name: "Runs on: Ollama · Chat · Ask" })).toBeTruthy();
+    expect(screen.getByText("Runs on Ollama · Chat · Ask")).toBeTruthy();
     // Back to Claude: it is Ask and the project's own models, not the Auto and Max that were there before.
     await fireEvent.press(screen.getByRole("radio", { name: "Claude" }));
-    expect(screen.getByRole("button", { name: "Runs on: Claude · Chat · Ask · Project's own" })).toBeTruthy();
+    expect(screen.getByText("Runs on Claude · Chat · Ask · Project's own")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Ask" }).props.accessibilityState).toMatchObject({ selected: true });
     expect(await start(lastOf)).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "ask", preset: null, workflow: null, provider: "claude" });
   });
@@ -371,7 +374,7 @@ describe("choosing a new chat's model", () => {
     expect(screen.getByText("Presets: a model for each role")).toBeTruthy();
     expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Its own", "Low", "High", "Max", "Balanced"]));
     await fireEvent.press(screen.getByRole("radio", { name: "High" }));
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Opus 5.5, High" })).toBeTruthy();
+    expect(screen.getByText("Runs on Chat · Ask · Opus 5.5, High")).toBeTruthy();
     const sent = await start(lastOf);
     expect(sent).toMatchObject({ model: "opus", effort: "high", preset: null });
     expect("provider" in sent).toBe(false);
@@ -384,7 +387,7 @@ describe("choosing a new chat's model", () => {
     expect(screen.queryByText("Effort")).toBeNull();
     await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
     expect(screen.getByRole("radio", { name: "Haiku 4.5" }).props.accessibilityState).toMatchObject({ selected: false });
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Max" })).toBeTruthy();
+    expect(screen.getByText("Runs on Chat · Ask · Max")).toBeTruthy();
     const sent = await start(lastOf);
     expect(sent).toMatchObject({ preset: "max" });
     expect("model" in sent || "effort" in sent).toBe(false);
@@ -428,8 +431,8 @@ describe("starting a chat as Step by step", () => {
     const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls: { allow_auto: false, presets: [] } }, ["controls", "workflow"]);
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, { connection: connectedWithControls }, controller);
     await projectsHere();
-    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
     await openOptions();
+    expect(screen.getByText("Runs on Chat · Ask · Project's own")).toBeTruthy();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Step by step" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Chat" }).props.accessibilityState).toMatchObject({ selected: true });
     await fireEvent.press(screen.getByRole("radio", { name: "Step by step" }));
@@ -473,7 +476,7 @@ describe("choosing a new chat's Claude account", () => {
     await openOptions();
     await fireEvent.press(await screen.findByRole("radio", { name: "Work" }));
     expect(screen.getByText("The chat uses Work's sign-in and limits.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Runs on: Work · Chat · Ask · Project's own" })).toBeTruthy();
+    expect(screen.getByText("Runs on Work · Chat · Ask · Project's own")).toBeTruthy();
     expect(await start(lastOf)).toMatchObject({ op: "new_chat", account: "work" });
   });
 

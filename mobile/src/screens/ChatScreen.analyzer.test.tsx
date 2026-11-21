@@ -67,7 +67,7 @@ describe("dictating with iOS 26's newer model", () => {
     await tapStop();
     expect(LanternSpeech.stop).toHaveBeenCalled();
     await act(async () => emit("end", null));
-    expect(screen.getByRole("button", { name: "Dictate" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Dictate" })).toBeNull();
     expect(box().props.value).toBe("Fix the login bug. Then ship it.");
   });
 

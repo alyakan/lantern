@@ -2,7 +2,7 @@ import { View } from "react-native";
 import { useColors } from "./theme";
 
 /** The pictures of the chat bar's tools, each drawn from a few views like the app's other glyphs (there is no icon set). */
-export type ToolIconName = "compact" | "clear" | "todos" | "rename";
+export type ToolIconName = "compact" | "clear" | "todos" | "rename" | "cruise" | "copy" | "more";
 
 const SIZE = 20;
 
@@ -17,7 +17,8 @@ const Arrow = ({ color, x, y, turn }: { color: string; x: number; y: number; tur
 );
 
 /**
- * Compact: two arrows closing in on a line (the chat squeezed). Clear: a bin. To-dos: a ticked box. Rename: a pencil. Decoration
+ * Compact: two arrows closing in on a line (the chat squeezed). Clear: a bin. To-dos: a ticked box. Rename: a pencil. Cruise: a
+ * sparkle (two crossed bars, and two more turned between them). Decoration
  * only: the button around it says what it is.
  */
 export function ToolIcon({ name, color }: { name: ToolIconName; color?: string }) {
@@ -43,6 +44,27 @@ export function ToolIcon({ name, color }: { name: ToolIconName; color?: string }
         <>
           <View style={{ position: "absolute", left: 2, top: 2, width: 16, height: 16, borderRadius: 4, borderWidth: 2, borderColor: c }} />
           <View style={{ position: "absolute", left: 6, top: 6.5, width: 9, height: 5, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: c, transform: [{ rotate: "-45deg" }] }} />
+        </>
+      )}
+      {name === "copy" && (
+        <>
+          <View style={{ position: "absolute", left: 6, top: 6, width: 12, height: 12, borderRadius: 3, borderWidth: 2, borderColor: c }} />
+          <View style={{ position: "absolute", left: 2, top: 2, width: 12, height: 12, borderRadius: 3, borderWidth: 2, borderColor: c, borderRightWidth: 0, borderBottomWidth: 0 }} />
+        </>
+      )}
+      {name === "more" && (
+        <View style={{ position: "absolute", left: 0, right: 0, top: 8, flexDirection: "row", justifyContent: "center", gap: 3 }}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: c }} />
+          ))}
+        </View>
+      )}
+      {name === "cruise" && (
+        <>
+          <Bar color={c} x={9} y={1} w={2} h={18} />
+          <Bar color={c} x={1} y={9} w={18} h={2} />
+          <Bar color={c} x={4.5} y={9} w={11} h={1.5} turn={45} />
+          <Bar color={c} x={4.5} y={9} w={11} h={1.5} turn={-45} />
         </>
       )}
       {name === "rename" && (

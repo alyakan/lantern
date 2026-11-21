@@ -3,27 +3,21 @@ import type { Suggestion } from "../protocol/generated/Suggestion";
 import { Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Dots } from "../ui/skeleton";
-import { ChipRow, ReplyChip } from "./ChatExtras";
 import { radius, shadow, space, useColors } from "../ui/theme";
 import { useAccent } from "../ui/accent";
 
 /**
- * Cruise, over the message box: a pill that turns it on; then, each time the chat goes idle, the next step Claude drafted
- * from its last few turns. "Do it" sends that draft (and Cruise asks again when the turn ends); "Another" asks for a
+ * Cruise's card, over the message box while it is on (it is turned on from the box's tools): each time the chat goes idle, the
+ * next step Claude drafted from its last few turns. "Do it" sends that draft (and Cruise asks again when the turn ends); "Another" asks for a
  * different one; the ✕ stops it. It never sends anything by itself, and a real prompt (a permission, a question) always
  * breaks the loop: the chat's own card takes the box back.
  */
-export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, onDo, onAnother, onStop, replies, onReply }: {
-  on: boolean;
-  /** Quick replies to Claude's last words, drawn in the off pill's row (see QuickReplies). */
-  replies?: string[];
-  onReply?: (text: string) => void;
+export function CruiseBar({ resting, asking, draft, error, onAsk, onDo, onAnother, onStop }: {
   /** The chat is idle: no turn running and nothing waiting on you. While it isn't, Cruise waits instead of offering a step. */
   resting: boolean;
   asking: boolean;
   draft: Suggestion | null;
   error: string | null;
-  onToggle: () => void;
   /** Asks for a next step now, when none is offered. */
   onAsk: () => void;
   onDo: () => void;
@@ -33,17 +27,6 @@ export function CruiseBar({ on, resting, asking, draft, error, onToggle, onAsk, 
   const colors = useColors();
   // The app's accent (a regular's Ember), as other choices and buttons have it.
   const accent = useAccent();
-  if (!on)
-    return (
-      // At the message box's edge, as Cruise's card is when it is on: the edge doesn't jump as it turns on. With quick replies
-      // to offer, they share its row as chips of one kind: the answers first, then Cruise.
-      <View style={{ paddingBottom: 2 }}>
-        <ChipRow label={replies?.length ? "Quick replies" : undefined}>
-          {replies?.map((r) => <ReplyChip key={r} label={r} onPress={() => onReply?.(r)} />)}
-          <ReplyChip lead="✨" label={replies?.length ? "Cruise" : "Cruise · suggest the next step"} accessibilityLabel="Cruise: suggest the next step each time the chat is idle" onPress={onToggle} />
-        </ChipRow>
-      </View>
-    );
   return (
     <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
       <View style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 12, gap: 4 }, shadow.card, { shadowOpacity: 0.06 }]}>
