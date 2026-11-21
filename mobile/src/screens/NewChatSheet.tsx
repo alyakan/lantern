@@ -337,9 +337,9 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                     No projects yet. Open a folder in Lantern on your Mac first.
                   </Txt>
                 ) : (
-                  <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} hitSlop={{ top: 6, bottom: 6 }} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 32, borderRadius: radius.pill, backgroundColor: colors.wash }}>
+                  <PressScale accessibilityRole="button" accessibilityLabel={`Project: ${projects.find((p) => p.id === project)?.name ?? "none"}${guessed ? ", guessed from what you said" : ""}`} accessibilityHint="Picks another project" accessibilityState={{ expanded: choosingProject }} onPress={() => setChoosingProject(!choosingProject)} haptic="select" scaleTo={0.95} hitSlop={{ top: 6, bottom: 6 }} style={{ flexShrink: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 12, minHeight: 34, borderRadius: radius.pill, backgroundColor: colors.wash }}>
                     <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(projects.find((p) => p.id === project)?.name ?? "") }} />
-                    <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1 }}>
+                    <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", flexShrink: 1, lineHeight: 18 }}>
                       {projects.find((p) => p.id === project)?.name ?? "Pick a project"}
                     </Txt>
                     {guessed && (
@@ -380,7 +380,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                 </Txt>
                 {opened && (
                   <FadeSlideIn from={6} ms={180}>
-                    <View style={{ gap: 12, paddingTop: 12 }}>
+                    <View testID="new-chat-options" style={{ gap: 18, marginTop: 10, padding: 16, borderRadius: 22, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
                       {providers.length > 1 && (
                         <View>
                           <Caption>Provider</Caption>
@@ -502,7 +502,7 @@ const EFFORT_WORDS: Record<string, string> = { minimal: "Minimal", low: "Low", m
 /** A small label over a group of choices. */
 function Caption({ children }: { children: string }) {
   return (
-    <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700", marginBottom: 6 }}>
+    <Txt variant="small" style={{ fontWeight: "600", marginBottom: 8 }}>
       {children}
     </Txt>
   );
@@ -511,11 +511,12 @@ function Caption({ children }: { children: string }) {
 /** One choice of a group: filled when it is the one chosen. A radio for a screen reader, with what it means as its hint. */
 function Pill({ label, on, onPress, hint, disabled, dot }: { label: string; on: boolean; onPress: () => void; hint?: string; disabled?: boolean; /** A project's colour, as a dot before its name. */ dot?: string }) {
   const colors = useColors();
+  // The one chosen is a soft tint with an ink edge, not a solid black block; the rest are quiet outlines.
   return (
-    <PressScale accessibilityRole="radio" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ selected: on, checked: on, disabled: !!disabled }} disabled={disabled} opacity={disabled ? 0.45 : 1} onPress={onPress} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 13, paddingVertical: 8, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
+    <PressScale accessibilityRole="radio" accessibilityLabel={label} accessibilityHint={hint} accessibilityState={{ selected: on, checked: on, disabled: !!disabled }} disabled={disabled} opacity={disabled ? 0.45 : 1} onPress={onPress} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? `${colors.ink}14` : "transparent", borderRadius: radius.pill, paddingHorizontal: 14, minHeight: 36, justifyContent: "center", borderWidth: on ? 1.5 : 1, borderColor: on ? colors.ink : colors.rule }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
         {dot && <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dot }} />}
-        <Txt variant="small" tone={on ? "on-ink" : "ink"} style={{ fontWeight: "700" }}>
+        <Txt variant="small" tone={on ? "ink" : "ink2"} style={{ fontWeight: on ? "700" : "500", lineHeight: 18 }}>
           {label}
         </Txt>
       </View>
