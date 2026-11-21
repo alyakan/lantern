@@ -22,7 +22,7 @@ export type Row =
   | { key: string; kind: "assistant"; item: Extract<Item, { kind: "assistant" }>; /** The files its turn edited: a path in the words that names one opens its diff. */ files: string[] }
   | { key: string; kind: "page"; item: Extract<Item, { kind: "assistant" }>; page: Page; live: boolean; /** The files its turn edited (a Build step's): named in its words, each is a link to its change. */ files: string[] }
   | { key: string; kind: "summary"; item: Extract<Item, { kind: "assistant" }>; chips: StepChip[]; durationMs: number | null; files: string[] }
-  | { key: string; kind: "steps"; chips: StepChip[]; /** How long the turn took, when it ended and this is its last row of steps ("42 s"). */ took: string | null; /** What the agent (Claude, Codex, Gemini…) said between these steps, folded into them (see `foldedNotes`). */ notes: string[]; /** The files its turn edited: a path in the notes that names one opens its diff. */ files: string[] }
+  | { key: string; kind: "steps"; chips: StepChip[]; /** What it did and said, in the order it happened: what the Activity sheet lists. */ entries: ActivityEntry[]; /** How long the turn took, when it ended and this is its last row of steps ("42 s"). */ took: string | null; /** What the agent (Claude, Codex, Gemini…) said between these steps, folded into them (see `foldedNotes`). */ notes: string[]; /** The files its turn edited: a path in the notes that names one opens its diff. */ files: string[] }
   | { key: string; kind: "prompt"; item: Extract<Item, { kind: "prompt" }> }
   | { key: string; kind: "desktop"; item: Extract<Item, { kind: "desktop" }> }
   | { key: string; kind: "turn"; item: Extract<Item, { kind: "turn" }> }
@@ -96,6 +96,70 @@ export function stepChips(steps: Step[]): StepChip[] {
   const failed = steps.filter((s) => s.isError);
   if (failed.length) chips.push({ key: "failed", label: `${plural(failed.length, "step")} failed`, tone: "bad" });
   return chips;
+}
+
+/** What an Activity sheet filters by: the kinds of thing a run of steps did or said. */
+export type ActivityGroup = "read" | "search" | "edit" | "run" | "test" | "other";
+
+/** One line of the Activity sheet: a step, or something the agent said between steps, in the order they happened. */
+export type ActivityEntry =
+  | {
+      key: string;
+      kind: "step";
+      /** The step's id, to ask what it printed. */
+      id: string;
+      group: ActivityGroup;
+      text: string;
+      bad: boolean;
+      running: boolean;
+      /** The files an edit changed: a tap opens their diffs. */
+      files: string[];
+      added: number;
+      removed: number;
+    }
+  | { key: string; kind: "note"; text: string };
+
+const SEARCH_TOOLS = ["Grep", "Glob", "WebSearch", "WebFetch"];
+
+/** A step as one line of the Activity sheet. */
+export function stepEntry(s: Step): ActivityEntry {
+  const group: ActivityGroup = s.tests ? "test" : s.edits.length || EDIT_TOOLS.includes(s.name) ? "edit" : s.name === "Read" ? "read" : SEARCH_TOOLS.includes(s.name) ? "search" : s.name === "Bash" || s.name === "BashOutput" ? "run" : "other";
+  const verb = { read: "Read", search: "Searched", edit: s.edits.some((e) => e.created) ? "Created" : "Edited", run: "Ran", test: "Ran", other: "" }[group];
+  const what = group === "edit" && s.edits.length ? s.edits.map((e) => e.path.split("/").pop() ?? e.path).join(", ") : s.summary;
+  const text = group === "other" ? (s.name ? `${s.name.replace(/^mcp__.+?__/, "").replace(/_/g, " ")}${s.summary ? ` ${s.summary}` : ""}` : "A step") : `${verb} ${what}`.trim();
+  return {
+    key: s.id,
+    kind: "step",
+    id: s.id,
+    group,
+    text: clip(text, 200),
+    bad: s.isError || (s.tests?.failed ?? 0) > 0,
+    running: !s.done,
+    files: s.edits.map((e) => e.path),
+    added: s.edits.reduce((n, e) => n + e.added, 0),
+    removed: s.edits.reduce((n, e) => n + e.removed, 0),
+  };
+}
+
+/** What a chip says first when a turn's line has room for only three: what went wrong, what changed, what ran, then the looking around. */
+const CHIP_RANK = ["failed", "edits", "run", "tests", "skill", "agent", "advisor", "other", "read", "search"];
+const rankOf = (c: StepChip) => {
+  const r = CHIP_RANK.indexOf(c.key.startsWith("mcp-") ? "other" : c.key);
+  return c.key === "tests" && c.tone === "bad" ? -1 : r === -1 ? CHIP_RANK.length : r;
+};
+
+/**
+ * A run of steps as the one quiet line that stands for it ("Edited 3 files, ran 12 commands and 4 more"): the three that matter
+ * most, and how many are left. `bad` when something in it failed (the line's glyph turns red); `running` while a step still goes.
+ */
+export function activityLine(chips: StepChip[]): { text: string; bad: boolean; running: boolean } {
+  const ranked = [...chips].sort((a, b) => rankOf(a) - rankOf(b));
+  // An edits chip says how much changed after its count ("+24 −2"): the line leaves that to the sheet.
+  const label = (c: StepChip) => c.label.replace(/\s[+−]\d.*$/, "");
+  const head = ranked.slice(0, 3).map((c, i) => (i === 0 ? label(c) : label(c).charAt(0).toLowerCase() + label(c).slice(1)));
+  const left = ranked.length - head.length;
+  const text = head.length === 0 ? "Worked" : left > 0 ? `${head.join(", ")} and ${left} more` : head.length > 1 ? `${head.slice(0, -1).join(", ")} and ${head[head.length - 1]}` : head[0];
+  return { text, bad: chips.some((c) => c.tone === "bad"), running: chips.some((c) => c.running) };
 }
 
 /** What of a turn's work a summary card says (the rest is in the steps above it). */
@@ -280,6 +344,7 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
   const rows: Row[] = [];
   let run: Step[] = [];
   let notes: string[] = [];
+  let entries: ActivityEntry[] = [];
   let noteFiles = NO_FILES;
   // Where the current turn's rows start (after its user row), the last day said and the last message's time.
   let turnStart = 0;
@@ -288,9 +353,10 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
   const endRun = () => {
     // Notes with no steps yet (a prompt came between) wait for the steps after them.
     if (!run.length) return;
-    rows.push({ key: `steps-${run[0].id}`, kind: "steps", chips: stepChips(run), took: null, notes, files: noteFiles });
+    rows.push({ key: `steps-${run[0].id}`, kind: "steps", chips: stepChips(run), entries, took: null, notes, files: noteFiles });
     run = [];
     notes = [];
+    entries = [];
     noteFiles = NO_FILES;
   };
   const hookAt = (i: number) => {
@@ -303,10 +369,14 @@ export function timeline(all: Item[], now = Date.now(), working = false): Row[] 
   };
   items.forEach((item, i) => {
     hookAt(i);
-    if (item.kind === "step") return void run.push(item);
+    if (item.kind === "step") {
+      entries.push(stepEntry(item));
+      return void run.push(item);
+    }
     // A note between steps goes with them, and the steps on either side of it stay one row.
     if (item.kind === "assistant" && folded.has(i)) {
       noteFiles = files[i] ?? NO_FILES;
+      entries.push({ key: `n-${item.id}`, kind: "note", text: item.text });
       return void notes.push(item.text);
     }
     endRun();

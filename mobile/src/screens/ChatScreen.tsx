@@ -655,7 +655,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} paged={paged} onFile={openFile} onAction={(a) => reply(row.item.id, a)} />;
         }
         case "steps":
-          return <StepsRow rowKey={row.key} chips={row.chips} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} entries={row.entries} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so

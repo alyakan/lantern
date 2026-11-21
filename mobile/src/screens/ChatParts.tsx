@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef, type ReactNode } from "react";
 import { useRecyclingState } from "@shopify/flash-list";
 import { useLayout } from "../shell/useLayout";
 import { ActivityIndicator, Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -37,7 +37,8 @@ import { approvalOf, fieldsOf, promptView } from "../view/prompts";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import { DiffView } from "./DiffView";
 import { MarkupSheet } from "./MarkupSheet";
-import { lastLine, turnLine, type Row, type StepChip } from "../view/timeline";
+import { activityLine, lastLine, turnLine, type ActivityEntry, type Row, type StepChip } from "../view/timeline";
+import { ActivitySheet } from "./ActivitySheet";
 import { markRanges } from "../view/mark";
 import { parseMarkdown, settledCuts } from "../view/markdown";
 import type { PageAction } from "../view/pages";
@@ -318,7 +319,48 @@ export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: 
 /** No notes: the same list every time, so a row without any is not drawn again. */
 const NO_NOTES: string[] = [];
 
-export const StepsRow = memo(function StepsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
+/**
+ * A run of steps. With `entries` (the chat's own) it is one quiet line that opens the Activity sheet; without (a hook's steps) it
+ * is the row of chips that open in place.
+ */
+export const StepsRow = memo(function StepsRow(props: ComponentProps<typeof ChipsRow> & { entries?: ActivityEntry[] }) {
+  return props.entries ? <ActivityLine {...props} entries={props.entries} /> : <ChipsRow {...props} />;
+});
+
+/** The quiet line a run of steps becomes: what it did, in a few words (the three that matter most), and a › that opens everything in order. */
+const ActivityLine = memo(function ActivityLine({ rowKey, chips, entries, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: ComponentProps<typeof ChipsRow> & { entries: ActivityEntry[] }) {
+  const colors = useColors();
+  const [open, setOpen] = useRecyclingState(false, [rowKey]);
+  const line = activityLine(chips);
+  const marked = !!mark && notes.some((n) => markRanges(n, mark).length > 0);
+  return (
+    <View style={{ paddingHorizontal: inset, paddingTop: 4 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel={`${line.text}. Open what happened`} onPress={() => setOpen(true)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
+        {line.running ? <View testID="activity-busy"><Dots /></View> :<Txt variant="small" tone={line.bad ? "stop" : "ink3"}>{line.bad ? "!" : "›_"}</Txt>}
+        <Txt tone={line.bad ? "stop" : "ink3"} numberOfLines={1} style={{ flexShrink: 1 }}>
+          {line.text}
+        </Txt>
+        <Chevron open={false} size={7} />
+        {!!took && (
+          <Txt variant="tiny" tone="ink3" accessibilityLabel={`Finished in ${took}`}>
+            · {took}
+          </Txt>
+        )}
+      </PressScale>
+      {marked && (
+        // A chat search that finds its words in a message shows them here, marked, without opening the sheet.
+        <View accessibilityLabel="Messages" style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 10 }}>
+          {notes.map((n, i) => (
+            <Markdown key={i} text={n} mark={mark} files={files} onFile={onFile} surface={colors.card} />
+          ))}
+        </View>
+      )}
+      {open && <ActivitySheet entries={entries} took={took} mark={mark} files={files} onFile={onFile} onFiles={onFiles} onOutput={onOutput} onClose={() => setOpen(false)} />}
+    </View>
+  );
+});
+
+const ChipsRow = memo(function ChipsRow({ rowKey, chips, notes = NO_NOTES, files, onFile, mark, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; /** What the agent said between these steps: a chip of its own ("2 messages") opens to them. */ notes?: string[]; /** What a chat search looks for: notes that say it are shown open, with it marked. */ mark?: string; /** The files the turn edited, and what a tap on one named in the notes does. */ files?: string[]; onFile?: (path: string) => void; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useRecyclingState<string | null>(null, [rowKey]);

@@ -52,8 +52,8 @@ describe("while Claude works", () => {
   it("says what it is doing right now", async () => {
     await withSession([asked, { kind: "tool_started", tool_use_id: "t9", name: "Bash", summary: "npm test" }], { status: "working" });
     expect(screen.getByText(/^Running npm test/)).toBeTruthy();
-    // The chip of the step still going has a spinner.
-    expect(screen.getByTestId("chip-busy")).toBeTruthy();
+    // The quiet line of the steps, while one is still going, has dots in place of its glyph.
+    expect(screen.getByTestId("activity-busy")).toBeTruthy();
   });
 
   it("shows a caret at the end of words still coming in", async () => {

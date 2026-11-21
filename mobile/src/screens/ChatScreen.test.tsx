@@ -25,6 +25,12 @@ jest.mock("../prefs", () => ({
 }));
 beforeEach(() => resetSeen());
 
+/** A run of steps is one quiet line that opens a sheet; an edit's row there opens its diff. */
+const openEdit = async (file: string) => {
+  await fireEvent.press(screen.getByRole("button", { name: /Open what happened/ }));
+  await fireEvent.press(screen.getByRole("button", { name: `Edited ${file}` }));
+};
+
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
 const turn: RemoteEvent[] = [
@@ -57,22 +63,21 @@ describe("a chat", () => {
     expect(readableSide(402)).toBe(0);
   });
 
-  it("reads as a timeline: your message with its time, Claude's text, a row of chips, and how long it took", async () => {
+  it("reads as a timeline: your message with its time, Claude's text, one quiet line for its steps, and how long it took", async () => {
     await withSession(turn);
     expect(screen.getByText("Release 0.1.53")).toBeTruthy();
     expect(screen.getByText("lantern")).toBeTruthy();
     expect(screen.getByText("Cut 0.1.53 with the context menu fix.")).toBeTruthy();
     expect(screen.getByText(new Date(1_000_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))).toBeTruthy();
     expect(screen.getByText("Bumping the version, then running the tests.")).toBeTruthy();
-    expect(screen.getByText("Read 1 file")).toBeTruthy();
-    expect(screen.getByText("Edited 1 file +1 −1")).toBeTruthy();
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
-    // How long it took ends the row of chips, rather than a line of its own.
+    // What it did is one quiet line: what changed and what ran first, the looking around last.
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
+    // How long it took ends the line, rather than a line of its own.
     expect(screen.getByLabelText("Finished in 3 s")).toBeTruthy();
     expect(screen.queryByText("Finished in 3 s")).toBeNull();
   });
 
-  it("groups the commands into one chip that opens to each of them", async () => {
+  it("folds the commands into the quiet line, which opens a sheet with each of them in order", async () => {
     const commands: RemoteEvent[] = [
       { kind: "user_text", text: "Check it.", at: 1_000_000, sent_by: "desktop" },
       { kind: "tool_started", tool_use_id: "c1", name: "Bash", summary: "git status" },
@@ -82,14 +87,12 @@ describe("a chat", () => {
       { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
     ];
     await withSession(commands);
-    expect(screen.queryByText("git status")).toBeNull();
-    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: false });
-    await fireEvent.press(screen.getByText("Ran 2 commands"));
-    expect(screen.getByText("git status")).toBeTruthy();
-    expect(screen.getByText("cargo build")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: true });
-    await fireEvent.press(screen.getByText("Ran 2 commands"));
-    expect(screen.queryByText("git status")).toBeNull();
+    expect(screen.queryByText("Ran git status")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: /Open what happened/ }));
+    expect(screen.getByText("Ran git status")).toBeTruthy();
+    expect(screen.getByText("Ran cargo build")).toBeTruthy();
+    // A step that failed is told apart from the ones that did not.
+    expect(screen.getByText("Problems 1")).toBeTruthy();
   });
 
   it("shows what a turn did as a card: the closing message, how long it took, and what it changed and ran", async () => {
@@ -727,7 +730,7 @@ describe("a chat", () => {
     const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
     // A catch-up starts the chat over: the messages already there stay while its pages come.
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 30, page: 0, done: false, hidden: 0, events: turn.slice(0, 1) } }));
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
     // Something sent from here meanwhile shows at once.
     await act(async () => void controller.sync.send("a", "Quick one."));
     expect(screen.getByText("Quick one.")).toBeTruthy();
@@ -735,16 +738,16 @@ describe("a chat", () => {
     expect(screen.queryByText("And the changelog.")).toBeNull();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 32, page: 2, done: true, hidden: 0, events: later } }));
     expect(screen.getByText("And the changelog.")).toBeTruthy();
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
   });
 
   it("opens a long chat on the shape of a chat until all its pages have come", async () => {
     const { controller } = await withSession([]);
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
-    expect(screen.queryByText("412 tests passed")).toBeNull();
+    expect(screen.queryByText("Edited 1 file, 412 tests passed and read 1 file")).toBeNull();
     expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: true, hidden: 0, events: [] } }));
-    expect(screen.getByText("412 tests passed")).toBeTruthy();
+    expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
   });
 
   it("stops holding a chat back when its pages stop coming on a link that stays up, and holds it again with the next page", async () => {
@@ -752,9 +755,9 @@ describe("a chat", () => {
     jest.useFakeTimers();
     try {
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: false, hidden: 0, events: turn } }));
-      expect(screen.queryByText("412 tests passed")).toBeNull();
+      expect(screen.queryByText("Edited 1 file, 412 tests passed and read 1 file")).toBeNull();
       await act(async () => void jest.advanceTimersByTime(PAGES_STALL_MS + 100));
-      expect(screen.getByText("412 tests passed")).toBeTruthy();
+      expect(screen.getByText("Edited 1 file, 412 tests passed and read 1 file")).toBeTruthy();
       // A page that does come after that is held until the chat is whole, as before.
       const later: RemoteEvent[] = [{ kind: "user_text", text: "And the changelog.", at: 2_000_000, sent_by: "desktop" }];
       await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 10, page: 1, done: false, hidden: 0, events: later } }));
@@ -837,8 +840,8 @@ describe("while more of a chat is coming", () => {
 
   it("shows the shape of a diff while it comes, in the sheet", async () => {
     const { releases } = await slow(["diff"], turn);
-    await waitFor(() => expect(screen.getByText("Edited 1 file +1 −1")).toBeTruthy(), { timeout: 3000 });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open what happened/ })).toBeTruthy(), { timeout: 3000 });
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy(), { timeout: 3000 });
     await act(async () => releases.diff("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"));
     await waitFor(() => expect(screen.getByLabelText("Added, line 1: new")).toBeTruthy(), { timeout: 3000 });
@@ -1374,7 +1377,7 @@ describe("a Review, a file page at a time", () => {
     await fireEvent.press(screen.getByText("/wt/stack/src/lib/token.ts:7"));
     await waitFor(() => expect(lastOf("review_diff")).toEqual({ op: "review_diff", slot: "a", path: "/wt/stack/src/lib/token.ts" }));
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
-    await fireEvent.press(screen.getByText(/Edited 1 file/));
+    await openEdit("auth.ts");
     await waitFor(() => expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/src/lib/auth.ts" }));
   });
 
@@ -1536,9 +1539,9 @@ describe("a Review, a file page at a time", () => {
 });
 
 describe("what a turn changed", () => {
-  it("opens the diff of an edited file from its chip, with added and removed lines told apart", async () => {
+  it("opens the diff of an edited file from its row in the Activity sheet, with added and removed lines told apart", async () => {
     const { lastOf } = await withSession(turn, {}, { diff: "--- /p/Cargo.toml\n+++ /p/Cargo.toml\n@@ -3 +3 @@\n-version = \"0.1.52\"\n+version = \"0.1.53\"\n" });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByLabelText("Added, line 3: version = \"0.1.53\"")).toBeTruthy());
     expect(lastOf("diff")).toEqual({ op: "diff", slot: "a", path: "/p/Cargo.toml" });
     expect(screen.getByText("What changed")).toBeTruthy();
@@ -1612,7 +1615,7 @@ describe("what a turn changed", () => {
 
   it("says why a diff couldn't be read", async () => {
     await withSession(turn, {}, { diff: new Error("That file wasn't changed in this chat.") });
-    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await openEdit("Cargo.toml");
     await waitFor(() => expect(screen.getByText("That file wasn't changed in this chat.")).toBeTruthy());
   });
 });
