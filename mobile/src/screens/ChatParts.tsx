@@ -971,6 +971,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
   const ready = (text.trim().length > 0 || attach.images.length > 0 || pasted.length > 0) && !disabled && !attach.busy;
+  const hasWords = text.trim().length > 0 || pasted.length > 0;
   const searching = useSearchOpening(search, () => input.current?.focus());
   const noMatch = !!search && search.query.trim().length >= 2 && search.count === 0;
   // What the + offers besides photos: the chat's search and its tools, as one menu (there is no row of tools to open).
@@ -1168,9 +1169,10 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               style={{ maxHeight: tallest, minHeight: barButton, height: wordsHeight === null ? undefined : Math.min(tallest, Math.max(barButton, wordsHeight)), fontSize: FIELD.fontSize, lineHeight: FIELD.lineHeight, color: colors.ink, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 7 }}
             />
           </View>
-          {dictation.available && !disabled && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+          {/* Once there are words, the box is for sending them: the microphone (unless it is listening) and Stop step aside. */}
+          {dictation.available && !disabled && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
           {/* While Claude works Stop is beside Send, and Send queues. */}
-          {working && onStop && <StopButton onPress={onStop} />}
+          {working && onStop && !hasWords && <StopButton onPress={onStop} />}
           <SendButton ready={ready} queues={working} onPress={submit} />
         </View>
         </View>

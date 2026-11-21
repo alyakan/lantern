@@ -122,7 +122,8 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
 export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; onPress: () => void; /** How far above the bottom of its box it sits, where the message box floats over the list. */ lift?: number }) {
   const colors = useColors();
   return (
-    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10 + lift, alignItems: "flex-end", gap: 6 }}>
+    // Centred over the box, as the Claude app has it: only as wide as the button, so the chat beside it still takes touches.
+    <FadeSlideIn glass from={8} ms={160} style={{ position: "absolute", left: "50%", marginLeft: -20, width: 40, bottom: 10 + lift, alignItems: "center", gap: 6 }}>
       {unseen > 0 && (
         <View accessibilityElementsHidden style={{ backgroundColor: colors.ink, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 }}>
           <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "700" }}>
