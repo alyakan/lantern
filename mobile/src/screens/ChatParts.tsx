@@ -28,6 +28,8 @@ import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown, Marked } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
+import { isLong, pastedPart } from "../view/paste";
+import { LongMessage, PastedCards, PastedSheet } from "./PastedText";
 import { DiffSkeleton, Dots } from "../ui/skeleton";
 import { Chevron } from "../ui/Chevron";
 import { ToolIcon } from "../ui/ToolIcon";
@@ -58,6 +60,9 @@ const TURN_GAP = 22;
 export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
+  // A page of pasted words is a card that opens, not a page in the chat (a chat search still finds it: it shows in full then).
+  const long = !!item.text && !mark && isLong(item.text);
+  const [reading, setReading] = useState(false);
   // A message with code or a table in it is as wide as a message gets. Hugging its words, the bubble was laid out once around
   // what scrolls sideways at no set width: it kept the height of its words wrapped a word to a line, a dark block over Claude's
   // reply under it (seen on the simulator).
@@ -88,10 +93,11 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
         {!!item.text && (
           <View testID="your-bubble" style={{ backgroundColor: colors.card, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 11, width: wide ? "85%" : undefined, maxWidth: "85%", borderWidth: failed ? 1.5 : 0, borderColor: colors.stop }}>
-            <Markdown text={item.text} voice="you" surface={colors.card} selectable={!onActions} mark={mark} />
+            {long ? <LongMessage text={item.text} onOpen={() => setReading(true)} /> : <Markdown text={item.text} voice="you" surface={colors.card} selectable={!onActions} mark={mark} />}
           </View>
         )}
       </Pressable>
+      {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", columnGap: 12, marginTop: 2, maxWidth: "85%" }}>
           <Txt variant="small" tone="stop" style={{ textAlign: "right", flexShrink: 1, paddingVertical: 4 }}>
@@ -918,6 +924,9 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const [choosing, setChoosing] = useState(false);
   // The photo being drawn on.
   const [marking, setMarking] = useState<PickedImage | null>(null);
+  // Long pastes held above the box, and the one open to read.
+  const [pasted, setPasted] = useState<{ id: string; text: string }[]>([]);
+  const [readingPaste, setReadingPaste] = useState<string | null>(null);
   const chosen = useRef<ImageSource | null>(null);
   useEffect(() => {
     if (choosing || !chosen.current) return;
@@ -961,7 +970,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   const insets = useSafeAreaInsets();
   // (The room under the bar is the same with the keyboard up or down: the chat screen has the library lift the bar by that much
   // less, so nothing changes size at the moment the keyboard starts to come, and the chat above moves once, with the keyboard.)
-  const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
+  const ready = (text.trim().length > 0 || attach.images.length > 0 || pasted.length > 0) && !disabled && !attach.busy;
   const searching = useSearchOpening(search, () => input.current?.focus());
   const noMatch = !!search && search.query.trim().length >= 2 && search.count === 0;
   // What the + offers besides photos: the chat's search and its tools, as one menu (there is no row of tools to open).
@@ -973,9 +982,11 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   // Sends what is typed (and the pictures attached), and empties the box.
   const submit = () => {
     dictation.cancel();
-    onSend(text.trim(), attach.images.length > 0 ? attach.images : undefined);
+    // What was pasted goes first, then what was typed round it.
+    onSend([...pasted.map((p) => p.text.trim()), text.trim()].filter(Boolean).join("\n\n"), attach.images.length > 0 ? attach.images : undefined);
     attach.clear();
     setText("");
+    setPasted([]);
   };
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
@@ -984,7 +995,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
   // On an iPad's keyboard, Return sends (queued while Claude works, as Send does then) and Shift+Return is the new line.
   // Not while a sheet is over the box (the box may still have the keyboard behind it), and a half-typed "/command" is completed to
   // the first match rather than sent.
-  useReturnToSend(typing && !choosing && !marking, () => {
+  useReturnToSend(typing && !choosing && !marking && readingPaste === null, () => {
     const first = matches[0];
     if (first && text.trim() !== `/${first.name}`) {
       setText(`/${first.name} `);
@@ -1101,6 +1112,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
         )}
         {/* The message box stays while searching, out of sight, so what was typed and the keyboard hand-over survive. */}
         <View style={{ display: searching.active ? "none" : "flex" }}>
+        {pasted.length > 0 && <PastedCards items={pasted} onOpen={(id) => setReadingPaste(pasted.find((p) => p.id === id)?.text ?? null)} onRemove={(id) => setPasted((p) => p.filter((x) => x.id !== id))} />}
         {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
         {/* One row, as the Claude app has its box: the + (photos, search, tools), the words, the microphone and Send. */}
         <View testID="chat-box-tools" style={{ flexDirection: "row", alignItems: "flex-end", gap: 4 }}>
@@ -1135,6 +1147,13 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
               // Typing by hand takes over from the microphone.
               onChangeText={(v) => {
                 dictation.edited();
+                // A long paste is taken out of the box and held above it (the box keeps what was typed).
+                const out = pastedPart(text, v);
+                if (out) {
+                  setPasted((p) => [...p, { id: `p${Date.now()}${p.length}`, text: out.pasted }]);
+                  list.onChangeText(out.rest);
+                  return;
+                }
                 list.onChangeText(v);
               }}
               onFocus={() => {
@@ -1159,6 +1178,7 @@ export function Composer({ todos = [], onSend, onRun, canAttach, disabled, place
       {/* While the chat works, the box's edge glows like the title bar's, in the same colour. */}
       {glow && <WorkGlow color={glow} radius={BOX_RADIUS} />}
       </View>
+      {readingPaste !== null && <PastedSheet text={readingPaste} onClose={() => setReadingPaste(null)} />}
       {marking &&<MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
