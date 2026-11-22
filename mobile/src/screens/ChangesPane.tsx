@@ -9,7 +9,7 @@ import { Button, Txt } from "../ui/components";
 import { SheetPill } from "../ui/Sheet";
 import { PressScale } from "../ui/motion";
 import { DiffSkeleton } from "../ui/skeleton";
-import { radius, space, useColors } from "../ui/theme";
+import { radius, softChoice, space, useColors } from "../ui/theme";
 import { changedFileOf, changedFiles, changesLine, EMPTY_SCOPE, fromMac, inEditOrder, SCOPES, withLinked, type ChangedFile } from "../view/changes";
 import { DiffView } from "./DiffView";
 
@@ -126,7 +126,7 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
             {files.map((f) => (
               <PressScale key={f.path} accessibilityRole="button" accessibilityLabel={f.linked ? `${f.name}, from a link` : `${f.name}, ${f.created ? "new, " : ""}${f.added} added, ${f.removed} removed`} accessibilityState={{ selected: f.path === path }} onPress={() => setPicked(f.path)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 8, borderRadius: radius.inner, backgroundColor: f.path === path ? colors.paper : "transparent" }}>
                 <View style={{ flex: 1 }}>
-                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700" }}>
+                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "600" }}>
                     {f.name}
                   </Txt>
                   {!!f.folder && (
@@ -189,10 +189,10 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
 function ScopeSwitch({ value, onChange }: { value: RemoteChangeScope; onChange: (s: RemoteChangeScope) => void }) {
   const colors = useColors();
   return (
-    <View accessibilityRole="tablist" style={{ flexDirection: "row", alignSelf: "flex-start", marginHorizontal: space.lg, marginBottom: 8, backgroundColor: colors.paper, borderRadius: radius.pill, padding: 3, borderWidth: 1, borderColor: colors.rule }}>
+    <View accessibilityRole="tablist" style={{ flexDirection: "row", alignSelf: "flex-start", marginHorizontal: space.lg, marginBottom: 8, gap: 6 }}>
       {SCOPES.map((s) => (
-        <PressScale key={s.value} accessibilityRole="tab" accessibilityState={{ selected: value === s.value }} onPress={() => onChange(s.value)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: value === s.value ? colors.ink : "transparent" }}>
-          <Txt variant="small" tone={value === s.value ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
+        <PressScale key={s.value} accessibilityRole="tab" accessibilityState={{ selected: value === s.value }} onPress={() => onChange(s.value)} haptic="select" scaleTo={0.94} style={{ paddingHorizontal: 14, minHeight: 32, justifyContent: "center", borderRadius: radius.pill, ...softChoice(colors, value === s.value) }}>
+          <Txt variant="small" tone={value === s.value ? "ink" : "ink2"} style={{ fontWeight: value === s.value ? "700" : "500" }}>
             {s.label}
           </Txt>
         </PressScale>

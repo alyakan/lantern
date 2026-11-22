@@ -117,13 +117,14 @@ export function ArtifactsPane({ slot, onHide, hideLabel = "Hide", inSheet = fals
         </Txt>
       ) : (
         <>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: 8, gap: 8 }}>
+          {/* A list of rows, one under another (a strip that scrolled sideways could not be dragged on the phone); the one open is tinted. */}
+          <ScrollView style={{ maxHeight: 190, flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.lg - 6, paddingBottom: 6 }}>
             {items.map((a) => (
-              <PressScale key={a.name} accessibilityRole="button" accessibilityLabel={`${artifactFolder(a.name)}${artifactTitle(a.name)}, ${KIND_LABEL[a.kind]}`} accessibilityState={{ selected: a.name === current?.name }} onPress={() => setPicked(a.name)} haptic="select" scaleTo={0.97} style={{ minHeight: 44, justifyContent: "center", paddingVertical: 6, paddingHorizontal: 12, borderRadius: radius.inner, backgroundColor: a.name === current?.name ? colors.ink : colors.paper }}>
-                <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700", color: a.name === current?.name ? colors.onInk : colors.ink }}>
+              <PressScale key={a.name} accessibilityRole="button" accessibilityLabel={`${artifactFolder(a.name)}${artifactTitle(a.name)}, ${KIND_LABEL[a.kind]}`} accessibilityState={{ selected: a.name === current?.name }} onPress={() => setPicked(a.name)} haptic="select" scaleTo={0.98} style={{ minHeight: 48, justifyContent: "center", paddingVertical: 6, paddingHorizontal: 10, borderRadius: radius.inner, backgroundColor: a.name === current?.name ? `${colors.ink}14` : "transparent" }}>
+                <Txt variant="small" numberOfLines={1} style={{ fontWeight: a.name === current?.name ? "700" : "500" }}>
                   {artifactTitle(a.name)}
                 </Txt>
-                <Txt variant="tiny" numberOfLines={1} style={{ color: a.name === current?.name ? colors.onInk : colors.ink3 }}>
+                <Txt variant="tiny" tone="ink3" numberOfLines={1}>
                   {KIND_LABEL[a.kind]}
                   {a.modified ? ` · ${ago(a.modified, Date.now())}` : ""}
                 </Txt>
