@@ -36,9 +36,9 @@ export function MessageMenu({ items, children }: { items: MenuItem[]; children: 
 }
 
 /** The three dots under a reply: the same actions, as iOS's menu that opens from the button. */
-export function MoreMenu({ items, color, compact = false }: { items: MenuItem[]; color: string; /** Under every message, not just the last reply: shorter, so the chat does not grow tall. */ compact?: boolean }) {
+export function MoreMenu({ items, color, compact = false, align = "center" }: { items: MenuItem[]; color: string; /** Which edge the dots sit against, so they line up with the words (or the bubble) above them. */ align?: "leading" | "center" | "trailing"; /** Under every message, not just the last reply: shorter, so the chat does not grow tall. */ compact?: boolean }) {
   return (
-    <Host matchContents style={{ minWidth: compact ? 36 : 44, minHeight: compact ? 28 : 44 }}>
+    <Host style={{ width: compact ? 40 : 44, height: compact ? 28 : 44 }} alignment={align}>
       <Menu label={<Image systemName="ellipsis" size={18} color={color} />} modifiers={[accessibilityLabel("More")]}>
         {items.map((item) => (
           <Button key={item.label} label={item.label} systemImage={item.symbol} onPress={item.onPress} />
