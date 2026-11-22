@@ -4975,3 +4975,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* Your message and its Copy / Edit stack at the trailing edge: the bubble, then its actions underneath it. */
 .turn-head { flex-direction: column; align-items: flex-end; }
 .turn-head > .msg-actions { align-self: flex-end; margin: 2px 4px 0; }
+/* Code blocks: a soft rounded block, its language and Copy quietly in one header line (no divider), Copy always in sight. */
+.code-block { border-radius: var(--radius-float); border-color: var(--line); }
+.code-block-head { height: 30px; padding: 0 8px 0 14px; border-bottom: none; background: transparent; }
+button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius-pill); }
+.code-block:hover .code-block-copy, button.code-block-copy:hover:not(:disabled) { opacity: 1; }
+.msg.assistant .code-block pre { padding-top: 2px; }
+/* The mode and chat-kind pills under the message box: words that wake on hover, not a row of outlined buttons. */
+.composer-pills .pill { border-color: transparent; background: transparent; color: var(--muted-text); }
+.composer-pills .pill:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.meta-item.mode-chip { border-color: transparent; background: transparent; color: var(--muted-text); }
+.meta-item.mode-chip:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.code-block-diff .diff-line.add { background: color-mix(in srgb, var(--add) 9%, transparent); }
+.code-block-diff .diff-line.del { background: color-mix(in srgb, var(--del) 8%, transparent); }
