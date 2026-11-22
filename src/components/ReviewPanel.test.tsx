@@ -120,9 +120,14 @@ describe("ReviewPanel's file list", () => {
 });
 
 describe("ReviewPanel reverts", () => {
+  // A file's own Revert is in the file bar's ⋯ menu.
+  const fileRevert = () => {
+    fireEvent.click(screen.getByRole("button", { name: "File actions" }));
+    return screen.queryByRole("menuitem", { name: "Revert this file" });
+  };
   it("a file's Revert opens a dialog for that file", () => {
     render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Revert" }));
+    fireEvent.click(fileRevert()!);
     expect(screen.getByRole("dialog", { name: "Revert a.ts?" })).toBeInTheDocument();
   });
 
@@ -134,22 +139,24 @@ describe("ReviewPanel reverts", () => {
     expect(screen.getByRole("button", { name: "Revert all" })).toBeEnabled();
     rerender(<ReviewPanel {...base} scope="turn" stepRange={{ from: 1, to: 2 }} selected="/p/src/a.ts" follow revert={controls()} />);
     expect(screen.queryByRole("button", { name: "Revert all" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Revert" })).toBeEnabled();
+    expect(fileRevert()).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("is off while Claude works, with the reason on the buttons", () => {
     render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls({ blocked: "Wait for Claude to finish before reverting." })} />);
-    expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "Wait for Claude to finish before reverting.");
+    const revert = fileRevert();
+    expect(revert).toHaveAttribute("aria-disabled", "true");
+    expect(revert).toHaveAttribute("title", "Wait for Claude to finish before reverting.");
     expect(screen.getByRole("button", { name: "Revert all" })).toBeDisabled();
   });
 
   it("is off for a step whose turns aren't known, and absent for a git view", () => {
     const { rerender } = render(<ReviewPanel {...base} scope="turn" stepRange={null} selected="/p/src/a.ts" follow revert={controls()} />);
-    expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "This step's changes aren't known: the chat was reopened after it.");
+    const revert = fileRevert();
+    expect(revert).toHaveAttribute("aria-disabled", "true");
+    expect(revert).toHaveAttribute("title", "This step's changes aren't known: the chat was reopened after it.");
     rerender(<ReviewPanel {...base} scope="git" selected="/p/src/a.ts" follow revert={controls()} />);
-    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Revert this file" })).toBeNull();
   });
 
   it("shows what the last revert did, with Undo, on every tab", () => {

@@ -28,6 +28,7 @@ import { SummaryTab, type ExportDoc } from "./SummaryTab";
 import type { StepsSummary } from "../lib/stepsSummary";
 import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
+import { FileMenu } from "./FileMenu";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
 import { DEFAULT_PINNED, TABS, adoptSession, chatTabOf, keepChatTab, migrateTab, validPinned, type ChatKey, type Tab } from "../lib/reviewTabs";
@@ -117,7 +118,6 @@ interface Props {
   onFollow: () => void;
 }
 
-const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
 export { migrateTab, type Tab };
@@ -512,19 +512,13 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
         <button className="icon" aria-label="Next file" title="Next file (J)" disabled={index === files.length - 1} onClick={() => onSelect(files[index + 1].path)}>
           ›
         </button>
-        {!current.deleted && scope !== "pr" && scope !== "branch" && (
-          <button className="ghost" title="Edit this file" onClick={() => onEdit(current.path)}>
-            Edit
-          </button>
-        )}
-        {fileRevert && (
-          <button className="ghost" disabled={!!fileRevert.off} title={fileRevert.off ?? "Put this file back to how it was before these changes"} onClick={() => fileRevert.onFile(current)}>
-            Revert
-          </button>
-        )}
-        <button className="ghost layout" title={layout === "inline" ? "Showing removals and additions together. Click for side by side." : "Showing old and new side by side. Click to show them together."} onClick={() => setLayout(NEXT_LAYOUT[layout])}>
-          {LAYOUT_LABEL[layout]}
-        </button>
+        <FileMenu
+          actions={[
+            ...(!current.deleted && scope !== "pr" && scope !== "branch" ? [{ label: "Edit this file", title: "Edit this file", onClick: () => onEdit(current.path) }] : []),
+            ...(fileRevert ? [{ label: "Revert this file", title: fileRevert.off ?? "Put this file back to how it was before these changes", disabled: !!fileRevert.off, onClick: () => fileRevert.onFile(current) }] : []),
+            { label: layout === "inline" ? "Show side by side" : "Show unified", title: layout === "inline" ? "Showing removals and additions together. Click for side by side." : "Showing old and new side by side. Click to show them together.", onClick: () => setLayout(NEXT_LAYOUT[layout]) },
+          ]}
+        />
       </div>
       {bar}
       <Suspense fallback={<div className="empty">Loading diff…</div>}>
