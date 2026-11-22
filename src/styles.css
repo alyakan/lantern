@@ -5021,3 +5021,7 @@ button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius
 .desk-ask-bar { border-color: var(--line); }
 .yw-card { border-radius: var(--radius-float); overflow: hidden; }
 .yw-card.yw-next, .yw-next { border-color: var(--line); box-shadow: var(--card-shadow); }
+/* The right pane's search and the chat's tables: soft pills and cards, hairlines only between rows. */
+.file-search .menu-search { border-color: transparent; border-radius: var(--radius-pill); background: var(--bg-subtle); padding-left: 14px; }
+.file-search .menu-search:focus { border-color: var(--line-strong); background: var(--field); }
+.md-table { border-color: var(--line); border-radius: var(--radius-float); }
