@@ -70,6 +70,8 @@
   --radius-inner: 4px;
   --radius-chip: 3px;
   --radius-float: 12px;    /* cards, popovers and dialogs that float over the page or the canvas */
+  --radius-bubble: 18px;   /* your message bubble and the message box: the calm chat's soft shapes */
+  --reply-font: ui-serif, "New York", Georgia, serif;   /* Claude's words, as the Claude app sets them */
   --radius-md: 8px;        /* inputs, rows and tiles between a chip and a card */
   --radius-card: 10px;     /* the chat card */
   --radius-hud: 14px;      /* the toast that floats over the toolbar */
@@ -307,6 +309,8 @@
   --radius-inner: 2px;
   --radius-chip: 2px;
   --radius-float: 3px;
+  --radius-bubble: 3px;
+  --reply-font: inherit;
   --radius-md: 2px;
   --radius-card: 2px;
   --radius-hud: 3px;
@@ -418,6 +422,8 @@
   --radius-inner: 0;
   --radius-chip: 0;
   --radius-float: 0;
+  --radius-bubble: 0;
+  --reply-font: inherit;
   --radius-md: 0;
   --radius-card: 0;
   --radius-hud: 0;
@@ -993,6 +999,8 @@
   --radius-inner: 2px;
   --radius-chip: 2px;
   --radius-float: 4px;
+  --radius-bubble: 4px;
+  --reply-font: inherit;
   --radius-md: 3px;
   --radius-card: 4px;
   --radius-hud: 4px;
@@ -4944,3 +4952,23 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }
+
+
+/* Calm chat, as the Claude app has it: your message is a soft bubble on the right (not a band across the card), Claude's words are
+   set as a page in a serif, the work folds to quiet grey lines and the message box is one soft capsule. Themes that are a look of their
+   own (Terminal, Fallout, PostHog) keep their own shapes through the radius and font tokens. */
+.turn-head { margin: 0 -20px; padding: 14px 20px 4px; display: flex; justify-content: flex-end; }
+.turn-head::after { display: none; }
+.turn-head .msg.user { max-width: 85%; max-height: 30vh; overflow-y: auto; border: none; border-radius: var(--radius-bubble); padding: 9px 16px; }
+.chat > .turn-section:first-child .turn-head { padding-top: 16px; }
+.msg.assistant { font-family: var(--reply-font); font-size: calc(16px * var(--font-scale)); line-height: 1.65; }
+.msg.assistant p { margin: 0 0 12px; }
+.msg.assistant pre, .msg.assistant code, .msg.assistant .code-block { font-family: var(--mono); }
+.activity-line { padding: 3px 8px; margin-left: -8px; border-radius: var(--radius-pill); font-size: calc(13px * var(--font-scale)); }
+.composer-box { border-radius: var(--radius-bubble); padding: 12px 12px 8px 16px; border-color: var(--line); }
+/* A command that failed is not an alarm: it is told in grey on the folded lines, and in red only inside the detail (the files and runs a line opens). */
+.activity > .activity-line .failed { color: var(--muted-text); }
+.activity > .activity-line.test-chip.failed svg { color: var(--muted-text); }
+/* The last reply keeps its Copy in sight, as the Claude app does; the rest show theirs under the pointer. */
+.chat > .turn-section:last-child > .msg.assistant:last-of-type + .msg-actions { opacity: 1; }
+.activity > .activity-line.test-chip.failed { color: var(--muted-text); }
