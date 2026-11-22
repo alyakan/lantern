@@ -4993,3 +4993,9 @@ button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius
 .jump-latest-arrow { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 /* "Chat compacted": a thin wavy line each side of the words, not a straight rule. */
 .compact-line::before, .compact-line::after { height: 6px; background: var(--line-strong); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x center / 12px 6px; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x center / 12px 6px; }
+/* The right-hand pane is a card like the chat's: rounded, on the window, not a flat sheet pressed to its edges. */
+.split-right { padding: 0 var(--edge) var(--edge) 0; }
+.review { border-radius: var(--radius-card); overflow: hidden; box-shadow: var(--card-shadow); }
+/* The bar beside added and removed lines is thin and soft, not a dark stripe. */
+.monaco-diff-editor .margin-view-overlays .gutter-insert { box-shadow: inset -2px 0 color-mix(in srgb, var(--add) 55%, transparent); }
+.monaco-diff-editor .margin-view-overlays .gutter-delete { box-shadow: inset -2px 0 color-mix(in srgb, var(--del) 55%, transparent); }
