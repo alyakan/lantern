@@ -157,7 +157,7 @@ const SUMMARY_LONG_CHARS = 600;
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
-export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark, onFile }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
+export const SummaryRow = memo(function SummaryRow({ menu, row, onFiles, onActions, mark, onFile }: { menu?: MenuItem[]; row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
   const colors = useColors();
   // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
   const [full, setFull] = useRecyclingState(false, [row.key]);
@@ -235,6 +235,12 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
           </View>
         </View>
       </View>
+      {/* The three dots sit under the card, at its left edge, not inside it. */}
+      {menu && (
+        <View style={{ alignSelf: "flex-start", marginTop: 4 }}>
+          <MoreMenu items={menu} color={colors.ink3} align="leading" />
+        </View>
+      )}
     </View>
   );
 });
