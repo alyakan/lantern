@@ -507,7 +507,7 @@ describe("what is unread", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
     const news = await screen.findByRole("button", { name: "Has news, Claude, lantern, unread" });
     expect(within(news).getByTestId("unread-dot", HIDDEN)).toBeTruthy();
-    expect(StyleSheet.flatten(within(news).getByText("Has news").props.style).fontWeight).toBe("800");
+    expect(StyleSheet.flatten(within(news).getByText("Has news").props.style).fontWeight).toBe("700");
     const plain = screen.getByRole("button", { name: "Seen already, Claude, lantern" });
     expect(within(plain).queryByTestId("unread-dot", HIDDEN)).toBeNull();
     expect(StyleSheet.flatten(within(plain).getByText("Seen already").props.style).fontWeight).toBe("400");

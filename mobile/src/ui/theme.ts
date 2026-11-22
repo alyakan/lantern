@@ -274,3 +274,14 @@ export const shadow = {
 
 /** The smallest a touch target is: Apple's 44 points. */
 export const MIN_TARGET = 44;
+
+/**
+ * How the one chosen of a few looks, everywhere a choice is made in a pill or a switch (Recent or Projects, a changes view, an
+ * option of a new chat): a soft tint with an ink edge, not a solid black block, and the rest are quiet outlines. One place, so
+ * the screens don't drift apart.
+ */
+export const softChoice = (colors: Pick<Palette, "ink" | "rule">, on: boolean) => ({
+  backgroundColor: on ? `${colors.ink}14` : "transparent",
+  borderWidth: on ? 1.5 : 1,
+  borderColor: on ? colors.ink : colors.rule,
+});

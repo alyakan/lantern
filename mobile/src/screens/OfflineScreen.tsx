@@ -13,7 +13,7 @@ import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { TOP_BAR_GAP, TOP_BAR_HEIGHT } from "../ui/TopBar";
-import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader, Tile } from "../ui/Settings";
+import { DangerButton, LOOKS, MenuRow, SettingsRow, SettingsSection, SheetHeader } from "../ui/Settings";
 import { setWorkBadge, useWorkBadge, type WorkBadge } from "../workBadge";
 import { radius, setThemeChoice, space, THEME_CHOICES, useBody, useColors, useThemeChoice, type ThemeChoice } from "../ui/theme";
 import { loadVoiceEngine, saveTheme, type VoiceEngine } from "../prefs";
@@ -349,9 +349,6 @@ export function MacSheet({ state, onClose, onUnpair, onUsage, onVoice, onSupport
             <SheetHeader onDone={close} />
             <ScrollView ref={scroll} style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: insets.bottom + space.lg, gap: 6 }}>
               <View style={{ alignItems: "center", gap: 3, paddingBottom: 8 }}>
-                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ marginBottom: 8 }}>
-                  <Tile symbol="laptopcomputer" glyph="⌘" tint={colors.isDark ? "#3a4654" : "#15212e"} size={56} />
-                </View>
                 <Txt variant="heading" accessibilityRole="header">
                   {state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}
                 </Txt>

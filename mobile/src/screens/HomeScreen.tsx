@@ -1,5 +1,4 @@
 import { tightest, tightestText } from "../view/providerUsage";
-import { ProviderBadge } from "../ui/ProviderBadge";
 import { Fragment, useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useToTop } from "../ui/useToTop";
 import { Animated, LayoutAnimation, Platform, RefreshControl, StyleSheet, View } from "react-native";
@@ -11,7 +10,7 @@ import { setPinned, settlePins, usePins } from "../pins";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
-import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
+import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot, run, skips } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
@@ -77,23 +76,6 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 24, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: pinned ? colors.ink : colors.ink3, flexDirection: "row", overflow: "hidden" }}>
       <View style={{ width: 8, backgroundColor: pinned ? colors.ink : "transparent", borderRightWidth: 1.5, borderRightColor: pinned ? colors.ink : colors.ink3 }} />
-    </View>
-  );
-}
-
-/** A thin bar that slides while a chat is working. */
-function Working() {
-  const colors = useColors();
-  const accent = useAccent();
-  const x = useRef(new Animated.Value(-1)).current;
-  useEffect(() => {
-    const loop = Animated.loop(Animated.timing(x, { toValue: 2.5, duration: 1400, useNativeDriver: true }));
-    loop.start();
-    return () => loop.stop();
-  }, [x]);
-  return (
-    <View accessibilityLabel="Working" style={{ width: 54, height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
-      <Animated.View style={{ width: "40%", height: "100%", backgroundColor: accent, borderRadius: 2, transform: [{ translateX: Animated.multiply(x, 22) }] }} />
     </View>
   );
 }
@@ -177,7 +159,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {row.pinned && <PinIcon />}
-          <Txt variant="body" numberOfLines={1} style={{ flexShrink: 1, fontWeight: row.unread ? "800" : "400" }}>
+          <Txt variant="body" numberOfLines={1} style={{ flexShrink: 1, fontWeight: row.unread ? "700" : "400" }}>
             {row.title}
           </Txt>
         </View>
@@ -187,14 +169,33 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
             {row.preview}
           </Txt>
         )}
-        <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
-          {showProject && !!row.project && <ProjectTag name={row.project} color={row.projectColor} />}
-          <ProviderBadge provider={row.provider} />
-        </View>
+        {/* Where it is, in quiet words (a coloured dot, the project's name, and the provider only when it isn't Claude): no pills. */}
+        {((showProject && !!row.project) || (!!row.provider && row.provider !== "Claude")) && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 }}>
+            {showProject && !!row.project && <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />}
+            {showProject && !!row.project && (
+              <Txt variant="tiny" numberOfLines={1} style={{ flexShrink: 1, color: fg, fontWeight: "600" }}>
+                {row.project}
+              </Txt>
+            )}
+            {!!row.provider && row.provider !== "Claude" && showProject && !!row.project && (
+              <Txt variant="tiny" tone="ink3" accessibilityElementsHidden>
+                ·
+              </Txt>
+            )}
+            {!!row.provider && row.provider !== "Claude" && (
+              <Txt variant="tiny" tone="ink3" numberOfLines={1}>
+                {row.provider}
+              </Txt>
+            )}
+          </View>
+        )}
       </View>
       {row.status === "working" ? (
         <View style={{ alignItems: "flex-end", gap: 4 }}>
-          <Working />
+          <View accessibilityLabel="Working" accessible>
+            <Dots size={3} color={colors.ink3} />
+          </View>
           {!!row.elapsed && (
             <Txt variant="tiny" tone="ink3">
               {row.elapsed}
@@ -238,7 +239,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
 function SectionLabel({ label, count, gutter }: { label: string; count: number; gutter: number }) {
   return (
     <View accessibilityRole="header" style={{ flexDirection: "row", alignItems: "baseline", gap: 6, paddingHorizontal: gutter, paddingTop: 14, paddingBottom: 2 }}>
-      <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" }}>
+      <Txt variant="small" tone="ink2" style={{ fontWeight: "600" }}>
         {label}
       </Txt>
       <Txt variant="tiny" tone="ink3">
@@ -298,13 +299,13 @@ function SectionHead({ title, onBack }: { title: string; onBack: () => void }) {
 function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Grouping) => void }) {
   const colors = useColors();
   const option = (g: Grouping, label: string) => (
-    <PressScale key={g} accessibilityRole="button" accessibilityLabel={`${label}${value === g ? ", selected" : ""}`} accessibilityState={{ selected: value === g }} onPress={() => onChange(g)} scaleTo={0.95} haptic="select" style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: value === g ? colors.ink : "transparent" }}>
-      <Txt variant="small" tone={value === g ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
+    <PressScale key={g} accessibilityRole="button" accessibilityLabel={`${label}${value === g ? ", selected" : ""}`} accessibilityState={{ selected: value === g }} onPress={() => onChange(g)} scaleTo={0.95} haptic="select" style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: value === g ? `${colors.ink}14` : "transparent" }}>
+      <Txt variant="small" tone={value === g ? "ink" : "ink2"} style={{ fontWeight: value === g ? "700" : "500" }}>
         {label}
       </Txt>
     </PressScale>
   );
-  return <View style={{ flexDirection: "row", gap: 2, padding: 2, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>{[option("recent", "Recent"), option("project", "Projects")]}</View>;
+  return <View style={{ flexDirection: "row", gap: 2, padding: 2, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.rule }}>{[option("recent", "Recent"), option("project", "Projects")]}</View>;
 }
 
 /**
@@ -318,7 +319,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, swipeFor,
   const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
   const accent = useAccent();
   return (
-    <View testID={`project-card-${name}`} style={[{ marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.card, backgroundColor: colors.card }, shadow.card]}>
+    <View testID={`project-card-${name}`} style={{ marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.card, backgroundColor: colors.card }}>
       <View style={{ borderRadius: radius.card, borderWidth: 1, borderColor: bg, overflow: "hidden" }}>
         <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}${group.unread ? `, ${group.unread} unread` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: CARD_INSET, backgroundColor: bg, minHeight: 44 }}>
           <Chevron open={open} />
@@ -354,7 +355,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
   const tipped = jar.hasTippedThisMonth() || pledger;
   return (
     <FadeSlideIn from={10} delay={200} style={{ paddingHorizontal: space.lg, paddingTop: 26 }}>
-      <PressScale accessibilityRole="button" accessibilityLabel="Support development" accessibilityHint="Opens the optional tips" onPress={onPress} scaleTo={0.97} haptic="select" style={[{ flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.card, borderRadius: radius.card - 6, paddingVertical: 14, paddingHorizontal: 16 }, shadow.card, { shadowOpacity: 0.05 }]}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Support development" accessibilityHint="Opens the optional tips" onPress={onPress} scaleTo={0.97} haptic="select" style={{ flexDirection: "row", alignItems: "center", gap: 14, borderRadius: radius.card - 6, paddingVertical: 14, paddingHorizontal: 16, borderWidth: 1, borderColor: colors.rule }}>
         <Txt variant="heading" accessibilityElementsHidden style={{ width: 28, textAlign: "center" }}>
           {pledger ? "🔥" : tipped ? "✅" : "💛"}
         </Txt>

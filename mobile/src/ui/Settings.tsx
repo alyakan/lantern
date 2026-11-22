@@ -21,17 +21,21 @@ const ROW = 46;
 const TILE = 28;
 const PAD = 12;
 
-/** A row's coloured square, with an SF Symbol in it on iOS (a letter or sign elsewhere). Hidden from VoiceOver: the row's name says it. */
-export function Tile({ symbol, glyph, tint, size = TILE }: { symbol: SFSymbol; glyph: string; tint: string; size?: number }) {
-  const icon = Math.round(size * 0.54);
+/**
+ * A row's mark: the setting's symbol in quiet ink, with no coloured square behind it (the Claude app's settings have none: the
+ * colours made every row shout). On iOS an SF Symbol (a letter or sign elsewhere). Hidden from VoiceOver: the row's name says it.
+ */
+export function Tile({ symbol, glyph, size = TILE }: { symbol: SFSymbol; glyph: string; /** Kept so each setting's look still says its colour; it is not drawn. */ tint?: string; size?: number }) {
+  const colors = useColors();
+  const icon = Math.round(size * 0.68);
   return (
-    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: size, height: size, borderRadius: size * 0.29, backgroundColor: tint, alignItems: "center", justifyContent: "center" }}>
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
       {Platform.OS === "ios" ? (
         <Host style={{ width: icon + 4, height: icon + 4 }} alignment="center">
-          <Image systemName={symbol} size={icon} color="#ffffff" />
+          <Image systemName={symbol} size={icon} color={colors.ink2} />
         </Host>
       ) : (
-        <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+        <Txt variant="small" tone="ink2" style={{ fontWeight: "600" }}>
           {glyph}
         </Txt>
       )}
@@ -47,11 +51,11 @@ export function SettingsSection({ label, footer, children }: { label?: string; f
   return (
     <View style={{ gap: 6 }}>
       {!!label && (
-        <Txt variant="tiny" tone="ink3" accessibilityRole="header" style={{ fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.6, marginLeft: 6, marginTop: 10 }}>
+        <Txt variant="small" tone="ink2" accessibilityRole="header" style={{ fontWeight: "600", marginLeft: 6, marginTop: 14 }}>
           {label}
         </Txt>
       )}
-      <View style={{ backgroundColor: colors.wash, borderRadius: radius.inner, overflow: "hidden" }}>
+      <View style={{ backgroundColor: colors.card, borderRadius: 18, borderWidth: 1, borderColor: colors.rule, overflow: "hidden" }}>
         {rows.map((row, i) => (
           <Fragment key={i}>
             {i > 0 && <View style={{ height: 1, marginLeft: PAD + TILE + 11, backgroundColor: colors.rule }} />}

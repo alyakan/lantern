@@ -56,9 +56,9 @@ function Summary({ chat, model, account, context }: { chat: RemoteChat; model: s
   const held = context ? contextOf(context) : null;
   const line = [chat.project, chat.provider ?? "Claude", account, model].filter(Boolean).join(" · ");
   return (
-    <View accessible accessibilityLabel={`${chat.title?.trim() || "This chat"}. ${line}${held ? `. ${held.label}` : ""}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.inner, backgroundColor: colors.wash }}>
-      <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: LOOKS.provider.tint, alignItems: "center", justifyContent: "center" }}>
-        <Txt variant="heading" tone="white">
+    <View accessible accessibilityLabel={`${chat.title?.trim() || "This chat"}. ${line}${held ? `. ${held.label}` : ""}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 18, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
+      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.wash, alignItems: "center", justifyContent: "center" }}>
+        <Txt variant="heading">
           {(chat.title?.trim() || "?").charAt(0).toUpperCase()}
         </Txt>
       </View>
@@ -167,7 +167,7 @@ function SettingsSheet({ chat, plan, providerUsage, context, off, loading, workf
                 </SettingsSection>
                 {hasUsage && (
                   <>
-                    <Txt variant="tiny" tone="ink3" accessibilityRole="header" style={{ fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.6, marginLeft: 6, marginTop: 16 }}>Usage</Txt>
+                    <Txt variant="small" tone="ink2" accessibilityRole="header" style={{ fontWeight: "600", marginLeft: 6, marginTop: 18 }}>Usage</Txt>
                     {context && <ContextRow context={context} />}
                     {activeUsage.length ? activeUsage.map((w) => <WindowRow key={w.label} window={w} provider={chat.provider ?? undefined} />) : plan ? <>
                       <UsageRow plan={plan} />
