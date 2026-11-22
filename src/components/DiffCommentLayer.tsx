@@ -89,6 +89,16 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
   };
   const [draft, setDraft] = useState<Draft | null>(keptDraft);
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const button = useRef<HTMLButtonElement>(null);
+  // Where the pointer last was over an editor, so a scroll can find the line that is now under it.
+  const lastPoint = useRef<{ x: number; y: number; role: Role } | null>(null);
+  /** Hide the button in a moment, unless the pointer is on it by then: a button drawn under a still pointer never gets a mouseenter, and the editor sees the pointer leave. */
+  const hideSoon = () => {
+    clearTimeout(leaving.current);
+    leaving.current = setTimeout(() => {
+      if (!button.current?.matches(":hover")) setHover(null);
+    }, LEAVE_MS);
+  };
   const whole = surface.kind === "whole";
   const editors = useMemo<{ ed: CodeEditor; role: Role }[]>(() => (surface.kind === "diff" ? [{ ed: surface.diff.getModifiedEditor(), role: "modified" as const }, { ed: surface.diff.getOriginalEditor(), role: "original" as const }] : [{ ed: surface.editor, role: "whole" as const }]), [surface.kind === "diff" ? surface.diff : surface.editor]);
   const split = surface.kind === "diff" && surface.split;
@@ -216,6 +226,7 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
       stops.push(
         ed.onMouseMove((e) => {
           clearTimeout(leaving.current);
+          lastPoint.current = { x: e.event.posx, y: e.event.posy, role };
           const t = e.target;
           const line = t.position?.lineNumber;
           const mapped = line !== undefined && T.lineParts.includes(t.type) ? lineFor(role, line) : null;
@@ -231,13 +242,18 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
           if (mapped) start.current({ side: mapped.side, line: mapped.line });
         }),
         // The pointer going to the button leaves the editor too: the button keeps the line for a moment.
-        ed.onMouseLeave(() => {
-          clearTimeout(leaving.current);
-          leaving.current = setTimeout(() => setHover(null), LEAVE_MS);
-        }),
+        ed.onMouseLeave(hideSoon),
+        // Scrolling moves the lines under a still pointer: the button goes to the line that is under it now.
         ed.onDidScrollChange(() => {
-          setHover(null);
           showCursor(role);
+          const at = lastPoint.current;
+          if (!at || at.role !== role) return setHover(null);
+          requestAnimationFrame(() => {
+            const t = ed.getTargetAtClientPoint(at.x, at.y);
+            const line = t?.position?.lineNumber;
+            const mapped = line !== undefined && t && T.lineParts.includes(t.type) ? lineFor(role, line) : null;
+            setHover(mapped ? anchorOf(ed, mapped.side, mapped.line) : null);
+          });
         }),
         ed.onDidChangeCursorPosition(() => showCursor(role)),
         ed.onDidFocusEditorText(() => showCursor(role)),
@@ -333,14 +349,12 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
         <button
           type="button"
           className="diff-comment-add"
+          ref={button}
           style={{ top: shown.top + (shown.height - 18) / 2, left: shown.left + 3 }}
           aria-label={`Comment on ${lineLabel(shown).toLowerCase()} of ${where}`}
           title="Comment on this line (C)"
           onMouseEnter={() => clearTimeout(leaving.current)}
-          onMouseLeave={() => {
-            clearTimeout(leaving.current);
-            leaving.current = setTimeout(() => setHover(null), LEAVE_MS);
-          }}
+          onMouseLeave={hideSoon}
           onClick={() => startDraft({ side: shown.side, line: shown.line })}
         >
           +
