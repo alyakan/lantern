@@ -1,6 +1,6 @@
 // Dev-only fake backend so the UI can be designed in a plain browser: `npm run dev`, then open /?mock.
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
-// Address flags: ?mock (no folder), ?mock=ready (a folder, empty chat), ?mock=demo (a scripted turn), &more, &bgend, &allow, and
+// Address flags: ?mock (no folder), ?mock=ready (a folder, empty chat), ?mock=demo (a scripted turn), &more, &rich (a long reply with code blocks, a table and quotes), &longprompt (a long message of yours), &bgend, &allow, and
 // &providers: a second, fake agent CLI ("Codex", without Auto mode, advisor, skills or dollar cost) beside Claude Code.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
@@ -801,6 +801,65 @@ async function playWorkerReply(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: "Understood, I'll fold that in.", cost_usd: 0.01, duration_ms: 1500, auth_hint: false, denied: 0, context_window: 200_000 });
 }
 
+/** `&rich`: a long final reply with headings, numbered steps, several code blocks (one with a very long line), a table, quotes and long paragraphs, for the calm chat look. */
+const RICH_REPLY = [
+  "## What I changed",
+  "",
+  "`fetchJson` now **retries transient failures** with *exponential backoff*. Only 429 and the 5xx gateway errors are retried, so a 404 or a 401 still fails on the first try, and the caller sees the same error it always did. The delay doubles each attempt and is capped, so a slow upstream can never stall the interface for long, and a request that was never idempotent is left alone.",
+  "",
+  "Retrying quietly can hide real outages, which is why the last error is thrown as it was and nothing is swallowed. If you would rather log each retry, the hook is one line in the loop below.",
+  "",
+  "### The loop",
+  "",
+  "```ts",
+  "const RETRYABLE = new Set([429, 502, 503, 504]);",
+  "",
+  "export async function fetchJson(url: string, attempts = 3) {",
+  "  for (let i = 1; ; i++) {",
+  "    const res = await fetch(url);",
+  "    if (res.ok) return res.json();",
+  "    if (!RETRYABLE.has(res.status) || i === attempts) throw new Error(`HTTP ${res.status}`);",
+  "    await new Promise((r) => setTimeout(r, 250 * 2 ** i));",
+  "  }",
+  "}",
+  "```",
+  "",
+  "### How to check it",
+  "",
+  "1. Run the retry tests: `npm test -- retry`.",
+  "2. Point the client at a flaky endpoint and watch the delays double.",
+  "3. Try a 404 and make sure it fails at once.",
+  "",
+  "```bash",
+  "npm test -- retry",
+  "curl -s -o /dev/null -w \"%{http_code}\\n\" https://api.example.com/flaky/endpoint/that/keeps/returning/503/for/the/first/two/requests/and/then/succeeds",
+  "```",
+  "",
+  "> Retries are limited to 429 and 5xx gateway errors, so a 404 still fails fast.",
+  "",
+  "| Status | Retried | Why |",
+  "| --- | --- | --- |",
+  "| 429 | yes | rate limited, the server asks us to slow down |",
+  "| 503 | yes | the upstream is restarting |",
+  "| 404 | no | not found stays an error |",
+  "",
+  "```diff",
+  "-  const res = await fetch(url);",
+  "-  if (!res.ok) throw new Error(`HTTP ${res.status}`);",
+  "+  for (let i = 1; ; i++) {",
+  "+    const res = await fetch(url);",
+  "+    if (res.ok) return res.json();",
+  "```",
+  "",
+  "- Delay doubles each time: `250 * 2 ** i` ms",
+  "- Gives up after **3 attempts**",
+  "- Jitter is the obvious next step",
+  "",
+].join("\n");
+
+/** `&longprompt`: your message is several paragraphs, for the bubble's clamp and Show more. */
+const LONG_PROMPT = "Add retries with backoff to fetchJson for transient errors, then run the retry tests.\n\nA few things to keep in mind: only retry what is safe to retry (429 and the 5xx gateway errors), never a 404 or a 401, and keep the error the caller sees exactly as it is today.\n\nIf the tests need a mock for fetch, put it next to them, not in a shared helper, because the other suites should not see it. When you are done, tell me what you would do next about jitter, and whether the delay cap is worth making configurable.";
+
 /** `?markup`: the turn's last message uses every kind of markdown, for checking a theme's text styles. */
 const MARKUP_REPLY = [
   "## What changed",
@@ -968,7 +1027,7 @@ async function playTurn(slot: string) {
     });
   }
   const markup = new URLSearchParams(location.search).has("markup");
-  await streamText(send, "m2:0", markup ? MARKUP_REPLY : allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
+  await streamText(send, "m2:0", markup ? MARKUP_REPLY : new URLSearchParams(location.search).has("rich") ? RICH_REPLY : allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
   await send({ kind: "context_used", tokens: 61_480 });
   // The dev server and a watcher keep running after the turn, like run_in_background commands.
   const dev = { id: "bdev1", task_type: "local_bash", description: "npm run dev -- --port 5173" };
@@ -1132,7 +1191,7 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
       box = await until(() => document.querySelector<HTMLTextAreaElement>(".composer textarea:not(:disabled)"));
     }
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-    setValue.call(box, "Add retries with backoff to fetchJson for transient errors, then run the retry tests.");
+    setValue.call(box, new URLSearchParams(location.search).has("longprompt") ? LONG_PROMPT : "Add retries with backoff to fetchJson for transient errors, then run the retry tests.");
     box.dispatchEvent(new Event("input", { bubbles: true }));
     await sleep(50);
     box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
