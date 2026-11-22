@@ -1859,7 +1859,10 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 .diff-note { position: absolute; top: 8px; right: 16px; z-index: 5; font-size: calc(11px * var(--font-scale)); padding: 2px 8px; border-radius: var(--radius-chip); background: var(--error-bg); color: var(--del); }
 /* Comments on diff lines: the "+" in the gutter, a note under its line (a Monaco view zone), the box it's written in, the bar over the diff. */
 .diff-comment-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
-.diff-comment-add { position: absolute; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; padding: 0; border: none; border-radius: var(--radius-inner); background: var(--accent); color: var(--accent-text); font-family: var(--ui); font-size: calc(14px * var(--font-scale)); font-weight: 600; line-height: 1; box-shadow: var(--thumb-lift); cursor: pointer; pointer-events: auto; }
+.diff-comment-add { position: absolute; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; padding: 0; border: none; border-radius: var(--radius-inner); background: var(--accent); color: var(--accent-text); font-size: 0; line-height: 0; box-shadow: var(--thumb-lift); cursor: pointer; pointer-events: auto; }
+.diff-comment-add::before, .diff-comment-add::after { content: ""; position: absolute; top: 50%; left: 50%; background: currentColor; border-radius: 1px; transform: translate(-50%, -50%); }
+.diff-comment-add::before { width: 10px; height: 2px; }
+.diff-comment-add::after { width: 2px; height: 10px; }
 .diff-comment-add:hover { filter: brightness(1.15); }
 .diff-comment-add:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .diff-comment-clip { position: absolute; overflow: hidden; pointer-events: none; }

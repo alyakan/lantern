@@ -337,7 +337,10 @@ export function DiffCommentLayer({ path, original, modified, surface, monaco, co
           aria-label={`Comment on ${lineLabel(shown).toLowerCase()} of ${where}`}
           title="Comment on this line (C)"
           onMouseEnter={() => clearTimeout(leaving.current)}
-          onMouseLeave={() => setHover(null)}
+          onMouseLeave={() => {
+            clearTimeout(leaving.current);
+            leaving.current = setTimeout(() => setHover(null), LEAVE_MS);
+          }}
           onClick={() => startDraft({ side: shown.side, line: shown.line })}
         >
           +
