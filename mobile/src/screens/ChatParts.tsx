@@ -59,7 +59,7 @@ type UserItem = Extract<Item, { kind: "user" }>;
 /** The room above each of your messages: a turn starts there, so a little more than between the rows inside one. */
 const TURN_GAP = 22;
 
-export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued = false, mark, showTime = true, saved }: { item: UserItem; /** The photos this phone kept of it, when the message no longer carries them (the Mac only says how many). */ saved?: string[]; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
+export const UserRow = memo(function UserRow({ menu, item, onActions, onRetry, queued = false, mark, showTime = true, saved }: { /** iOS's pop-up menu, from the three dots under the message. */ menu?: MenuItem[]; item: UserItem; /** The photos this phone kept of it, when the message no longer carries them (the Mac only says how many). */ saved?: string[]; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sends it again, when it didn't go (not one with photos: this phone no longer holds them to send). */ onRetry?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean; /** What a chat search looks for, marked in the words. */ mark?: string; /** Its time above it: the first message of a day, or one a while after the last (the rest say it when held down). */ showTime?: boolean }) {
   const colors = useColors();
   const failed = !!item.failed;
   // A page of pasted words is a card that opens, not a page in the chat (a chat search still finds it: it shows in full then).
@@ -104,6 +104,7 @@ export const UserRow = memo(function UserRow({ item, onActions, onRetry, queued 
           </View>
         )}
       </Pressable>
+      {menu && !item.failed && !item.sending && <View style={{ alignSelf: "flex-end" }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
       {viewing !== null && <PhotoViewer uris={pics} first={viewing} onClose={() => setViewing(null)} />}
       {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
@@ -156,7 +157,7 @@ const SUMMARY_LONG_CHARS = 600;
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
-export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, mark, onFile }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
+export const SummaryRow = memo(function SummaryRow({ menu, row, onFiles, onActions, mark, onFile }: { menu?: MenuItem[]; row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void; /** What a chat search looks for: marked in the words, and the card shown whole so it can be seen. */ mark?: string; /** A file the turn edited, named in the words, was tapped. */ onFile?: (path: string) => void }) {
   const colors = useColors();
   // A list cell drawn again for another summary starts that one afresh (see useRecyclingState).
   const [full, setFull] = useRecyclingState(false, [row.key]);
@@ -231,6 +232,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions, ma
                 {copied ? "Copied" : "Copy"}
               </Txt>
             </PressScale>
+            {menu && <MoreMenu items={menu} color={colors.ink3} compact />}
           </View>
         </View>
       </View>
@@ -245,10 +247,12 @@ export function withCaret(text: string): string {
 }
 
 export const AssistantRow = memo(function AssistantRow({ menu, item, onActions, mark, files, onFile, last = false }: { menu?: MenuItem[]; item: Extract<Item, { kind: "assistant" }>; onActions?: () => void; /** What a chat search looks for, marked in the words. */ mark?: string; /** The files its turn edited: a path to one of them in the words opens its diff. */ files?: string[]; onFile?: (path: string) => void; /** The chat's last reply, finished: Copy and More sit under it, as the Claude app has them. */ last?: boolean }) {
+  const colors = useColors();
   return (
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
       {last && !item.streaming && <ReplyActions text={item.text} onMore={onActions} menu={menu} />}
+      {!last && !item.streaming && menu && <View style={{ alignSelf: "flex-start", marginLeft: -6 }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
     </Pressable>
   );
 });
