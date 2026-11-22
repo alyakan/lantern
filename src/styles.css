@@ -5008,3 +5008,16 @@ button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius
 .sb-panel.expanded .sb-row.current { background: var(--bg-active); }
 .sb-row.current .sb-title { font-weight: 500; }
 .sb-new-button { border-radius: var(--radius-pill); }
+/* Settings, menus and the Desk: soft cards and pills, shadows instead of outlines. */
+.mode-guide { border-color: var(--line); border-radius: var(--radius-bubble); box-shadow: var(--card-shadow); }
+.mode-guide-nav { border-right: none; }
+.mode-guide-tab { border-radius: var(--radius-md); }
+.settings-search { border-color: transparent; border-radius: var(--radius-pill); background: var(--bg-subtle); padding: 0 12px; }
+.settings-search:focus { border-color: var(--line-strong); background: var(--field); }
+.menu { border-color: var(--line); border-radius: var(--radius-float); }
+.menu-row { border-radius: var(--radius-md); }
+.desk-tile, .desk-clear, .yw-next { border-color: transparent; border-radius: var(--radius-float); box-shadow: var(--card-shadow); }
+.desk-head { border-bottom-color: transparent; }
+.desk-ask-bar { border-color: var(--line); }
+.yw-card { border-radius: var(--radius-float); overflow: hidden; }
+.yw-card.yw-next, .yw-next { border-color: var(--line); box-shadow: var(--card-shadow); }
