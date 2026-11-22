@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
@@ -14,16 +14,17 @@ import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
 import { buzz, easeLayout, FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet, SheetBar } from "../ui/Sheet";
+import { SettingsSection, Tile } from "../ui/Settings";
 import { Dots } from "../ui/skeleton";
 import { fonts, MIN_TARGET, radius, space, useBody, useColors } from "../ui/theme";
 import { useAccent } from "../ui/accent";
 
-/** One thing a sheet offers: a plain row with a name, a hairline above it (but the first); what it does is said to a screen reader. */
-function ActionRow({ label, hint, onPress, tone = "ink", first = false }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop"; first?: boolean }) {
-  const colors = useColors();
+/** One thing a sheet offers: a row with a quiet symbol and its name; what it does is said to a screen reader. */
+function ActionRow({ label, hint, symbol, glyph, onPress, tone = "ink" }: { label: string; hint?: string; symbol: ComponentProps<typeof Tile>["symbol"]; glyph: string; onPress: () => void; tone?: "ink" | "stop" }) {
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.98} style={{ minHeight: 52, justifyContent: "center", paddingHorizontal: 6, borderTopWidth: first ? 0 : 1, borderTopColor: colors.rule }}>
-      <Txt variant="body" tone={tone} style={{ fontWeight: "500" }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 11, minHeight: 54, paddingHorizontal: 14 }}>
+      <Tile symbol={symbol} glyph={glyph} />
+      <Txt variant="body" tone={tone} style={{ flex: 1 }}>
         {label}
       </Txt>
     </PressScale>
@@ -60,9 +61,9 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                   Sent {new Date(sentAt).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </Txt>
               )}
+              <SettingsSection>
               <ActionRow
-                first
-                label="Copy"
+                label="Copy" symbol="doc.on.doc" glyph="⧉"
                 onPress={() => {
                   // Copied: a tap you can feel, as iOS gives, since the sheet closing is all you'd see.
                   void Promise.resolve(Clipboard.setStringAsync(text)).then(() => buzz("success"), () => {});
@@ -70,16 +71,16 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                 }}
               />
               <ActionRow
-                label="Quote in a reply"
+                label="Quote in a reply" symbol="arrowshape.turn.up.left" glyph="↩"
                 hint="Puts it in the message box, to answer under it"
                 onPress={() => {
                   onQuote();
                   close();
                 }}
               />
-              <ActionRow label="Select text" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
+              <ActionRow label="Select text" symbol="text.cursor" glyph="T" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
               <ActionRow
-                label="Share"
+                label="Share" symbol="square.and.arrow.up" glyph="↑"
                 hint="Send it to another app"
                 onPress={() => {
                   void Share.share({ message: text }).catch(() => {});
@@ -89,6 +90,8 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
               {onReadAloud && (
                 <ActionRow
                   label={reading ? "Stop reading" : "Read aloud"}
+                  symbol={reading ? "stop.circle" : "speaker.wave.2"}
+                  glyph="♪"
                   hint={reading ? undefined : "The phone's voice reads the words, not the code"}
                   onPress={() => {
                     onReadAloud();
@@ -98,7 +101,7 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
               )}
               {onEdit && (
                 <ActionRow
-                  label="Edit and send again"
+                  label="Edit and send again" symbol="pencil" glyph="✎"
                   hint="Puts it back in the message box"
                   onPress={() => {
                     onEdit();
@@ -106,6 +109,7 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
                   }}
                 />
               )}
+              </SettingsSection>
             </>
           )}
         </View>
