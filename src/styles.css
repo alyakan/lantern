@@ -70,6 +70,8 @@
   --radius-inner: 4px;
   --radius-chip: 3px;
   --radius-float: 12px;    /* cards, popovers and dialogs that float over the page or the canvas */
+  --radius-bubble: 18px;   /* your message bubble and the message box: the calm chat's soft shapes */
+  --reply-font: ui-serif, "New York", Georgia, serif;   /* Claude's words, as the Claude app sets them */
   --radius-md: 8px;        /* inputs, rows and tiles between a chip and a card */
   --radius-card: 10px;     /* the chat card */
   --radius-hud: 14px;      /* the toast that floats over the toolbar */
@@ -307,6 +309,8 @@
   --radius-inner: 2px;
   --radius-chip: 2px;
   --radius-float: 3px;
+  --radius-bubble: 3px;
+  --reply-font: inherit;
   --radius-md: 2px;
   --radius-card: 2px;
   --radius-hud: 3px;
@@ -418,6 +422,8 @@
   --radius-inner: 0;
   --radius-chip: 0;
   --radius-float: 0;
+  --radius-bubble: 0;
+  --reply-font: inherit;
   --radius-md: 0;
   --radius-card: 0;
   --radius-hud: 0;
@@ -993,6 +999,8 @@
   --radius-inner: 2px;
   --radius-chip: 2px;
   --radius-float: 4px;
+  --radius-bubble: 4px;
+  --reply-font: inherit;
   --radius-md: 3px;
   --radius-card: 4px;
   --radius-hud: 4px;
@@ -1851,7 +1859,10 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 .diff-note { position: absolute; top: 8px; right: 16px; z-index: 5; font-size: calc(11px * var(--font-scale)); padding: 2px 8px; border-radius: var(--radius-chip); background: var(--error-bg); color: var(--del); }
 /* Comments on diff lines: the "+" in the gutter, a note under its line (a Monaco view zone), the box it's written in, the bar over the diff. */
 .diff-comment-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
-.diff-comment-add { position: absolute; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; padding: 0; border: none; border-radius: var(--radius-inner); background: var(--accent); color: var(--accent-text); font-family: var(--ui); font-size: calc(14px * var(--font-scale)); font-weight: 600; line-height: 1; box-shadow: var(--thumb-lift); cursor: pointer; pointer-events: auto; }
+.diff-comment-add { position: absolute; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; padding: 0; border: none; border-radius: var(--radius-inner); background: var(--accent); color: var(--accent-text); font-size: 0; line-height: 0; box-shadow: var(--thumb-lift); cursor: pointer; pointer-events: auto; }
+.diff-comment-add::before, .diff-comment-add::after { content: ""; position: absolute; top: 50%; left: 50%; background: currentColor; border-radius: 1px; transform: translate(-50%, -50%); }
+.diff-comment-add::before { width: 10px; height: 2px; }
+.diff-comment-add::after { width: 2px; height: 10px; }
 .diff-comment-add:hover { filter: brightness(1.15); }
 .diff-comment-add:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .diff-comment-clip { position: absolute; overflow: hidden; pointer-events: none; }
@@ -4944,3 +4955,91 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   button, .yw-fcard, .desk-tile, .dp-feature, .desk-back, .dp-click, .dp-card, .desk-pr-link, .sb-chip, .sb-chip::before { transition: none; }
   .yw-fcard:hover, .yw-fcard:focus-visible, .desk-tile:hover, .desk-tile:focus-within { transform: none; }
 }
+
+
+/* Calm chat, as the Claude app has it: your message is a soft bubble on the right (not a band across the card), Claude's words are
+   set as a page in a serif, the work folds to quiet grey lines and the message box is one soft capsule. Themes that are a look of their
+   own (Terminal, Fallout, PostHog) keep their own shapes through the radius and font tokens. */
+.turn-head { margin: 0 -20px; padding: 14px 20px 4px; display: flex; justify-content: flex-end; }
+.turn-head::after { display: none; }
+.turn-head .msg.user { max-width: 85%; max-height: 30vh; overflow-y: auto; border: none; border-radius: var(--radius-bubble); padding: 9px 16px; }
+.chat > .turn-section:first-child .turn-head { padding-top: 16px; }
+.msg.assistant { font-family: var(--reply-font); font-size: calc(16px * var(--font-scale)); line-height: 1.65; }
+.msg.assistant p { margin: 0 0 12px; }
+.msg.assistant pre, .msg.assistant code, .msg.assistant .code-block { font-family: var(--mono); }
+.activity-line { padding: 3px 8px; margin-left: -8px; border-radius: var(--radius-pill); font-size: calc(13px * var(--font-scale)); }
+.composer-box { border-radius: var(--radius-bubble); padding: 12px 12px 8px 16px; border-color: var(--line); }
+/* A command that failed is not an alarm: it is told in grey on the folded lines, and in red only inside the detail (the files and runs a line opens). */
+.activity > .activity-line .failed { color: var(--muted-text); }
+.activity > .activity-line.test-chip.failed svg { color: var(--muted-text); }
+/* The last reply keeps its Copy in sight, as the Claude app does; the rest show theirs under the pointer. */
+.chat > .turn-section:last-child > .msg-actions.start:last-child { opacity: 1; }
+.activity > .activity-line.test-chip.failed { color: var(--muted-text); }
+/* Your message and its Copy / Edit stack at the trailing edge: the bubble, then its actions underneath it. */
+.turn-head { flex-direction: column; align-items: flex-end; }
+.turn-head > .msg-actions { align-self: flex-end; margin: 2px 4px 0; }
+/* Code blocks: a soft rounded block, its language and Copy quietly in one header line (no divider), Copy always in sight. */
+.code-block { border-radius: var(--radius-float); border-color: var(--line); }
+.code-block-head { height: 30px; padding: 0 8px 0 14px; border-bottom: none; background: transparent; }
+button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius-pill); }
+.code-block:hover .code-block-copy, button.code-block-copy:hover:not(:disabled) { opacity: 1; }
+.msg.assistant .code-block pre { padding-top: 2px; }
+/* The mode and chat-kind pills under the message box: words that wake on hover, not a row of outlined buttons. */
+.composer-pills .pill { border-color: transparent; background: transparent; color: var(--muted-text); }
+.composer-pills .pill:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.meta-item.mode-chip { border-color: transparent; background: transparent; color: var(--muted-text); }
+.meta-item.mode-chip:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.code-block-diff .diff-line.add { background: color-mix(in srgb, var(--add) 9%, transparent); }
+.code-block-diff .diff-line.del { background: color-mix(in srgb, var(--del) 8%, transparent); }
+/* Back to the latest: one round button over the chat (its words stay for a screen reader), as the Claude app has it. */
+.jump-latest { width: 34px; height: 34px; padding: 0; justify-content: center; gap: 0; font-size: 0; }
+.jump-latest-arrow { font-size: calc(16px * var(--font-scale)); line-height: 1; }
+/* "Chat compacted": a thin wavy line each side of the words, not a straight rule. */
+.compact-line::before, .compact-line::after { height: 6px; background: var(--line-strong); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x center / 12px 6px; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E") repeat-x center / 12px 6px; }
+/* The right-hand pane is a card like the chat's: rounded, on the window, not a flat sheet pressed to its edges. */
+.split-right { padding: 0 var(--edge) var(--edge) 0; }
+.review { border-radius: var(--radius-card); overflow: hidden; box-shadow: var(--card-shadow); }
+/* The bar beside added and removed lines is thin and soft, not a dark stripe. */
+.monaco-diff-editor .margin-view-overlays .gutter-insert { box-shadow: inset -2px 0 color-mix(in srgb, var(--add) 55%, transparent); }
+.monaco-diff-editor .margin-view-overlays .gutter-delete { box-shadow: inset -2px 0 color-mix(in srgb, var(--del) 55%, transparent); }
+/* The sidebar, calmer: rounder chips, rows that are soft pills, the open chat held by a tint rather than a bold title. */
+.sb-chip { border-radius: var(--radius-float); }
+.sb-row { border-radius: var(--radius-float); }
+.sb-panel.expanded .sb-row.current { background: var(--bg-active); }
+.sb-row.current .sb-title { font-weight: 500; }
+.sb-new-button { border-radius: var(--radius-pill); }
+/* Settings, menus and the Desk: soft cards and pills, shadows instead of outlines. */
+.mode-guide { border-color: var(--line); border-radius: var(--radius-bubble); box-shadow: var(--card-shadow); }
+.mode-guide-nav { border-right: none; }
+.mode-guide-tab { border-radius: var(--radius-md); }
+.settings-search { border-color: transparent; border-radius: var(--radius-pill); background: var(--bg-subtle); padding: 0 12px; }
+.settings-search:focus { border-color: var(--line-strong); background: var(--field); }
+.menu { border-color: var(--line); border-radius: var(--radius-float); }
+.menu-row { border-radius: var(--radius-md); }
+.desk-tile, .desk-clear, .yw-next { border-color: transparent; border-radius: var(--radius-float); box-shadow: var(--card-shadow); }
+.desk-head { border-bottom-color: transparent; }
+.desk-ask-bar { border-color: var(--line); }
+.yw-card { border-radius: var(--radius-float); overflow: hidden; }
+.yw-card.yw-next, .yw-next { border-color: var(--line); box-shadow: var(--card-shadow); }
+/* The right pane's search and the chat's tables: soft pills and cards, hairlines only between rows. */
+.file-search .menu-search { border-color: transparent; border-radius: var(--radius-pill); background: var(--bg-subtle); padding-left: 14px; }
+.file-search .menu-search:focus { border-color: var(--line-strong); background: var(--field); }
+.md-table { border-color: var(--line); border-radius: var(--radius-float); }
+/* Plain buttons and menus (Settings, dialogs, the tabs) share the rounder corner; buttons with a class of their own keep theirs. */
+button { border-radius: var(--radius-md); }
+select { border: 1px solid var(--line-strong); border-radius: var(--radius-md); background-color: var(--field); color: inherit; font: inherit; padding: 2px 6px; }
+.network-watches { border-bottom-color: var(--line); }
+textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { border-radius: var(--radius-md); }
+/* Dialogs that share the revert body (Ship, Revert, ...), the History search and the Insights tiles. */
+.revert-body { border-color: var(--line); border-radius: var(--radius-bubble); box-shadow: var(--card-shadow); }
+.ship-step, .ship-prompt, .ship-warning { border-radius: var(--radius-float); }
+.ship-field input, .ship-field textarea { border-radius: var(--radius-md); }
+.menu-search { border-radius: var(--radius-pill); }
+/* The side chat over the message box. */
+.aside { border-color: var(--line); border-radius: var(--radius-float); box-shadow: var(--card-shadow); }
+.aside-ask input { border-radius: var(--radius-pill); padding: 5px 12px; }
+.aside-model { border-radius: var(--radius-md); }
+/* Cards that ask you something in the chat: the permission card and the question card. */
+.permission { border-radius: var(--radius-float); padding: 12px 14px; }
+.permission-detail { border-radius: var(--radius-md); }
+.question-other { border-radius: var(--radius-pill); padding: 0 14px; }
