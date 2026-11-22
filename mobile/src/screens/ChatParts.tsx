@@ -104,7 +104,7 @@ export const UserRow = memo(function UserRow({ menu, item, onActions, onRetry, q
           </View>
         )}
       </Pressable>
-      {menu && !item.failed && !item.sending && <View style={{ alignSelf: "flex-end" }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
+      {menu && !item.failed && !item.sending && <View style={{ alignSelf: "flex-end", marginRight: -6 }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
       {viewing !== null && <PhotoViewer uris={pics} first={viewing} onClose={() => setViewing(null)} />}
       {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
@@ -252,7 +252,7 @@ export const AssistantRow = memo(function AssistantRow({ menu, item, onActions, 
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
       {last && !item.streaming && <ReplyActions text={item.text} onMore={onActions} menu={menu} />}
-      {!last && !item.streaming && menu && <View style={{ alignSelf: "flex-start", marginLeft: -6 }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
+      {!last && !item.streaming && menu && <View style={{ alignSelf: "flex-start", marginLeft: 6, marginTop: 4 }}><MoreMenu items={menu} color={colors.ink3} compact /></View>}
     </Pressable>
   );
 });
