@@ -5025,3 +5025,8 @@ button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius
 .file-search .menu-search { border-color: transparent; border-radius: var(--radius-pill); background: var(--bg-subtle); padding-left: 14px; }
 .file-search .menu-search:focus { border-color: var(--line-strong); background: var(--field); }
 .md-table { border-color: var(--line); border-radius: var(--radius-float); }
+/* Plain buttons and menus (Settings, dialogs, the tabs) share the rounder corner; buttons with a class of their own keep theirs. */
+button { border-radius: var(--radius-md); }
+select { border: 1px solid var(--line-strong); border-radius: var(--radius-md); background-color: var(--field); color: inherit; font: inherit; padding: 2px 6px; }
+.network-watches { border-bottom-color: var(--line); }
+textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { border-radius: var(--radius-md); }
