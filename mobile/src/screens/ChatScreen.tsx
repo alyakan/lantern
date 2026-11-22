@@ -45,7 +45,7 @@ import { parseReviewFile, parseReviewFrame, verdictMessage, verdictsFromNext, ty
 import { reviewRoute, type RoutePage } from "../view/reviewRoute";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
-import { MessageMenu, type MenuItem } from "../ui/MessageMenu";
+import { MessageMenu, nativeMenu, type MenuItem } from "../ui/MessageMenu";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
@@ -688,17 +688,19 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     { label: reading ? "Stop reading" : "Read aloud", symbol: reading ? "stop.circle" : "speaker.wave.2", onPress: () => readAloud(m.text) },
     ...(m.own && m.last ? [{ label: "Edit and send again", symbol: "pencil" as const, onPress: () => setSeed({ id: Date.now(), text: m.text, mode: "replace" }) }] : []),
   ];
+  /** The pop-up menu for a message, on iOS only (elsewhere the sheet). */
+  const mine = (text: string, own: boolean, last: boolean, at?: number | null) => (nativeMenu() ? menuFor({ text, own, last, at }) : undefined);
   const renderRow = ({ item: row }: { item: Row }) => {
     // What is searched for, given only to the messages that say it: the rest are not drawn again as it is typed.
     const term = marks.all.has(row.key) ? find?.query : undefined;
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow menu={mine(row.item.text, true, row.key === lastUser, row.item.at)} item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
-          return <AssistantRow item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
+          return <AssistantRow menu={mine(row.item.text, false, false)} item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
+          return <SummaryRow menu={mine(row.item.text, false, false)} row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
           // On a page of its own, a Review's Frame with Units or Risks is drawn as its totals, risks and route, as the Mac's is
           // (only in a chat that is a Review: another flavour's Frame may have a Risks section too, and reads as written).
