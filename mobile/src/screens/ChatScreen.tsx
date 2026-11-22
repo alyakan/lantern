@@ -45,7 +45,7 @@ import { parseReviewFile, parseReviewFrame, verdictMessage, verdictsFromNext, ty
 import { reviewRoute, type RoutePage } from "../view/reviewRoute";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
-import { MessageMenu, nativeMenu, type MenuItem } from "../ui/MessageMenu";
+import { nativeMenu, type MenuItem } from "../ui/MessageMenu";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
@@ -696,11 +696,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow menu={mine(row.item.text, true, row.key === lastUser, row.item.at)} item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
+          return <UserRow item={row.item} showTime={row.showTime} queued={queued.has(row.item.id)} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at }))} saved={sentPhotos.get(row.item.id)} onRetry={online && !row.item.thumbs?.length && !row.item.stale ? steady(`${row.key}:retry`, () => void sync.retry(slot, row.item.id)) : undefined} />;
         case "assistant":
           return <AssistantRow menu={mine(row.item.text, false, false)} item={row.item} mark={term} files={row.files} onFile={openFile} last={!working && row.key === lastReply} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "summary":
-          return <SummaryRow menu={mine(row.item.text, false, false)} row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
+          return <SummaryRow row={row} onFiles={openFiles} onFile={openFile} mark={term} onActions={steady(`${row.key}:actions`, () => setActions({ text: row.item.text, own: false, last: false }))} />;
         case "page": {
           // On a page of its own, a Review's Frame with Units or Risks is drawn as its totals, risks and route, as the Mac's is
           // (only in a chat that is a Review: another flavour's Frame may have a Risks section too, and reads as written).
@@ -756,13 +756,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const mark = marks.here === row.key ? "here" : marks.all.has(row.key) ? "other" : null;
     return (
       <FadeSlideIn id={row.key} animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
-        {row.kind === "user" ? (
-          <MessageMenu items={menuFor({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })}>{body}</MessageMenu>
-        ) : row.kind === "assistant" || row.kind === "summary" ? (
-          <MessageMenu items={menuFor({ text: row.item.text, own: false, last: false })}>{body}</MessageMenu>
-        ) : (
-          body
-        )}
+        {body}
         {mark && <View testID={`match-${mark}`} pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: 6, borderRadius: radius.inner, borderWidth: mark === "here" ? 2 : 1, borderColor: mark === "here" ? colors.cobalt : `${colors.cobalt}55` }]} />}
       </FadeSlideIn>
     );
