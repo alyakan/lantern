@@ -5030,3 +5030,16 @@ button { border-radius: var(--radius-md); }
 select { border: 1px solid var(--line-strong); border-radius: var(--radius-md); background-color: var(--field); color: inherit; font: inherit; padding: 2px 6px; }
 .network-watches { border-bottom-color: var(--line); }
 textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { border-radius: var(--radius-md); }
+/* Dialogs that share the revert body (Ship, Revert, ...), the History search and the Insights tiles. */
+.revert-body { border-color: var(--line); border-radius: var(--radius-bubble); box-shadow: var(--card-shadow); }
+.ship-step, .ship-prompt, .ship-warning { border-radius: var(--radius-float); }
+.ship-field input, .ship-field textarea { border-radius: var(--radius-md); }
+.menu-search { border-radius: var(--radius-pill); }
+/* The side chat over the message box. */
+.aside { border-color: var(--line); border-radius: var(--radius-float); box-shadow: var(--card-shadow); }
+.aside-ask input { border-radius: var(--radius-pill); padding: 5px 12px; }
+.aside-model { border-radius: var(--radius-md); }
+/* Cards that ask you something in the chat: the permission card and the question card. */
+.permission { border-radius: var(--radius-float); padding: 12px 14px; }
+.permission-detail { border-radius: var(--radius-md); }
+.question-other { border-radius: var(--radius-pill); padding: 0 14px; }
