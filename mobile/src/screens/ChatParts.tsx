@@ -104,7 +104,7 @@ export const UserRow = memo(function UserRow({ menu, item, onActions, onRetry, q
           </View>
         )}
       </Pressable>
-      {menu && !item.failed && !item.sending && <View style={{ alignSelf: "flex-end", marginTop: 2 }}><MoreMenu items={menu} color={colors.ink3} compact align="trailing" /></View>}
+      {menu && !item.failed && !item.sending && <View style={{ alignSelf: "flex-end" }}><MoreMenu items={menu} color={colors.ink3} align="trailing" /></View>}
       {viewing !== null && <PhotoViewer uris={pics} first={viewing} onClose={() => setViewing(null)} />}
       {reading && <PastedSheet text={item.text} onClose={() => setReading(false)} />}
       {item.failed && (
@@ -227,12 +227,12 @@ export const SummaryRow = memo(function SummaryRow({ menu, row, onFiles, onActio
                 {c.label}
               </Chip>
             ))}
-            <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy summary"} onPress={copy} hitSlop={8} haptic="light" scaleTo={0.92} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+            <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy summary"} onPress={copy} hitSlop={8} haptic="light" scaleTo={0.92} style={{ paddingLeft: 6, paddingRight: menu ? 0 : 6, paddingVertical: 4 }}>
               <Txt variant="small" tone={copied ? "go" : "cobalt"} style={{ fontWeight: "700" }}>
                 {copied ? "Copied" : "Copy"}
               </Txt>
             </PressScale>
-            {menu && <MoreMenu items={menu} color={colors.ink3} compact align="leading" />}
+            {menu && <MoreMenu items={menu} color={colors.ink3} align="leading" />}
           </View>
         </View>
       </View>
@@ -252,7 +252,7 @@ export const AssistantRow = memo(function AssistantRow({ menu, item, onActions, 
     <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions && (() => { buzz("select"); onActions(); })} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <Blocks text={item.text} streaming={!!item.streaming} selectable={!onActions} mark={mark} files={files} onFile={onFile} />
       {last && !item.streaming && <ReplyActions text={item.text} onMore={onActions} menu={menu} />}
-      {!last && !item.streaming && menu && <View style={{ alignSelf: "flex-start", marginTop: 4 }}><MoreMenu items={menu} color={colors.ink3} compact align="leading" /></View>}
+      {!last && !item.streaming && menu && <View style={{ alignSelf: "flex-start", marginTop: -4 }}><MoreMenu items={menu} color={colors.ink3} align="leading" /></View>}
     </Pressable>
   );
 });

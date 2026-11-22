@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
-import { Platform } from "react-native";
+import { Platform, View } from "react-native";
 import { Button, ContextMenu, Host, Image, Menu, RNHostView } from "@expo/ui/swift-ui";
-import { accessibilityLabel } from "@expo/ui/swift-ui/modifiers";
+import { accessibilityLabel, padding } from "@expo/ui/swift-ui/modifiers";
 import type { SFSymbol } from "sf-symbols-typescript";
 
 /** iOS has the pop-up menu; the tests (which hold a message to reach the sheet) and other systems keep the sheet. */
@@ -35,15 +35,33 @@ export function MessageMenu({ items, children }: { items: MenuItem[]; children: 
   );
 }
 
-/** The three dots under a reply: the same actions, as iOS's menu that opens from the button. */
-export function MoreMenu({ items, color, compact = false, align = "center" }: { items: MenuItem[]; color: string; /** Which edge the dots sit against, so they line up with the words (or the bubble) above them. */ align?: "leading" | "center" | "trailing"; /** Under every message, not just the last reply: shorter, so the chat does not grow tall. */ compact?: boolean }) {
+/** How far the dots' touch area reaches beyond the dots on every side: padding inside the menu's label, so the dots themselves stay where the layout puts them. */
+const REACH = 12;
+/** The empty room the ellipsis symbol (size 18) leaves left and right of its dots, measured on the simulator. */
+const BEARING = { left: 1.7, right: 1.7 };
+/** The dots' own width and the height of the box they sit in. */
+const DOTS = { width: 16.67, height: 18 };
+
+/**
+ * The three dots under a message: the same actions, as iOS's menu that opens from the button. The native menu is a SwiftUI
+ * view that cannot be told which edge to sit against, so the box it is in has a fixed size and it is placed in the box:
+ * "leading" and "trailing" put the dots' own edge (not the symbol's room around it) on the edge of the words or the bubble
+ * above; "center" is a 44-point box with the dots in the middle, like the copy icon beside it. The touch area reaches REACH
+ * beyond the dots on every side.
+ */
+export function MoreMenu({ items, color, align = "center" }: { items: MenuItem[]; color: string; align?: "leading" | "center" | "trailing" }) {
+  const place = align === "leading" ? { left: -(REACH + BEARING.left) } : align === "trailing" ? { right: -(REACH + BEARING.right) } : { left: 0, right: 0 };
   return (
-    <Host style={{ width: compact ? 40 : 44, height: compact ? 28 : 44 }} alignment={align}>
-      <Menu label={<Image systemName="ellipsis" size={18} color={color} />} modifiers={[accessibilityLabel("More")]}>
-        {items.map((item) => (
-          <Button key={item.label} label={item.label} systemImage={item.symbol} onPress={item.onPress} />
-        ))}
-      </Menu>
-    </Host>
+    <View style={{ width: align === "center" ? 44 : DOTS.width, height: DOTS.height }}>
+      <View style={{ position: "absolute", top: -REACH, bottom: -REACH, justifyContent: "center", alignItems: "center", ...place }}>
+        <Host matchContents>
+          <Menu label={<Image systemName="ellipsis" size={18} color={color} modifiers={[padding({ all: REACH })]} />} modifiers={[accessibilityLabel("More")]}>
+            {items.map((item) => (
+              <Button key={item.label} label={item.label} systemImage={item.symbol} onPress={item.onPress} />
+            ))}
+          </Menu>
+        </Host>
+      </View>
+    </View>
   );
 }
