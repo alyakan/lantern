@@ -18,19 +18,14 @@ import { Dots } from "../ui/skeleton";
 import { fonts, MIN_TARGET, radius, space, useBody, useColors } from "../ui/theme";
 import { useAccent } from "../ui/accent";
 
-/** One thing a sheet offers: a row with a name. */
-function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
+/** One thing a sheet offers: a plain row with a name, a hairline above it (but the first); what it does is said to a screen reader. */
+function ActionRow({ label, hint, onPress, tone = "ink", first = false }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop"; first?: boolean }) {
   const colors = useColors();
   return (
-    <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.wash, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
-      <Txt variant="body" tone={tone} style={{ fontWeight: "700" }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint} onPress={onPress} haptic="select" scaleTo={0.98} style={{ minHeight: 52, justifyContent: "center", paddingHorizontal: 6, borderTopWidth: first ? 0 : 1, borderTopColor: colors.rule }}>
+      <Txt variant="body" tone={tone} style={{ fontWeight: "500" }}>
         {label}
       </Txt>
-      {hint && (
-        <Txt variant="small" tone="ink2">
-          {hint}
-        </Txt>
-      )}
     </PressScale>
   );
 }
@@ -48,24 +43,25 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
   return (
     <Sheet onClose={onClose}>
       {(close, scroll) => (
-        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 8, maxHeight: "100%" }]}>
+        <View style={[{ padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 0, maxHeight: "100%" }]}>
           {selecting ? (
             <>
               <SheetBar title="Select text" close={{ label: "Close", onPress: close }} inset={0} />
               {/* iOS's selectable text takes all of it or nothing: a field that can't be edited has the handles that pick just a part
                   (and its own Copy), without a keyboard. */}
-              <ScrollView ref={scroll} style={{ maxHeight: 360 }}>
+              <ScrollView ref={scroll} style={{ maxHeight: 360, marginTop: 8 }}>
                 <TextInput testID="select-text" value={text} editable={false} multiline scrollEnabled={false} style={{ fontSize: body.fontSize, lineHeight: body.lineHeight, color: colors.ink, padding: 0 }} />
               </ScrollView>
             </>
           ) : (
             <>
               {sentAt !== null && (
-                <Txt variant="small" tone="ink3" style={{ marginBottom: 2 }}>
+                <Txt variant="small" tone="ink3" style={{ marginBottom: 8, marginLeft: 6 }}>
                   Sent {new Date(sentAt).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </Txt>
               )}
               <ActionRow
+                first
                 label="Copy"
                 onPress={() => {
                   // Copied: a tap you can feel, as iOS gives, since the sheet closing is all you'd see.
