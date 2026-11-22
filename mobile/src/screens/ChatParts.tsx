@@ -1374,7 +1374,7 @@ export function PlusButton({ busy, full, canAttach, items, onPress, onPick }: { 
 export function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
   const colors = useColors();
   return (
-    <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 2 }} style={{ flexGrow: 0 }}>
+    <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingHorizontal: 6, paddingTop: 6, paddingBottom: 10 }} style={{ flexGrow: 0 }}>
       {images.map((image, i) => (
         <View key={image.id} style={{ width: THUMB, height: THUMB }}>
           <PressScale accessibilityRole="button" accessibilityLabel={`Mark up photo ${i + 1}`} accessibilityHint="Draw on it before it is sent" onPress={() => onMarkUp(image)} haptic="select" scaleTo={0.95} reach={false}>

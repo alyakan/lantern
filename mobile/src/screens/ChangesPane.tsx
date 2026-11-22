@@ -122,15 +122,15 @@ export function ChangesPane({ slot, onHide, hideLabel = "Hide", inSheet = false,
         )
       ) : (
         <>
-          <ScrollView style={{ maxHeight: 190, flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.lg - 6, paddingBottom: 6 }}>
+          <ScrollView style={{ maxHeight: 132, flexGrow: 0 }} contentContainerStyle={{ paddingHorizontal: space.lg - 6, paddingBottom: 6 }}>
             {files.map((f) => (
-              <PressScale key={f.path} accessibilityRole="button" accessibilityLabel={f.linked ? `${f.name}, from a link` : `${f.name}, ${f.created ? "new, " : ""}${f.added} added, ${f.removed} removed`} accessibilityState={{ selected: f.path === path }} onPress={() => setPicked(f.path)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 8, borderRadius: radius.inner, backgroundColor: f.path === path ? colors.paper : "transparent" }}>
-                <View style={{ flex: 1 }}>
-                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "600" }}>
+              <PressScale key={f.path} accessibilityRole="button" accessibilityLabel={f.linked ? `${f.name}, from a link` : `${f.name}, ${f.created ? "new, " : ""}${f.added} added, ${f.removed} removed`} accessibilityState={{ selected: f.path === path }} onPress={() => setPicked(f.path)} haptic="select" scaleTo={0.98} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, paddingHorizontal: 8, borderRadius: radius.inner, backgroundColor: f.path === path ? colors.paper : "transparent" }}>
+                <View style={{ flex: 1, flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                  <Txt variant="small" numberOfLines={1} style={{ fontWeight: "600", flexShrink: 0, maxWidth: "70%" }}>
                     {f.name}
                   </Txt>
                   {!!f.folder && (
-                    <Txt variant="tiny" tone="ink3" numberOfLines={1}>
+                    <Txt variant="tiny" tone="ink3" numberOfLines={1} ellipsizeMode="head" style={{ flex: 1 }}>
                       {f.folder}
                     </Txt>
                   )}
