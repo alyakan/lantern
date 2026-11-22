@@ -4972,3 +4972,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 /* The last reply keeps its Copy in sight, as the Claude app does; the rest show theirs under the pointer. */
 .chat > .turn-section:last-child > .msg.assistant:last-of-type + .msg-actions { opacity: 1; }
 .activity > .activity-line.test-chip.failed { color: var(--muted-text); }
+/* Your message and its Copy / Edit stack at the trailing edge: the bubble, then its actions underneath it. */
+.turn-head { flex-direction: column; align-items: flex-end; }
+.turn-head > .msg-actions { align-self: flex-end; margin: 2px 4px 0; }
