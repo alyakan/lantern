@@ -35,12 +35,12 @@ function ActionRow({ label, hint, symbol, glyph, onPress, tone = "ink" }: { labe
  * What can be done with a message held down: copy it, quote it in a reply, select part of it, and (your own last one) edit
  * it and send it again. Each does it and closes the sheet.
  */
-export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, sentAt = null, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; /** When it was sent (your messages): said at the top, since the chat shows a time only now and then. */ sentAt?: number | null; onClose: () => void }) {
+export function MessageActionsSheet({ startSelecting = false, text, onQuote, onEdit, onReadAloud, reading = false, sentAt = null, onClose }: { /** Opens at the words to pick from (chosen in the pop-up menu). */ startSelecting?: boolean; text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; /** When it was sent (your messages): said at the top, since the chat shows a time only now and then. */ sentAt?: number | null; onClose: () => void }) {
   const colors = useColors();
   // The message reads in the chat's own type, which is the device's body size.
   const body = useBody();
   const insets = useSafeAreaInsets();
-  const [selecting, setSelecting] = useState(false);
+  const [selecting, setSelecting] = useState(startSelecting);
   return (
     <Sheet onClose={onClose}>
       {(close, scroll) => (

@@ -126,6 +126,9 @@ jest.mock("@expo/ui/swift-ui", () => {
     // A section shows its title, as iOS's menus do over a group.
     Section: ({ title, children }: { title?: string; children?: unknown }) => React.createElement(View, null, title ? React.createElement(Text, null, title) : null, children),
     Spacer: () => null,
+    // The held-message menu: its items are only in the native menu, so the tests see the message alone.
+    ContextMenu: Object.assign(({ children }: { children?: unknown }) => React.createElement(View, null, children), { Items: () => null, Trigger: ({ children }: { children?: unknown }) => React.createElement(View, null, children) }),
+    RNHostView: ({ children }: { children?: unknown }) => React.createElement(View, null, children),
     Image: () => null,
     Text: ({ children }: { children?: unknown }) => React.createElement(Text, null, children),
     Menu: ({ label, children, modifiers }: { label: unknown; children?: unknown; modifiers?: MockMod[] }) =>

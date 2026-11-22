@@ -1,7 +1,8 @@
 import { claudeUsage } from "../view/providerUsage";
 import type { ConversationSettings } from "../sync/sync";
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AppState, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { Alert, AppState, Pressable, Share, StyleSheet, View, type ScrollViewProps } from "react-native";
+import * as ExpoClipboard from "expo-clipboard";
 import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -44,6 +45,7 @@ import { parseReviewFile, parseReviewFrame, verdictMessage, verdictsFromNext, ty
 import { reviewRoute, type RoutePage } from "../view/reviewRoute";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
+import { MessageMenu, type MenuItem } from "../ui/MessageMenu";
 import { distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { SearchBar, SidebarIcon, type BarSearch, type BarTool } from "./SearchBar";
 import { TodosPane } from "./TodosPane";
@@ -241,7 +243,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
   }, [problem]);
   // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
   // the message box (a quote, an edit).
-  const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null } | null>(null);
+  const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean; at?: number | null; select?: boolean } | null>(null);
   // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
   const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
   // Command-F on an iPad's keyboard opens the chat's search, as the bar's Search does.
@@ -662,6 +664,30 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     }
     return s;
   };
+  const readAloud = (text: string) => {
+    if (reading) {
+      platformSpeech.stop();
+      setReading(false);
+      return;
+    }
+    setReading(true);
+    platformSpeech.read(text).then(
+      () => setReading(false),
+      (e: Error) => {
+        setReading(false);
+        fail(e);
+      },
+    );
+  };
+  /** What iOS's pop-up menu offers for a message held down (the same things as the sheet the "More" button opens). */
+  const menuFor = (m: { text: string; own: boolean; last: boolean; at?: number | null }): MenuItem[] => [
+    { label: "Copy", symbol: "doc.on.doc", onPress: () => void Promise.resolve(ExpoClipboard.setStringAsync(m.text)).then(() => buzz("success"), () => {}) },
+    { label: "Quote in a reply", symbol: "arrowshape.turn.up.left", onPress: () => setSeed({ id: Date.now(), text: quote(m.text), mode: "append" }) },
+    { label: "Select text", symbol: "text.cursor", onPress: () => setActions({ ...m, select: true }) },
+    { label: "Share", symbol: "square.and.arrow.up", onPress: () => void Share.share({ message: m.text }).catch(() => {}) },
+    { label: reading ? "Stop reading" : "Read aloud", symbol: reading ? "stop.circle" : "speaker.wave.2", onPress: () => readAloud(m.text) },
+    ...(m.own && m.last ? [{ label: "Edit and send again", symbol: "pencil" as const, onPress: () => setSeed({ id: Date.now(), text: m.text, mode: "replace" }) }] : []),
+  ];
   const renderRow = ({ item: row }: { item: Row }) => {
     // What is searched for, given only to the messages that say it: the rest are not drawn again as it is typed.
     const term = marks.all.has(row.key) ? find?.query : undefined;
@@ -728,7 +754,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     const mark = marks.here === row.key ? "here" : marks.all.has(row.key) ? "other" : null;
     return (
       <FadeSlideIn id={row.key} animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
-        {body}
+        {row.kind === "user" ? (
+          <MessageMenu items={menuFor({ text: row.item.text, own: true, last: row.key === lastUser, at: row.item.at })}>{body}</MessageMenu>
+        ) : row.kind === "assistant" || row.kind === "summary" ? (
+          <MessageMenu items={menuFor({ text: row.item.text, own: false, last: false })}>{body}</MessageMenu>
+        ) : (
+          body
+        )}
         {mark && <View testID={`match-${mark}`} pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: 6, borderRadius: radius.inner, borderWidth: mark === "here" ? 2 : 1, borderColor: mark === "here" ? colors.cobalt : `${colors.cobalt}55` }]} />}
       </FadeSlideIn>
     );
@@ -1048,25 +1080,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       {actions && (
         <MessageActionsSheet
           text={actions.text}
+          startSelecting={!!actions.select}
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
           reading={reading}
           sentAt={actions.at ?? null}
-          onReadAloud={() => {
-            if (reading) {
-              platformSpeech.stop();
-              setReading(false);
-              return;
-            }
-            setReading(true);
-            platformSpeech.read(actions.text).then(
-              () => setReading(false),
-              (e: Error) => {
-                setReading(false);
-                fail(e);
-              },
-            );
-          }}
+          onReadAloud={() => readAloud(actions.text)}
           onClose={() => setActions(null)}
         />
       )}
