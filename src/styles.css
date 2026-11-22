@@ -5002,3 +5002,9 @@ button.code-block-copy { opacity: 0.7; height: 22px; border-radius: var(--radius
 /* The bar beside added and removed lines is thin and soft, not a dark stripe. */
 .monaco-diff-editor .margin-view-overlays .gutter-insert { box-shadow: inset -2px 0 color-mix(in srgb, var(--add) 55%, transparent); }
 .monaco-diff-editor .margin-view-overlays .gutter-delete { box-shadow: inset -2px 0 color-mix(in srgb, var(--del) 55%, transparent); }
+/* The sidebar, calmer: rounder chips, rows that are soft pills, the open chat held by a tint rather than a bold title. */
+.sb-chip { border-radius: var(--radius-float); }
+.sb-row { border-radius: var(--radius-float); }
+.sb-panel.expanded .sb-row.current { background: var(--bg-active); }
+.sb-row.current .sb-title { font-weight: 500; }
+.sb-new-button { border-radius: var(--radius-pill); }
