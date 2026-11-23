@@ -321,14 +321,19 @@ impl GeminiMapper {
                 let raw = &call["rawInput"];
                 // Each agent's own field names only (Gemini CLI's shell tool: `command`, `dir_path`; Antigravity's
                 // `run_command`: `CommandLine`, `Cwd`), so another field can never be what the card shows instead of what runs.
-                let (command_keys, dir_keys): (&[&str], &[&str]) = match self.agent {
-                    AcpAgent::Gemini => (&["command"], &["dir_path"]),
-                    AcpAgent::Antigravity => (&["CommandLine"], &["Cwd"]),
+                let (command_key, dir_key) = match self.agent {
+                    AcpAgent::Gemini => ("command", "dir_path"),
+                    AcpAgent::Antigravity => ("commandline", "cwd"),
                 };
-                let command = one_of(raw, command_keys, &["command", "CommandLine", "commandLine", "cmd"])?;
-                let command = command.filter(|c| !c.trim().is_empty()).unwrap_or(title);
+                let command = one_of(raw, command_key, COMMAND_KEYS)?;
+                let command = match command {
+                    Some(c) if !c.trim().is_empty() => c,
+                    // Gemini CLI may send no input at all; its shell tool's title is then the command itself.
+                    None if !raw.is_object() && self.agent == AcpAgent::Gemini => title,
+                    _ => return Err("it doesn't say exactly what it would run".into()),
+                };
                 input["command"] = seen.shown(command, true).into();
-                let dir = one_of(raw, dir_keys, &["dir_path", "directory", "cwd", "Cwd", "workdir"])?.map(str::trim);
+                let dir = one_of(raw, dir_key, DIR_KEYS)?.map(str::trim);
                 match dir {
                     // No folder given: the agent's shell tool runs in the folder it was started in, which is the chat's.
                     _ if raw.is_object() && dir.is_none_or(str::is_empty) => input["cwd"] = seen.shown(&self.cwd.display().to_string(), false).into(),
@@ -500,15 +505,22 @@ pub fn signed_out(code: i64, message: &str) -> bool {
     code == 401 || code == 403 || m.contains("authentication required") || m.contains("not authenticated") || m.contains("unauthenticated") || m.contains("api key is missing") || m.contains("please set an auth method") || m.contains("log in") || m.contains("sign in")
 }
 
-/// The value of `raw`'s field among `keys` (the agent's own name for it). A request that also carries one of `lookalikes`
-/// with a different value is not shown: which of them would run can't be told from here.
-fn one_of<'a>(raw: &'a Value, keys: &[&str], lookalikes: &[&str]) -> Result<Option<&'a str>, String> {
-    let own = keys.iter().find_map(|k| raw[*k].as_str());
-    let others: Vec<&str> = lookalikes.iter().filter(|k| !keys.contains(k)).filter_map(|k| raw[*k].as_str()).collect();
-    if others.iter().any(|o| Some(*o) != own) {
-        return Err("it names what it would run, or where, twice and differently".into());
+/// Every name, in lower case, a shell tool's command or folder might go by.
+const COMMAND_KEYS: &[&str] = &["command", "commandline", "cmd"];
+const DIR_KEYS: &[&str] = &["dir_path", "directory", "cwd", "workdir", "dir"];
+
+/// The value of `raw`'s field `own` (its name in lower case). Names are matched without regard to case, because an agent may
+/// read them that way (Go's JSON does, and takes the last of two); so a request carrying more than one of `family`, or one
+/// that isn't text, or one that isn't the agent's own, is not shown: what the card says might not be what runs.
+fn one_of<'a>(raw: &'a Value, own: &str, family: &[&str]) -> Result<Option<&'a str>, String> {
+    let Some(fields) = raw.as_object() else { return Ok(None) };
+    let found: Vec<(&String, &Value)> = fields.iter().filter(|(k, _)| family.contains(&k.to_lowercase().as_str())).collect();
+    match found.as_slice() {
+        [] => Ok(None),
+        [(k, v)] if k.to_lowercase() == own => v.as_str().map(Some).ok_or_else(|| "it names what it would run, or where, as something other than text".to_string()),
+        [_] => Err("it names what it would run, or where, under a name this agent doesn't use".into()),
+        _ => Err("it names what it would run, or where, more than once".into()),
     }
-    Ok(own)
 }
 
 /// What a turn that failed to sign in says, with how to fix it.
@@ -759,20 +771,34 @@ mod tests {
     fn each_agent_s_command_is_read_from_its_own_field_and_a_second_differing_one_is_declined() {
         let agy = GeminiMapper::for_agent(Path::new("/work/proj"), AcpAgent::Antigravity);
         let mut req = request("execute", "ls", json!([]));
+        let refused = |m: &GeminiMapper, r: &Value| m.approval(r).unwrap_err();
         req["toolCall"]["rawInput"] = json!({"CommandLine": "rm -rf ~", "command": "ls"});
-        assert!(agy.approval(&req).unwrap_err().contains("twice and differently"));
+        assert!(refused(&agy, &req).contains("more than once"));
+        // A second spelling of its own name: a reader that ignores case (and takes the last) could run the other one.
+        req["toolCall"]["rawInput"] = json!({"CommandLine": "ls", "commandline": "rm -rf ~"});
+        assert!(refused(&agy, &req).contains("more than once"));
         req["toolCall"]["rawInput"] = json!({"CommandLine": "make", "Cwd": "/tmp/x", "dir_path": "/work/proj"});
-        assert!(agy.approval(&req).unwrap_err().contains("twice and differently"));
-        // Its own field, alone: what is shown, and its folder.
-        req["toolCall"]["rawInput"] = json!({"CommandLine": "make", "Cwd": "sub"});
+        assert!(refused(&agy, &req).contains("more than once"));
+        req["toolCall"]["rawInput"] = json!({"CommandLine": ["rm", "-rf", "~"]});
+        assert!(refused(&agy, &req).contains("other than text"));
+        // No command of its own: the title is not taken for it.
+        req["toolCall"]["rawInput"] = json!({"toolSummary": "clean"});
+        assert!(refused(&agy, &req).contains("exactly what it would run"));
+        req["toolCall"]["rawInput"] = json!({"command": "ls"});
+        assert!(refused(&agy, &req).contains("doesn't use"));
+        // Its own field, alone, in any case: what is shown, and its folder.
+        req["toolCall"]["rawInput"] = json!({"commandLine": "make", "Cwd": "sub", "toolSummary": "build"});
         let a = agy.approval(&req).unwrap();
         assert_eq!((a.input["command"].as_str(), a.input["cwd"].as_str(), a.input["provider"].as_str()), (Some("make"), Some("/work/proj/sub"), Some("antigravity")));
-        // Gemini CLI doesn't read Antigravity's names.
+        // Gemini CLI doesn't read Antigravity's names, but with no input at all its title is the command.
         let gemini = mapper();
         req["toolCall"]["rawInput"] = json!({"CommandLine": "rm -rf ~"});
-        assert!(gemini.approval(&req).unwrap_err().contains("twice and differently"));
+        assert!(refused(&gemini, &req).contains("doesn't use"));
         req["toolCall"]["rawInput"] = json!({"command": "ls", "CommandLine": "ls"});
+        assert!(refused(&gemini, &req).contains("more than once"));
+        req["toolCall"].as_object_mut().unwrap().remove("rawInput");
         assert_eq!(gemini.approval(&req).unwrap().input["command"], "ls");
+        assert!(refused(&agy, &req).contains("exactly what it would run"));
     }
 
     #[test]
