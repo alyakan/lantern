@@ -17,7 +17,7 @@ import type { WindowWork } from "./lib/phoneWork";
 import type { AsideEvent, AuthState, CaptureStatus, ChatSearchResults, HermesStatus, DeskRoute, DeskTalk, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, HostedProvider, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Account, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, RepoStatus, LinearWork, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
-export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
+export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch" | "commit";
 
 /** A linked worktree of the chat's project. */
 export interface Worktree {
@@ -40,7 +40,15 @@ export interface BranchReview {
   base: string;
   /** Why it isn't the base the review named, when that one couldn't be found. */
   note?: string;
-  commits: { sha: string; subject: string; author: string; at: number }[];
+  commits: CommitInfo[];
+}
+
+/** One commit, as the branch list and the History list show it (`at` is ms since the epoch). */
+export interface CommitInfo {
+  sha: string;
+  subject: string;
+  author: string;
+  at: number;
 }
 
 export type WriteResult = { status: "saved"; changed: boolean } | { status: "conflict"; current: string | null };
@@ -230,6 +238,8 @@ export const api = {
     invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints, base }),
   /** `base`: the branch the review says it is stacked on; null lets Lantern work it out. */
   branchReview: (slot: string, hints: string[], base: string | null = null) => invoke<BranchReview>("branch_review", { slot, hints, base }),
+  /** The newest commits of the worktree the Changes pane shows, newest first. Read one's files with the "commit" scope, its sha as `base`. */
+  commitHistory: (slot: string) => invoke<CommitInfo[]>("commit_history", { slot }),
   /** The worktree the chat is working in (Claude entered one itself), whose changes Git and Branch show; null when it works in its own folder. */
   workFolder: (slot: string) => invoke<WorkView | null>("work_folder", { slot }),
   /** `main`: read Git and Branch from the chat's own folder even while it works in a worktree. */

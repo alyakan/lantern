@@ -12,7 +12,7 @@ import { changeOf, CONTINUE_TEXT, describe as describeChange, nextStep, queue as
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
+import { api, type BranchReview, type ChangeScope, type CommitInfo, type RestoreResult, type RevertOutcome, type WorkView, type Worktree } from "./api";
 import { baseBranchOf, matchChanged, prNumberOf, reviewHints, reviewTargetOf, type PageFindings } from "./lib/review";
 import { forgetWorktree, isGoneWorktree, worktreeCalls, worktreeOf, worktreeToRestore } from "./lib/worktree";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
@@ -2116,7 +2116,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const hintKey = hints.join("\n");
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
   const reviewBase = !reviewing ? null : peek ? peek.base : reviewTarget ? reviewTarget.base : baseBranchOf(state.items);
-  const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) ? "session" : changeScope;
+  const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) || (changeScope === "commit" && !state.folder) ? "session" : changeScope;
   // Step by step's Review: its page's findings go under their lines in the diff, and line comments are notes for its summary.
   const reviewSteps = stepsView && flavour === "review";
   const updateComments = (change: (all: DiffComment[]) => DiffComment[]) =>
@@ -2158,6 +2158,38 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     };
   }, [scope, active, state.folder, hintKey, reviewBase, state.seq, worktreeKey]);
   const shownBranch = branchFiles?.key.startsWith(`${active}:`) ? branchFiles : null;
+  // "History": the commits of the worktree the pane shows, newest first. Asked for only while it's the filter; read
+  // again as the chat goes on (Claude commits), and the pick is kept while its commit is still in the list.
+  const [historyState, setHistoryState] = useState<{ slot: string; tree: string; commits: CommitInfo[]; error: string | null } | null>(null);
+  const [pickedCommit, setPickedCommit] = useState<{ slot: string; sha: string } | null>(null);
+  useEffect(() => {
+    if (scope !== "commit" || !state.folder) return;
+    let live = true;
+    api.commitHistory(active).then(
+      (commits) => live && setHistoryState({ slot: active, tree: worktreeKey, commits, error: null }),
+      (e) => live && setHistoryState({ slot: active, tree: worktreeKey, commits: [], error: errText(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [scope, active, state.folder, state.seq, worktreeKey]);
+  // Another worktree has its own commits, and its own root for their files: nothing of the last one is shown meanwhile.
+  const shownHistory = historyState?.slot === active && historyState.tree === worktreeKey ? historyState : null;
+  const commitSha = shownHistory ? (shownHistory.commits.find((c) => c.sha === (pickedCommit?.slot === active ? pickedCommit.sha : null))?.sha ?? shownHistory.commits[0]?.sha ?? null) : null;
+  const [commitFiles, setCommitFiles] = useState<{ sha: string; tree: string; files: ChangedFile[]; error: string | null } | null>(null);
+  useEffect(() => {
+    if (scope !== "commit" || !state.folder || commitSha === null) return;
+    let live = true;
+    api.changeSummary(active, "commit", null, null, null, null, commitSha).then(
+      (files) => live && setCommitFiles({ sha: commitSha, tree: worktreeKey, files, error: null }),
+      (e) => live && setCommitFiles({ sha: commitSha, tree: worktreeKey, files: [], error: errText(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [scope, active, state.folder, commitSha, worktreeKey]);
+  // A commit's files are those of the commit shown; between two picks, nothing stale is listed.
+  const shownCommit = commitFiles !== null && commitFiles.sha === commitSha && commitFiles.tree === worktreeKey ? commitFiles : null;
   // Keyed by chat and folder as well as the PR number: another chat reviewing the same PR has its own files.
   const prKey = `${active}:${state.folder}:${reviewPr}`;
   const [prFiles, setPrFiles] = useState<{ key: string; files: ChangedFile[]; error: string | null } | null>(null);
@@ -2175,13 +2207,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [scope, active, state.folder, reviewPr]);
   const shownPr = prFiles?.key === prKey ? prFiles : null;
   // A Review page's finding shows its lines from the same diff the Changes pane has (the PR's, the branch's, ...).
-  const diffBase = scope === "branch" && reviewBranch ? (shownBranch?.review?.base ?? null) : null;
+  const diffBase = scope === "branch" && reviewBranch ? (shownBranch?.review?.base ?? null) : scope === "commit" ? commitSha : null;
   const diffTurn = scope === "turn" && stepsView ? pageRange : null;
   const reviewDiffs = useMemo(
     () => ({ load: (path: string) => api.getFileDiff(active, path, scope, diffTurn?.from ?? null, diffTurn?.to ?? null, scope === "pr" ? reviewPr : null, diffBase) }),
     [active, scope, diffTurn?.from, diffTurn?.to, reviewPr, diffBase],
   );
-  const shownFiles =scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
+  const shownFiles = scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "commit" ? (shownCommit?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
   // A review page's files, shown in the PR's changes once they're in: one file, or the files of a group page. A path that
   // matches no changed file, or several, is left out (a bare name must not pick one by chance).
   const [reviewFiles, setReviewFiles] = useState<string[]>([]);
@@ -3731,12 +3763,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
                 onScope={setChangeScope}
-                worktree={shownWorktree ? { name: shownWorktree.name, branch: shownWorktree.branch, main: shownWorktree.main, onToggle: () => chooseWorktreeView(!shownWorktree.main) } : undefined}
+                worktree={shownWorktree ? { path: shownWorktree.path, name: shownWorktree.name, branch: shownWorktree.branch, main: shownWorktree.main, onToggle: () => chooseWorktreeView(!shownWorktree.main) } : undefined}
                 worktrees={worktrees.length > 0 ? { list: worktrees, current: shownWorktree && !shownWorktree.main ? shownWorktree.path : null, pinned: shownWorktree?.pinned ?? false, onPick: pickWorktree } : undefined}
-                scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
-                gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
+                scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null), commit: shownCommit?.error ? null : (shownCommit?.files.length ?? null) }}
+                gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : scope === "commit" ? (shownHistory?.error ?? shownCommit?.error ?? null) : null}
                 pr={reviewPr}
                 branch={reviewBranch ? (shownBranch?.review ?? null) : undefined}
+                history={state.folder ? { commits: shownHistory ? shownHistory.commits : null, selected: commitSha, onSelect: (sha) => setPickedCommit({ slot: active, sha }) } : undefined}
                 stepRange={stepsView ? pageRange : undefined}
                 testRuns={state.testRuns}
                 searchKey={searchKey}

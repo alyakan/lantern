@@ -308,6 +308,39 @@ fn built_on(folder: &Path, hints: &[String], base: &str) -> bool {
     same(&default) || stacked_on(f, &name, &head, &default).is_some_and(|s| same(&s))
 }
 
+/// The tree with nothing in it: what a first commit is compared with.
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// How many commits the History list reads.
+pub const HISTORY_LIMIT: usize = 100;
+
+/// The newest commits of what is checked out, newest first, merges included (as GitHub Desktop lists them).
+pub fn history(folder: &Path) -> Result<Vec<Commit>, String> {
+    let repo = repo_for(folder, &[])?;
+    let limit = format!("--max-count={HISTORY_LIMIT}");
+    let log = git(&repo, &["log", &limit, "--format=%h%x1f%s%x1f%an%x1f%ct"]).map_err(|e| if e.contains("does not have any commits") { "This branch has no commits yet.".to_string() } else { e })?;
+    Ok(log
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split('\u{1f}');
+            Some(Commit { sha: f.next()?.into(), subject: f.next()?.into(), author: f.next()?.into(), at: f.next()?.parse::<u64>().ok()? * 1000 })
+        })
+        .collect())
+}
+
+/// One commit as a range: from its first parent (or nothing, for a first commit) to itself. `sha` is what the History
+/// list gave, so it must be hex and nothing else, which keeps it from being read as an option or a range.
+pub fn commit_range(folder: &Path, sha: &str) -> Result<PrRange, String> {
+    let sha = sha.trim();
+    if !(4..=64).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("That isn't a commit.".into());
+    }
+    let root = repo_for(folder, &[])?;
+    let head = git(&root, &["rev-parse", "--verify", &format!("{sha}^{{commit}}")])?;
+    let base = git(&root, &["rev-parse", "--verify", "--quiet", &format!("{head}^1")]).unwrap_or_else(|_| EMPTY_TREE.into());
+    Ok(PrRange { base, head, root })
+}
+
 /// The PR's files: (absolute path, created, deleted, lines added, lines removed), by path. A file moved (and maybe
 /// changed) is one row at its new path, saying where it was, not one added and one removed.
 pub fn summary(range: &PrRange) -> Result<Vec<ChangeSummary>, String> {
@@ -452,6 +485,45 @@ mod tests {
     }
 
     /// main ← core (2 commits) ← ui (1 commit), with main moving on after core left it.
+    #[test]
+    fn history_lists_commits_and_each_one_reads_as_its_own_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        sh(d, &["init", "-q", "-b", "main"]);
+        sh(d, &["config", "user.email", "t@t"]);
+        sh(d, &["config", "user.name", "t"]);
+        assert!(history(d).unwrap_err().contains("no commits yet"));
+        std::fs::write(d.join("a.txt"), "one\n").unwrap();
+        sh(d, &["add", "."]);
+        sh(d, &["commit", "-qm", "first"]);
+        std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(d.join("b.txt"), "b\n").unwrap();
+        sh(d, &["add", "."]);
+        sh(d, &["commit", "-qm", "second"]);
+
+        let log = history(d).unwrap();
+        assert_eq!(log.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["second", "first"]);
+
+        // The newest commit is read against its parent: one file changed, one added.
+        let second = commit_range(d, &log[0].sha).unwrap();
+        let rows = summary(&second).unwrap();
+        assert_eq!(rows.iter().map(|r| (r.path.rsplit('/').next().unwrap(), r.created, r.added)).collect::<Vec<_>>(), [("a.txt", false, 1), ("b.txt", true, 1)]);
+        let diff = file(&second, &rows[0].path).unwrap();
+        assert_eq!((diff.original.as_str(), diff.current.as_str()), ("one\n", "one\ntwo\n"));
+
+        // A first commit has no parent: everything in it is new.
+        let first = commit_range(d, &log[1].sha).unwrap();
+        let rows = summary(&first).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].created);
+        assert!(file(&first, &rows[0].path).unwrap().created);
+
+        // Only a commit's hex is taken: nothing that git could read as an option, a range or a path.
+        for bad in ["", "--help", "HEAD", "main..HEAD", "abc", "zzzz1234"] {
+            assert!(commit_range(d, bad).is_err(), "{bad:?}");
+        }
+    }
+
     fn stack() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import type { BranchReview, ChangeScope } from "../api";
+import type { BranchReview, ChangeScope, CommitInfo } from "../api";
 import { relativeTime } from "../lib/time";
 import { useAction } from "../lib/actions";
 import type { ChangedFile, TestRunItem } from "../store";
@@ -18,7 +18,7 @@ import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
 import { Counts } from "./EditLine";
-import { RevertIcon, DocIcon } from "./icons";
+import { RevertIcon, DocIcon, FolderIcon } from "./icons";
 import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
 import { TabEmpty } from "./TabEmpty";
@@ -56,7 +56,7 @@ interface Props {
   scope?: ChangeScope;
   onScope?: (scope: ChangeScope) => void;
   /** Claude entered a worktree itself: Git and Branch read from it (`main`: from the chat's own folder, by the user's choice). */
-  worktree?: { name: string; branch: string | null; main: boolean; onToggle: () => void };
+  worktree?: { path: string; name: string; branch: string | null; main: boolean; onToggle: () => void };
   /** The project's worktrees to pick from: `current` is the one shown (a path; null: none, or the chat's own folder), `pinned` that the chat was put in it. */
   worktrees?: { list: { path: string; name: string; branch: string | null }[]; current: string | null; pinned: boolean; onPick: (path: string | null) => void };
   /** On a Step-by-step page: the turns "turn" means (null: not all known, e.g. an earlier page of a reopened session). */
@@ -74,6 +74,11 @@ interface Props {
   pr?: number | null;
   /** A local branch being reviewed (null while it's read): adds a "Branch" filter, with its commits above the diff. */
   branch?: BranchReview | null;
+  /**
+   * The checked-out branch's commit history (null while it's read): adds a "Commits" filter, a list of commits above
+   * the diff, where choosing one shows only that commit's files (`selected`: its sha).
+   */
+  history?: { commits: CommitInfo[] | null; selected: string | null; onSelect: (sha: string) => void };
   /** This chat's test runs; the Tests tab says so until there's one. */
   testRuns?: TestRunItem[];
   /** Open a file: in Changes if it's one of `files`, otherwise the Files preview (at a line); `key` changes each time. */
@@ -260,18 +265,7 @@ export function ReviewPanel(props: Props) {
         </div>
         <PaneTabsMenu pinned={pinned} onPinned={setPinned} current={tab} badges={badges} onOpen={setTab} />
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
-        {tab === "changes" && props.worktree && (
-          <button
-            className={`ghost worktree-chip${props.worktree.main ? " off" : ""}`}
-            aria-pressed={!props.worktree.main}
-            aria-label={props.worktree.main ? "Main folder" : `Worktree: ${props.worktree.name}`}
-            title={`${props.worktree.main ? "Showing the chat's own folder" : `This chat is working in the worktree ${props.worktree.name}${props.worktree.branch ? ` (${props.worktree.branch})` : ""}`}. Git and Branch read from ${props.worktree.main ? "the folder" : "it"}; click to read from ${props.worktree.main ? "the worktree" : "the folder"} instead.`}
-            onClick={props.worktree.onToggle}
-          >
-            {props.worktree.main ? "Main folder" : props.worktree.name}
-          </button>
-        )}
-        {tab === "changes" && props.worktrees && <WorktreePicker {...props.worktrees} named={!!props.worktree} />}
+        {tab === "changes" && (props.worktrees || props.worktree) && <WorktreeSwitcher folder={props.folder} worktree={props.worktree} worktrees={props.worktrees} />}
         {tab === "changes" && props.onShip && count > 0 && (
           <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
             Ship it…
@@ -445,7 +439,7 @@ function PlanTab({ summary, architecture, view, onView, revert }: Props & { view
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, findings, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gitError, pr, branch, history, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, findings, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
@@ -472,9 +466,11 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
       scope === "git" ? (gitError ?? "Nothing uncommitted") :
       scope === "pr" ? (gitError ?? `Fetching pull request #${pr}…`) :
       scope === "branch" ? (gitError ?? "Reading the branch…") :
+      scope === "commit" ? (gitError ?? (history?.selected ? "Reading this commit…" : "No commits yet")) :
       scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the chat was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
     return (
       <>
+        {scope === "commit" && history && <CommitHistory history={history} />}
         {bar}
         <div className="empty">{empty}</div>
       </>
@@ -489,6 +485,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
   return (
     <>
       {scope === "branch" && branch && <BranchCommits review={branch} />}
+      {scope === "commit" && history && <CommitHistory history={history} />}
       <div className="review-bar">
         <FilePicker files={files} current={current} folder={folder} onSelect={onSelect} />
         <Counts added={current.added} removed={current.removed} />
@@ -498,7 +495,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
             {pageFocus.all ? `This page's ${pageFocus.pageCount}` : `All ${pageFocus.total}`}
           </button>
         )}
-        {!follow && scope !== "pr" && scope !== "branch" && (
+        {!follow && scope !== "pr" && scope !== "branch" && scope !== "commit" && (
           <button className="ghost" title="Follow Claude's edits again" onClick={onFollow}>
             ↓ Latest
           </button>
@@ -514,7 +511,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
         </button>
         <FileMenu
           actions={[
-            ...(!current.deleted && scope !== "pr" && scope !== "branch" ? [{ label: "Edit this file", title: "Edit this file", onClick: () => onEdit(current.path) }] : []),
+            ...(!current.deleted && scope !== "pr" && scope !== "branch" && scope !== "commit" ? [{ label: "Edit this file", title: "Edit this file", onClick: () => onEdit(current.path) }] : []),
             ...(fileRevert ? [{ label: "Revert this file", title: fileRevert.off ?? "Put this file back to how it was before these changes", disabled: !!fileRevert.off, onClick: () => fileRevert.onFile(current) }] : []),
             { label: layout === "inline" ? "Show side by side" : "Show unified", title: layout === "inline" ? "Showing removals and additions together. Click for side by side." : "Showing old and new side by side. Click to show them together.", onClick: () => setLayout(NEXT_LAYOUT[layout]) },
           ]}
@@ -522,16 +519,16 @@ function ChangesTab({ folder, files, scope = "session", stepRange, pageFocus, gi
       </div>
       {bar}
       <Suspense fallback={<div className="empty">Loading diff…</div>}>
-        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} comments={comments} findings={diffFindings} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
+        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : scope === "commit" ? (history?.selected ?? null) : null} comments={comments} findings={diffFindings} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
       </Suspense>
     </>
   );
 }
 
-const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "This chat", git: "Uncommitted" };
+const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "This chat", git: "Uncommitted", commit: "Commits" };
 
 /** Which changes the Changes tab shows, as a menu: each option with its count and what it means. */
-function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCounts }: Props & { onScope: (scope: ChangeScope) => void }) {
+function ScopeMenu({ scope = "session", onScope, pr, branch, history, stepRange, scopeCounts }: Props & { onScope: (scope: ChangeScope) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
@@ -561,9 +558,11 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
         return "Everything this chat changed";
       case "git":
         return "Everything not committed yet, whoever changed it (an interrupted command, another editor)";
+      case "commit":
+        return "The commits of this branch: pick one to see what it changed";
     }
   };
-  const options: ChangeScope[] = [...(pr != null ? (["pr"] as const) : branch !== undefined ? (["branch"] as const) : []), "turn", "session", "git"];
+  const options: ChangeScope[] = [...(pr != null ? (["pr"] as const) : branch !== undefined ? (["branch"] as const) : []), "turn", "session", "git", ...(history ? (["commit"] as const) : [])];
   const count = (s: ChangeScope) => scopeCounts?.[s];
   return (
     <div className="scope-anchor" ref={root}>
@@ -603,14 +602,19 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
   );
 }
 
-/** The project's worktrees: pick the one whose Git and Branch the pane shows, or let the chat's latest edit decide again. */
-function WorktreePicker({ list, current, pinned, onPick, named }: NonNullable<Props["worktrees"]> & { named: boolean }) {
+/**
+ * Which worktree the pane reads Git, Branch and Commits from, as one control like GitHub Desktop's: it names the one
+ * shown, and its menu lists the chat's own folder (the main worktree) and the project's linked worktrees, with a check
+ * on the current one. "Follow my edits" lets the chat's latest edit decide again.
+ */
+function WorktreeSwitcher({ folder, worktree, worktrees }: { folder: string | null; worktree: Props["worktree"]; worktrees: Props["worktrees"] }) {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
   const inside = useMenuInside(open);
   useEffect(() => {
-    if (!open) return;
+    if (!open) return setFilter("");
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -620,31 +624,72 @@ function WorktreePicker({ list, current, pinned, onPick, named }: NonNullable<Pr
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-  const pick = (path: string | null) => {
-    onPick(path);
+  const list = worktrees?.list ?? [];
+  // In the chat's own folder unless a worktree is shown (a chat that works in one can be read from its folder instead).
+  const shownPath = worktrees ? worktrees.current : worktree && !worktree.main ? worktree.path : null;
+  const inFolder = shownPath === null;
+  const folderName = folder ? (folder.replace(/\/+$/, "").split("/").pop() || folder) : "Main folder";
+  const shown = inFolder ? null : (list.find((w) => w.path === shownPath) ?? (worktree?.path === shownPath ? worktree : null));
+  const shownName = shown?.name ?? folderName;
+  const shownBranch = shown?.branch ?? null;
+  const q = filter.trim().toLowerCase();
+  const matches = (name: string, branch: string | null) => !q || name.toLowerCase().includes(q) || (branch ?? "").toLowerCase().includes(q);
+  const shownList = list.filter((w) => matches(w.name, w.branch));
+  const folderShown = matches(folderName, null);
+  const pickFolder = () => {
+    if (!inFolder) worktree?.onToggle();
+    setOpen(false);
+    // (With no `worktree` to toggle, the folder is only shown already.)
+  };
+  const pickWorktree = (path: string) => {
+    // The worktree the chat works in, while its folder is shown: back to it, as the old chip did.
+    if (worktree?.main && worktree.path === path) worktree.onToggle();
+    else worktrees?.onPick(path);
     setOpen(false);
   };
+  const row = (checked: boolean, title: string, about: string, onClick: () => void, key?: string) => (
+    <button key={key} role="menuitemradio" aria-checked={checked} className={`menu-row scope-option${checked ? " current" : ""}`} onClick={onClick}>
+      <span className="scope-check" aria-hidden>
+        {checked ? "✓" : ""}
+      </span>
+      <span className="scope-option-text">
+        <span className="scope-option-title">{title}</span>
+        <span className="scope-option-about">{about}</span>
+      </span>
+    </button>
+  );
   return (
     <div className="scope-anchor worktree-anchor" ref={root}>
-      <button className={`ghost worktree-picker${open ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label="Choose a worktree" title="Show a worktree's Git and Branch changes" onClick={() => setOpen(!open)}>
-        {!named && <span className="scope-label">Worktrees</span>}
+      <button
+        className={`ghost worktree-picker${open ? " pressed" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Current worktree: ${shownName}`}
+        title={`Git, Branch and Commits read from ${shownName}${shownBranch ? ` (${shownBranch})` : ""}. Click to switch worktree.`}
+        onClick={() => setOpen(!open)}
+      >
+        <FolderIcon />
+        <span className="worktree-name">{shownName}</span>
         <span className="scope-chevron" aria-hidden />
       </button>
       {open && (
-        <div className="menu scope-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Choose a worktree" onKeyDown={keys.onKeyDown}>
-          {list.map((w) => (
-            <button key={w.path} role="menuitemradio" aria-checked={current === w.path} className={`menu-row scope-option${current === w.path ? " current" : ""}`} onClick={() => pick(w.path)}>
-              <span className="scope-check" aria-hidden>
-                {current === w.path ? "✓" : ""}
-              </span>
-              <span className="scope-option-text">
-                <span className="scope-option-title">{w.name}</span>
-                <span className="scope-option-about">{w.branch ?? "No branch checked out"}</span>
-              </span>
-            </button>
-          ))}
-          {pinned && (
-            <button role="menuitem" className="menu-row scope-option" onClick={() => pick(null)}>
+        <div className="menu scope-menu worktree-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Choose a worktree" onKeyDown={keys.onKeyDown}>
+          {list.length > 4 && <input className="menu-search" autoFocus autoCapitalize="off" autoCorrect="off" placeholder="Filter" aria-label="Filter worktrees" value={filter} onChange={(e) => setFilter(e.target.value)} />}
+          {folderShown && (
+            <>
+              <div className="menu-heading">Main worktree</div>
+              {row(inFolder, folderName, "This chat's own folder", pickFolder)}
+            </>
+          )}
+          {shownList.length > 0 && (
+            <>
+              <div className="menu-heading">Linked worktrees</div>
+              {shownList.map((w) => row(shownPath === w.path, w.name, w.branch ?? "No branch checked out", () => pickWorktree(w.path), w.path))}
+            </>
+          )}
+          {q && !folderShown && shownList.length === 0 && <div className="menu-empty">No worktree matches</div>}
+          {worktrees?.pinned && (
+            <button role="menuitem" className="menu-row scope-option" onClick={() => { worktrees.onPick(null); setOpen(false); }}>
               <span className="scope-check" aria-hidden />
               <span className="scope-option-text">
                 <span className="scope-option-title">Follow my edits</span>
@@ -682,6 +727,27 @@ function BranchCommits({ review }: { review: BranchReview }) {
           ))}
         </ol>
       )}
+    </div>
+  );
+}
+
+/** The branch's commits, newest first: pick a commit and the files and diff below show only what it changed. */
+function CommitHistory({ history }: { history: NonNullable<Props["history"]> }) {
+  const { commits, selected, onSelect } = history;
+  if (commits === null) return null;
+  return (
+    <div className="branch-commits commit-history">
+      <ol className="commit-history-list" aria-label="Commits">
+        {commits.map((c) => (
+          <li key={c.sha}>
+            <button className={`commit-history-row${c.sha === selected ? " current" : ""}`} aria-current={c.sha === selected} title={`${c.sha} by ${c.author}`} onClick={() => onSelect(c.sha)}>
+              <code className="branch-commit-sha">{c.sha}</code>
+              <span className="branch-commit-subject">{c.subject}</span>
+              <span className="branch-commit-time">{relativeTime(c.at)}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

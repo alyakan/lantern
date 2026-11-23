@@ -2514,6 +2514,13 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .branch-commit-sha { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .branch-commit-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .branch-commit-time { flex: none; color: var(--muted); font-size: calc(11px * var(--font-scale)); }
+/* History: the branch's commits as rows to pick from, the picked one tinted like the sidebar's open chat. */
+.commit-history { padding: 4px 6px; }
+.commit-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 180px; overflow-y: auto; }
+.commit-history-row { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 8px; border: 0; border-radius: var(--radius-md); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.commit-history-row:hover { background: var(--bg-hover); }
+.commit-history-row.current { background: var(--bg-active); }
+.commit-history-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* A reply Claude started on its own (a background task ended): a quiet note where a prompt would be. */
 .auto-turn { display: flex; align-items: center; gap: 7px; margin: 6px 0 2px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .auto-turn::after { content: ""; flex: 1; height: 1px; background: var(--line); }
@@ -3378,8 +3385,8 @@ button.summary-main:hover:not(:disabled) { background: none; }
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
-.worktree-chip { flex: 0 1 auto; min-width: 0; max-width: 130px; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); }
-.worktree-chip.off { opacity: 0.7; }
+.worktree-name { min-width: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-menu { min-width: 260px; }
 .scope-anchor.worktree-anchor { margin-left: 2px; }
 .worktree-picker { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; font-size: calc(11.5px * var(--font-scale)); }
 .worktree-picker.pressed { background: var(--bg-hover); }

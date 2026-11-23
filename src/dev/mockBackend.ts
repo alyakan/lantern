@@ -433,6 +433,19 @@ async function playReview(slot: string, text: string) {
 /** Each chat's background tasks, as claude would list them. */
 const mockTasks: Record<string, { id: string; task_type: string; description: string }[]> = {};
 
+/** The project's worktrees in the demo, always there, so the Changes tab's worktree switcher has something to switch. */
+const MOCK_WORKTREES = [
+  ["retry-fix", "worktree-retry-fix"],
+  ["new-sheet", "worktree-new-sheet"],
+  ["lum-2361-photo-count", "fix/lum-2361-photo-count-check"],
+  ["lum-3089", "demo/myfm-round-trip"],
+  ["lum-3116", "feature/lum-3116-translated-list-titles"],
+  ["testflight", "testflight/myfm-15.4.90"],
+  ["split-pause", "enhancement/lum-3212-split-pause-button"],
+].map(([name, branch]) => ({ name, branch, path: `${FOLDER}/.claude/worktrees/${name}` }));
+/** Which worktree the chat is shown in (`?worktree` starts it in retry-fix, as if Claude had entered it), and whether its own folder is read instead. */
+const mockWork: { path: string | null; pinned: boolean; main: boolean } = { path: new URLSearchParams(location.search).get("worktree") ? MOCK_WORKTREES[0].path : null, pinned: false, main: false };
+
 /** Built-in commands answer at once without calling the model, like the real CLI in stream-json mode. */
 async function playCommand(slot: string, text: string) {
   const send = sendTo(slot);
@@ -1780,17 +1793,20 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
-          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false, pinned: false } : null;
+        {
+          const w = MOCK_WORKTREES.find((x) => x.path === mockWork.path);
+          return w ? { ...w, main: mockWork.main, pinned: mockWork.pinned } : null;
+        }
         case "set_view_main":
+          mockWork.main = Boolean(a.main);
           return undefined;
         case "list_worktrees":
-          return new URLSearchParams(location.search).get("worktree")
-            ? [
-                { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix" },
-                { path: `${FOLDER}/.claude/worktrees/new-sheet`, name: "new-sheet", branch: "worktree-new-sheet" },
-              ]
-            : [];
+          return MOCK_WORKTREES;
         case "pin_worktree":
+          // A pick shows that worktree; none goes back to following the chat's edits (the demo's own: retry-fix with ?worktree, else none).
+          mockWork.path = typeof a.path === "string" ? a.path : new URLSearchParams(location.search).get("worktree") ? MOCK_WORKTREES[0].path : null;
+          mockWork.pinned = typeof a.path === "string";
+          mockWork.main = false;
           return undefined;
         case "branch_review":
           return {
@@ -1801,6 +1817,14 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
               { sha: "7d03b1f", subject: "feat: retry transient errors in fetchJson", author: "Sam Rivera", at: Date.now() - 3 * 3_600_000 },
             ],
           };
+        case "commit_history":
+          // The History list: the branch's commits, then the ones on main under them.
+          return [
+            { sha: "a41c9e2", subject: "test: retries and give-ups for fetchJson", author: "Sam Rivera", at: Date.now() - 40 * 60_000 },
+            { sha: "7d03b1f", subject: "feat: retry transient errors in fetchJson", author: "Sam Rivera", at: Date.now() - 3 * 3_600_000 },
+            { sha: "c9e04ab", subject: "chore: release 0.4.2 (#212)", author: "Lee Chen", at: Date.now() - 26 * 3_600_000 },
+            { sha: "5b8f7d3", subject: "fix: the client keeps its headers on a redirect (#209)", author: "Lee Chen", at: Date.now() - 3 * 86_400_000 },
+          ];
         case "stop_task": {
           // Like claude: the task is killed and the list comes again without it.
           const slot = String(a.slot);
@@ -2500,6 +2524,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));
         case "change_summary":
+          // One commit of the History list: the test commit adds the test file, the others change the retry code.
+          if (a.scope === "commit") return a.base === "a41c9e2" ? [{ path: TEST_FILE, created: true, deleted: false, added: 32, removed: 0 }] : [{ path: FILE, created: false, deleted: false, added: a.base === "7d03b1f" ? 14 : 3, removed: a.base === "7d03b1f" ? 3 : 1 }];
           // The local branch under review: the same two files, committed on it.
           if (a.scope === "branch") return new Promise((r) => setTimeout(() => r([{ path: FILE, created: false, deleted: false, added: 14, removed: 3 }, { path: TEST_FILE, created: true, deleted: false, added: 32, removed: 0 }]), 300));
           // The reviewed PR: the retry code and its test, against main.

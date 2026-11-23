@@ -31,6 +31,8 @@ pub enum Scope {
     Pr,
     /// The checked-out branch's commits against where it left the default branch (read from git, see pr.rs).
     Branch,
+    /// One commit of the History list, against its parent (read from git, see pr.rs).
+    Commit,
 }
 
 /// Bigger files aren't read into the tracker or diffed: what stands for one is a stamp of its size and time, which
@@ -157,7 +159,7 @@ impl ChangeTracker {
     fn baseline(&self, scope: Scope, turn: Option<usize>, to_turn: Option<usize>) -> Option<std::borrow::Cow<'_, HashMap<String, Option<String>>>> {
         use std::borrow::Cow;
         match (scope, turn) {
-            (Scope::Git | Scope::Pr | Scope::Branch, _) => None,
+            (Scope::Git | Scope::Pr | Scope::Branch | Scope::Commit, _) => None,
             (Scope::Session, _) => Some(Cow::Borrowed(&self.originals)),
             (Scope::Turn, None) => self.turns.last().map(Cow::Borrowed),
             (Scope::Turn, Some(n)) => {

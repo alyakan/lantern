@@ -58,20 +58,33 @@ describe("ReviewPanel's group page", () => {
   });
 });
 
-describe("ReviewPanel's worktree chip", () => {
-  it("names the worktree the chat works in and switches to the chat's own folder and back", () => {
+describe("ReviewPanel's worktree switcher", () => {
+  const retryFix = { path: "/p/.claude/worktrees/retry-fix", name: "retry-fix", branch: "worktree-retry-fix" };
+
+  it("names the worktree shown, and switches to the chat's own folder and back from its menu", () => {
     const onToggle = vi.fn();
-    const worktree = { name: "retry-fix", branch: "worktree-retry-fix", main: false, onToggle };
-    const { rerender } = render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktree={worktree} />);
-    fireEvent.click(screen.getByRole("button", { name: "Worktree: retry-fix" }));
+    const worktree = { ...retryFix, main: false, onToggle };
+    const worktrees = { list: [retryFix], current: retryFix.path, pinned: false, onPick: vi.fn() };
+    const { rerender } = render(<ReviewPanel {...base} folder="/p" selected={null} follow onScope={() => {}} worktree={worktree} worktrees={worktrees} />);
+    fireEvent.click(screen.getByRole("button", { name: "Current worktree: retry-fix" }));
+    const menu = screen.getByRole("menu", { name: "Choose a worktree" });
+    expect(within(menu).getByRole("menuitemradio", { name: /^p/ })).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^p/ }));
     expect(onToggle).toHaveBeenCalledTimes(1);
-    rerender(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktree={{ ...worktree, main: true }} />);
-    expect(screen.getByRole("button", { name: "Main folder" })).toHaveAttribute("aria-pressed", "false");
+    // The folder shown instead: the worktree the chat works in is one click back, and it is the folder that is checked.
+    const inFolder = { ...worktrees, current: null };
+    rerender(<ReviewPanel {...base} folder="/p" selected={null} follow onScope={() => {}} worktree={{ ...worktree, main: true }} worktrees={inFolder} />);
+    fireEvent.click(screen.getByRole("button", { name: "Current worktree: p" }));
+    const again = screen.getByRole("menu", { name: "Choose a worktree" });
+    expect(within(again).getByRole("menuitemradio", { name: /^p/ })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(again).getByRole("menuitemradio", { name: /retry-fix/ }));
+    expect(onToggle).toHaveBeenCalledTimes(2);
+    expect(inFolder.onPick).not.toHaveBeenCalled();
   });
 
-  it("is absent when the chat works in its own folder", () => {
+  it("is absent when the project has no other worktree and the chat works in its own folder", () => {
     render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} />);
-    expect(screen.queryByRole("button", { name: /Worktree:|Main folder/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Current worktree/ })).toBeNull();
   });
 });
 
@@ -84,8 +97,11 @@ describe("ReviewPanel's worktree picker", () => {
   it("lists the project's worktrees, marks the one shown and hands back the one picked", () => {
     const onPick = vi.fn();
     render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktrees={{ list, current: list[0].path, pinned: false, onPick }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose a worktree" }));
+    fireEvent.click(screen.getByRole("button", { name: "Current worktree: retry-fix" }));
     const menu = screen.getByRole("menu", { name: "Choose a worktree" });
+    // Two sections, like GitHub Desktop: the chat's own folder, then the linked worktrees.
+    expect(within(menu).getByText("Main worktree")).toBeInTheDocument();
+    expect(within(menu).getByText("Linked worktrees")).toBeInTheDocument();
     expect(within(menu).getByRole("menuitemradio", { name: /retry-fix/ })).toHaveAttribute("aria-checked", "true");
     expect(within(menu).getByRole("menuitemradio", { name: /spike/ })).toHaveAttribute("aria-checked", "false");
     expect(within(menu).getByText("No branch checked out")).toBeInTheDocument();
@@ -99,14 +115,18 @@ describe("ReviewPanel's worktree picker", () => {
   it("offers to follow the chat's edits again once it was put in one", () => {
     const onPick = vi.fn();
     render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktrees={{ list, current: list[0].path, pinned: true, onPick }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose a worktree" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Current worktree/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Follow my edits/ }));
     expect(onPick).toHaveBeenCalledWith(null);
   });
 
-  it("is absent when the project has no other worktree", () => {
-    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} />);
-    expect(screen.queryByRole("button", { name: "Choose a worktree" })).toBeNull();
+  it("filters a long list by name or branch", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({ path: `/p/.claude/worktrees/w${i}`, name: `w${i}`, branch: i === 4 ? "fix/lum-9" : `feat/${i}` }));
+    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktrees={{ list: many, current: null, pinned: false, onPick: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Current worktree/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter worktrees" }), { target: { value: "lum-9" } });
+    const menu = screen.getByRole("menu", { name: "Choose a worktree" });
+    expect(within(menu).getAllByRole("menuitemradio").map((r) => r.textContent)).toEqual(["w4fix/lum-9"]);
   });
 });
 
@@ -244,6 +264,38 @@ describe("ReviewPanel", () => {
     expect(screen.getAllByRole("menuitemradio")[0]).toHaveTextContent("Committed on feat/x since it left origin/main");
     expect(screen.getByText(/1 commit on/)).toHaveTextContent("1 commit on feat/x since origin/main");
     expect(screen.getByText("test: retries")).toBeInTheDocument();
+  });
+
+  it("offers the branch's Commits, and a picked commit shows only its files", () => {
+    const onScope = vi.fn();
+    const onSelect = vi.fn();
+    const commits = [
+      { sha: "a41c9e2", subject: "test: retries", author: "Sam", at: Date.now() - 60_000 },
+      { sha: "7d03b1f", subject: "feat: retry", author: "Sam", at: Date.now() - 3 * 3_600_000 },
+    ];
+    const history = { commits, selected: "7d03b1f", onSelect };
+    // Only offered where the folder is a repository to read: no `history` prop, no option.
+    const { rerender } = render(<ReviewPanel {...base} scope="session" onScope={onScope} selected="/p/src/a.ts" follow />);
+    openFilter();
+    expect(screen.queryByRole("menuitemradio", { name: /^Commits/ })).toBeNull();
+    rerender(<ReviewPanel {...base} scope="session" onScope={onScope} history={history} selected="/p/src/a.ts" follow />);
+    expect(option(/^Commits/)).toHaveTextContent("pick one to see what it changed");
+    fireEvent.click(option(/^Commits/));
+    expect(onScope).toHaveBeenCalledWith("commit");
+
+    rerender(<ReviewPanel {...base} scope="commit" onScope={onScope} history={history} scopeCounts={{ commit: 2 }} selected="/p/src/a.ts" follow />);
+    expect(filterButton()).toHaveTextContent("Commits2");
+    expect(screen.getByRole("button", { name: /feat: retry/ })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: /test: retries/ })).toHaveAttribute("aria-current", "false");
+    fireEvent.click(screen.getByRole("button", { name: /test: retries/ }));
+    expect(onSelect).toHaveBeenCalledWith("a41c9e2");
+
+    // A commit with no files still shows the list, so another can be picked; an error is said in its place.
+    rerender(<ReviewPanel {...base} files={[]} scope="commit" onScope={onScope} history={history} selected={null} follow />);
+    expect(screen.getByRole("button", { name: /test: retries/ })).toBeInTheDocument();
+    expect(screen.getByText("Reading this commit…")).toBeInTheDocument();
+    rerender(<ReviewPanel {...base} files={[]} scope="commit" onScope={onScope} history={{ commits: [], selected: null, onSelect }} gitError="This branch has no commits yet." selected={null} follow />);
+    expect(screen.getByText("This branch has no commits yet.")).toBeInTheDocument();
   });
 
   it("picks a file from the dropdown", () => {

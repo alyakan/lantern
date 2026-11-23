@@ -44,7 +44,7 @@ export interface RevertControls {
  * undefined on a chat that isn't a step-by-step page). "unknown" for a step whose turns aren't known (a reopened
  * session's earlier turns); null for scopes that come from git, where Lantern doesn't revert.
  */
-export function revertFor(scope: "session" | "turn" | "git" | "pr" | "branch", stepRange: { from: number; to: number } | null | undefined): RevertRequest | "unknown" | null {
+export function revertFor(scope: "session" | "turn" | "git" | "pr" | "branch" | "commit", stepRange: { from: number; to: number } | null | undefined): RevertRequest | "unknown" | null {
   if (scope === "session") return { scope: "session", turn: null, toTurn: null };
   if (scope !== "turn") return null;
   if (stepRange === undefined) return { scope: "turn", turn: null, toTurn: null };

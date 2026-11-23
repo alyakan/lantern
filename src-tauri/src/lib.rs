@@ -3236,6 +3236,13 @@ async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<V
     tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
 }
 
+/// The newest commits of the worktree the Changes pane shows, for its History list.
+#[tauri::command]
+async fn commit_history(state: State<'_, AppState>, slot: String) -> Result<Vec<pr::Commit>, String> {
+    let view = state.slots.get(&slot)?.view_folder()?;
+    tauri::async_runtime::spawn_blocking(move || pr::history(&view)).await.map_err(|e| e.to_string())?
+}
+
 /// The worktree the chat is working in (Claude entered one itself), which the Changes pane reads from instead of the
 /// chat's folder, and whether the user chose to look at the folder anyway.
 #[derive(serde::Serialize)]
@@ -3320,6 +3327,12 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
         let dir = std::path::Path::new(&path).parent().map(|p| p.to_path_buf()).unwrap_or(s.folder()?);
         return tauri::async_runtime::spawn_blocking(move || pr::branch(&dir, &[], base.as_deref()).and_then(|(range, _)| pr::file(&range, &path))).await.map_err(|e| e.to_string())?;
     }
+    if scope == Some(changes::Scope::Commit) {
+        // `base` is the commit's sha, from the History list; the pane's worktree is where it is read.
+        let sha = base.ok_or("No commit was chosen.")?;
+        let view = s.view_folder()?;
+        return tauri::async_runtime::spawn_blocking(move || pr::commit_range(&view, &sha).and_then(|range| pr::file(&range, &path))).await.map_err(|e| e.to_string())?;
+    }
     if scope == Some(changes::Scope::Git) {
         let read = path.clone();
         let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::diff_sides(&s.view_folder()?, std::path::Path::new(&read))).await.map_err(|e| e.to_string())??;
@@ -3358,6 +3371,11 @@ async fn summary_of(state: &AppState, slot: &str, scope: Option<changes::Scope>,
     if scope == Some(changes::Scope::Branch) {
         let hints = hints.unwrap_or_default();
         return tauri::async_runtime::spawn_blocking(move || pr::review_branch(&review_folders(&s)?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+    }
+    if scope == Some(changes::Scope::Commit) {
+        let sha = base.ok_or("No commit was chosen.")?;
+        let view = s.view_folder()?;
+        return tauri::async_runtime::spawn_blocking(move || pr::commit_range(&view, &sha).and_then(|range| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         return tauri::async_runtime::spawn_blocking(move || {
@@ -4733,6 +4751,7 @@ pub fn run() {
             interrupt,
             stop_task,
             branch_review,
+            commit_history,
             work_folder,
             list_worktrees,
             pin_worktree,
