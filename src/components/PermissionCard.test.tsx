@@ -91,6 +91,15 @@ describe("PermissionCard", () => {
       expect(onDecide).toHaveBeenCalledWith("perm-1", true);
     });
 
+    it("names the agent that is asking: Gemini's own words are Gemini's, and an unreadable request says so", () => {
+      const gemini = { ...item, provider: "gemini", input: { provider: "gemini", command: "ls", cwd: "/p", description: "[in /p] (list files)" } };
+      const { container, unmount } = render(<PermissionCard item={gemini} onDecide={() => {}} />);
+      expect(container.textContent).toContain("Gemini says, and Lantern doesn't check: [in /p] (list files)");
+      unmount();
+      render(<PermissionCard item={{ ...gemini, input: { provider: "gemini" } }} onDecide={() => {}} />);
+      expect(screen.getByText("Gemini didn't say what this would do. Deny it.")).toBeInTheDocument();
+    });
+
     it("never offers Always allow…: a rule would be Claude's", () => {
       render(<PermissionCard item={codex} onDecide={() => {}} />);
       expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();

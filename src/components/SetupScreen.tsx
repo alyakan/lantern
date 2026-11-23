@@ -10,14 +10,14 @@ export function SetupScreen({ error, onCheck }: { error: string | null; onCheck:
   return (
     <div className="setup">
       <h1>No coding agent found</h1>
-      <p className="welcome-lead">Install Claude Code or Codex to start chats in Lantern.</p>
+      <p className="welcome-lead">Install Claude Code, Codex or Gemini CLI to start chats in Lantern.</p>
       {error && <p className="muted setup-error">{error}</p>}
       <ol>
         <li>
-          Install Claude Code: <ExternalLink href={INSTALL_URL}>how to install it</ExternalLink>, or <ExternalLink href="https://developers.openai.com/codex/cli">install Codex</ExternalLink>.
+          Install Claude Code: <ExternalLink href={INSTALL_URL}>how to install it</ExternalLink>, <ExternalLink href="https://developers.openai.com/codex/cli">install Codex</ExternalLink>, or <ExternalLink href="https://github.com/google-gemini/gemini-cli">install Gemini CLI</ExternalLink>.
         </li>
         <li>
-          Run <code>claude</code> or <code>codex login</code> in a terminal to sign in.
+          Run <code>claude</code>, <code>codex login</code> or <code>gemini</code> in a terminal to sign in.
         </li>
         <li>
           Click “Check again” to find installed providers. For a custom Claude installation, enter its full path.

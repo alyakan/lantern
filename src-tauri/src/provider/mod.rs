@@ -14,6 +14,9 @@ pub mod codex_prompt;
 pub mod codex_session;
 pub mod gateway;
 pub mod inference;
+pub mod gemini;
+pub mod gemini_events;
+pub mod gemini_session;
 
 use crate::session::{EditHook, Session, SessionConfig};
 use crate::ui_event::Sink;
@@ -28,6 +31,8 @@ pub enum ProviderId {
     Claude,
     /// OpenAI's Codex CLI, driven through `codex app-server`.
     Codex,
+    /// Google's Gemini CLI, driven as an Agent Client Protocol agent (`gemini --acp`).
+    Gemini,
     /// Claude Code sent to an endpoint of the user's (see endpoints.rs). Not a CLI of its own, so not in `all()`: its choices
     /// are the endpoints, which the window is told from the saved list.
     Gateway,
@@ -41,6 +46,7 @@ impl ProviderId {
         match self {
             ProviderId::Claude => &claude::ClaudeProvider,
             ProviderId::Codex => &codex::CodexProvider,
+            ProviderId::Gemini => &gemini::GeminiProvider,
             ProviderId::Gateway => &gateway::GatewayProvider,
             #[cfg(test)]
             ProviderId::Fake => &FakeProvider,
@@ -50,7 +56,7 @@ impl ProviderId {
     /// Every provider this build knows, whether or not its CLI is installed.
     pub fn all() -> Vec<ProviderId> {
         #[allow(unused_mut)]
-        let mut all = vec![ProviderId::Claude, ProviderId::Codex];
+        let mut all = vec![ProviderId::Claude, ProviderId::Codex, ProviderId::Gemini];
         #[cfg(test)]
         all.push(ProviderId::Fake);
         all
@@ -61,9 +67,26 @@ impl ProviderId {
         match self {
             ProviderId::Claude => "claude",
             ProviderId::Codex => "codex",
+            ProviderId::Gemini => "gemini",
             ProviderId::Gateway => "gateway",
             #[cfg(test)]
             ProviderId::Fake => "fake",
+        }
+    }
+
+    /// Its conversation is read back from the running agent (see Session::transcript), not from a Claude Code transcript file.
+    pub fn reads_transcript_from_agent(self) -> bool {
+        matches!(self, ProviderId::Codex | ProviderId::Gemini)
+    }
+
+    /// The name the window and a phone show for it.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ProviderId::Claude | ProviderId::Gateway => "Claude",
+            ProviderId::Codex => "Codex",
+            ProviderId::Gemini => "Gemini",
+            #[cfg(test)]
+            ProviderId::Fake => "Fake",
         }
     }
 

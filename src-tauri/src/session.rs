@@ -5,6 +5,7 @@ use crate::args::{HelperConfig, Mode};
 use crate::endpoints::GatewayLaunch;
 use crate::provider::claude_session::ClaudeSession;
 use crate::provider::codex_session::CodexSession;
+use crate::provider::gemini_session::GeminiSession;
 use crate::provider::ProviderId;
 use crate::ui_event::Sink;
 use std::path::PathBuf;
@@ -60,6 +61,7 @@ impl InputImage {
 pub enum Session {
     Claude(ClaudeSession),
     Codex(CodexSession),
+    Gemini(GeminiSession),
 }
 
 impl Session {
@@ -72,6 +74,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.session_id(),
             Session::Codex(s) => s.session_id(),
+            Session::Gemini(s) => s.session_id(),
         }
     }
 
@@ -80,6 +83,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.pid(),
             Session::Codex(s) => s.pid(),
+            Session::Gemini(s) => s.pid(),
         }
     }
 
@@ -87,6 +91,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.is_running(),
             Session::Codex(s) => s.is_running(),
+            Session::Gemini(s) => s.is_running(),
         }
     }
 
@@ -94,6 +99,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.send(text).await,
             Session::Codex(s) => s.send(text).await,
+            Session::Gemini(s) => s.send(text).await,
         }
     }
 
@@ -102,11 +108,14 @@ impl Session {
         match self {
             Session::Claude(s) => s.send_with(text, images.into_iter().map(InputImage::claude).collect()).await,
             Session::Codex(s) => s.send_with(text, images.into_iter().map(InputImage::codex).collect()).await,
+            // Gemini takes pictures as ACP image blocks, which nothing here makes yet: its capabilities say no pictures.
+            Session::Gemini(_) if !images.is_empty() => Err("A Gemini chat can't take pictures yet. Send the message without them.".into()),
+            Session::Gemini(s) => s.send(text).await,
         }
     }
 
     pub async fn compact(&mut self) -> Result<(), String> {
-        match self { Session::Claude(s) => s.send("/compact").await, Session::Codex(s) => s.compact().await }
+        match self { Session::Claude(s) => s.send("/compact").await, Session::Codex(s) => s.compact().await, Session::Gemini(_) => Err("A Gemini chat can't be compacted from Lantern yet.".into()) }
     }
 
     /// Ends the current turn; the agent keeps running.
@@ -114,6 +123,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.interrupt().await,
             Session::Codex(s) => s.interrupt().await,
+            Session::Gemini(s) => s.interrupt().await,
         }
     }
 
@@ -122,6 +132,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.set_model(model).await,
             Session::Codex(s) => s.set_model(model).await,
+            Session::Gemini(s) => s.set_model(model).await,
         }
     }
 
@@ -130,11 +141,12 @@ impl Session {
         match self {
             Session::Claude(s) => { s.initialize().await; Ok(()) },
             Session::Codex(s) => s.wait_ready().await,
+            Session::Gemini(s) => s.wait_ready().await,
         }
     }
 
     pub fn set_effort(&mut self, effort: Option<&str>) -> bool {
-        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) => false }
+        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) | Session::Gemini(_) => false }
     }
 
     /// What the agent is told right after it starts, which the provider's protocol may need before the first message.
@@ -142,6 +154,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.initialize().await,
             Session::Codex(s) => s.initialize().await,
+            Session::Gemini(s) => s.initialize().await,
         }
     }
 
@@ -150,6 +163,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.stop().await,
             Session::Codex(s) => s.stop().await,
+            Session::Gemini(s) => s.stop().await,
         }
     }
 
@@ -161,6 +175,7 @@ impl Session {
         match self {
             Session::Claude(s) => s.stop_task(task_id).await,
             Session::Codex(_) => Err("Codex has no background tasks to stop from here.".into()),
+            Session::Gemini(_) => Err("Gemini has no background tasks to stop from here.".into()),
         }
     }
 
@@ -172,15 +187,20 @@ impl Session {
                 let _ = request;
                 Err("This is Claude Code's settings request; a Codex chat is set up in ~/.codex/config.toml.".into())
             }
+            Session::Gemini(_) => {
+                let _ = request;
+                Err("This is Claude Code's settings request; a Gemini chat is set up in ~/.gemini/settings.json.".into())
+            }
         }
     }
 
     /// The conversation so far, for an agent whose transcript isn't a file Lantern can read (Codex's is read from its
-    /// app-server). Claude's is read from its transcript file instead (see history.rs).
+    /// app-server, Gemini's from what it replays when it loads the conversation). Claude's is read from its transcript file instead (see history.rs).
     pub async fn transcript(&mut self) -> Result<Vec<crate::ui_event::UiEvent>, String> {
         match self {
             Session::Claude(_) => Err("Claude's conversation is read from its transcript file.".into()),
             Session::Codex(s) => s.transcript().await,
+            Session::Gemini(s) => s.transcript().await,
         }
     }
 
@@ -188,6 +208,7 @@ impl Session {
         match self {
             Session::Claude(_) => vec![],
             Session::Codex(s) => s.pending_permissions(),
+            Session::Gemini(s) => s.pending_permissions(),
         }
     }
 
@@ -198,6 +219,7 @@ impl Session {
         match self {
             Session::Claude(_) => false,
             Session::Codex(s) => s.respond_permission(request_id, allow).await,
+            Session::Gemini(s) => s.respond_permission(request_id, allow).await,
         }
     }
 }
