@@ -292,9 +292,11 @@ impl GeminiMapper {
     }
 
     /// A `session/request_permission` request: the card to show, or why there can't be one. The card says what Gemini will do
-    /// from the request's own fields: a shell command is the tool call's title, which for Gemini's shell tool is the command
-    /// itself (the model's own description of it comes apart, as "Gemini says"); a file change lists every file with what
-    /// happens to it. Anything that can't be shown that way is not asked.
+    /// from the request's own fields: a shell command is the tool call's `rawInput` (`command`, and `dir_path` for where it
+    /// runs) when Gemini sends it, else its title, which for Gemini's shell tool is the command itself; the model's own
+    /// description comes apart, as "Gemini says". "Runs in" is stated only when a structured field says where: Gemini's shell
+    /// tool can run a command outside the chat's folder, and a folder named only in its words is not a fact Lantern checked.
+    /// A file change lists every file with what happens to it. Anything that can't be shown that way is not asked.
     pub fn approval(&self, p: &Value) -> Request {
         let call = &p["toolCall"];
         let kind = call["kind"].as_str().unwrap_or("other");
@@ -304,10 +306,25 @@ impl GeminiMapper {
         let reject = option("reject_once");
         let mut seen = Lookalikes::default();
         let explanation = text_of(&call["content"]);
-        let mut input = json!({"provider": "gemini", "cwd": seen.shown(&self.cwd.display().to_string(), false)});
+        let mut input = json!({"provider": "gemini"});
+        let mut extra: Vec<String> = Vec::new();
         let tool_name = match kind {
             "execute" => {
-                input["command"] = seen.shown(title, true).into();
+                let raw = &call["rawInput"];
+                let command = raw["command"].as_str().filter(|c| !c.trim().is_empty()).unwrap_or(title);
+                input["command"] = seen.shown(command, true).into();
+                let dir = ["dir_path", "directory", "cwd"].iter().find_map(|k| raw[*k].as_str()).map(str::trim);
+                match dir {
+                    // No folder given: Gemini's shell tool runs in the folder it was started in, which is the chat's.
+                    _ if raw.is_object() && dir.is_none_or(str::is_empty) => input["cwd"] = seen.shown(&self.cwd.display().to_string(), false).into(),
+                    Some(d) if !d.is_empty() => {
+                        input["cwd"] = seen.shown(&self.abs(d).display().to_string(), false).into();
+                        if !self.inside(d) {
+                            extra.push("Runs outside this chat's folder.".into());
+                        }
+                    }
+                    _ => extra.push("Gemini didn't say which folder this runs in: it may not be this chat's. Read its own words below.".into()),
+                }
                 "Bash"
             }
             "edit" | "delete" | "move" => {
@@ -350,6 +367,12 @@ impl GeminiMapper {
         };
         if !explanation.trim().is_empty() {
             input["description"] = seen.shown(&explanation, true).into();
+        }
+        if !extra.is_empty() {
+            match input["warnings"].as_array_mut() {
+                Some(list) => list.extend(extra.into_iter().map(Value::from)),
+                None => input["warnings"] = extra.into(),
+            }
         }
         if let Some(w) = seen.warning() {
             match input["warnings"].as_array_mut() {
@@ -652,16 +675,40 @@ mod tests {
     #[test]
     fn a_shell_card_is_the_command_as_gemini_will_run_it_with_where_and_its_own_words_apart() {
         let m = mapper();
-        let req = request("execute", "cargo test --all", json!([{"type": "content", "content": {"type": "text", "text": "[in /work/proj] (run the tests)"}}]));
+        let mut req = request("execute", "cargo test --all", json!([{"type": "content", "content": {"type": "text", "text": "(run the tests)"}}]));
+        req["toolCall"]["rawInput"] = json!({"command": "cargo test --all", "description": "run the tests"});
         let a = m.approval(&req).unwrap();
         assert_eq!(a.tool_name, "Bash");
         assert_eq!(a.input["provider"], "gemini");
         assert_eq!(a.input["command"], "cargo test --all");
         assert_eq!(a.input["cwd"], "/work/proj");
-        assert_eq!(a.input["description"], "[in /work/proj] (run the tests)");
+        assert!(a.input.get("warnings").is_none());
+        assert_eq!(a.input["description"], "(run the tests)");
         // Only the options for this one action: never "allow for this session".
         assert_eq!(a.allow, "proceed_once");
         assert_eq!(a.reject.as_deref(), Some("cancel"));
+    }
+
+    #[test]
+    fn a_shell_card_says_where_from_the_tool_input_and_never_claims_a_folder_it_was_not_told() {
+        let m = mapper();
+        // The structured input wins over the title, and its folder is the one shown.
+        let mut req = request("execute", "ls", json!([{"type": "content", "content": {"type": "text", "text": "ls [in /work/proj] (list)"}}]));
+        req["toolCall"]["rawInput"] = json!({"command": "rm -rf build", "dir_path": "/tmp/elsewhere"});
+        let a = m.approval(&req).unwrap();
+        assert_eq!(a.input["command"], "rm -rf build");
+        assert_eq!(a.input["cwd"], "/tmp/elsewhere");
+        assert_eq!(a.input["warnings"][0], "Runs outside this chat's folder.");
+        // A folder relative to the chat's is read from there.
+        req["toolCall"]["rawInput"] = json!({"command": "make", "dir_path": "sub"});
+        let a = m.approval(&req).unwrap();
+        assert_eq!(a.input["cwd"], "/work/proj/sub");
+        assert!(a.input.get("warnings").is_none());
+        // No structured input: the title is the command, no folder is stated, and the card says so.
+        let a = m.approval(&request("execute", "ls", json!([{"type": "content", "content": {"type": "text", "text": "ls [in /tmp/elsewhere] (list)"}}]))).unwrap();
+        assert_eq!(a.input["command"], "ls");
+        assert!(a.input.get("cwd").is_none());
+        assert!(a.input["warnings"][0].as_str().unwrap().contains("didn't say which folder"));
     }
 
     #[test]
@@ -669,7 +716,7 @@ mod tests {
         let m = mapper();
         let a = m.approval(&request("execute", "echo a\u{202e}b \u{0430}", json!([]))).unwrap();
         assert_eq!(a.input["command"], "echo a\\u{202e}b \u{0430}");
-        assert!(a.input["warnings"][0].as_str().unwrap().contains("U+0430"));
+        assert!(a.input["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("U+0430")));
     }
 
     #[test]
