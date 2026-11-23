@@ -99,6 +99,12 @@ export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: (
           Gemini CLI signs itself in. Run <code>gemini</code> in a terminal once and choose how: with Google, or with a Gemini API key (it reads <code>GEMINI_API_KEY</code> from <code>~/.gemini/.env</code>). Lantern starts Gemini on whatever you chose and keeps no Gemini key itself.
         </p>
       </section>
+      <section className="settings-section">
+        <h3 className="settings-subhead">Antigravity</h3>
+        <p className="settings-muted">
+          Antigravity CLI signs itself in too: run <code>agy</code> in a terminal once and sign in with Google. A personal Google account signs in here, not in Gemini CLI. Lantern keeps no key for it.
+        </p>
+      </section>
       <HostedProviders onChanged={onProvidersChanged} />
       <HermesSettings />
       <section className="settings-section">

@@ -27,6 +27,12 @@ describe("PermissionsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /Permissions: Ask/ }));
     expect(screen.getByRole("menuitemradio", { name: /Auto/ })).toHaveTextContent("A separate reviewer handles sandbox approval requests");
   });
+
+  it("describes Antigravity Auto as its own: safe steps go ahead, irreversible ones ask", () => {
+    render(<PermissionsMenu permissions="ask" onChange={() => {}} agent="Antigravity" />);
+    fireEvent.click(screen.getByRole("button", { name: /Permissions: Ask/ }));
+    expect(screen.getByRole("menuitemradio", { name: /Auto/ })).toHaveTextContent("it asks before irreversible ones");
+  });
 });
 
 describe("WorkflowMenu", () => {

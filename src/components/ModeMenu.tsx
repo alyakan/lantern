@@ -160,7 +160,7 @@ interface PermissionsProps {
 
 /** Permissions: how much the agent may do without asking (Ask or Auto), the same in every workflow. */
 export function PermissionsMenu({ permissions, onChange, disabled, compact, auto = true, agent = "Claude" }: PermissionsProps) {
-  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value], hint: agent === "Codex" && r.value === "auto" ? "A separate reviewer handles sandbox approval requests" : r.hint, off: !auto && r.value === "auto" ? `${agent} has no Auto mode: it asks before actions.` : undefined }));
+  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value], hint: r.value !== "auto" ? r.hint : agent === "Codex" ? "A separate reviewer handles sandbox approval requests" : agent === "Antigravity" ? "Antigravity's own Auto: edits and commands it judges safe go ahead; it asks before irreversible ones" : r.hint, off: !auto && r.value === "auto" ? `${agent} has no Auto mode: it asks before actions.` : undefined }));
   return <SettingMenu name="Permissions" value={permissions} text={PERMISSIONS_LABEL[permissions]} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={permissions} />;
 }
 

@@ -33,6 +33,8 @@ pub enum ProviderId {
     Codex,
     /// Google's Gemini CLI, driven as an Agent Client Protocol agent (`gemini --acp`).
     Gemini,
+    /// Google's Antigravity CLI, the same protocol (`agy acp`): where a personal Google account signs in.
+    Antigravity,
     /// Claude Code sent to an endpoint of the user's (see endpoints.rs). Not a CLI of its own, so not in `all()`: its choices
     /// are the endpoints, which the window is told from the saved list.
     Gateway,
@@ -47,6 +49,7 @@ impl ProviderId {
             ProviderId::Claude => &claude::ClaudeProvider,
             ProviderId::Codex => &codex::CodexProvider,
             ProviderId::Gemini => &gemini::GeminiProvider,
+            ProviderId::Antigravity => &gemini::AntigravityProvider,
             ProviderId::Gateway => &gateway::GatewayProvider,
             #[cfg(test)]
             ProviderId::Fake => &FakeProvider,
@@ -56,7 +59,7 @@ impl ProviderId {
     /// Every provider this build knows, whether or not its CLI is installed.
     pub fn all() -> Vec<ProviderId> {
         #[allow(unused_mut)]
-        let mut all = vec![ProviderId::Claude, ProviderId::Codex, ProviderId::Gemini];
+        let mut all = vec![ProviderId::Claude, ProviderId::Codex, ProviderId::Gemini, ProviderId::Antigravity];
         #[cfg(test)]
         all.push(ProviderId::Fake);
         all
@@ -68,6 +71,7 @@ impl ProviderId {
             ProviderId::Claude => "claude",
             ProviderId::Codex => "codex",
             ProviderId::Gemini => "gemini",
+            ProviderId::Antigravity => "antigravity",
             ProviderId::Gateway => "gateway",
             #[cfg(test)]
             ProviderId::Fake => "fake",
@@ -76,7 +80,7 @@ impl ProviderId {
 
     /// Its conversation is read back from the running agent (see Session::transcript), not from a Claude Code transcript file.
     pub fn reads_transcript_from_agent(self) -> bool {
-        matches!(self, ProviderId::Codex | ProviderId::Gemini)
+        matches!(self, ProviderId::Codex | ProviderId::Gemini | ProviderId::Antigravity)
     }
 
     /// The name the window and a phone show for it.
@@ -85,6 +89,7 @@ impl ProviderId {
             ProviderId::Claude | ProviderId::Gateway => "Claude",
             ProviderId::Codex => "Codex",
             ProviderId::Gemini => "Gemini",
+            ProviderId::Antigravity => "Antigravity",
             #[cfg(test)]
             ProviderId::Fake => "Fake",
         }

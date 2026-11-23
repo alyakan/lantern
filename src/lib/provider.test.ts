@@ -23,6 +23,7 @@ describe("what a chat's provider can do", () => {
     expect(providerName("claude")).toBe("Claude");
     expect(providerName("codex")).toBe("Codex");
     expect(providerName("gemini")).toBe("Gemini");
+    expect(providerName("antigravity")).toBe("Antigravity");
     expect(wireProvider("gemini")).toEqual({ provider: "gemini" });
     expect(providerName("aider")).toBe("Aider");
     expect(agentName(null)).toBe("Claude");

@@ -58,6 +58,29 @@ pub fn gemini_candidate_paths(home: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Where Antigravity CLI is installed: its install script puts `agy` in ~/.local/bin; Homebrew's cask is the other way.
+pub fn antigravity_candidate_paths(home: &Path) -> Vec<PathBuf> {
+    vec![home.join(".local/bin/agy"), PathBuf::from("/opt/homebrew/bin/agy"), PathBuf::from("/usr/local/bin/agy")]
+}
+
+/// The Antigravity CLI: `override_path` when the user gave one, else the usual places, else the login shell's PATH.
+pub fn locate_antigravity(override_path: Option<&str>) -> Result<PathBuf, String> {
+    static NOT_FOUND: std::sync::Mutex<Option<(Instant, String)>> = std::sync::Mutex::new(None);
+    let default = override_path.map(str::trim).is_none_or(|p| p.is_empty());
+    if default {
+        if let Some((at, why)) = NOT_FOUND.lock().unwrap().as_ref() {
+            if at.elapsed() < NOT_FOUND_FOR {
+                return Err(why.clone());
+            }
+        }
+    }
+    let found = locate_cli("agy", override_path, antigravity_candidate_paths, "Could not find the `agy` CLI. Install Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash), or enter its path.");
+    if default {
+        *NOT_FOUND.lock().unwrap() = found.as_ref().err().map(|why| (Instant::now(), why.clone()));
+    }
+    found
+}
+
 /// How long a search that found no Codex stands: a main agent looks for it every time it starts, and without it each of
 /// those would wait on the login shell.
 const NOT_FOUND_FOR: Duration = Duration::from_secs(60);

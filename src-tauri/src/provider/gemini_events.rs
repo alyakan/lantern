@@ -7,6 +7,7 @@
 //! one must not end a chat.
 
 use super::codex_events::{str_of, visible, whole_file, Lookalikes, Mapped};
+use super::gemini::AcpAgent;
 use crate::stream_parser::{summarize, truncate, OUTPUT_LIMIT};
 use crate::ui_event::{Hunk, ModelOption, UiEvent};
 use serde_json::{json, Value};
@@ -16,8 +17,6 @@ use std::path::{Path, PathBuf};
 /// What Gemini writes into the message stream when the approval mode changes: not part of the conversation.
 const MODE_NOTE: &str = "[MODE_UPDATE] ";
 
-/// What Gemini answers a tool it was told not to run with, which is how a denied step is told from a failed one.
-const DENIED_NOTE: &str = "was canceled by the user";
 
 /// An approval Gemini asks the user for, as a card, and the two answers it offers for it (only ever the ones for this one
 /// action: an "allow for this session" option is never chosen).
@@ -52,11 +51,17 @@ pub struct GeminiMapper {
     context_window: Option<u64>,
     /// The user's message being replayed (a loaded conversation's history), in the pieces Gemini sends it in.
     user: String,
+    /// Which agent it reads (Gemini CLI or Antigravity): their names, and how each says a step was denied.
+    agent: AcpAgent,
 }
 
 impl GeminiMapper {
     pub fn new(cwd: &Path) -> Self {
-        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, thinking: false, declined: 0, session_tokens: 0, context_window: None, user: String::new() }
+        Self::for_agent(cwd, AcpAgent::Gemini)
+    }
+
+    pub fn for_agent(cwd: &Path, agent: AcpAgent) -> Self {
+        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, thinking: false, declined: 0, session_tokens: 0, context_window: None, user: String::new(), agent }
     }
 
     /// The `update` of a `session/update` notification.
@@ -132,7 +137,7 @@ impl GeminiMapper {
     }
 
     fn block(&self) -> String {
-        format!("gemini-message-{}", self.messages)
+        format!("{}-message-{}", self.agent.slug(), self.messages)
     }
 
     /// The message so far is whole: it is said once, as the text it is.
@@ -165,8 +170,8 @@ impl GeminiMapper {
             }
             "search" => ("Grep".to_string(), truncate(&visible(&title, false), 200)),
             "fetch" => ("WebFetch".to_string(), truncate(&visible(&title, false), 200)),
-            // Named as its own, so a tool of Gemini's is never mistaken for one of Claude's.
-            other => (visible(&format!("gemini__{}", if other.is_empty() { "tool" } else { other }), false), truncate(&visible(&title, false), 200)),
+            // Named as its own, so a tool of the agent's is never mistaken for one of Claude's.
+            other => (visible(&format!("{}__{}", self.agent.slug(), if other.is_empty() { "tool" } else { other }), false), truncate(&visible(&title, false), 200)),
         };
         self.names.insert(id.clone(), name.clone());
         m.events.push(UiEvent::ToolStarted { parent: None, tool_use_id: id, name, summary });
@@ -195,7 +200,8 @@ impl GeminiMapper {
         let diffs = diffs_of(&u["content"]);
         let text = text_of(&u["content"]);
         let done = status == "completed";
-        let denied = !done && text.contains(DENIED_NOTE);
+        let raw = u["rawOutput"].as_str().unwrap_or("");
+        let denied = !done && (text.contains(self.agent.denied_note()) || raw.contains(self.agent.denied_note()));
         if denied {
             self.declined += 1;
         }
@@ -250,22 +256,23 @@ impl GeminiMapper {
     pub fn turn_done(&mut self, reply: Result<&Value, (i64, &str)>, duration_ms: Option<u64>) -> Mapped {
         let mut m = Mapped::default();
         self.settle_message(&mut m);
+        let name = self.agent.name();
         let (is_error, result, tokens, auth_hint) = match reply {
             Ok(v) => {
                 let tokens = v["usage"]["totalTokens"].as_u64();
                 let (is_error, result) = match v["stopReason"].as_str().unwrap_or("") {
                     "end_turn" => (false, None),
                     "cancelled" => (true, Some("interrupted".to_string())),
-                    "max_tokens" => (true, Some("Gemini's reply was cut off: the conversation reached the model's limit.".to_string())),
-                    "max_turn_requests" => (true, Some("Gemini stopped: it reached its limit of steps for this conversation, or began to loop.".to_string())),
-                    "refusal" => (true, Some("Gemini declined to answer.".to_string())),
-                    other => (true, Some(format!("Gemini stopped ({other})."))),
+                    "max_tokens" => (true, Some(format!("{name}'s reply was cut off: the conversation reached the model's limit."))),
+                    "max_turn_requests" => (true, Some(format!("{name} stopped: it reached its limit of steps for this conversation, or began to loop."))),
+                    "refusal" => (true, Some(format!("{name} declined to answer."))),
+                    other => (true, Some(format!("{name} stopped ({other})."))),
                 };
                 (is_error, result, tokens, false)
             }
             Err((code, message)) => {
                 let auth = signed_out(code, message);
-                let text = if auth { sign_in_text(message) } else if message.is_empty() { "The turn failed.".to_string() } else { message.to_string() };
+                let text = if auth { sign_in_text(self.agent, message) } else if message.is_empty() { "The turn failed.".to_string() } else { message.to_string() };
                 (true, Some(text), None, auth)
             }
         };
@@ -306,16 +313,18 @@ impl GeminiMapper {
         let reject = option("reject_once");
         let mut seen = Lookalikes::default();
         let explanation = text_of(&call["content"]);
-        let mut input = json!({"provider": "gemini"});
+        let name = self.agent.name();
+        let mut input = json!({"provider": self.agent.slug()});
         let mut extra: Vec<String> = Vec::new();
         let tool_name = match kind {
             "execute" => {
                 let raw = &call["rawInput"];
-                let command = raw["command"].as_str().filter(|c| !c.trim().is_empty()).unwrap_or(title);
+                // Gemini CLI's shell tool names it `command`, Antigravity's `run_command` names it `CommandLine`.
+                let command = ["command", "CommandLine"].iter().find_map(|k| raw[*k].as_str()).filter(|c| !c.trim().is_empty()).unwrap_or(title);
                 input["command"] = seen.shown(command, true).into();
-                let dir = ["dir_path", "directory", "cwd"].iter().find_map(|k| raw[*k].as_str()).map(str::trim);
+                let dir = ["dir_path", "directory", "cwd", "Cwd"].iter().find_map(|k| raw[*k].as_str()).map(str::trim);
                 match dir {
-                    // No folder given: Gemini's shell tool runs in the folder it was started in, which is the chat's.
+                    // No folder given: the agent's shell tool runs in the folder it was started in, which is the chat's.
                     _ if raw.is_object() && dir.is_none_or(str::is_empty) => input["cwd"] = seen.shown(&self.cwd.display().to_string(), false).into(),
                     Some(d) if !d.is_empty() => {
                         input["cwd"] = seen.shown(&self.abs(d).display().to_string(), false).into();
@@ -323,7 +332,7 @@ impl GeminiMapper {
                             extra.push("Runs outside this chat's folder.".into());
                         }
                     }
-                    _ => extra.push("Gemini didn't say which folder this runs in: it may not be this chat's. Read its own words below.".into()),
+                    _ => extra.push(format!("{name} didn't say which folder this runs in: it may not be this chat's. Read its own words below.")),
                 }
                 "Bash"
             }
@@ -359,10 +368,10 @@ impl GeminiMapper {
                 input["action"] = seen.shown(title, false).into();
                 "WebFetch"
             }
-            // Gemini's other tools (an MCP server's, a skill, a search): said by name as it gave it, which is all Lantern knows.
+            // The agent's other tools (an MCP server's, a skill, a search): said by name as it gave it, which is all Lantern knows.
             _ => {
-                input["action"] = format!("Gemini wants to use a tool: {}", seen.shown(title, false)).into();
-                "Gemini tool"
+                input["action"] = format!("{name} wants to use a tool: {}", seen.shown(title, false)).into();
+                if self.agent == AcpAgent::Gemini { "Gemini tool" } else { "Antigravity tool" }
             }
         };
         if !explanation.trim().is_empty() {
@@ -486,9 +495,27 @@ pub fn signed_out(code: i64, message: &str) -> bool {
 }
 
 /// What a turn that failed to sign in says, with how to fix it.
-pub fn sign_in_text(message: &str) -> String {
+pub fn sign_in_text(agent: AcpAgent, message: &str) -> String {
     let said = if message.trim().is_empty() { String::new() } else { format!(" ({})", truncate(message.trim(), 200)) };
-    format!("Gemini isn't signed in, or its sign-in expired{said}. Run `gemini` in a terminal and choose how to sign in, then send your message again.")
+    format!("{} isn't signed in, or its sign-in expired{said}. {}, then send your message again.", agent.name(), agent.sign_in_hint())
+}
+
+/// Antigravity's models from a session's `configOptions`: each `model` option, with every `thought_level` as its effort
+/// levels (the model ids themselves carry no level), and the model the session is on.
+pub fn config_model_options(config: &Value) -> (Vec<ModelOption>, Option<String>) {
+    let option = |id: &str| config.as_array().into_iter().flatten().find(|o| o["id"] == id).cloned().unwrap_or(Value::Null);
+    let (model, level) = (option("model"), option("thought_level"));
+    let levels: Vec<String> = level["options"].as_array().into_iter().flatten().filter_map(|o| o["value"].as_str()).filter(|v| crate::args::valid_model(v)).map(String::from).collect();
+    let models = model["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|o| {
+            let id = o["value"].as_str().filter(|i| crate::args::valid_model(i))?.to_string();
+            Some(ModelOption { display_name: o["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(&id).to_string(), description: str_of(o, "description"), resolved_model: id.clone(), effort_levels: levels.clone(), value: id })
+        })
+        .collect();
+    (models, model["currentValue"].as_str().map(String::from))
 }
 
 /// The models Gemini offers (`models.availableModels` of a new session) as the picker lists them. Gemini has no effort
