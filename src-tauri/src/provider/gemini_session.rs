@@ -66,6 +66,7 @@ pub fn approval_mode(agent: AcpAgent, auto: bool, read_only: bool, offered: &[St
     let wanted: &[&'static str] = match (agent, read_only, auto) {
         (AcpAgent::Gemini, true, _) => &[READ_ONLY_MODE, FALLBACK_MODE],
         (AcpAgent::Gemini, false, _) => &[ASK_MODE, FALLBACK_MODE],
+        // Not reached: a read-only agent is refused on Antigravity at spawn. Asking for everything is the safest left.
         (AcpAgent::Antigravity, true, _) => &[FALLBACK_MODE],
         (AcpAgent::Antigravity, false, true) => &[AGY_AUTO_MODE],
         (AcpAgent::Antigravity, false, false) => &[AGY_ASK_MODE, FALLBACK_MODE],
@@ -402,6 +403,11 @@ impl GeminiSession {
         let name = agent.name();
         if cfg.helper.role == Role::Main {
             return Err(format!("A main agent can't run on {name} yet: it has no way to call the orchestra's tools. Start the main agent on Claude; its workers can run on {name}."));
+        }
+        // Antigravity has no read-only mode: its `default` asks "per your permission settings", which the user's own agy
+        // rules can loosen, so a worker that must not write in its Lead's folder can't be promised that there.
+        if agent == AcpAgent::Antigravity && matches!(cfg.helper.role, Role::Worker { read_only: true, .. }) {
+            return Err("A read-only agent can't run on Antigravity: it has no mode that keeps it from writing. Start it on Claude, Codex or Gemini CLI.".into());
         }
         let mut cmd = command(cfg, agent);
         // Its own session and group, as Claude's is: stopping it signals the group, so a command it is running goes too.
@@ -1180,6 +1186,16 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
         let err = s.send_with("x", vec![crate::session::InputImage { media_type: "image/png".into(), data: "AAAA".into() }]).await.unwrap_err();
         assert!(err.contains("can't take pictures"));
         s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_read_only_agent_is_refused_on_antigravity_which_has_no_mode_that_keeps_it_from_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(Fake::agy(NOTHING).script(dir.path()), dir.path(), None, Role::Worker { name: "reader".into(), read_only: true });
+        cfg.provider = ProviderId::Antigravity;
+        let (sink, _rx) = channel_sink();
+        let err = Session::spawn(&cfg, sink, no_edits()).err().expect("refused");
+        assert!(err.contains("read-only agent can't run on Antigravity"), "{err}");
     }
 
     #[tokio::test]
