@@ -514,6 +514,11 @@ const DIR_KEYS: &[&str] = &["dir_path", "directory", "cwd", "workdir", "dir"];
 /// that isn't text, or one that isn't the agent's own, is not shown: what the card says might not be what runs.
 fn one_of<'a>(raw: &'a Value, own: &str, family: &[&str]) -> Result<Option<&'a str>, String> {
     let Some(fields) = raw.as_object() else { return Ok(None) };
+    // A name outside ASCII could fold to one of these under a reader's own case rules (Go's folds U+212A to k and U+017F
+    // to s): none is expected, so none is read past.
+    if fields.keys().any(|k| !k.is_ascii()) {
+        return Err("its input has a field name outside plain ASCII, which could stand for another".into());
+    }
     let found: Vec<(&String, &Value)> = fields.iter().filter(|(k, _)| family.contains(&k.to_lowercase().as_str())).collect();
     match found.as_slice() {
         [] => Ok(None),
@@ -779,6 +784,8 @@ mod tests {
         assert!(refused(&agy, &req).contains("more than once"));
         req["toolCall"]["rawInput"] = json!({"CommandLine": "make", "Cwd": "/tmp/x", "dir_path": "/work/proj"});
         assert!(refused(&agy, &req).contains("more than once"));
+        req["toolCall"]["rawInput"] = json!({"CommandLine": "ls", "Commandline\u{212A}": "x"});
+        assert!(refused(&agy, &req).contains("outside plain ASCII"));
         req["toolCall"]["rawInput"] = json!({"CommandLine": ["rm", "-rf", "~"]});
         assert!(refused(&agy, &req).contains("other than text"));
         // No command of its own: the title is not taken for it.
