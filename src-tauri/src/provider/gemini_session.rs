@@ -77,6 +77,8 @@ struct Pending {
     /// The option that allows this one action, and the one that refuses it.
     allow: String,
     reject: Option<String>,
+    /// The card as the window was shown it, which a paired phone reads to show and answer it.
+    asked: crate::permission::bridge::Pending,
 }
 
 #[derive(Default)]
@@ -97,6 +99,8 @@ struct State {
     version: Option<String>,
     /// When the last update arrived while no turn ran: the history Gemini replays to a loaded conversation.
     last_replay: Option<Instant>,
+    /// That history as the chat shows it, read back when a chat is restored without Lantern's own copy (see `transcript`).
+    replayed: Vec<UiEvent>,
 }
 
 /// Cards are numbered across every session of the app, not within one: a card left on screen from a session that was
@@ -109,6 +113,8 @@ struct Ctx {
     stdin: Arc<AsyncMutex<Option<ChildStdin>>>,
     state: Arc<Mutex<State>>,
     mapper: Arc<Mutex<GeminiMapper>>,
+    /// Maps the replayed history apart from the live turns, so what it remembers of old tool calls never meets a new one's.
+    replay_mapper: Arc<Mutex<GeminiMapper>>,
     sink: Sink,
     on_edit: EditHook,
     cwd: String,
@@ -351,6 +357,7 @@ impl GeminiSession {
             stdin,
             state: state.clone(),
             mapper: Arc::new(Mutex::new(GeminiMapper::new(&cfg.folder))),
+            replay_mapper: Arc::new(Mutex::new(GeminiMapper::new(&cfg.folder))),
             sink: sink.clone(),
             on_edit,
             cwd,
@@ -459,7 +466,7 @@ impl GeminiSession {
         let _ = self.wait_ready().await;
     }
 
-    async fn wait_ready(&self) -> Result<(), String> {
+    pub async fn wait_ready(&self) -> Result<(), String> {
         let mut ready = self.ready.clone();
         let outcome = tokio::time::timeout(READY_WAIT, ready.wait_for(|r| *r != Ready::Starting)).await.map(|r| r.map(|state| state.clone()));
         match outcome {
@@ -508,6 +515,16 @@ impl GeminiSession {
         }
     }
 
+    /// The conversation so far, as Gemini replayed it when this session loaded it (a new conversation has none). Lantern's
+    /// own copy of a chat is read first; this is for one it doesn't have.
+    pub async fn transcript(&self) -> Result<Vec<UiEvent>, String> {
+        self.wait_ready().await?;
+        let rest = self.ctx.replay_mapper.lock().unwrap().end_replay();
+        let mut s = self.ctx.state.lock().unwrap();
+        s.replayed.extend(rest);
+        Ok(s.replayed.clone())
+    }
+
     /// The model from the next turn on; None goes back to Gemini's own.
     pub async fn set_model(&mut self, model: Option<&str>) -> Result<(), String> {
         let session = {
@@ -520,6 +537,11 @@ impl GeminiSession {
             self.ctx.request("session/set_model", json!({"sessionId": session, "modelId": model}), STEP_WAIT).await.map_err(|(_, why)| format!("Couldn't switch Gemini to {model}: {why}"))?;
         }
         Ok(())
+    }
+
+    /// The cards waiting for an answer, as a paired phone reads them.
+    pub fn pending_permissions(&self) -> Vec<crate::permission::bridge::Pending> {
+        self.ctx.state.lock().unwrap().pending.values().map(|p| p.asked.clone()).collect()
     }
 
     /// The user's answer to a card. False when there is no such card (it was answered, or it isn't Gemini's).
@@ -645,7 +667,9 @@ fn server_request(ctx: &Ctx, method: &str, id: &Value, params: &Value) {
     match request {
         Ok(a) => {
             let request_id = format!("gemini-{}", CARDS.fetch_add(1, Ordering::SeqCst) + 1);
-            ctx.state.lock().unwrap().pending.insert(request_id.clone(), Pending { rpc_id: id.clone(), allow: a.allow, reject: a.reject });
+            let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+            let asked = crate::permission::bridge::Pending { request_id: request_id.clone(), tool_name: a.tool_name.clone(), input: a.input.clone(), at };
+            ctx.state.lock().unwrap().pending.insert(request_id.clone(), Pending { rpc_id: id.clone(), allow: a.allow, reject: a.reject, asked });
             (ctx.sink)(UiEvent::PermissionRequested { request_id, tool_name: a.tool_name, input: a.input });
         }
         Err(why) => {
@@ -683,6 +707,10 @@ fn notification(ctx: &Ctx, method: &str, params: &Value) {
         let mut s = ctx.state.lock().unwrap();
         if !s.busy {
             s.last_replay = Some(Instant::now());
+            if params["sessionId"].as_str() == s.session_id.as_deref() || s.session_id.is_none() {
+                let events = ctx.replay_mapper.lock().unwrap().replay(&params["update"]);
+                s.replayed.extend(events);
+            }
             return;
         }
         if params["sessionId"].as_str() != s.session_id.as_deref() {
@@ -747,10 +775,11 @@ mod tests {
 
     #[test]
     fn a_decision_selects_the_option_for_this_one_action_or_refuses_it() {
-        let both = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: Some("cancel".into()) };
+        let asked = crate::permission::bridge::Pending { request_id: "gemini-1".into(), tool_name: "Bash".into(), input: json!({}), at: 0 };
+        let both = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: Some("cancel".into()), asked: asked.clone() };
         assert_eq!(outcome(&both, true), json!({"outcome": {"outcome": "selected", "optionId": "proceed_once"}}));
         assert_eq!(outcome(&both, false), json!({"outcome": {"outcome": "selected", "optionId": "cancel"}}));
-        let only_allow = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: None };
+        let only_allow = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: None, asked };
         assert_eq!(outcome(&only_allow, false), json!({"outcome": {"outcome": "cancelled"}}));
     }
 
@@ -839,9 +868,11 @@ done
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role, providers: vec![], project_notes: None },
+            plugins_off: false,
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role, providers: vec![], project_notes: None, publish_artifacts: false },
             path_env: None,
             endpoint: None,
+            config_dir: None,
         }
     }
 
@@ -1070,13 +1101,13 @@ say '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old
         let (mut s, mut rx) = open_as(&fake, dir.path(), Some("sess-1"), Role::Normal).await;
         assert_eq!(requests(dir.path(), "session/load")[0]["params"]["sessionId"], "sess-1");
         assert!(requests(dir.path(), "session/new").is_empty());
+        // Not shown, but kept: a chat restored without Lantern's own copy reads it back.
+        let back = s.transcript().await.unwrap();
+        assert!(matches!(back.as_slice(), [UiEvent::AssistantText { text, .. }] if text == "old history"), "{back:?}");
         s.send("next").await.unwrap();
         let mut said = vec![];
-        loop {
-            match next_matching(&mut rx, |e| matches!(e, UiEvent::TextDelta { .. } | UiEvent::TurnDone { .. })).await {
-                UiEvent::TextDelta { text, .. } => said.push(text),
-                _ => break,
-            }
+        while let UiEvent::TextDelta { text, .. } = next_matching(&mut rx, |e| matches!(e, UiEvent::TextDelta { .. } | UiEvent::TurnDone { .. })).await {
+            said.push(text);
         }
         assert_eq!(said, ["new"]);
         s.stop().await;

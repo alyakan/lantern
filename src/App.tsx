@@ -1126,7 +1126,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   }, [state.claudePath]);
   // What a phone may choose, read when it asks: whether Settings let phones use Auto (the backend's saved setting, not anything the
   // request says) and which presets there are.
-  // Where a phone may start a chat: Claude Code and each endpoint (not Codex, whose questions a phone can't answer yet).
+  // Where a phone may start a chat: every provider whose cards a phone can answer (Capabilities.phone_approvals).
   const phoneProviders = windowProviders(providers.list, providerName);
   // Their models: Claude Code's as an open Claude chat last listed them (they are the same in every one).
   const claudeOptions = Object.values(chats.slots).find((s) => providerIdOf(s.provider) === CLAUDE && s.models.length > 0)?.models ?? [];

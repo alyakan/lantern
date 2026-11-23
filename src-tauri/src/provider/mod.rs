@@ -74,6 +74,22 @@ impl ProviderId {
         }
     }
 
+    /// Its conversation is read back from the running agent (see Session::transcript), not from a Claude Code transcript file.
+    pub fn reads_transcript_from_agent(self) -> bool {
+        matches!(self, ProviderId::Codex | ProviderId::Gemini)
+    }
+
+    /// The name the window and a phone show for it.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ProviderId::Claude | ProviderId::Gateway => "Claude",
+            ProviderId::Codex => "Codex",
+            ProviderId::Gemini => "Gemini",
+            #[cfg(test)]
+            ProviderId::Fake => "Fake",
+        }
+    }
+
     pub fn info(self) -> ProviderInfo {
         ProviderInfo { id: self, capabilities: self.provider().capabilities() }
     }

@@ -27,9 +27,9 @@ impl Provider for GeminiProvider {
 
     /// Gemini has no auto mode (its `yolo` approves everything, which Lantern never hands a chat), no advisor, no Claude Code
     /// skills or slash commands, no thinking-effort level, and reports tokens but not dollars. Its model can be changed while
-    /// the session runs.
+    /// the session runs. Pictures (ACP image blocks) and compacting aren't wired yet; Clear starts a fresh conversation.
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: false, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: false, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: true, supports_images: false, supports_compact: false, supports_clear: true, publishes_artifacts: false, supports_recap: false }
     }
 
     fn models(&self) -> &'static [&'static str] {
@@ -68,8 +68,9 @@ mod tests {
         let c = GeminiProvider.capabilities();
         assert!(!c.supports_auto_mode && !c.supports_advisor && !c.supports_skills && !c.reports_cost_usd && !c.supports_effort && !c.supports_lantern_tools);
         assert!(c.model_switchable);
-        // A team's Lead is Claude's, and a phone can't answer Gemini's cards.
-        assert!(!c.can_lead_team && !c.phone_approvals);
+        // A team's Lead is Claude's; a phone answers Gemini's cards as it does Codex's (see GeminiSession::pending_permissions).
+        assert!(!c.can_lead_team && c.phone_approvals);
+        assert!(!c.supports_images && !c.supports_compact && c.supports_clear && !c.publishes_artifacts && !c.supports_recap);
     }
 
     #[test]

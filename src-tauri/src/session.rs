@@ -115,7 +115,7 @@ impl Session {
     }
 
     pub async fn compact(&mut self) -> Result<(), String> {
-        match self { Session::Claude(s) => s.send("/compact").await, Session::Codex(s) => s.compact().await }
+        match self { Session::Claude(s) => s.send("/compact").await, Session::Codex(s) => s.compact().await, Session::Gemini(_) => Err("A Gemini chat can't be compacted from Lantern yet.".into()) }
     }
 
     /// Ends the current turn; the agent keeps running.
@@ -141,11 +141,12 @@ impl Session {
         match self {
             Session::Claude(s) => { s.initialize().await; Ok(()) },
             Session::Codex(s) => s.wait_ready().await,
+            Session::Gemini(s) => s.wait_ready().await,
         }
     }
 
     pub fn set_effort(&mut self, effort: Option<&str>) -> bool {
-        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) => false }
+        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) | Session::Gemini(_) => false }
     }
 
     /// What the agent is told right after it starts, which the provider's protocol may need before the first message.
@@ -194,12 +195,12 @@ impl Session {
     }
 
     /// The conversation so far, for an agent whose transcript isn't a file Lantern can read (Codex's is read from its
-    /// app-server). Claude's is read from its transcript file instead (see history.rs).
+    /// app-server, Gemini's from what it replays when it loads the conversation). Claude's is read from its transcript file instead (see history.rs).
     pub async fn transcript(&mut self) -> Result<Vec<crate::ui_event::UiEvent>, String> {
         match self {
             Session::Claude(_) => Err("Claude's conversation is read from its transcript file.".into()),
             Session::Codex(s) => s.transcript().await,
-            Session::Gemini(_) => Err("A Gemini conversation is read back by Gemini itself, which Lantern doesn't ask yet.".into()),
+            Session::Gemini(s) => s.transcript().await,
         }
     }
 
@@ -207,6 +208,7 @@ impl Session {
         match self {
             Session::Claude(_) => vec![],
             Session::Codex(s) => s.pending_permissions(),
+            Session::Gemini(s) => s.pending_permissions(),
         }
     }
 

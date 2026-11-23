@@ -9,7 +9,7 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 
 /**
  * Settings → API keys: sign an agent's CLI in with an API key instead of its own login, so it bills the user's API account. Claude
- * Code today (a key for an endpoint is set on the endpoint, in Endpoints); Codex says why it can't yet. The key goes to the Mac's
+ * Code today (a key for an endpoint is set on the endpoint, in Endpoints); Codex says why it can't yet, and Gemini where its own key goes. The key goes to the Mac's
  * Keychain and is never shown again: the page only knows that one is saved.
  */
 export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: () => void }) {
@@ -92,6 +92,12 @@ export function ApiKeysSettings({ onProvidersChanged }: { onProvidersChanged?: (
       <section className="settings-section">
         <h3 className="settings-subhead">Codex</h3>
         <p className="settings-muted">{state.not_yet}</p>
+      </section>
+      <section className="settings-section">
+        <h3 className="settings-subhead">Gemini</h3>
+        <p className="settings-muted">
+          Gemini CLI signs itself in. Run <code>gemini</code> in a terminal once and choose how: with Google, or with a Gemini API key (it reads <code>GEMINI_API_KEY</code> from <code>~/.gemini/.env</code>). Lantern starts Gemini on whatever you chose and keeps no Gemini key itself.
+        </p>
       </section>
       <HostedProviders onChanged={onProvidersChanged} />
       <HermesSettings />

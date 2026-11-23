@@ -1186,14 +1186,14 @@ impl orchestra::Host for AppHost {
     fn live_transcript<'a>(&'a self, worker: &'a str) -> Option<orchestra::Fut<'a, Result<Vec<ui_event::UiEvent>, String>>> {
         let s = self.app.state::<AppState>().slots.get(worker).ok()?;
         let provider = s.config.lock().unwrap().as_ref().map(|c| c.provider)?;
-        if provider != ProviderId::Codex {
+        if !provider.reads_transcript_from_agent() {
             return None;
         }
         Some(Box::pin(async move {
             let mut session = s.session.lock().await;
             match session.as_mut() {
                 Some(x) if x.is_running() => x.transcript().await,
-                _ => Err("This Codex worker isn't running, and its conversation is read from its running Codex: start it again (message_agent or the user) to read it.".into()),
+                _ => Err(format!("This {} worker isn't running, and its conversation is read from the running agent: start it again (message_agent or the user) to read it.", provider.display_name())),
             }
         }))
     }
@@ -2330,7 +2330,7 @@ async fn conversation_settings_inner(app: &AppHandle, slot: &str, change: Option
         let provider = chat_info(&cfg);
         let id = cfg.endpoint.as_ref().map(|e| format!("gateway:{}", e.id)).unwrap_or_else(|| cfg.provider.name().into());
         let _ = app.emit("conversation-configured", serde_json::json!({"slot":slot,"provider":{"id":id,"capabilities":provider.capabilities},"mode":cfg.mode,"autoApprove":cfg.auto_approve,"model":cfg.model,"effort":cfg.effort}));
-        let name = cfg.endpoint.as_ref().and_then(|e|state.endpoints.get(&e.id)).map(|e|e.name).unwrap_or_else(||if cfg.provider == ProviderId::Codex { "Codex".into() } else { "Claude".into() });
+        let name = cfg.endpoint.as_ref().and_then(|e|state.endpoints.get(&e.id)).map(|e|e.name).unwrap_or_else(||cfg.provider.display_name().into());
         state.remote.hub.set_provider(slot, (cfg.provider != ProviderId::Claude).then_some(name.as_str()));
     }
     let id = cfg.endpoint.as_ref().map(|e| format!("gateway:{}",e.id)).unwrap_or_else(||cfg.provider.name().into());
@@ -2349,7 +2349,7 @@ async fn conversation_of(state: &AppState, s: &Arc<Slot>, cfg: &SessionConfig, c
         return Ok(c);
     }
     let native = s.session.lock().await.as_ref().and_then(|s| s.session_id()).unwrap_or(conversation_id.clone());
-    let events = if cfg.provider == ProviderId::Codex {
+    let events = if cfg.provider.reads_transcript_from_agent() {
         s.session.lock().await.as_mut().ok_or("The agent stopped")?.transcript().await?
     } else {
         let root = projects_root()?;
@@ -4279,7 +4279,7 @@ async fn open_session(
     enroll(&state, &slot, &s, &cfg.helper.role);
     let provider = chat_info(&cfg);
     if let Some(mut chat) = archived {
-        let native_import = chat.provider == ProviderId::Codex && chat.events.iter().all(|e|matches!(e["kind"].as_str(), Some("user_text" | "assistant_text")));
+        let native_import = chat.provider.reads_transcript_from_agent() && chat.events.iter().all(|e|matches!(e["kind"].as_str(), Some("user_text" | "assistant_text")));
         if let Some(w) = &worker { state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref(), w.role.clone()).await?; }
         state.conversations.attach(&slot, chat.clone());
         if let Err(e) = launch(&app, &slot, &s, cfg, true).await { state.orchestra.forget(&slot); return Err(e); }
@@ -4297,7 +4297,7 @@ async fn open_session(
         s.changes.lock().unwrap().restore(edits, before_last);
         return Ok(OpenedSession { events: page.events, earlier: page.hidden, moved_from: None, read_only: None, provider });
     }
-    if cfg.provider == ProviderId::Codex {
+    if cfg.provider.reads_transcript_from_agent() {
         launch(&app, &slot, &s, cfg, true).await?;
         let events = s.session.lock().await.as_mut().ok_or("The session did not start")?.transcript().await?;
         return Ok(OpenedSession { events, earlier: 0, moved_from: None, read_only: None, provider });

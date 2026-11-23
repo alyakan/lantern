@@ -50,11 +50,13 @@ pub struct GeminiMapper {
     declined: usize,
     session_tokens: u64,
     context_window: Option<u64>,
+    /// The user's message being replayed (a loaded conversation's history), in the pieces Gemini sends it in.
+    user: String,
 }
 
 impl GeminiMapper {
     pub fn new(cwd: &Path) -> Self {
-        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, thinking: false, declined: 0, session_tokens: 0, context_window: None }
+        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, thinking: false, declined: 0, session_tokens: 0, context_window: None, user: String::new() }
     }
 
     /// The `update` of a `session/update` notification.
@@ -94,6 +96,39 @@ impl GeminiMapper {
             _ => {}
         }
         m
+    }
+
+    /// An update of the history Gemini replays to a loaded conversation, as the chat keeps it: the user's messages, whole
+    /// replies and the steps, but nothing that only matters while a turn streams.
+    pub fn replay(&mut self, u: &Value) -> Vec<UiEvent> {
+        if u["sessionUpdate"] == "user_message_chunk" {
+            let mut m = Mapped::default();
+            self.settle_message(&mut m);
+            if u["content"]["type"] == "text" {
+                self.user.push_str(u["content"]["text"].as_str().unwrap_or(""));
+            }
+            return m.events;
+        }
+        let mut out = self.flush_user();
+        out.extend(self.update(u).events.into_iter().filter(|e| !matches!(e, UiEvent::TextDelta { .. } | UiEvent::Thinking { .. } | UiEvent::ContextUsed { .. })));
+        out
+    }
+
+    /// The end of a replayed history: what was still being said is said whole.
+    pub fn end_replay(&mut self) -> Vec<UiEvent> {
+        let mut out = self.flush_user();
+        let mut m = Mapped::default();
+        self.settle_message(&mut m);
+        out.extend(m.events);
+        out
+    }
+
+    fn flush_user(&mut self) -> Vec<UiEvent> {
+        let text = std::mem::take(&mut self.user);
+        if text.trim().is_empty() {
+            return vec![];
+        }
+        vec![UiEvent::UserText { text, at: None, sent_by: None, images: 0 }]
     }
 
     fn block(&self) -> String {
@@ -453,6 +488,34 @@ mod tests {
 
     fn mapper() -> GeminiMapper {
         GeminiMapper::new(Path::new("/work/proj"))
+    }
+
+    #[test]
+    fn a_replayed_history_reads_back_as_the_users_messages_and_whole_replies() {
+        let mut m = GeminiMapper::new(Path::new("/p"));
+        let mut out = vec![];
+        for u in [
+            json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "Fix "}}),
+            json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "the bug"}}),
+            json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hm"}}),
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Do"}}),
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "ne"}}),
+            json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "Thanks"}}),
+            json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Welcome"}}),
+        ] {
+            out.extend(m.replay(&u));
+        }
+        out.extend(m.end_replay());
+        let said: Vec<(String, String)> = out
+            .iter()
+            .map(|e| match e {
+                UiEvent::UserText { text, .. } => ("user".into(), text.clone()),
+                UiEvent::AssistantText { text, .. } => ("gemini".into(), text.clone()),
+                other => ("other".into(), format!("{other:?}")),
+            })
+            .collect();
+        assert_eq!(said, vec![("user".into(), "Fix the bug".into()), ("gemini".into(), "Done".into()), ("user".into(), "Thanks".into()), ("gemini".into(), "Welcome".into())]);
+        assert!(m.end_replay().is_empty());
     }
 
     fn update(m: &mut GeminiMapper, u: Value) -> Mapped {
