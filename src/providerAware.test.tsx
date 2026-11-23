@@ -411,6 +411,8 @@ describe("the words a chat uses for its agent", () => {
     const gemini = { ...PLAIN, id: "gemini" };
     expect(reducer(chat(gemini, { status: "running" }), { type: "ui_event", event: login }).banner?.text).toBe("Gemini isn't signed in. Run `gemini` in a terminal and choose how to sign in, then send your message again.");
     expect(reducer(chat(gemini, { status: "running" }), { type: "ui_event", event: ended }).banner?.text).toBe("Gemini stopped unexpectedly (exit code 1). boom");
+    const agy = { ...PLAIN, id: "antigravity" };
+    expect(reducer(chat(agy, { status: "running" }), { type: "ui_event", event: login }).banner?.text).toBe("Antigravity isn't signed in. Run `agy` in a terminal and sign in with Google, then send your message again.");
   });
 
   it("names it where a chat follows up on its own, and in the empty chat's line", () => {

@@ -54,6 +54,7 @@ pub struct InputImage { pub media_type: String, pub data: String }
 impl InputImage {
     fn claude(self) -> serde_json::Value { serde_json::json!({"type":"image","source":{"type":"base64","media_type":self.media_type,"data":self.data}}) }
     fn codex(self) -> serde_json::Value { serde_json::json!({"type":"image","url":format!("data:{};base64,{}",self.media_type,self.data)}) }
+    fn acp(self) -> serde_json::Value { serde_json::json!({"type":"image","mimeType":self.media_type,"data":self.data}) }
 }
 
 /// One running agent process. An enum rather than a trait object: a session's calls are async, and each provider's has
@@ -108,9 +109,9 @@ impl Session {
         match self {
             Session::Claude(s) => s.send_with(text, images.into_iter().map(InputImage::claude).collect()).await,
             Session::Codex(s) => s.send_with(text, images.into_iter().map(InputImage::codex).collect()).await,
-            // Gemini takes pictures as ACP image blocks, which nothing here makes yet: its capabilities say no pictures.
-            Session::Gemini(_) if !images.is_empty() => Err("A Gemini chat can't take pictures yet. Send the message without them.".into()),
-            Session::Gemini(s) => s.send(text).await,
+            // ACP image blocks: Antigravity takes them; Gemini CLI isn't wired for them (its capabilities say no pictures).
+            Session::Gemini(s) if !images.is_empty() && !s.takes_images() => Err("A Gemini chat can't take pictures yet. Send the message without them.".into()),
+            Session::Gemini(s) => s.send_with(text, images.into_iter().map(InputImage::acp).collect()).await,
         }
     }
 
@@ -146,7 +147,7 @@ impl Session {
     }
 
     pub fn set_effort(&mut self, effort: Option<&str>) -> bool {
-        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Claude(_) | Session::Gemini(_) => false }
+        match self { Session::Codex(s) => { s.set_effort(effort); true }, Session::Gemini(s) => s.set_effort(effort), Session::Claude(_) => false }
     }
 
     /// What the agent is told right after it starts, which the provider's protocol may need before the first message.

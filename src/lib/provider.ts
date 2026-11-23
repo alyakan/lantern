@@ -29,7 +29,7 @@ export const capabilitiesOf = (p: ProviderInfo | null | undefined): Capabilities
 
 export const providerIdOf = (p: ProviderInfo | null | undefined): string => p?.id ?? CLAUDE;
 
-const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
+const NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini", antigravity: "Antigravity" };
 
 /** An endpoint the user set up is a provider of its own, named "gateway:<its id>" (the backend's id for all of them is "gateway"). */
 const GATEWAY = "gateway:";

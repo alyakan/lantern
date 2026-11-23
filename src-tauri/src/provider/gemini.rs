@@ -49,6 +49,120 @@ impl Provider for GeminiProvider {
     }
 }
 
+pub struct AntigravityProvider;
+
+/// What Antigravity CLI 1.5.15 offered (its session's `model` config option), its own default first. The live list (asked of
+/// the session itself) is what pickers show; this is for telling the main agent what to choose from.
+const AGY_MODELS: &[&str] = &["gemini-4-neon", "gemini-4-argon", "gemini-4-hydrogen", "gemini-3.8-flash"];
+
+impl Provider for AntigravityProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::Antigravity
+    }
+
+    /// Antigravity's own `auto` mode is Lantern's Auto (it approves edits and what it judges safe, and asks before
+    /// irreversible actions); its thinking level is Lantern's effort; it takes pictures; a phone answers its cards as it does
+    /// Codex's. No advisor, Claude Code skills, compacting from Lantern or dollar cost (tokens only).
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { supports_auto_mode: true, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: true, supports_images: true, supports_compact: false, supports_clear: true, publishes_artifacts: false, supports_recap: false }
+    }
+
+    fn models(&self) -> &'static [&'static str] {
+        AGY_MODELS
+    }
+
+    fn locate(&self, override_path: Option<&str>) -> Result<PathBuf, String> {
+        crate::cli_locator::locate_antigravity(override_path)
+    }
+
+    fn version(&self, binary: &str, path_env: Option<&str>) -> Option<String> {
+        crate::diagnostics::cli_version(binary, path_env)
+    }
+
+    fn spawn(&self, cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<Session, String> {
+        GeminiSession::spawn(cfg, sink, on_edit).map(Session::Gemini)
+    }
+}
+
+/// Which ACP agent a session drives. Both are Google's and speak the same Agent Client Protocol; what differs is how each
+/// is started, what its approval modes are called, how it is signed in and updated, and what it says when a step is denied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpAgent {
+    /// Gemini CLI (`gemini --acp`), for API keys and Gemini Code Assist.
+    Gemini,
+    /// Antigravity CLI (`agy acp`), where a personal Google account signs in since Google moved those users off Gemini CLI.
+    Antigravity,
+}
+
+impl AcpAgent {
+    pub fn of(provider: ProviderId) -> AcpAgent {
+        if provider == ProviderId::Antigravity { AcpAgent::Antigravity } else { AcpAgent::Gemini }
+    }
+
+    /// What the chat calls it.
+    pub fn name(self) -> &'static str {
+        match self {
+            AcpAgent::Gemini => "Gemini",
+            AcpAgent::Antigravity => "Antigravity",
+        }
+    }
+
+    /// Its provider's saved name, which a card and an id carry.
+    pub fn slug(self) -> &'static str {
+        match self {
+            AcpAgent::Gemini => "gemini",
+            AcpAgent::Antigravity => "antigravity",
+        }
+    }
+
+    /// What follows the binary to start its ACP server on stdio.
+    pub fn args(self) -> &'static [&'static str] {
+        match self {
+            AcpAgent::Gemini => &["--acp"],
+            AcpAgent::Antigravity => &["acp"],
+        }
+    }
+
+    /// How the user brings it up to date.
+    pub fn update_hint(self) -> &'static str {
+        match self {
+            AcpAgent::Gemini => "`npm i -g @google/gemini-cli`",
+            AcpAgent::Antigravity => "`agy update`",
+        }
+    }
+
+    /// How the user signs it in, in a terminal (Lantern never does).
+    pub fn sign_in_hint(self) -> &'static str {
+        match self {
+            AcpAgent::Gemini => "Run `gemini` in a terminal and choose how to sign in",
+            AcpAgent::Antigravity => "Run `agy` in a terminal and sign in with Google",
+        }
+    }
+
+    /// The oldest version whose ACP server this was run against.
+    pub fn min_version(self) -> (u64, u64, u64) {
+        match self {
+            AcpAgent::Gemini => MIN_VERSION,
+            // `agy acp` arrived in 1.5.0; 1.5.15 is the one probed.
+            AcpAgent::Antigravity => (1, 5, 0),
+        }
+    }
+
+    /// What it answers a step the user denied with, which tells a denied step from a failed one.
+    pub fn denied_note(self) -> &'static str {
+        match self {
+            AcpAgent::Gemini => "was canceled by the user",
+            AcpAgent::Antigravity => "user denied permission",
+        }
+    }
+
+    /// Whether its model and thinking level are session config options (`session/set_config_option`, ids `model` and
+    /// `thought_level`), as Antigravity's are, rather than one `session/set_model` id.
+    pub fn config_options(self) -> bool {
+        self == AcpAgent::Antigravity
+    }
+}
+
 /// Whether a Gemini that reports `version` speaks the protocol this provider does.
 pub fn version_supported(version: (u64, u64, u64)) -> bool {
     version >= MIN_VERSION
@@ -86,6 +200,19 @@ mod tests {
         assert_eq!(serde_json::from_str::<ProviderId>("\"codex\"").unwrap(), ProviderId::Codex);
         assert_eq!(serde_json::from_str::<ProviderId>("\"claude\"").unwrap(), ProviderId::Claude);
         assert_eq!(ProviderId::Gemini.provider().id(), ProviderId::Gemini);
+    }
+
+    #[test]
+    fn antigravity_has_auto_effort_pictures_and_phone_cards_but_no_advisor_skills_or_dollar_cost() {
+        let c = AntigravityProvider.capabilities();
+        assert!(c.supports_auto_mode && c.supports_effort && c.supports_images && c.phone_approvals && c.model_switchable && c.supports_clear);
+        assert!(!c.supports_advisor && !c.supports_skills && !c.reports_cost_usd && !c.supports_lantern_tools && !c.can_lead_team && !c.supports_compact);
+        assert!(AntigravityProvider.models().iter().all(|m| crate::args::valid_model(m)));
+        assert_eq!(serde_json::to_string(&ProviderId::Antigravity).unwrap(), "\"antigravity\"");
+        assert_eq!(AcpAgent::of(ProviderId::Antigravity), AcpAgent::Antigravity);
+        assert_eq!(AcpAgent::of(ProviderId::Gemini), AcpAgent::Gemini);
+        assert_eq!(AcpAgent::Antigravity.args(), ["acp"]);
+        assert_eq!(AcpAgent::Gemini.args(), ["--acp"]);
     }
 
     #[test]
