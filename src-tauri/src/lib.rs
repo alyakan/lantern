@@ -3670,10 +3670,11 @@ fn remote_new_chat_done(state: State<'_, AppState>, id: String, slot: Option<Str
 /// counts: every client is told it was answered, and a later answer is refused.
 async fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
     let s = state.slots.get(slot)?;
-    let mut answered = s.bridge.respond(request_id, allow, message, updated_input);
+    // A card the agent raised in its own protocol takes the answers too (an ACP agent's question).
+    let mut answered = s.bridge.respond(request_id, allow, message, updated_input.clone());
     if !answered {
         if let Some(session) = s.session.lock().await.as_mut() {
-            answered = session.respond_permission(request_id, allow).await;
+            answered = session.respond_permission(request_id, allow, updated_input.as_ref()).await;
         }
     }
     if answered {

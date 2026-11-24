@@ -21,12 +21,14 @@ export const APPROVAL_TOOL = "Approval";
 type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 
 export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  // A question is the same card whichever agent asks it (Antigravity's come as a form, which Lantern turns into this). It
+  // allows nothing: its answers go back as words.
+  if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
   // Its own kind of card for a chat on another agent than Claude Code, chosen by which agent the chat runs, not by the request.
   if (item.provider && item.provider !== "claude") return <ProviderCard item={item} onDecide={onDecide} />;
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
   if (item.toolName === APPROVAL_TOOL) return <ApprovalCard item={item} onDecide={onDecide} />;
-  if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
   return <ToolCard item={item} onDecide={onDecide} />;
 }
 

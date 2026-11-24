@@ -216,11 +216,12 @@ impl Session {
     /// The user's answer to a card the agent raised in its own protocol (Codex asks in a JSON-RPC request, not through the
     /// permission helper). False when this session has no such card, as it never does for Claude, whose cards go through the
     /// chat's permission bridge.
-    pub async fn respond_permission(&mut self, request_id: &str, allow: bool) -> bool {
+    /// `answered`: a question card's answers (AskUserQuestion's input with `answers` in it), for an agent that asked one.
+    pub async fn respond_permission(&mut self, request_id: &str, allow: bool, answered: Option<&serde_json::Value>) -> bool {
         match self {
             Session::Claude(_) => false,
             Session::Codex(s) => s.respond_permission(request_id, allow).await,
-            Session::Gemini(s) => s.respond_permission(request_id, allow).await,
+            Session::Gemini(s) => s.respond(request_id, allow, answered).await,
         }
     }
 }

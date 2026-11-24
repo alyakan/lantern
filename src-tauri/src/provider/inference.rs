@@ -20,7 +20,7 @@ pub async fn codex(system: &str, prompt: &str, path_env: Option<&str>) -> Result
         while let Some(event) = rx.recv().await {
             match event {
                 UiEvent::AssistantText { parent: None, text: said, .. } => text = said,
-                UiEvent::PermissionRequested { request_id, .. } => { session.respond_permission(&request_id, false).await; },
+                UiEvent::PermissionRequested { request_id, .. } => { session.respond_permission(&request_id, false, None).await; },
                 UiEvent::TurnDone { is_error, result, .. } => return if is_error { Err(result.unwrap_or_else(||"The assistant couldn't answer".into())) } else if text.trim().is_empty() { Err("The assistant had nothing to say".into()) } else { Ok(text) },
                 UiEvent::SessionEnded { .. } => return Err("The assistant stopped before answering".into()),
                 _ => {},
