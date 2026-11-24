@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
-import { BackHandler, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
+import { Alert, BackHandler, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
@@ -33,7 +33,9 @@ import { CHAT_MIN, gutterFor, NARROW_MAX, SIDEBAR_WIDTH } from "../view/layout";
 import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
-import { atRoot, decision, home, navigate, shownSlot } from "./nav";
+import { atRoot, decision, home, navigate, shownSlot, shownStart } from "./nav";
+import type { Start, StartShown } from "./starting";
+import { StartingChat } from "../screens/StartingChat";
 import { TabletShell } from "./TabletShell";
 import { useLayout } from "./useLayout";
 import { useShortcut } from "../ui/useShortcut";
@@ -91,6 +93,14 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
   const connection = useConnectionState();
   const { chats, chatsLoaded, plan, providerUsage, epoch } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
+  // The chats this phone asked the Mac to start that it hasn't yet (or couldn't), each with its page. Whether a start's page is
+  // still in the stack is read when the Mac answers, after the render that last saw it.
+  const [starts, setStarts] = useState<Record<string, StartShown>>({});
+  const stackNow = useRef(stack);
+  stackNow.current = stack;
+  // The starts whose page has been in the stack: one the Mac refused at once may not be there yet, and is about to be.
+  const startsShown = useRef(new Set<string>());
+  for (const r of stack) if (r.name === "starting") startsShown.current.add(r.id);
   // A tablet shows the chats beside the chat ("split") or slides them in over it when asked and away once a chat is chosen
   // ("overlay"); a phone has the stack alone. Which of the two the chats get is the person's pin, or the window's, unpinned.
   const colors = useColors();
@@ -262,6 +272,53 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
     go({ type: tablet ? "jump_to_chat" : "open_chat", slot });
     setChatsOpen(false);
   };
+  // A new chat asked of the Mac: its page opens now, saying it is starting, and becomes the chat when the Mac answers.
+  const forget = (id: string) =>
+    setStarts((s) => {
+      const { [id]: _, ...rest } = s;
+      return rest;
+    });
+  const follow = (start: Start, asked: Promise<string>) => {
+    setStarts((s) => ({ ...s, [start.id]: { start, problem: null } }));
+    asked.then(
+      (slot) => {
+        go({ type: "started", id: start.id, slot });
+        forget(start.id);
+        startsShown.current.delete(start.id);
+      },
+      (e: Error) => {
+        const problem = e?.message || "Your Mac didn't start the chat.";
+        // Its page says why, with Try again. Left already, it would be lost: said here instead, the message with it.
+        const onPage = !startsShown.current.has(start.id) || stackNow.current.some((r) => r.name === "starting" && r.id === start.id);
+        if (onPage) setStarts((s) => (s[start.id] ? { ...s, [start.id]: { start, problem } } : s));
+        else {
+          forget(start.id);
+          Alert.alert("Your chat didn't start", `${problem}\n\n“${start.text.slice(0, 200)}${start.text.length > 200 ? "…" : ""}”`, [
+            { text: "OK", style: "cancel" },
+            { text: "Edit message", onPress: () => setNewChat({ text: start.text, project: start.project }) },
+          ]);
+        }
+      },
+    );
+  };
+  const openStart = (start: Start) => {
+    if (tablet) movePanes();
+    go({ type: "start_chat", id: start.id, jump: tablet });
+    setChatsOpen(false);
+    follow(start, start.asked);
+  };
+  // Try again: the same message and choices, asked again.
+  const retryStart = (start: Start) => follow(start, start.ask());
+  // Edit message: back to the sheet with it (its page goes).
+  const editStart = (start: Start) => {
+    back();
+    forget(start.id);
+    setNewChat({ text: start.text, project: start.project });
+  };
+  const startPage = (id: string, onBack?: () => void) => {
+    const shown = starts[id];
+    return shown ? <StartingChat shown={shown} onBack={onBack} onRetry={() => retryStart(shown.start)} onEdit={() => editStart(shown.start)} /> : null;
+  };
   // A tablet's Your work is in its main area, where no chat is open: back to that.
   // What a tablet's main area shows where no chat is open: Your work, or Insights (a phone has a tab for each).
   const [tabletPage, setTabletPage] = useState<"work" | "insights">("work");
@@ -392,20 +449,24 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
           case "home":
             // A phone's bottom screen is its tabs: the chats, Your work and Insights, with the button that starts a chat.
             return { key: `${i}:home`, kind: "push", element: <PhoneTabs onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} onComposeNew={(voice) => setNewChat({ text: "", voice })} /> };
+          // A chat started from here keeps its starting page's key: it becomes the chat in place, not a page pushed over it.
           case "chat":
-            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} onStartNew={startNew} /> };
+            return { key: `${i}:chat:${route.via ?? route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} onStartNew={startNew} /> };
+          case "starting":
+            return { key: `${i}:chat:${route.id}`, kind: "push", element: startPage(route.id, back) };
           case "decide":
             return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
         }
       });
   const shown = shownSlot(stack);
+  const startingShown = tablet ? shownStart(stack) : null;
   const deciding = decision(stack);
   return fade(
     "stack",
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} page={tabletPage} feature={workFeature} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
+          <TabletDetail slot={shown} starting={startingShown ? startPage(startingShown) : null} decide={deciding} page={tabletPage} feature={workFeature} layout={shellLayout} chatsOpen={chatsOpen} onShowChats={() => setChatsOpen(true)} onBack={back} onOpenChat={openChat} onReview={review} onStartNew={startNew} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
@@ -447,9 +508,10 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened, openTodos, onTo
           listen={newChat.voice}
           continueChat={newChat.continueChat}
           onClose={() => setNewChat(null)}
-          onStarted={(slot) => {
+          onStarted={(to) => {
             setNewChat(null);
-            openChat(slot);
+            if (typeof to === "string") openChat(to);
+            else openStart(to);
           }}
         />
       )}

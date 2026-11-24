@@ -27,6 +27,7 @@ it("puts the sheet away first, and opens the chat only once it has gone (iOS's s
   await waitFor(() => expect(mockSheet.close).toHaveBeenCalled());
   expect(onStarted).not.toHaveBeenCalled();
   await act(async () => mockSheet.gone?.());
-  expect(onStarted).toHaveBeenCalledWith("s9");
+  expect(onStarted).toHaveBeenCalledWith(expect.objectContaining({ text: "Fix it" }));
+  await expect(onStarted.mock.calls[0][0].asked).resolves.toBe("s9");
   expect(onClose).not.toHaveBeenCalled();
 });

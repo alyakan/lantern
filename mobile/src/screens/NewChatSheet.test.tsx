@@ -68,7 +68,9 @@ describe("starting a chat from the phone", () => {
         expect(chip("lantern")).toBeTruthy();
     await write("Fix the login bug");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
-    await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s9"));
+    // The chat opens at once, with what the Mac will answer still on its way.
+    expect(onStarted).toHaveBeenCalledWith(expect.objectContaining({ project: "/Users/me/lantern", projectName: "lantern", text: "Fix the login bug", thumbs: [] }));
+    await expect(onStarted.mock.calls[0][0].asked).resolves.toBe("s9");
     expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug", permissions: null, preset: null, workflow: null });
   });
 
@@ -123,15 +125,25 @@ describe("starting a chat from the phone", () => {
     expect(chip("lantern")).toBeTruthy();
   });
 
-  it("says why when the Mac wouldn't start it, and keeps what was written", async () => {
-    const { onStarted } = await open({ projects, new_chat: new Error("This phone has started a lot of chats just now. Try again in a few minutes.") });
+  it("hands on why the Mac wouldn't start it, and asks again the same way from Try again", async () => {
+    const { onStarted, asked } = await open({ projects, new_chat: new Error("This phone has started a lot of chats just now. Try again in a few minutes.") });
     await projectsHere();
     await write("one more");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
-    await waitFor(() => expect(screen.getByText(/started a lot of chats/)).toBeTruthy());
-    expect(onStarted).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("What to start with").props.value).toBe("one more");
-    expect(screen.getByRole("button", { name: "Start the chat" })).not.toBeDisabled();
+    const start = onStarted.mock.calls[0][0];
+    await expect(start.asked).rejects.toThrow(/started a lot of chats/);
+    await expect(start.ask()).rejects.toThrow(/started a lot of chats/);
+    expect(asked.filter((r) => r.op === "new_chat").map((r) => r.text)).toEqual(["one more", "one more"]);
+  });
+
+  it("starts one chat however often Start is tapped as the sheet goes", async () => {
+    const { onStarted, asked } = await open();
+    await projectsHere();
+    await write("Just once");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    expect(onStarted).toHaveBeenCalledTimes(1);
+    expect(asked.filter((r) => r.op === "new_chat")).toHaveLength(1);
   });
 
   it("says so when there are no projects, and when they couldn't be fetched", async () => {

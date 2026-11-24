@@ -1,4 +1,4 @@
-import { atRoot, decision, home, navigate, shownSlot, type Nav } from "./nav";
+import { atRoot, decision, home, navigate, shownSlot, shownStart, type Nav } from "./nav";
 
 describe("navigation", () => {
   it("opens a chat over Home, then a decision over the chat, and backs out one at a time", () => {
@@ -50,5 +50,33 @@ describe("on a tablet", () => {
     const stack = navigate(home, { type: "jump_to_chat", slot: "a" });
     expect(shownSlot(stack)).toBe("a");
     expect(atRoot(stack)).toBe(false);
+  });
+});
+
+describe("a chat started from here", () => {
+  it("opens at once as a starting page, and becomes the chat in its place when the Mac answers", () => {
+    const starting = navigate(home, { type: "start_chat", id: "s1" });
+    expect(starting).toEqual([{ name: "home" }, { name: "starting", id: "s1" }]);
+    expect(navigate(starting, { type: "started", id: "s1", slot: "a" })).toEqual([{ name: "home" }, { name: "chat", slot: "a", via: "s1" }]);
+  });
+
+  it("leaves the stack alone when its page was gone back from before the Mac answered", () => {
+    const left = navigate(navigate(home, { type: "start_chat", id: "s1" }), { type: "back" });
+    expect(navigate(left, { type: "started", id: "s1", slot: "a" })).toBe(left);
+  });
+
+  it("is the same chat as one opened from the list, so it isn't stacked twice", () => {
+    const started = navigate(navigate(home, { type: "start_chat", id: "s1" }), { type: "started", id: "s1", slot: "a" });
+    expect(navigate(started, { type: "open_chat", slot: "a" })).toBe(started);
+  });
+
+  it("on a tablet, takes the chat's place beside the chats and is shown there until it is a chat", () => {
+    const starting = navigate(navigate(home, { type: "open_chat", slot: "x" }), { type: "start_chat", id: "s1", jump: true });
+    expect(starting).toEqual([{ name: "home" }, { name: "starting", id: "s1" }]);
+    expect(shownSlot(starting)).toBeNull();
+    expect(shownStart(starting)).toBe("s1");
+    const started = navigate(starting, { type: "started", id: "s1", slot: "a" });
+    expect(shownSlot(started)).toBe("a");
+    expect(shownStart(started)).toBeNull();
   });
 });

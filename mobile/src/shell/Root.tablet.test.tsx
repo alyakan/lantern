@@ -788,3 +788,25 @@ describe("dragging the chats in and out on a tablet with them not pinned", () =>
     expect(column().props.onMoveShouldSetResponder).toBeUndefined();
   });
 });
+
+describe("a chat started on a tablet", () => {
+  it("shows beside the chats at once, before the Mac answers, and becomes the chat there when it does", async () => {
+    const { controller } = makeController();
+    seed(controller, { chats: two });
+    let answer: (v: unknown) => void = () => {};
+    const { lastOf } = attachSession(controller, { list_waiting: [], projects: [{ id: "/Users/me/lantern", name: "lantern" }], new_chat: () => new Promise((r) => (answer = r)) });
+    await render(<Root controller={controller} />);
+    await settle();
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    expect(screen.getByTestId("starting-chat")).toBeTruthy();
+    expect(screen.getByLabelText("You: Fix the login bug")).toBeTruthy();
+    await act(async () => answer({ slot: "s9" }));
+    await settle();
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
+  });
+});

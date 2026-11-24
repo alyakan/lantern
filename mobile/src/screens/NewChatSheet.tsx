@@ -26,6 +26,7 @@ import { PastedCards, PastedSheet } from "./PastedText";
 import { pastedPart } from "../view/paste";
 import { MarkupSheet } from "./MarkupSheet";
 import type { PickedImage } from "../view/attachments";
+import { newStartId, type Start } from "../shell/starting";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -50,8 +51,8 @@ export interface NewChatProps {
   /** Start listening at once (the compose button was held down). */
   listen?: boolean;
   onClose: () => void;
-  /** The chat was started on the Mac: its slot. */
-  onStarted: (slot: string) => void;
+  /** Sent: the chat carried on (its slot), or a new chat asked of the Mac, to open at once while the Mac starts it. */
+  onStarted: (to: string | Start) => void;
 }
 
 /**
@@ -80,8 +81,6 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
   const message = () => [...pasted.map((p) => p.text.trim()), text.trim()].filter(Boolean).join("\n\n");
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // Talking instead of typing, and photos to go with the first message (a Mac that takes them).
   const dictation = useDictation(text, setText);
   const attach = useAttachments();
@@ -111,14 +110,14 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     };
   }, []);
   // A chat started: the sheet slides away first (iOS's own sheet stays up if it is just taken away), then the chat opens.
-  const started = useRef<string | null>(null);
+  const started = useRef<string | Start | null>(null);
   const closeSheet = useRef<(() => void) | null>(null);
-  // Swiped away while the chat was starting: there is no sheet left to wait for, and the chat still opens.
+  // Swiped away as it was sent: there is no sheet left to wait for, and the chat still opens.
   const gone = useRef(false);
-  const finish = (slot: string) => {
-    started.current = slot;
+  const finish = (to: string | Start) => {
+    started.current = to;
     if (closeSheet.current && !gone.current) closeSheet.current();
-    else onStarted(slot);
+    else onStarted(to);
   };
   const [preset, setPreset] = useState<string | null>(null);
   // Where it runs: the project's own unless chosen. A Mac with only Claude Code to offer (or an older one) offers no choice.
@@ -211,32 +210,33 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     setChoosingProject(false);
   };
 
-  const ready = (!!continueChat || !!project) && hasWords && !busy && !attach.busy;
-  const start = async () => {
-    if (!ready) return;
+  const ready = (!!continueChat || !!project) && hasWords && !attach.busy;
+  const start = () => {
+    // (Once: a second tap while the sheet slides away would start a second chat.)
+    if (!ready || started.current) return;
     if (continueChat) {
       // A send never throws: it shows in the chat at once, and says there if it didn't go.
       void sync.send(continueChat.slot, message());
       return finish(continueChat.slot);
     }
     if (!project) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Only what was chosen is sent, and only to a Mac that can take it.
-      // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
-      dictation.cancel();
-      // (A model only from the list of where it runs, and its effort only if that model takes it.)
-      const ownModel = pickedModel ? { model: pickedModel.value, ...(effort && pickedModel.effort_levels.includes(effort) ? { effort } : {}) } : {};
-      const slot = await sync.newChat(project, message(), supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {}, canPhotos ? attach.images : []);
-      void saveLastProject(project);
-      // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
-      if (supported && !note) void saveNewChatPermissions(permissions);
-      finish(slot);
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
+    dictation.cancel();
+    // Only what was chosen is sent, and only to a Mac that can take it.
+    // (A provider with no Auto, or no presets, is sent neither, whatever was chosen before it was; nor Auto to a Mac that doesn't let phones use it.)
+    // (A model only from the list of where it runs, and its effort only if that model takes it.)
+    const ownModel = pickedModel ? { model: pickedModel.value, ...(effort && pickedModel.effort_levels.includes(effort) ? { effort } : {}) } : {};
+    const choice = supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {};
+    const text = message();
+    const images = canPhotos ? attach.images : [];
+    const ask = () => sync.newChat(project, text, choice, images);
+    const asked = ask();
+    // (Its page says why if it fails; until the sheet has gone and the page is there, a failure is not left unheard.)
+    asked.catch(() => {});
+    void saveLastProject(project);
+    // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
+    if (supported && !note) void saveNewChatPermissions(permissions);
+    // The chat opens now, not once the Mac answers: its page says it is starting, and becomes the chat when the Mac has it.
+    finish({ id: newStartId(), project, projectName: projects?.find((p) => p.id === project)?.name ?? project, text, thumbs: images.map((i) => i.uri), asked, ask });
   };
 
   const workflowName = WORKFLOWS.find((w) => w.value === workflow)?.label ?? "Chat";
@@ -268,7 +268,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
         return (
         <View style={[{ flexShrink: 1 }]}>
           {/* iOS's sheet bar: Cancel in glass at the left, the title in the middle (a swipe down closes it too). */}
-          <SheetBar title={continueChat ? "Carry on" : "New chat"} close={{ label: "Cancel", onPress: close, disabled: busy }} />
+          <SheetBar title={continueChat ? "Carry on" : "New chat"} close={{ label: "Cancel", onPress: close }} />
           {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
           <ScrollView ref={scroll} style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.lg, paddingTop: 8, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 12 }}>
             {continueChat && (
@@ -304,12 +304,12 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
                   placeholder={dictation.listening ? (dictation.ready ? "Listening\u2026" : "Getting ready\u2026") : chosen ? `What should ${chosen.name} start with?` : "What should the agent work on?"}
                   placeholderTextColor={colors.ink3}
                   multiline
-                  editable={!busy}
+                  editable
                   style={{ flex: 1, minHeight: barButton, maxHeight: 200, color: colors.ink, ...FIELD, paddingHorizontal: 8, paddingTop: 14, paddingBottom: 8, textAlignVertical: "top" }}
                 />
                 {/* Once there are words, the box is for sending them: the microphone steps aside (unless it is listening). */}
-                {dictation.available && !busy && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
-                <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={() => void start()} />
+                {dictation.available && (!hasWords || dictation.listening) && <MicButton listening={dictation.listening} ready={dictation.ready} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
+                <SendButton ready={ready} label={continueChat ? "Send" : "Start the chat"} onPress={start} />
               </View>
             </View>
 
@@ -476,16 +476,6 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
               </FadeSlideIn>
             )}
 
-            {error && (continueChat || (projects && projects.length > 0)) && (
-              <Txt variant="small" tone="stop" accessibilityRole="alert">
-                {error}
-              </Txt>
-            )}
-            {busy && (
-              <Txt variant="small" tone="ink2" accessibilityLiveRegion="polite">
-                {continueChat ? "Sending…" : "Starting…"}
-              </Txt>
-            )}
           </ScrollView>
           {readingPaste !== null && <PastedSheet text={readingPaste} onClose={() => setReadingPaste(null)} />}
           {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
