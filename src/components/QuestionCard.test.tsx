@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QuestionCard } from "./QuestionCard";
+import { PermissionCard } from "./PermissionCard";
 import { readQuestions, withAnswers } from "../lib/questions";
 
 const input = {
@@ -76,5 +77,15 @@ describe("QuestionCard", () => {
     rerender(<QuestionCard item={item({ decision: "allowed", note: "Retries: In each caller" })} onDecide={onDecide} />);
     expect(screen.getByText("✓ Answered")).toBeInTheDocument();
     expect(screen.getByText(/Retries: In each caller/)).toBeInTheDocument();
+  });
+
+  it("is the card an Antigravity chat's question gets too, naming Antigravity as the one asking", () => {
+    const onDecide = vi.fn();
+    render(<PermissionCard item={item({ provider: "antigravity", input: { questions: [input.questions[0]] } })} onDecide={onDecide} />);
+    expect(screen.getByText("Antigravity is asking")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /In each caller/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(onDecide.mock.lastCall![3].answers).toEqual({ "Where should retries live?": "In each caller" });
   });
 });

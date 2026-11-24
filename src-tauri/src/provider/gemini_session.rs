@@ -8,6 +8,7 @@
 //! It also advertises no file or terminal service, so the agent reads, writes and runs things itself, in the chat's folder,
 //! and asks before it does what the chat's mode says to ask about.
 
+use super::acp_question;
 use super::claude_session::{next_line, push_tail, signal_group, write_line, STDERR_TAIL_BYTES};
 use super::gemini::{version_of, AcpAgent};
 use super::gemini_events::{config_model_options, model_options, sign_in_text, signed_out, GeminiMapper};
@@ -87,11 +88,17 @@ enum Ready {
 struct Pending {
     /// The JSON-RPC id of the agent's request, to answer it by.
     rpc_id: Value,
-    /// The option that allows this one action, and the one that refuses it.
-    allow: String,
-    reject: Option<String>,
+    asks: Asks,
     /// The card as the window was shown it, which a paired phone reads to show and answer it.
     asked: crate::permission::bridge::Pending,
+}
+
+/// What a card asks, which decides how its answer goes back.
+enum Asks {
+    /// Permission for one action: the option that allows it, and the one that refuses it.
+    Permission { allow: String, reject: Option<String> },
+    /// The agent's questions (`elicitation/create`), answered with the form's content.
+    Question(Vec<acp_question::Field>),
 }
 
 #[derive(Default)]
@@ -653,10 +660,15 @@ impl GeminiSession {
         self.ctx.state.lock().unwrap().pending.values().map(|p| p.asked.clone()).collect()
     }
 
-    /// The user's answer to a card. False when there is no such card (it was answered, or it isn't this agent's).
-    pub async fn respond_permission(&mut self, request_id: &str, allow: bool) -> bool {
+    /// The user's answer to a card, with the question card's answers (AskUserQuestion's input with `answers` in it) when
+    /// it was a question. False when there is no such card (it was answered, or it isn't this agent's).
+    pub async fn respond(&mut self, request_id: &str, allow: bool, answered: Option<&Value>) -> bool {
         let Some(p) = self.ctx.state.lock().unwrap().pending.remove(request_id) else { return false };
-        self.ctx.answer(&p.rpc_id, outcome(&p, allow)).await;
+        let result = match &p.asks {
+            Asks::Permission { allow: yes, reject } => outcome(yes, reject.as_deref(), allow),
+            Asks::Question(fields) => acp_question::reply(fields, allow, answered),
+        };
+        self.ctx.answer(&p.rpc_id, result).await;
         true
     }
 
@@ -665,7 +677,11 @@ impl GeminiSession {
         let pending: Vec<(String, Pending)> = self.ctx.state.lock().unwrap().pending.drain().collect();
         for (request_id, p) in pending {
             let ctx = self.ctx.clone();
-            tokio::spawn(async move { ctx.answer(&p.rpc_id, cancelled()).await });
+            let result = match p.asks {
+                Asks::Permission { .. } => cancelled(),
+                Asks::Question(_) => acp_question::cancelled(),
+            };
+            tokio::spawn(async move { ctx.answer(&p.rpc_id, result).await });
             (self.ctx.sink)(UiEvent::PermissionWithdrawn { request_id });
         }
     }
@@ -692,9 +708,9 @@ impl GeminiSession {
 
 /// The JSON-RPC result that answers a permission request: `allow` chooses the option for this one action; otherwise the
 /// refusing option, or (when it offers none) the cancelled outcome, which refuses the same way.
-fn outcome(p: &Pending, allow: bool) -> Value {
-    match (allow, &p.reject) {
-        (true, _) => json!({"outcome": {"outcome": "selected", "optionId": p.allow}}),
+fn outcome(yes: &str, reject: Option<&str>, allow: bool) -> Value {
+    match (allow, reject) {
+        (true, _) => json!({"outcome": {"outcome": "selected", "optionId": yes}}),
         (false, Some(reject)) => json!({"outcome": {"outcome": "selected", "optionId": reject}}),
         (false, None) => cancelled(),
     }
@@ -707,13 +723,18 @@ fn cancelled() -> Value {
 /// The handshake, then the conversation: a new one, or the one `resume` names.
 async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>) -> Result<(), String> {
     let name = ctx.agent.name();
+    // No file or terminal service: the agent reads, writes and runs things itself, in the chat's folder.
+    let mut capabilities = json!({"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false});
+    // Its questions come as forms, which become question cards (see acp_question).
+    if ctx.agent.asks_with_forms() {
+        capabilities["elicitation"] = json!({"form": {}});
+    }
     let init = ctx
         .request(
             "initialize",
             json!({
                 "protocolVersion": PROTOCOL_VERSION,
-                // No file or terminal service: the agent reads, writes and runs things itself, in the chat's folder.
-                "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+                "clientCapabilities": capabilities,
                 "clientInfo": {"name": "lantern", "title": "Lantern", "version": env!("CARGO_PKG_VERSION")},
             }),
             OPEN_WAIT,
@@ -742,13 +763,16 @@ fn deliver(ctx: &Ctx, id: &Value, v: &Value) {
     let _ = tx.send(reply);
 }
 
-/// A request from the agent. Permission requests become cards; one that can't be shown as it is is declined at once;
-/// anything else is refused, because the agent waits for a reply to each (Lantern offers it no file or terminal service).
+/// A request from the agent. Permission requests and questions become cards; one that can't be shown as it is is declined
+/// at once; anything else is refused, because the agent waits for a reply to each (Lantern offers it no file or terminal
+/// service).
 fn server_request(ctx: &Ctx, method: &str, id: &Value, params: &Value) {
-    if method != "session/request_permission" {
+    let question = method == "elicitation/create" && ctx.agent.asks_with_forms();
+    if method != "session/request_permission" && !question {
         refuse_later(ctx, id, format!("Lantern doesn't handle {method} requests."));
         return;
     }
+    let refused = |ctx: &Ctx, id: &Value| answer_later(ctx, id, if question { acp_question::cancelled() } else { cancelled() });
     // The agent's ids are its own to keep apart; one that is already waiting would have two cards answered by one reply, so
     // the card waiting is taken off and the id is answered as refused.
     let twins: Vec<String> = {
@@ -760,31 +784,34 @@ fn server_request(ctx: &Ctx, method: &str, id: &Value, params: &Value) {
     if !twins.is_empty() {
         twins.into_iter().for_each(|request_id| (ctx.sink)(UiEvent::PermissionWithdrawn { request_id }));
         declined_step(ctx, "the request reused the number of one still waiting");
-        answer_later(ctx, id, cancelled());
+        refused(ctx, id);
         return;
     }
     // Asked about this conversation, and no other.
     let ours = ctx.state.lock().unwrap().session_id.clone();
     let request = if params["sessionId"].as_str().is_none() || params["sessionId"].as_str() != ours.as_deref() {
         Err("it is not about this conversation".to_string())
+    // A question only asks; the user's answer allows nothing.
+    } else if question {
+        acp_question::read_form(params).map(|(input, fields)| (acp_question::QUESTION_TOOL.to_string(), input, Asks::Question(fields)))
     // A read-only agent shares its Lead's folder: nothing it asks for is allowed, so the user isn't asked (one Allow would
     // let it write there).
     } else if ctx.read_only {
         Err("this agent is read-only".to_string())
     } else {
-        ctx.mapper.lock().unwrap().approval(params)
+        ctx.mapper.lock().unwrap().approval(params).map(|a| (a.tool_name, a.input, Asks::Permission { allow: a.allow, reject: a.reject }))
     };
     match request {
-        Ok(a) => {
+        Ok((tool_name, input, asks)) => {
             let request_id = format!("{}-{}", ctx.agent.slug(), CARDS.fetch_add(1, Ordering::SeqCst) + 1);
             let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-            let asked = crate::permission::bridge::Pending { request_id: request_id.clone(), tool_name: a.tool_name.clone(), input: a.input.clone(), at };
-            ctx.state.lock().unwrap().pending.insert(request_id.clone(), Pending { rpc_id: id.clone(), allow: a.allow, reject: a.reject, asked });
-            (ctx.sink)(UiEvent::PermissionRequested { request_id, tool_name: a.tool_name, input: a.input });
+            let asked = crate::permission::bridge::Pending { request_id: request_id.clone(), tool_name: tool_name.clone(), input: input.clone(), at };
+            ctx.state.lock().unwrap().pending.insert(request_id.clone(), Pending { rpc_id: id.clone(), asks, asked });
+            (ctx.sink)(UiEvent::PermissionRequested { request_id, tool_name, input });
         }
         Err(why) => {
             declined_step(ctx, &why);
-            answer_later(ctx, id, cancelled());
+            refused(ctx, id);
         }
     }
 }
@@ -901,12 +928,9 @@ mod tests {
 
     #[test]
     fn a_decision_selects_the_option_for_this_one_action_or_refuses_it() {
-        let asked = crate::permission::bridge::Pending { request_id: "gemini-1".into(), tool_name: "Bash".into(), input: json!({}), at: 0 };
-        let both = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: Some("cancel".into()), asked: asked.clone() };
-        assert_eq!(outcome(&both, true), json!({"outcome": {"outcome": "selected", "optionId": "proceed_once"}}));
-        assert_eq!(outcome(&both, false), json!({"outcome": {"outcome": "selected", "optionId": "cancel"}}));
-        let only_allow = Pending { rpc_id: json!(7), allow: "proceed_once".into(), reject: None, asked };
-        assert_eq!(outcome(&only_allow, false), json!({"outcome": {"outcome": "cancelled"}}));
+        assert_eq!(outcome("proceed_once", Some("cancel"), true), json!({"outcome": {"outcome": "selected", "optionId": "proceed_once"}}));
+        assert_eq!(outcome("proceed_once", Some("cancel"), false), json!({"outcome": {"outcome": "selected", "optionId": "cancel"}}));
+        assert_eq!(outcome("proceed_once", None, false), json!({"outcome": {"outcome": "cancelled"}}));
     }
 
     #[test]
@@ -1096,6 +1120,77 @@ case "$answer" in
 esac
 reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
 
+    /// An Antigravity question as `agy acp` 1.5.15 asked it (its `ask_question` tool, with a client that can show forms):
+    /// the form, then the reply it was answered with, as the tool's result.
+    const AGY_QUESTION: &str = r#"say '{"sessionUpdate":"tool_call","toolCallId":"q1","name":"ask_question","status":"pending","kind":"other","title":"Run ask_question","rawInput":{"questions":[{"is_multi_select":false,"options":["Red","Green"],"question":"Which colour?"}]}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"elicitation/create","params":{"sessionId":"sess-1","toolCallId":"q1","mode":"form","message":"The agent has a question.","requestedSchema":{"type":"object","properties":{"q1":{"type":"string","title":"Which colour?","oneOf":[{"const":"1","title":"Red"},{"const":"2","title":"Green"}]},"q1_other":{"type":"string","title":"Other","description":"Optional free-form answer to: Which colour?"}}}},"id":"1"}'
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+say '{"sessionUpdate":"tool_call_update","toolCallId":"q1","status":"completed","kind":"other"}'
+reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
+
+    async fn ask_agy(dir: &Path) -> (Session, mpsc::UnboundedReceiver<UiEvent>, String) {
+        let (mut s, mut rx) = open_agy(&Fake::agy(AGY_QUESTION), dir, |_| {}).await;
+        s.send("ask me").await.unwrap();
+        let (request_id, tool, input) = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {
+            UiEvent::PermissionRequested { request_id, tool_name, input } => (request_id, tool_name, input),
+            _ => unreachable!(),
+        };
+        assert_eq!(tool, "AskUserQuestion");
+        assert_eq!(input, json!({"questions": [{"question": "Which colour?", "header": "", "options": [{"label": "Red", "description": ""}, {"label": "Green", "description": ""}], "multiSelect": false}]}));
+        (s, rx, request_id)
+    }
+
+    fn answer_to(dir: &Path, id: &str) -> Value {
+        let all = sent(dir);
+        all.iter().find(|m| m["id"] == id && m.get("method").is_none()).cloned().unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn antigravity_is_told_lantern_shows_forms_and_its_question_is_a_question_card_answered_with_the_option_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx, request_id) = ask_agy(dir.path()).await;
+        assert_eq!(requests(dir.path(), "initialize")[0]["params"]["clientCapabilities"]["elicitation"], json!({"form": {}}));
+        // A phone sees it too, as the same question.
+        assert_eq!(s.pending_permissions()[0].tool_name, "AskUserQuestion");
+        let card = json!({"questions": [], "answers": {"Which colour?": "Green"}});
+        assert!(s.respond_permission(&request_id, true, Some(&card)).await);
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        assert_eq!(answer_to(dir.path(), "1")["result"], json!({"action": "accept", "content": {"q1": "2"}}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_skipped_antigravity_question_is_declined_and_one_the_turn_was_stopped_on_is_cancelled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx, request_id) = ask_agy(dir.path()).await;
+        assert!(s.respond_permission(&request_id, false, None).await);
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        assert_eq!(answer_to(dir.path(), "1")["result"], json!({"action": "decline"}));
+        s.stop().await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx, request_id) = ask_agy(dir.path()).await;
+        s.interrupt().await;
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionWithdrawn { .. })).await, UiEvent::PermissionWithdrawn { request_id: r } if r == request_id));
+        wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == "1" && m.get("result").is_some())).await;
+        assert_eq!(answer_to(dir.path(), "1")["result"], json!({"action": "cancel"}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn gemini_cli_is_not_offered_forms_and_a_form_it_sends_anyway_is_refused() {
+        let ask = AGY_QUESTION.replace("IFS= read -r answer\nprintf '%s\\n' \"$answer\" >> \"$LOG\"\n", "");
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&ask), dir.path()).await;
+        assert!(requests(dir.path(), "initialize")[0]["params"]["clientCapabilities"].get("elicitation").is_none());
+        s.send("ask me").await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == "1" && m.get("error").is_some())).await;
+        assert!(all.iter().any(|m| m["id"] == "1" && m["error"]["message"].as_str().is_some_and(|t| t.contains("elicitation/create"))));
+        s.stop().await;
+    }
+
     async fn open_agy(fake: &Fake, dir: &Path, change: impl FnOnce(&mut SessionConfig)) -> (Session, mpsc::UnboundedReceiver<UiEvent>) {
         let (sink, rx) = channel_sink();
         let mut cfg = config(fake.script(dir), dir, None, Role::Normal);
@@ -1151,7 +1246,7 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
         assert_eq!(input["cwd"].as_str(), Some(dir.path().display().to_string().as_str()));
         // A phone sees it too.
         assert_eq!(s.pending_permissions().len(), 1);
-        assert!(s.respond_permission(&request_id, false).await);
+        assert!(s.respond_permission(&request_id, false, None).await);
         let all = wait_sent(dir.path(), |all| all.iter().any(|m| m.get("result").is_some() && m["id"] == "1")).await;
         let answer = all.iter().find(|m| m["id"] == "1").unwrap();
         assert_eq!(answer["result"], json!({"outcome": {"outcome": "selected", "optionId": "deny"}}));
@@ -1259,7 +1354,7 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
         assert_eq!(tool_name, "Bash");
         assert!(input["command"].as_str().unwrap_or("").contains("echo lantern-live-check"), "{input}");
         assert_eq!(input["provider"], "antigravity");
-        assert!(s.respond_permission(&request_id, false).await);
+        assert!(s.respond_permission(&request_id, false, None).await);
         let done = tokio::time::timeout(wait(180), async {
             loop {
                 let ev = rx.recv().await.unwrap();
@@ -1274,6 +1369,64 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
         println!("done: {done:?}\n{events:#?}");
         assert_eq!(done.0, 1, "the denial counts as denied");
         assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "nothing was made in the folder");
+        s.stop().await;
+    }
+
+    /// Against the real `agy`: its `ask_question` tool comes as a question card, and the options picked on it reach it.
+    /// Run with `cargo test --lib real_agy -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn real_agy_asks_its_question_on_a_question_card_and_hears_what_was_picked() {
+        let agy = std::env::var("HOME").map(|h| PathBuf::from(h).join(".local/bin/agy")).unwrap();
+        assert!(agy.exists(), "agy isn't installed at {}", agy.display());
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(agy, dir.path(), None, Role::Normal);
+        cfg.provider = ProviderId::Antigravity;
+        cfg.effort = Some("low".into());
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        s.initialize().await;
+        let wait = |secs| Duration::from_secs(secs);
+        s.send("Use your ask_question tool once, with two questions: which fruits I like (several may be picked: Apple, Pear, Plum), and which drink I want (one only: Tea, Coffee). Do nothing else. After I answer, reply with exactly what I picked for each, nothing more.").await.unwrap();
+        let mut events = vec![];
+        let card = tokio::time::timeout(wait(180), async {
+            loop {
+                let ev = rx.recv().await.unwrap();
+                events.push(format!("{ev:?}"));
+                match ev {
+                    UiEvent::PermissionRequested { request_id, tool_name, input } => return Some((request_id, tool_name, input)),
+                    UiEvent::TurnDone { .. } => return None,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("the turn neither asked nor ended");
+        let (request_id, tool_name, input) = card.unwrap_or_else(|| panic!("no card was raised: {events:#?}"));
+        println!("card: {tool_name} {input}");
+        assert_eq!(tool_name, "AskUserQuestion");
+        let questions = input["questions"].as_array().unwrap();
+        let fruits = questions.iter().find(|q| q["multiSelect"] == true).expect("a question where several may be picked");
+        let drink = questions.iter().find(|q| q["multiSelect"] == false).expect("a question with one answer");
+        let answers = json!({"answers": {fruits["question"].as_str().unwrap(): "Pear, Plum", drink["question"].as_str().unwrap(): "Tea"}});
+        assert!(s.respond_permission(&request_id, true, Some(&answers)).await);
+        let mut said = String::new();
+        tokio::time::timeout(wait(180), async {
+            loop {
+                match rx.recv().await.unwrap() {
+                    UiEvent::AssistantText { text, .. } => said = text,
+                    UiEvent::TurnDone { .. } => return,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("the turn didn't end");
+        println!("agy said: {said}");
+        for picked in ["Pear", "Plum", "Tea"] {
+            assert!(said.contains(picked), "{picked} didn't reach agy: {said}");
+        }
+        assert!(!said.contains("Apple") && !said.contains("Coffee"), "agy heard something that wasn't picked: {said}");
         s.stop().await;
     }
 
@@ -1361,9 +1514,9 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
             _ => unreachable!(),
         };
         assert_eq!((tool.as_str(), input["command"].as_str(), input["provider"].as_str()), ("Bash", Some("cargo test"), Some("gemini")));
-        assert!(s.respond_permission(&request_id, true).await);
+        assert!(s.respond_permission(&request_id, true, None).await);
         // Answered once: a second answer finds no card.
-        assert!(!s.respond_permission(&request_id, true).await);
+        assert!(!s.respond_permission(&request_id, true, None).await);
         assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::ToolFinished { .. })).await, UiEvent::ToolFinished { is_error: false, output, .. } if output == "done"));
         let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900)).await;
         let answer = all.iter().find(|m| m["id"] == 900).unwrap();
@@ -1380,7 +1533,7 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
             UiEvent::PermissionRequested { request_id, .. } => request_id,
             _ => unreachable!(),
         };
-        assert!(s.respond_permission(&request_id, false).await);
+        assert!(s.respond_permission(&request_id, false, None).await);
         assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::ToolFinished { .. })).await, UiEvent::ToolFinished { is_error: true, output, .. } if output == "Declined."));
         assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await, UiEvent::TurnDone { denied: 1, .. }));
         let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900)).await;
@@ -1403,7 +1556,7 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
         assert_eq!(all.iter().find(|m| m["id"] == 900).unwrap()["result"], json!({"outcome": {"outcome": "cancelled"}}));
         assert_eq!(all.iter().find(|m| m["method"] == "session/cancel").unwrap()["params"], json!({"sessionId": "sess-1"}));
         // The card can't be answered afterwards.
-        assert!(!s.respond_permission(&request_id, true).await);
+        assert!(!s.respond_permission(&request_id, true, None).await);
         s.stop().await;
     }
 

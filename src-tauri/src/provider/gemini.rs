@@ -161,6 +161,13 @@ impl AcpAgent {
     pub fn config_options(self) -> bool {
         self == AcpAgent::Antigravity
     }
+
+    /// Asks the user its questions as a form (`elicitation/create`) when the client says it can show one, which Lantern
+    /// shows as a question card; without it, Antigravity writes the question out as text and ends the turn. Gemini CLI's
+    /// way of asking hasn't been checked, so it isn't offered there.
+    pub fn asks_with_forms(self) -> bool {
+        self == AcpAgent::Antigravity
+    }
 }
 
 /// Whether a Gemini that reports `version` speaks the protocol this provider does.

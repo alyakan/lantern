@@ -45,6 +45,10 @@ pub struct GeminiMapper {
     /// The message being streamed (Gemini sends it in pieces without an id), settled as a whole when something else begins.
     message: String,
     messages: u64,
+    /// This mapper's own part of its messages' ids. The window puts a reply into the message with the same id wherever it
+    /// is in the chat, and a chat's session is restarted many times (a model change, the phone, Lantern itself), so ids
+    /// that started again at 0 sent each new reply into an old one further up instead of after the user's message.
+    run: String,
     thinking: bool,
     declined: usize,
     session_tokens: u64,
@@ -55,13 +59,21 @@ pub struct GeminiMapper {
     agent: AcpAgent,
 }
 
+/// A tag no other mapper has, in this run of Lantern or an earlier one (whose messages a restored chat still shows): when
+/// it was made, and how many were made before it in this run.
+fn run_tag() -> String {
+    static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    format!("{at:x}{:x}", MADE.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+}
+
 impl GeminiMapper {
     pub fn new(cwd: &Path) -> Self {
         Self::for_agent(cwd, AcpAgent::Gemini)
     }
 
     pub fn for_agent(cwd: &Path, agent: AcpAgent) -> Self {
-        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, thinking: false, declined: 0, session_tokens: 0, context_window: None, user: String::new(), agent }
+        GeminiMapper { cwd: cwd.to_path_buf(), open: HashSet::new(), names: HashMap::new(), commands: HashMap::new(), message: String::new(), messages: 0, run: run_tag(), thinking: false, declined: 0, session_tokens: 0, context_window: None, user: String::new(), agent }
     }
 
     /// The `update` of a `session/update` notification.
@@ -137,7 +149,7 @@ impl GeminiMapper {
     }
 
     fn block(&self) -> String {
-        format!("{}-message-{}", self.agent.slug(), self.messages)
+        format!("{}-{}-message-{}", self.agent.slug(), self.run, self.messages)
     }
 
     /// The message so far is whole: it is said once, as the text it is.
@@ -617,16 +629,35 @@ mod tests {
     #[test]
     fn a_message_streams_by_block_and_settles_as_the_whole_text_when_a_tool_begins() {
         let mut m = mapper();
+        let first = format!("gemini-{}-message-0", m.run);
         let a = update(&mut m, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Hel"}}));
         let b = update(&mut m, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "lo"}}));
-        assert!(matches!(&a.events[0], UiEvent::TextDelta { block_id, text, .. } if block_id == "gemini-message-0" && text == "Hel"));
-        assert!(matches!(&b.events[0], UiEvent::TextDelta { block_id, text, .. } if block_id == "gemini-message-0" && text == "lo"));
+        assert!(matches!(&a.events[0], UiEvent::TextDelta { block_id, text, .. } if *block_id == first && text == "Hel"));
+        assert!(matches!(&b.events[0], UiEvent::TextDelta { block_id, text, .. } if *block_id == first && text == "lo"));
         let c = update(&mut m, json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "status": "in_progress", "title": "ls", "kind": "execute"}));
-        assert!(matches!(&c.events[0], UiEvent::AssistantText { block_id, text, .. } if block_id == "gemini-message-0" && text == "Hello"));
+        assert!(matches!(&c.events[0], UiEvent::AssistantText { block_id, text, .. } if *block_id == first && text == "Hello"));
         assert!(matches!(&c.events[1], UiEvent::ToolStarted { name, summary, .. } if name == "Bash" && summary == "ls"));
         // The next message is a block of its own.
         let d = update(&mut m, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Done"}}));
-        assert!(matches!(&d.events[0], UiEvent::TextDelta { block_id, .. } if block_id == "gemini-message-1"));
+        assert!(matches!(&d.events[0], UiEvent::TextDelta { block_id, .. } if *block_id == format!("gemini-{}-message-1", m.run)));
+    }
+
+    /// The chat that lost its replies: each restart's first reply was "antigravity-message-0", and the window put it into
+    /// the first session's reply, far up the chat.
+    #[test]
+    fn a_restarted_session_never_reuses_a_reply_id_an_earlier_one_used() {
+        let reply = |m: &mut GeminiMapper| {
+            update(m, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}));
+            let mut out = Mapped::default();
+            m.settle_message(&mut out);
+            match &out.events[0] {
+                UiEvent::AssistantText { block_id, .. } => block_id.clone(),
+                _ => unreachable!(),
+            }
+        };
+        let ids: Vec<String> = (0..50).map(|_| reply(&mut GeminiMapper::for_agent(Path::new("/w"), AcpAgent::Antigravity))).collect();
+        assert!(ids.iter().all(|id| id.starts_with("antigravity-")), "{ids:?}");
+        assert_eq!(ids.iter().collect::<HashSet<_>>().len(), ids.len(), "{ids:?}");
     }
 
     #[test]

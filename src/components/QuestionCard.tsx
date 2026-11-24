@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ChatItem } from "../store";
 import { RECOMMENDED, answered, answersLine, readQuestions, withAnswers, type Answer } from "../lib/questions";
 import { moveFocus } from "./useMenuKeys";
+import { CLAUDE, providerName } from "../lib/provider";
 
 type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 /** What Claude is told when you skip its question. */
@@ -27,10 +28,12 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
   }
   const set = (q: string, a: Answer) => setAnswers({ ...answers, [q]: a });
   const ready = questions.length > 0 && answered(questions, answers);
+  // The agent the chat runs on, by name: Claude, or another one that asked (Antigravity).
+  const who = providerName(item.provider ?? CLAUDE);
   return (
-    <div className="permission question-card" role="group" aria-label="Claude's question">
-      <div className="permission-title">{questions.length > 1 ? `Claude has ${questions.length} questions` : "Claude is asking"}</div>
-      {questions.length === 0 && <div className="settings-muted">Claude asked something Lantern couldn't read. Skip it, and answer in the chat instead.</div>}
+    <div className="permission question-card" role="group" aria-label={`${who}'s question`}>
+      <div className="permission-title">{questions.length > 1 ? `${who} has ${questions.length} questions` : `${who} is asking`}</div>
+      {questions.length === 0 && <div className="settings-muted">{who} asked something Lantern couldn't read. Skip it, and answer in the chat instead.</div>}
       {questions.map((q) => {
         const a = answers[q.question] ?? { picked: [], other: "" };
         const pick = (label: string) => {

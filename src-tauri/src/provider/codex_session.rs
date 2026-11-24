@@ -1275,9 +1275,9 @@ done
         assert_eq!(waiting.len(), 1);
         assert_eq!((&waiting[0].request_id, &waiting[0].tool_name, &waiting[0].input), (&id, &tool, &input));
         assert!(waiting[0].at > 0);
-        assert!(s.respond_permission(&id, true).await);
+        assert!(s.respond_permission(&id, true, None).await);
         assert!(s.pending_permissions().iter().all(|p| p.request_id != id));
-        assert!(!s.respond_permission(&id, true).await, "a card is answered once");
+        assert!(!s.respond_permission(&id, true, None).await, "a card is answered once");
 
         let (id2, tool2, input2) = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {
             UiEvent::PermissionRequested { request_id, tool_name, input } => (request_id, tool_name, input),
@@ -1285,7 +1285,7 @@ done
         };
         assert_eq!((tool2.as_str(), input2["file_path"].as_str()), ("Write", Some("Create /p/x.txt")));
         assert_ne!(id, id2);
-        assert!(s.respond_permission(&id2, false).await);
+        assert!(s.respond_permission(&id2, false, None).await);
         match next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await {
             UiEvent::TurnDone { denied, is_error: false, .. } => assert_eq!(denied, 1),
             _ => unreachable!(),
@@ -1407,7 +1407,7 @@ done
             UiEvent::PermissionWithdrawn { request_id } => assert_eq!(request_id, first),
             _ => unreachable!(),
         }
-        assert!(!s.respond_permission(&first, true).await, "the withdrawn card still answers");
+        assert!(!s.respond_permission(&first, true, None).await, "the withdrawn card still answers");
         let got = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900 && m.get("method").is_none())).await;
         assert!(got.iter().any(|m| m["id"] == 900 && m["error"].is_object() && m.get("result").is_none()));
         s.stop().await;
@@ -1439,8 +1439,8 @@ done
             _ => unreachable!(),
         };
         assert_eq!((tool.as_str(), input["file_path"].as_str()), ("Edit", Some("Create /p/a.txt\nEdit /etc/hosts")));
-        assert!(!s.respond_permission(&first, true).await, "the card that was replaced still answers");
-        assert!(s.respond_permission(&second, true).await);
+        assert!(!s.respond_permission(&first, true, None).await, "the card that was replaced still answers");
+        assert!(s.respond_permission(&second, true, None).await);
         let got = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900 && m.get("method").is_none())).await;
         assert_eq!(got.iter().filter(|m| m["id"] == 900 && m.get("method").is_none()).count(), 1, "one request, one answer");
         s.stop().await;

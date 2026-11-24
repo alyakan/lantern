@@ -6,6 +6,7 @@
 //! needs an MCP tool to ask permission, but another CLI may speak JSON-RPC and ask in the protocol itself. So the parser
 //! and the approval path belong to each provider's session, not to this trait.
 
+pub mod acp_question;
 pub mod claude;
 pub mod claude_session;
 pub mod codex;
