@@ -17,7 +17,7 @@ const projects = [{ id: "/Users/me/lantern", name: "lantern" }];
 
 it("puts the sheet away first, and opens the chat only once it has gone (iOS's sheet stays up if it is only taken away)", async () => {
   const { controller } = makeController();
-  attachSession(controller, { projects, new_chat: { slot: "s9" } });
+  const { asked } = attachSession(controller, { projects, new_chat: { slot: "s9" } });
   const onClose = jest.fn();
   const onStarted = jest.fn();
   await renderWith(<NewChatSheet onClose={onClose} onStarted={onStarted} />, {}, controller);
@@ -27,7 +27,8 @@ it("puts the sheet away first, and opens the chat only once it has gone (iOS's s
   await waitFor(() => expect(mockSheet.close).toHaveBeenCalled());
   expect(onStarted).not.toHaveBeenCalled();
   await act(async () => mockSheet.gone?.());
-  expect(onStarted).toHaveBeenCalledWith(expect.objectContaining({ text: "Fix it" }));
-  await expect(onStarted.mock.calls[0][0].asked).resolves.toBe("s9");
+  expect(onStarted).toHaveBeenCalledWith({ start: expect.stringMatching(/^start-/) });
+  // Asked of the Mac as Start was tapped, not once the sheet had gone.
+  expect(asked.filter((r) => r.op === "new_chat")).toEqual([expect.objectContaining({ text: "Fix it" })]);
   expect(onClose).not.toHaveBeenCalled();
 });

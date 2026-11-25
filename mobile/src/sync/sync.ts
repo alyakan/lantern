@@ -36,6 +36,29 @@ import { newShellId } from "../view/shell";
 import type { PickedImage } from "../view/attachments";
 import { initialState, reducer, type Action, type State } from "./reducer";
 
+/** What a new chat may be started on (see Sync.startChat). */
+export type NewChatChoice = { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string; model?: string; effort?: string; account?: string };
+
+/** A start as Sync keeps it while it goes (see Sync.startChat). */
+interface KeptStart {
+  id: string;
+  project: string;
+  text: string;
+  choice: NewChatChoice;
+  images: PickedImage[];
+  /** The first message's id, the same however often it is sent, so the Mac takes it once. */
+  clientId: string;
+  slot: string | null;
+  queued: string[];
+  /** Being asked of the Mac now. */
+  going: boolean;
+}
+
+/** How long the Mac has to make a new chat: its window opens it (a few seconds), and a slow Mac or a busy window takes longer. */
+export const NEW_CHAT_WAIT = 45_000;
+/** How long a chat's first message may take: the Mac holds it until the chat's agent is up, which it gives a minute and a half. */
+export const FIRST_SEND_WAIT = 120_000;
+
 export interface SyncDeps {
   /** Runs `fn` before the next frame (requestAnimationFrame in the app). */
   schedule?: (fn: () => void) => void;
@@ -329,9 +352,13 @@ export class Sync {
    */
   retry(slot: string, itemId: string) {
     const item = this.state.views[slot]?.items.find((it) => it.kind === "user" && it.id === itemId);
-    if (item?.kind !== "user" || !item.failed || !item.id.startsWith("local-")) return Promise.resolve();
-    return this.send(slot, item.text, [], item.id.slice("local-".length));
+    if (item?.kind !== "user" || !item.failed || item.stale || !item.id.startsWith("local-")) return Promise.resolve();
+    const clientId = item.id.slice("local-".length);
+    return this.send(slot, item.text, this.photos.get(clientId) ?? [], clientId);
   }
+
+  /** The photos of messages that didn't go, by their id, so Try again sends them too (kept while the app runs). */
+  private photos = new Map<string, PickedImage[]>();
 
   /**
    * Messages written while the Mac couldn't be reached (see `hold`), in the order they were written. Only those: one that was
@@ -412,9 +439,19 @@ export class Sync {
     }
   }
 
-  /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */
-  async send(slot: string, text: string, images: PickedImage[] = [], clientId: string = this.newId()) {
+  /**
+   * Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go (its photos are kept for
+   * Try again). In a chat whose first message is still going, it goes after that one. `wait`: how long the Mac has to answer.
+   */
+  async send(slot: string, text: string, images: PickedImage[] = [], clientId: string = this.newId(), wait?: number) {
     this.apply({ type: "sending", slot, clientId, text, at: this.now(), ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
+    const first = this.firstGoing.get(slot);
+    if (first) await first;
+    await this.deliver(slot, text, images, clientId, wait);
+  }
+
+  /** Sends a message already shown as sending: whether it went (if not, it says why, and its photos are kept for Try again). */
+  private async deliver(slot: string, text: string, images: PickedImage[], clientId: string, wait?: number): Promise<boolean> {
     let carded = false;
     try {
       // Only to a Mac that says it takes them: an older one would send the words and say nothing of the pictures.
@@ -426,11 +463,15 @@ export class Sync {
       }
       // Photos are megabytes to get across, so the Mac has longer to answer than for words.
       const request: Request = { op: "send", slot, text, client_id: clientId, ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
-      await (images.length > 0 ? this.ask(request, UPLOAD_WAIT) : this.ask(request));
+      await this.ask(request, wait ?? (images.length > 0 ? UPLOAD_WAIT : undefined));
+      this.photos.delete(clientId);
       if (carded) this.onSent?.(clientId);
+      return true;
     } catch (e) {
+      if (images.length > 0) this.photos.set(clientId, images);
       if (carded) this.onFailed?.(clientId);
       this.apply({ type: "send_failed", slot, clientId, error: (e as Error).message });
+      return false;
     }
   }
 
@@ -500,22 +541,104 @@ export class Sync {
   }
 
   /**
-   * Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac. It is on Ask unless
-   * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
-   * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
+   * Starts a chat in a project with a first message. It is kept here (see ChatStart), not on a page: it shows at once, starting,
+   * and stays until its chat is in the Mac's list, or says why the Mac didn't make it, with Try again.
+   *
+   * A Mac that takes a named start (`newchatstart`) is asked for the chat by the start's id, with no message, and answers as soon
+   * as the chat is made; asked again by the same id (Try again, or an answer that was lost), it answers with the same chat, never a
+   * second one. The first message then goes into the chat as any message does, photos and all, and says there if it didn't go,
+   * with Try again: the Mac holds it until the chat's agent is up, so it is given as long as that takes. An older Mac takes the
+   * message with the chat.
+   *
+   * It is on Ask unless `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of
+   * controls()' ids) or else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string; model?: string; effort?: string; account?: string } = {}, images: PickedImage[] = []): Promise<string> {
-    if (images.length > 0 && !this.has("newchatimages")) throw new Error("This Mac can't take photos with a new chat yet. Update Lantern on it.");
-    if ((choice.model || choice.effort) && !this.has("newchatmodel")) throw new Error("This Mac can't start a chat on a model you pick yet. Update Lantern on it.");
-    if (choice.account && !this.has("accounts")) throw new Error("This Mac can't start a chat on another Claude account yet. Update Lantern on it.");
-    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider,
-    // the model, the effort and the pictures are left out altogether, not sent empty, when there are none.
-    const request: Request = { op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(choice.model ? { model: choice.model } : {}), ...(choice.effort ? { effort: choice.effort } : {}), ...(choice.account ? { account: choice.account } : {}), ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
-    const started = await (images.length > 0 ? this.ask<StartedChat>(request, UPLOAD_WAIT) : this.ask<StartedChat>(request));
-    // The chat opens with its first message in it, going, until the Mac's copy takes its place: the Mac answers as soon as the chat
-    // is made, and tells of the message only once its agent has it, which was a few seconds of an empty chat.
-    this.apply({ type: "sending", slot: started.slot, clientId: this.newId(), text, at: this.now(), opening: true, ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
-    return started.slot;
+  startChat(start: { id: string; project: string; projectName: string; text: string; choice?: NewChatChoice; images?: PickedImage[] }) {
+    const images = start.images ?? [];
+    const kept: KeptStart = { id: start.id, project: start.project, text: start.text, choice: start.choice ?? {}, images, clientId: this.newId(), slot: null, queued: [], going: false };
+    this.starting.set(start.id, kept);
+    this.apply({ type: "start_added", start: { id: start.id, project: start.project, projectName: start.projectName, text: start.text, thumbs: images.map((i) => i.uri), at: this.now(), slot: null, problem: null, queued: [] } });
+    void this.makeStart(kept);
+  }
+
+  /** Try again, for a start the Mac didn't make: asked by the same id, so a chat it made after all is the one opened. */
+  retryStart(id: string) {
+    const kept = this.starting.get(id);
+    if (!kept || kept.going || kept.slot) return;
+    this.apply({ type: "start_again", id });
+    void this.makeStart(kept);
+  }
+
+  /** A message sent from a start's page: it goes after the first message, once the chat is there (at once, if it is). */
+  queueStart(id: string, text: string) {
+    const kept = this.starting.get(id);
+    if (!kept) return;
+    if (kept.slot) return void this.send(kept.slot, text);
+    kept.queued.push(text);
+    this.apply({ type: "start_queued", id, text });
+  }
+
+  /** A start let go (Edit message, or Discard): what it had is the caller's. */
+  dropStart(id: string) {
+    this.starting.delete(id);
+    this.apply({ type: "start_gone", id });
+  }
+
+  /** What a start had: its words, and what was sent from its page after them. */
+  startText(id: string) {
+    const kept = this.starting.get(id);
+    return kept ? [kept.text, ...kept.queued].join("\n\n") : null;
+  }
+
+  /** The starts this phone asked for, by id, with what isn't shown (the photos, the choices, the first message's id). */
+  private starting = new Map<string, KeptStart>();
+  /** A chat's first message while it goes: what is sent after it in the same chat waits for it, so they arrive in order. */
+  private firstGoing = new Map<string, Promise<void>>();
+
+  private async makeStart(kept: KeptStart) {
+    kept.going = true;
+    const named = this.has("newchatstart");
+    let slot: string;
+    try {
+      const { images, choice } = kept;
+      if (images.length > 0 && !named && !this.has("newchatimages")) throw new Error("This Mac can't take photos with a new chat yet. Update Lantern on it.");
+      if ((choice.model || choice.effort) && !this.has("newchatmodel")) throw new Error("This Mac can't start a chat on a model you pick yet. Update Lantern on it.");
+      if (choice.account && !this.has("accounts")) throw new Error("This Mac can't start a chat on another Claude account yet. Update Lantern on it.");
+      // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider,
+      // the model, the effort and the pictures are left out altogether, not sent empty, when there are none.
+      const request: Request = { op: "new_chat", project: kept.project, text: named ? "" : kept.text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(choice.model ? { model: choice.model } : {}), ...(choice.effort ? { effort: choice.effort } : {}), ...(choice.account ? { account: choice.account } : {}), ...(named ? { start_id: kept.id } : images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
+      slot = (await this.ask<StartedChat>(request, !named && images.length > 0 ? UPLOAD_WAIT : NEW_CHAT_WAIT)).slot;
+    } catch (e) {
+      kept.going = false;
+      // Let go meanwhile: nothing is left to say it on.
+      if (this.starting.get(kept.id) === kept) this.apply({ type: "start_failed", id: kept.id, problem: (e as Error)?.message || "Your Mac didn't start the chat." });
+      return;
+    }
+    kept.going = false;
+    kept.slot = slot;
+    const queued = kept.queued.splice(0);
+    this.apply({ type: "start_made", id: kept.id, slot });
+    if (!named) {
+      // An older Mac took the first message with the chat, and tells of it once the chat's agent has it: it shows going until then.
+      this.apply({ type: "sending", slot, clientId: kept.clientId, text: kept.text, at: this.now(), opening: true, ...(kept.images.length > 0 ? { thumbs: kept.images.map((i) => i.uri) } : {}) });
+    }
+    // The first message, and then what was sent from its page, show now in that order, and go one after another; what is sent in
+    // the chat meanwhile waits for them all. One that didn't go holds back the rest, which say so: they would arrive without it.
+    const rest = queued.map((text) => ({ text, clientId: this.newId() }));
+    if (named) this.apply({ type: "sending", slot, clientId: kept.clientId, text: kept.text, at: this.now(), ...(kept.images.length > 0 ? { thumbs: kept.images.map((i) => i.uri) } : {}) });
+    for (const r of rest) this.apply({ type: "sending", slot, clientId: r.clientId, text: r.text, at: this.now() });
+    const chain = (async () => {
+      let ok = !named || (await this.deliver(slot, kept.text, kept.images, kept.clientId, FIRST_SEND_WAIT));
+      for (const r of rest) {
+        if (ok) ok = await this.deliver(slot, r.text, [], r.clientId);
+        else this.apply({ type: "send_failed", slot, clientId: r.clientId, error: "Not sent: the message before it didn't go." });
+      }
+    })();
+    this.firstGoing.set(slot, chain);
+    await chain;
+    if (this.firstGoing.get(slot) === chain) this.firstGoing.delete(slot);
+    // Its chat is the start now (it is shown as that chat once the Mac lists it).
+    this.starting.delete(kept.id);
   }
 
   /** Insights for a stretch of time, worked out on the Mac (it reads weeks of logs the first time: it may take a while). Only for a Mac that lists "insights". */

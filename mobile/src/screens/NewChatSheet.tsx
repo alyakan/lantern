@@ -26,7 +26,7 @@ import { PastedCards, PastedSheet } from "./PastedText";
 import { pastedPart } from "../view/paste";
 import { MarkupSheet } from "./MarkupSheet";
 import type { PickedImage } from "../view/attachments";
-import { newStartId, type Start } from "../shell/starting";
+import { newStartId, type Started } from "../shell/starting";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -51,8 +51,8 @@ export interface NewChatProps {
   /** Start listening at once (the compose button was held down). */
   listen?: boolean;
   onClose: () => void;
-  /** Sent: the chat carried on (its slot), or a new chat asked of the Mac, to open at once while the Mac starts it. */
-  onStarted: (to: string | Start) => void;
+  /** Sent: the chat carried on (its slot), or a new chat asked of the Mac (its start's id), to open at once while the Mac starts it. */
+  onStarted: (to: Started) => void;
 }
 
 /**
@@ -110,11 +110,11 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     };
   }, []);
   // A chat started: the sheet slides away first (iOS's own sheet stays up if it is just taken away), then the chat opens.
-  const started = useRef<string | Start | null>(null);
+  const started = useRef<Started | null>(null);
   const closeSheet = useRef<(() => void) | null>(null);
   // Swiped away as it was sent: there is no sheet left to wait for, and the chat still opens.
   const gone = useRef(false);
-  const finish = (to: string | Start) => {
+  const finish = (to: Started) => {
     started.current = to;
     if (closeSheet.current && !gone.current) closeSheet.current();
     else onStarted(to);
@@ -217,7 +217,7 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     if (continueChat) {
       // A send never throws: it shows in the chat at once, and says there if it didn't go.
       void sync.send(continueChat.slot, message());
-      return finish(continueChat.slot);
+      return finish({ slot: continueChat.slot });
     }
     if (!project) return;
     dictation.cancel();
@@ -228,15 +228,14 @@ export function NewChatSheet({ initialText = "", initialProject, initialProjectN
     const choice = supported ? { permissions: mode, ...(preset && (!chosen || chosen.presets) ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}), ...(chosen ? { provider: chosen.id } : {}), ...ownModel, ...(chosenAccount ? { account: chosenAccount.id } : {}) } : {};
     const text = message();
     const images = canPhotos ? attach.images : [];
-    const ask = () => sync.newChat(project, text, choice, images);
-    const asked = ask();
-    // (Its page says why if it fails; until the sheet has gone and the page is there, a failure is not left unheard.)
-    asked.catch(() => {});
+    // Asked of the Mac now, as the sheet goes: the start is kept by the app (its page, or its row in the chats, says how it goes).
+    const id = newStartId();
+    sync.startChat({ id, project, projectName: projects?.find((p) => p.id === project)?.name ?? project, text, choice, images });
     void saveLastProject(project);
     // What was chosen is what the next chat starts on; one forced to Ask (no Auto here) doesn't change that.
     if (supported && !note) void saveNewChatPermissions(permissions);
     // The chat opens now, not once the Mac answers: its page says it is starting, and becomes the chat when the Mac has it.
-    finish({ id: newStartId(), project, projectName: projects?.find((p) => p.id === project)?.name ?? project, text, thumbs: images.map((i) => i.uri), asked, ask });
+    finish({ start: id });
   };
 
   const workflowName = WORKFLOWS.find((w) => w.value === workflow)?.label ?? "Chat";

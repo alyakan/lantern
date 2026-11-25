@@ -123,9 +123,14 @@ suite("the phone's client against the real gateway", () => {
       { id: "/Users/you/dev/lantern", name: "lantern" },
       { id: "/Users/you/dev/website", name: "website" },
     ]);
-    await expect(p.sync.newChat("/etc", "hello")).rejects.toThrow("isn't one of your projects");
-    await expect(p.sync.newChat("/Users/you/dev/lantern", "   ")).rejects.toThrow("Write what the chat should start with");
-    const slot = await p.sync.newChat("/Users/you/dev/website", "Fix the footer links\nand the copyright year");
+    const start = (id: string, project: string, text: string) => p.sync.startChat({ id, project, projectName: project.split("/").pop()!, text });
+    const startOf = (id: string) => p.state().starts.find((s) => s.id === id);
+    start("start-etc", "/etc", "hello");
+    await until("the refusal", () => !!startOf("start-etc")?.problem);
+    expect(startOf("start-etc")?.problem).toContain("isn't one of your projects");
+    start("start-website", "/Users/you/dev/website", "Fix the footer links\nand the copyright year");
+    await until("the chat made", () => !!startOf("start-website")?.slot);
+    const slot = startOf("start-website")!.slot!;
     expect(slot).toBe("new1");
     // It is open on the Mac by the time the phone is told, and listed with a title made from its first line.
     await until("the new chat in the list", () => p.state().chats.some((c) => c.slot === slot));

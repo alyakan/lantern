@@ -24,7 +24,7 @@ async function open(answers: Parameters<typeof attachSession>[1] = { projects, n
   const onClose = jest.fn();
   const onStarted = jest.fn();
   await renderWith(<NewChatSheet onClose={onClose} onStarted={onStarted} {...props} />, {}, controller);
-  return { onClose, onStarted, ...session };
+  return { onClose, onStarted, controller, ...session };
 }
 
 /** The line that says what it runs on opens its options. */
@@ -62,15 +62,16 @@ describe("while the projects are coming", () => {
 describe("starting a chat from the phone", () => {
 
   it("says it starts on Ask, and starts in the first project by default", async () => {
-    const { lastOf, onStarted } = await open();
+    const { lastOf, onStarted, controller } = await open();
     expect(screen.getByText(/starts on Ask/)).toBeTruthy();
     await projectsHere();
         expect(chip("lantern")).toBeTruthy();
     await write("Fix the login bug");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
-    // The chat opens at once, with what the Mac will answer still on its way.
-    expect(onStarted).toHaveBeenCalledWith(expect.objectContaining({ project: "/Users/me/lantern", projectName: "lantern", text: "Fix the login bug", thumbs: [] }));
-    await expect(onStarted.mock.calls[0][0].asked).resolves.toBe("s9");
+    // The chat opens at once, by its start (the app keeps it), with what the Mac will answer still on its way.
+    expect(onStarted).toHaveBeenCalledWith({ start: expect.stringMatching(/^start-/) });
+    const id = onStarted.mock.calls[0][0].start;
+    await waitFor(() => expect(controller.sync.getState().starts).toEqual([expect.objectContaining({ id, project: "/Users/me/lantern", projectName: "lantern", text: "Fix the login bug", thumbs: [], slot: "s9" })]));
     expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug", permissions: null, preset: null, workflow: null });
   });
 
@@ -125,14 +126,15 @@ describe("starting a chat from the phone", () => {
     expect(chip("lantern")).toBeTruthy();
   });
 
-  it("hands on why the Mac wouldn't start it, and asks again the same way from Try again", async () => {
-    const { onStarted, asked } = await open({ projects, new_chat: new Error("This phone has started a lot of chats just now. Try again in a few minutes.") });
+  it("keeps why the Mac wouldn't start it, and asks again the same way from Try again", async () => {
+    const { onStarted, asked, controller } = await open({ projects, new_chat: new Error("This phone has started a lot of chats just now. Try again in a few minutes.") });
     await projectsHere();
     await write("one more");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
-    const start = onStarted.mock.calls[0][0];
-    await expect(start.asked).rejects.toThrow(/started a lot of chats/);
-    await expect(start.ask()).rejects.toThrow(/started a lot of chats/);
+    const id = onStarted.mock.calls[0][0].start;
+    await waitFor(() => expect(controller.sync.getState().starts[0]?.problem).toMatch(/started a lot of chats/));
+    controller.sync.retryStart(id);
+    await waitFor(() => expect(asked.filter((r) => r.op === "new_chat")).toHaveLength(2));
     expect(asked.filter((r) => r.op === "new_chat").map((r) => r.text)).toEqual(["one more", "one more"]);
   });
 
@@ -169,7 +171,7 @@ describe("starting a chat from the phone", () => {
       expect(asked.filter((r) => r.op === "projects")).toEqual([]);
       await write("Write the release notes, short.");
       await fireEvent.press(screen.getByRole("button", { name: "Send" }));
-      expect(onStarted).toHaveBeenCalledWith("a");
+      expect(onStarted).toHaveBeenCalledWith({ slot: "a" });
       await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "Write the release notes, short." }));
       expect(asked.filter((r) => r.op === "new_chat")).toEqual([]);
     });
