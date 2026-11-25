@@ -81,6 +81,8 @@ export interface ChatProps {
   onStartNew?: (project: string | null) => void;
   /** The chat's width is being dragged (the Changes pane's divider): the reader's place is put back once, when it ends. */
   resizing?: boolean;
+  /** The chat was started from this phone, on a page of its own until the Mac had it (that start's id): the box takes over what was typed there. */
+  startedAs?: string;
 }
 
 /** The header's buttons take a touch a little way around them, but not above: that is the status bar, whose tap scrolls a list to its top. */
@@ -139,7 +141,7 @@ export const readableSide = (width: number) => Math.max(0, (width - READABLE) / 
 /** How near the end, as a share of the chat's height, the list follows new words in (and so where Jump to latest starts). */
 const FOLLOW_END = 0.2;
 
-export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onTodos, onStartNew, resizing = false }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, leadHidden = false, changesPane, onTodos, onStartNew, resizing = false, startedAs }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -912,7 +914,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
       ) : (
         // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
         // a command still goes to Run, which says it couldn't).
-        <Composer todos={view.todos} draftKey={slot} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
+        <Composer todos={view.todos} draftKey={slot} draftFrom={startedAs} placeholder={online ? undefined : "Sends when your Mac is back"} canAttach={canImages && online} onSend={(text, images) => {
             // What you send is what you follow, even from far up the chat.
             setAway(null);
             list.current?.scrollToEnd({ animated: true });

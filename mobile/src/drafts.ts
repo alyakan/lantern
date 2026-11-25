@@ -44,15 +44,16 @@ export async function loadDraft(slot: string): Promise<string> {
 /** Keeps `text` as a chat's draft; an empty one (a message sent, a box cleared) or a terminal command forgets it. */
 export async function saveDraft(slot: string, text: string): Promise<void> {
   const keep = isTerminal(text) || text.trim() === "" ? "" : text.slice(0, DRAFT_MAX_CHARS);
+  // Held at once, before the store is: a box opened straight after (a new chat's page becoming the chat) reads it.
+  if (keep === "") memory.delete(slot);
+  else memory.set(slot, keep);
   try {
     const index = (await readIndex()).filter((s) => s !== slot);
     if (keep === "") {
-      memory.delete(slot);
       await SecureStore.deleteItemAsync(keyOf(slot), OPTIONS);
       await SecureStore.setItemAsync(INDEX_KEY, JSON.stringify(index), OPTIONS);
       return;
     }
-    memory.set(slot, keep);
     index.push(slot);
     // The oldest drafts beyond the limit are forgotten, so the Keychain doesn't fill with chats long closed.
     for (const old of index.splice(0, Math.max(0, index.length - DRAFTS_KEPT))) {

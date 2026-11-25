@@ -21,6 +21,8 @@ export interface Start {
 export interface StartShown {
   start: Start;
   problem: string | null;
+  /** Sent from its message box before the chat was there, in order: they go once it is. */
+  queued: string[];
 }
 
 let next = 0;

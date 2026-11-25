@@ -26,7 +26,7 @@ export interface FileEdit {
 }
 
 export type Item =
-  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** Written while the Mac couldn't be reached: it goes once the Mac is back. */ held?: boolean; /** It waited, and the Mac came back as another run: not sent, and not to be sent again from here. */ stale?: boolean; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
+  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** Written while the Mac couldn't be reached: it goes once the Mac is back. */ held?: boolean; /** It waited, and the Mac came back as another run: not sent, and not to be sent again from here. */ stale?: boolean; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[]; /** The first message of a chat this phone started: the Mac's copy carries no client id, and takes its place all the same. */ opening?: boolean }
   | { kind: "assistant"; id: string; text: string; streaming: boolean }
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
@@ -124,7 +124,7 @@ export type Action =
   | { type: "desk"; desk: RemoteDesk }
   /** Your work, as the Mac answered when asked (it pushes it too, as it changes). */
   | { type: "work"; work: RemoteWork }
-  | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
+  | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[]; /** A new chat's first message (see the item's `opening`). */ opening?: boolean }
   | { type: "held"; slot: string; clientId: string; text: string; at: number }
   | { type: "send_failed"; slot: string; clientId: string; error: string; /** See the item's `stale`. */ stale?: boolean }
   /** The chat's history was asked for (again), or the asking failed. */
@@ -180,7 +180,10 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "user_text": {
       const clientId = clientIdOf(event.sent_by);
       // The Mac's copy of a message this phone sent takes its place.
-      const mine = clientId ? items.findIndex((it) => it.kind === "user" && it.id === `local-${clientId}`) : -1;
+      // The first message of a chat this phone started is sent with the chat, and its copy names no client id: the first one waiting
+      // takes it (it is shown from the moment the Mac answers, so the chat is never empty while its copy is on the way).
+      let mine = clientId ? items.findIndex((it) => it.kind === "user" && it.id === `local-${clientId}`) : -1;
+      if (mine < 0) mine = items.findIndex((it) => it.kind === "user" && !!it.opening && !!it.sending);
       // `images` is null from a Mac that has none to say, and missing from an older one.
       const images = event.images ?? 0;
       const item: Item = { kind: "user", id: clientId ? `local-${clientId}` : `u-${event.at ?? ""}-${event.text.slice(0, 40)}`, text: event.text, at: event.at, sentBy: event.sent_by, ...(images > 0 ? { images } : {}) };
@@ -188,7 +191,9 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
         const next = items.slice();
         // The pictures this phone sent are still where it kept them.
         const kept = items[mine];
-        next[mine] = kept.kind === "user" && kept.thumbs?.length ? { ...item, thumbs: kept.thumbs } : item;
+        // (An opening message keeps its id too, so its row doesn't come in again.)
+        const placed = kept.kind === "user" && kept.opening ? { ...item, id: kept.id } : item;
+        next[mine] = kept.kind === "user" && kept.thumbs?.length ? { ...placed, thumbs: kept.thumbs } : placed;
         return { ...view, items: next, thinking: true, stopping: false };
       }
       // A new message is a new turn, whoever sent it: a stop asked for earlier no longer ends this one.
@@ -318,7 +323,9 @@ export function reducer(state: State, action: Action): State {
       return { ...state, work: action.work };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
-      const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
+      // A new chat whose first message the Mac has already told of: it is there, and isn't shown twice.
+      if (action.opening && view.items.some((it) => it.kind === "user" && !it.id.startsWith("local-"))) return state;
+      const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}), ...(action.opening ? { opening: true } : {}) };
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: upsert(view.items, item) } } };
     }
     case "held": {
