@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
@@ -34,6 +34,8 @@ export interface TabletDetailProps {
   feature?: string | null;
   /** The chat to show; none asks to pick one. */
   slot: string | null;
+  /** A chat this tablet asked the Mac to start, shown until the Mac has it (then `slot` is that chat). */
+  starting?: ReactNode;
   /** The prompt being decided in that chat, shown over it. */
   decide: { slot: string; requestId: string } | null;
   /** Whether the chats are beside the chat ("split") or away until asked for ("overlay"). */
@@ -57,7 +59,7 @@ export interface TabletDetailProps {
  * Beside the chat the Changes take half the width at first; their divider drags them wider or narrower, and that share is
  * remembered. Their own button floats them over the chat as a big card, and puts them back.
  */
-export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work", feature = null }: TabletDetailProps) {
+export function TabletDetail({ slot, starting = null, decide, layout, chatsOpen, onShowChats, onBack, onOpenChat, onReview, onStartNew, page = "work", feature = null }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -151,7 +153,9 @@ export function TabletDetail({ slot, decide, layout, chatsOpen, onShowChats, onB
         setChangesOpen(true);
       }
     : undefined;
-  const main = slot ? (
+  const main = starting ? (
+    <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>{starting}</View>
+  ) : slot ? (
     <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
       {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
       <ChatScreen key={slot} slot={slot} resizing={resizing} changesPane={wide ? { shown: mode !== "hidden", onToggle: togglePane, onFile: showFile } : undefined} onTodos={showTodos} lead={layout === "split" ? "none" : "sidebar"} leadHidden={chatsOpen} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} onStartNew={onStartNew} />

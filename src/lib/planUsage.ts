@@ -86,11 +86,17 @@ export function planLevel(p: PlanUsage): "ok" | "warn" | "stop" {
 }
 
 let providers: Record<string, ProviderUsage> = {};
+/** "Gemini" of "Gemini · Week"; "" for a window that names no group. */
+const groupOf = (label: string) => (label.includes(" · ") ? label.slice(0, label.indexOf(" · ")) : "");
 export function setProviderUsage(usage: ProviderUsage): void {
   const previous = providers[usage.provider];
   // Claude's weekly and session events arrive independently.
   const windows = isClaudeKey(usage.provider) ? [...(previous?.windows ?? []).filter(w => !usage.windows.some(n => n.label === w.label)), ...usage.windows] : usage.windows;
-  providers = { ...providers, [usage.provider]: { ...usage, windows: [...windows].sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity)) } };
+  // Shortest first, within each group of models that has limits of its own ("Gemini · 5 hours", Antigravity's): a group's
+  // session and week stay together, in the order the groups came.
+  const groups = [...new Set(windows.map(w => groupOf(w.label)))];
+  const sorted = [...windows].sort((a, b) => groups.indexOf(groupOf(a.label)) - groups.indexOf(groupOf(b.label)) || (a.minutes ?? Infinity) - (b.minutes ?? Infinity));
+  providers = { ...providers, [usage.provider]: { ...usage, windows: sorted } };
   window.dispatchEvent(new Event("lantern-provider-usage"));
 }
 export function useProviderUsage(): Record<string, ProviderUsage> {

@@ -1,4 +1,4 @@
-import { claudeUsage } from "../view/providerUsage";
+import { chatUsage } from "../view/providerUsage";
 import type { ConversationSettings } from "../sync/sync";
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AppState, Pressable, Share, StyleSheet, View, type ScrollViewProps } from "react-native";
@@ -784,7 +784,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         <ChatSettings
           slot={slot}
           chat={chat}
-          providerUsage={chat?.provider === "Codex" ? providerUsage?.codex : !chat?.provider || chat.provider === "Claude" ? claudeUsage(plan) : undefined}
+          providerUsage={chatUsage(chat?.provider, plan, providerUsage)}
           context={view.context}
           pages={
             stepsChat

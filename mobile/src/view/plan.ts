@@ -137,7 +137,7 @@ export function weekOf(week: { used: number; resetsAt: number | null }, now = Da
 }
 
 export interface WindowView {
-  /** "Session", "Weekly limit", or the provider's own name for the window. */
+  /** "Session", "Weekly limit" (each after its models' name where a provider gives one: "Gemini session"), or the provider's own name for the window. */
   title: string;
   /** Whole percent, 0 to 100. */
   percent: number;
@@ -154,13 +154,17 @@ export function windowOf(w: { label: string; used: number; resets_at: number | n
   const percent = Math.max(0, Math.min(100, Math.round(w.used * 100)));
   const tone = percent >= 100 ? "stop" : percent >= 80 ? "warn" : "ok";
   const resets = w.resets_at !== null && w.resets_at * 1000 > now ? w.resets_at : null;
+  // A provider whose models have limits of their own names each window by its models ("Gemini · Week", Antigravity's): the
+  // session and the week keep that name, or two of each would read the same ("Gemini weekly limit", "Claude & GPT session").
+  const group = w.label.includes(" · ") ? w.label.slice(0, w.label.indexOf(" · ")) : null;
+  const named = (title: string) => (group ? `${group} ${title.charAt(0).toLowerCase()}${title.slice(1)}` : title);
   if (w.minutes === 10080) {
     const week = weekOf({ used: w.used, resetsAt: resets }, now);
-    return { title: "Weekly limit", percent, note: week.sentence.replace(/^\d+% of the weekly limit used\. /, "").replace(/^Weekly limit reached\. ?/, ""), short: week.short === "Limit reached" ? "" : week.short, tone: week.tone };
+    return { title: named("Weekly limit"), percent, note: week.sentence.replace(/^\d+% of the weekly limit used\. /, "").replace(/^Weekly limit reached\. ?/, ""), short: week.short === "Limit reached" ? "" : week.short, tone: week.tone };
   }
   const soon = resets !== null && resets * 1000 - now < 24 * 3600 * 1000;
   const when = resets === null ? "" : soon ? `resets in ${untilText(resets, now)}` : `resets ${whenText(resets, now)}`;
   const short = when && when[0].toUpperCase() + when.slice(1);
-  if (w.minutes === 300) return { title: "Session", percent, note: when && `Five-hour window · ${when}`, short, tone };
+  if (w.minutes === 300) return { title: named("Session"), percent, note: when && `Five-hour window · ${when}`, short, tone };
   return { title: w.label, percent, note: short, short, tone };
 }

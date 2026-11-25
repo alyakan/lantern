@@ -20,7 +20,18 @@ export function currentUsageWindows(reading: ProviderUsage | undefined, now = Da
 export const USAGE_PROVIDERS: { id: string; name: string }[] = [
   { id: "claude", name: "Claude" },
   { id: "codex", name: "Codex" },
+  { id: "antigravity", name: "Antigravity" },
 ];
+
+/**
+ * The reading for a chat's provider, as the chat says it runs ("Codex", "Antigravity"; none for Claude). Claude's is the plan
+ * an older Mac sends; a provider with no limits to read (an endpoint) has none.
+ */
+export function chatUsage(provider: string | null | undefined, plan: PlanUsage | null, providers: Record<string, ProviderUsage> | null | undefined): ProviderUsage | undefined {
+  if (!provider || provider === "Claude") return claudeUsage(plan);
+  const id = USAGE_PROVIDERS.find((p) => p.name === provider)?.id;
+  return id && id !== "claude" ? providers?.[id] : undefined;
+}
 
 /** One provider's reading, Claude's from the plan an older Mac sends. */
 export function readingOf(id: string, plan: PlanUsage | null, providers: Record<string, ProviderUsage> | null | undefined): ProviderUsage | undefined {
@@ -28,7 +39,7 @@ export function readingOf(id: string, plan: PlanUsage | null, providers: Record<
 }
 
 export interface Tightest {
-  /** "Claude", "Codex". */
+  /** "Claude", "Codex", "Antigravity". */
   provider: string;
   window: UsageWindow;
   view: WindowView;

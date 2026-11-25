@@ -1,4 +1,5 @@
-import { claudeUsage, currentUsageWindows, tightest, tightestText } from "./providerUsage";
+import { chatUsage, claudeUsage, currentUsageWindows, tightest, tightestText } from "./providerUsage";
+import { windowOf } from "./plan";
 
 it("keeps an active weekly limit when the session expired, without inventing a reset percentage", () => {
   const reading = claudeUsage({ used: 1, resetsAt: 1, status: "rejected", week: { used: .95, resetsAt: 100 } });
@@ -42,5 +43,40 @@ describe("the tightest limit, for Home's ring", () => {
     const providers = { codex: { provider: "codex", updated_at: 1, windows: [{ label: "5 hours", used: 0.5, resets_at: at(3), minutes: 300 }] } };
     const t = tightest(plan, providers, NOW)!;
     expect([t.provider, t.view.tone, t.view.percent]).toEqual(["Codex", "ok", 50]);
+  });
+});
+
+describe("Antigravity, whose groups of models have limits of their own", () => {
+  const NOW = Date.UTC(2026, 10, 25, 12);
+  const at = (hours: number) => NOW / 1000 + hours * 3600;
+  const antigravity = {
+    provider: "antigravity",
+    updated_at: 1,
+    windows: [
+      { label: "Gemini · Week", used: 0.4, resets_at: at(140), minutes: 10080 },
+      { label: "Gemini · 5 hours", used: 0.96, resets_at: at(2), minutes: 300 },
+      { label: "Claude & GPT · Week", used: 0, resets_at: null, minutes: 10080 },
+      { label: "Claude & GPT · 5 hours", used: 0, resets_at: null, minutes: 300 },
+    ],
+  };
+
+  it("names each session and week by its models, so the two groups don't read the same", () => {
+    expect(antigravity.windows.map((w) => windowOf(w, NOW).title)).toEqual(["Gemini weekly limit", "Gemini session", "Claude & GPT weekly limit", "Claude & GPT session"]);
+    // A provider with one set of limits keeps the plain names.
+    expect(windowOf({ label: "5 hours", used: 0.2, resets_at: null, minutes: 300 }, NOW).title).toBe("Session");
+  });
+
+  it("is on Home's ring when its limit is the one nearest its end", () => {
+    const plan = { used: 0.3, resetsAt: at(3), status: "allowed" as const };
+    const t = tightest(plan, { antigravity }, NOW)!;
+    expect(t.provider).toBe("Antigravity");
+    expect(tightestText(t)).toMatch(/^Antigravity gemini session 96% used/);
+  });
+
+  it("is what an Antigravity chat shows of its usage; Claude's chat shows Claude's, and an endpoint's none", () => {
+    const plan = { used: 0.3, resetsAt: at(3), status: "allowed" as const };
+    expect(chatUsage("Antigravity", plan, { antigravity })).toBe(antigravity);
+    expect(chatUsage(null, plan, { antigravity })?.provider).toBe("claude");
+    expect(chatUsage("my endpoint", plan, { antigravity })).toBeUndefined();
   });
 });

@@ -49,6 +49,24 @@ describe("the plan meter", () => {
     expect(switchToCodex).toHaveBeenCalledOnce();
   });
 
+  it("lists Antigravity once it has said, with each group of models' session and week by name", () => {
+    act(() => {
+      setPlanUsage({ used: .1, resetsAt: null });
+      setProviderUsage({ provider: "antigravity", updated_at: Date.now() / 1000, windows: [
+        { label: "Gemini · Week", used: .41, resets_at: null, minutes: 10080 },
+        { label: "Gemini · 5 hours", used: .06, resets_at: null, minutes: 300 },
+        { label: "Claude & GPT · Week", used: 0, resets_at: null, minutes: 10080 },
+        { label: "Claude & GPT · 5 hours", used: 0, resets_at: null, minutes: 300 },
+      ] });
+    });
+    render(<PlanMeter />);
+    const button = screen.getByRole("button", { name: /^Usage by provider/ });
+    expect(button).toHaveTextContent("Antigravity 41%");
+    fireEvent.click(button);
+    const section = screen.getByRole("region", { name: "Antigravity usage" });
+    expect(within(section).getAllByRole("meter").map((m) => m.getAttribute("aria-label"))).toEqual(["Gemini · 5 hours used", "Gemini · Week used", "Claude & GPT · 5 hours used", "Claude & GPT · Week used"]);
+  });
+
   it("keeps each Claude account's limits apart: the bar follows the open chat's account and the pop-over lists them all", () => {
     act(() => {
       setAccountNames([{ id: "work", name: "Work" }]);

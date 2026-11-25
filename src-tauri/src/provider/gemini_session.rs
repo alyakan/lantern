@@ -9,6 +9,7 @@
 //! and asks before it does what the chat's mode says to ask about.
 
 use super::acp_question;
+use super::antigravity_quota;
 use super::claude_session::{next_line, push_tail, signal_group, write_line, STDERR_TAIL_BYTES};
 use super::gemini::{version_of, AcpAgent};
 use super::gemini_events::{config_model_options, model_options, sign_in_text, signed_out, GeminiMapper};
@@ -150,9 +151,28 @@ struct Ctx {
     read_only: bool,
     /// The session was stopped on purpose: nothing it says after that is shown.
     stopping: Arc<AtomicBool>,
+    /// The agent's process: Antigravity's log, named by it, says where its limits can be read.
+    pid: u32,
 }
 
 impl Ctx {
+    /// Antigravity's limits, read from its own language server (see antigravity_quota) and shown as a usage reading, as
+    /// Codex's are. In the background, and quietly: a chat never waits on it, and a reading that can't be had is just not shown.
+    fn read_quota(&self) {
+        if self.agent != AcpAgent::Antigravity {
+            return;
+        }
+        let (pid, sink, stopping) = (self.pid, self.sink.clone(), self.stopping.clone());
+        tokio::spawn(async move {
+            let Some(port) = antigravity_quota::port_of(pid) else { return };
+            if let Some(usage) = antigravity_quota::read(port).await {
+                if !stopping.load(Ordering::SeqCst) {
+                    sink(UiEvent::ProviderUsage { usage });
+                }
+            }
+        });
+    }
+
     async fn request(&self, method: &str, params: Value, wait: Duration) -> RpcResult {
         let (tx, rx) = oneshot::channel();
         let id = {
@@ -350,6 +370,8 @@ impl Ctx {
         for ev in mapped.events {
             (self.sink)(ev);
         }
+        // What the turn took off Antigravity's limits.
+        self.read_quota();
         // A turn that failed for want of a sign-in is told again, with the session's note, on the next message.
         if let Err((code, why)) = &reply {
             if signed_out(*code, why) {
@@ -452,6 +474,7 @@ impl GeminiSession {
             auto: cfg.mode == Mode::Auto || (cfg.mode == Mode::Steps && cfg.auto_approve),
             read_only: matches!(cfg.helper.role, Role::Worker { read_only: true, .. }),
             stopping: stopping.clone(),
+            pid,
         };
         let tail = Arc::new(Mutex::new(String::new()));
         let (exit_tx, exited) = watch::channel(false);
@@ -749,7 +772,10 @@ async fn startup(ctx: &Ctx, sink: &Sink, resume: Option<String>) -> Result<(), S
         }
     }
     ctx.state.lock().unwrap().version = version;
-    ctx.open_session(resume.as_deref(), sink).await?;
+    if ctx.open_session(resume.as_deref(), sink).await?.is_some() {
+        // Where its limits stand as the chat opens, before any turn.
+        ctx.read_quota();
+    }
     Ok(())
 }
 
@@ -1302,6 +1328,35 @@ reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
             UiEvent::SessionEnded { stderr_tail, .. } => assert!(stderr_tail.contains("This Antigravity (1.4.9) is older than the 1.5.0") && stderr_tail.contains("agy update"), "{stderr_tail}"),
             _ => unreachable!(),
         }
+    }
+
+    /// Against the real Antigravity CLI (signed in): a session that opens reads where its limits stand, with no turn (so none of
+    /// the plan is used). Run with `cargo test --lib real_agy -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn real_agy_reads_its_limits_as_the_chat_opens() {
+        let agy = std::env::var("HOME").map(|h| PathBuf::from(h).join(".local/bin/agy")).unwrap();
+        assert!(agy.exists(), "agy isn't installed at {}", agy.display());
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(agy, dir.path(), None, Role::Normal);
+        cfg.provider = ProviderId::Antigravity;
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        s.initialize().await;
+        let usage = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let UiEvent::ProviderUsage { usage } = rx.recv().await.unwrap() {
+                    return usage;
+                }
+            }
+        })
+        .await
+        .expect("no usage reading");
+        println!("{usage:#?}");
+        assert_eq!(usage.provider, "antigravity");
+        assert!(usage.windows.iter().any(|w| w.minutes == Some(300)) && usage.windows.iter().any(|w| w.minutes == Some(10080)), "{usage:?}");
+        assert!(usage.windows.iter().all(|w| (0.0..=1.0).contains(&w.used) && w.label.contains(" · ")), "{usage:?}");
+        s.stop().await;
     }
 
     /// Against the real Antigravity CLI (`~/.local/bin/agy`, signed in), in an empty scratch folder: the handshake, the mode,

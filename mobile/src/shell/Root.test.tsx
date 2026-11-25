@@ -140,6 +140,71 @@ describe("starting a chat from Home", () => {
     expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
   });
 
+  it("goes into the chat at once, before the Mac has answered, and it becomes the chat when the Mac does", async () => {
+    let answer: (v: unknown) => void = () => {};
+    const { lastOf } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => new Promise((r) => (answer = r)) });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    // The Mac hasn't answered: the chat is open anyway, with the message in it.
+    expect(screen.queryByText("Start the chat")).toBeNull();
+    expect(screen.getByTestId("starting-chat")).toBeTruthy();
+    expect(screen.getByText("Starting on your Mac…")).toBeTruthy();
+    expect(screen.getByLabelText("You: Fix the login bug")).toBeTruthy();
+    expect(lastOf("subscribe")).toBeUndefined();
+    await act(async () => answer({ slot: "s9" }));
+    await settle();
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
+  });
+
+  it("says on the chat's page why the Mac didn't start it, and starts it from Try again", async () => {
+    let fail = true;
+    const { asked } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => (fail ? new Error("That isn't one of your projects.") : { slot: "s9" }) });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    expect(screen.getByText(/Not sent\. That isn't one of your projects\./)).toBeTruthy();
+    fail = false;
+    await press("Try again");
+    await settle();
+    expect(asked.filter((r) => r.op === "new_chat")).toHaveLength(2);
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+  });
+
+  it("takes the message back to the New chat sheet from Edit message", async () => {
+    await open({ chats: [chat()] }, {}, { ...answers, new_chat: new Error("Your Mac said no.") });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    await press("Edit message");
+    await settle();
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(screen.getByLabelText("What to start with").props.value).toBe("Fix the login bug");
+  });
+
+  it("says so, message and all, when the Mac couldn't start it after its page was left", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    let answer: (e: Error) => void = () => {};
+    await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => new Promise((_, no) => (answer = no)) });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    await press("Back");
+    await settle();
+    await act(async () => answer(new Error("Lantern didn't answer in time.")));
+    expect(alert).toHaveBeenCalledWith("Your chat didn't start", expect.stringContaining("Fix the login bug"), expect.anything());
+    alert.mockRestore();
+  });
+
   it("closes the sheet with the system's back button before it leaves anything else", async () => {
     await open({ chats: [chat()] }, {}, answers);
     await press("New chat");
