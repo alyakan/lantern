@@ -59,6 +59,7 @@ import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./l
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
 import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
+import { useWebClaudeInbox } from "./lib/useWebClaude";
 import { parseTodoCommand, todoPrompt, useTodoCounts, useTodos, type Todo, type TodoReminder } from "./lib/todos";
 import { TodoDoneBar, type TodoChat } from "./components/TodosTab";
 import { availableActions, runAction, useAction } from "./lib/actions";
@@ -3098,6 +3099,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   // The pull request the chat on screen is on: the one found where it works.
   const activeWork = state.folder ? (workBySlot[active] ?? state.folder) : null;
   const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
+  // Web Claude's cards (claude.ai sign-ins and work to Run) go in the same inbox.
+  const webInbox = useWebClaudeInbox();
   // The Desk shows once something is open: until then the window's start (open a folder, chats to bring back) is what there is.
   const deskShown = desk && Object.keys(openByProject).length > 0;
   // What the Desk on screen has: its projects' chats only.
@@ -3618,7 +3621,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
           back={goBack && { run: goBack, label: backToProjects ? "Back to all projects" : backToDesk ? "Back to the Desk" : "Back to the previous chat" }}
           inset={sidebarHidden ? 0 : sidebarCompact ? SIDEBAR_BAR : sidebarWidth}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
-          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss, web: webInbox }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
           phones={phonesOn.length ? { names: phonesOn, onOpen: () => setSettingsAt("remote") } : undefined}
         />

@@ -8,6 +8,7 @@ import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
 import type { RemoteClose, RemoteNewChat, RemoteRename, RemoteSetAccount, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, RemoteSingle, WindowAccount, WindowChat, WindowModels, WindowPreset, WindowProvider, WindowSingle } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
+import type { WebCard, WebClaudeView } from "./lib/webClaude";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { ArtifactListing } from "./lib/artifacts";
 import type { PastedImage } from "./lib/images";
@@ -471,6 +472,21 @@ export const api = {
   onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
+  /** Settings › Web Claude: the connector claude.ai adds, its address, and who is connected. */
+  webclaudeView: () => invoke<WebClaudeView>("webclaude_view"),
+  /** On starts the connector and puts it on the internet with Tailscale Funnel; rejects, in words, when it can't. */
+  webclaudeSetEnabled: (on: boolean) => invoke<WebClaudeView>("webclaude_set_enabled", { on }),
+  webclaudeCards: () => invoke<WebCard[]>("webclaude_cards"),
+  /** Allow needs the code the claude.ai sign-in page shows; rejects, in words, when it doesn't match. */
+  webclaudeAllow: (id: string, allow: boolean, code: string | null) => invoke<void>("webclaude_allow", { id, allow, code }),
+  webclaudeSetAuto: (on: boolean) => invoke<WebClaudeView>("webclaude_set_auto", { on }),
+  webclaudeRevoke: (id: string) => invoke<void>("webclaude_revoke", { id }),
+  /** The projects a Run card may pick from, as [folder, name]. */
+  webclaudeProjects: () => invoke<[string, string][]>("webclaude_projects"),
+  /** Run (true) or Decline (false) web Claude's work; `folder` picks the project when the card has none. Rejects with why it couldn't. */
+  webclaudeRun: (id: string, run: boolean, folder: string | null) => invoke<void>("webclaude_run", { id, run, folder }),
+  /** A card came or went, or a connection changed. */
+  onWebclaudeChanged: (cb: () => void): Promise<UnlistenFn> => listen("webclaude-changed", () => cb()),
   /** Settings › Remote control: whether it is on, and the paired phones. */
   remoteSettings: () => invoke<RemoteView>("remote_settings"),
   remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),

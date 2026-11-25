@@ -71,6 +71,8 @@ pub struct View {
     /// What to paste in claude.ai: the public address of /mcp, while on.
     pub address: Option<String>,
     pub error: Option<String>,
+    /// A new chat web Claude's work starts runs on Auto (else Ask).
+    pub new_chats_auto: bool,
     pub connections: Vec<store::Connection>,
     pub links: Vec<LinkView>,
 }
@@ -96,6 +98,7 @@ impl WebClaude {
             listening,
             address,
             error: self.error.lock().unwrap().clone(),
+            new_chats_auto: self.store.new_chats_auto(),
             connections: self.store.connections(server::now_ms()),
             links: self.store.links().into_iter().map(|l| LinkView { canvas: l.canvas, title: l.title, folder: l.folder }).collect(),
         }

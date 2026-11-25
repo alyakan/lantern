@@ -591,8 +591,15 @@ fn webclaude_cards(state: State<'_, AppState>) -> Vec<webclaude::store::Card> {
 }
 
 #[tauri::command]
-fn webclaude_allow(state: State<'_, AppState>, id: String, allow: bool) -> Result<(), String> {
-    state.web.store.decide_auth(&id, allow, webclaude::server::now_ms())
+fn webclaude_allow(state: State<'_, AppState>, id: String, allow: bool, code: Option<String>) -> Result<(), String> {
+    state.web.store.decide_auth(&id, allow, code.as_deref(), webclaude::server::now_ms())
+}
+
+/// Settings › Web Claude: whether a new chat web Claude's work starts runs on Auto (else Ask).
+#[tauri::command]
+fn webclaude_set_auto(state: State<'_, AppState>, on: bool) -> webclaude::View {
+    state.web.store.set_new_chats_auto(on);
+    state.web.view()
 }
 
 #[tauri::command]
@@ -607,7 +614,7 @@ async fn webclaude_projects(app: AppHandle) -> Vec<(String, String)> {
 }
 
 /// Run (or Decline) on a card: the message goes into the canvas's chat, or a new chat in the project the card names. A new
-/// chat starts as a phone's would: Auto only when Settings lets paired phones use it, else Ask.
+/// chat starts on Auto unless Settings › Web Claude says Ask.
 #[tauri::command]
 async fn webclaude_run(app: AppHandle, id: String, run: bool, folder: Option<String>) -> Result<(), String> {
     run_web_request(&app, &id, run, folder).await
@@ -635,7 +642,7 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
             };
             match folder {
                 Some(folder) => {
-                    let auto = state.remote.store.saved().allow_phone_auto;
+                    let auto = web.store.new_chats_auto();
                     let permissions = if auto { remote::protocol::RemotePermissions::Auto } else { remote::protocol::RemotePermissions::Ask };
                     request_new_chat(app, folder, action.text.clone(), SENT_BY_WEB_CLAUDE.into(), permissions, None, remote::protocol::RemoteWorkflow::Chat, None, vec![], remote::gateway::NewChatModel::default()).await
                 }
@@ -4818,6 +4825,7 @@ pub fn run() {
             webclaude_set_enabled,
             webclaude_cards,
             webclaude_allow,
+            webclaude_set_auto,
             webclaude_revoke,
             webclaude_projects,
             webclaude_run,

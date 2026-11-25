@@ -109,9 +109,9 @@ h1{{font-size:20px;margin:0 0 8px}}p{{margin:8px 0;color:var(--muted)}}.code{{fo
 
 fn waiting_page(id: &str, client: &str, code: &str) -> String {
     page("Connect to Lantern", &format!(r#"<h1>Allow {client} in Lantern</h1>
-<p id="say"><span class="dot"></span>Lantern on your Mac is asking whether {client} may connect. Tap <b>Allow</b> there or on your phone, on the card that shows this code:</p>
+<p id="say"><span class="dot"></span>Lantern on your Mac shows a card asking whether {client} may connect. Type this code on that card, then Allow:</p>
 <p class="code">{code}</p>
-<p>Allow only a card with this code. This page moves on by itself once you answer.</p>
+<p>This page moves on by itself once you answer.</p>
 <script>
 (function(){{var id="{id}";function tick(){{fetch("/authorize/wait?id="+encodeURIComponent(id),{{cache:"no-store"}}).then(function(r){{return r.json()}}).then(function(j){{
 if(j.state==="done"){{location.replace(j.redirect);return}}
@@ -339,17 +339,16 @@ mod tests {
         let html = String::from_utf8(page.body).unwrap();
         assert!(html.contains("Allow Claude in Lantern"));
         let id = match &c.store.cards(now_ms())[0] {
-            crate::webclaude::store::Card::Connect { id, code, site, .. } => {
-                // The card and the page show the same code, and the card names where the browser goes back to.
-                assert!(html.contains(&format!("<p class=\"code\">{code}</p>")), "{html}");
-                assert_eq!(site, "claude.ai");
-                id.clone()
-            }
+            crate::webclaude::store::Card::Connect { id, .. } => id.clone(),
             _ => panic!(),
         };
         let wait = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
         assert_eq!(body(&wait)["state"], "waiting");
-        c.store.decide_auth(&id, true, now_ms()).unwrap();
+        // The code is on the page only (the card doesn't carry it): the user types what the page shows.
+        let code = c.store.auth_code(&id).unwrap().0;
+        assert!(html.contains(&format!("<p class=\"code\">{code}</p>")), "{html}");
+        assert!(!serde_json::to_string(&c.store.cards(now_ms())).unwrap().contains(&code));
+        c.store.decide_auth(&id, true, Some(&code), now_ms()).unwrap();
         let done = body(&route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await);
         let redirect = done["redirect"].as_str().unwrap();
         let code = redirect.split("code=").nth(1).unwrap().split('&').next().unwrap();

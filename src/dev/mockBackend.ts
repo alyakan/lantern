@@ -2318,6 +2318,28 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return { enabled: false, show_titles: false, rich_notifications: false, keep_awake: false, tailnet: [], allow_phone_auto: false, allow_phone_shell: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";
+        // Web Claude: off, with sample cards in the inbox when the page's address has ?webclaude (to look at them).
+        case "webclaude_view":
+        case "webclaude_set_auto":
+          return { enabled: false, listening: false, address: null, error: null, new_chats_auto: true, connections: [], links: [] };
+        case "webclaude_set_enabled":
+          throw "Web Claude needs the app (it starts a server and Tailscale Funnel).";
+        case "webclaude_cards": {
+          const show = typeof location !== "undefined" && location.search.includes("webclaude");
+          const at = Date.now() - 90_000;
+          return show
+            ? [
+                { kind: "connect", id: "c1", client: "Claude", at },
+                { kind: "run", id: "r1", canvas: "https://claude.ai/artifact/MJNCsnh1bNKR6xmbMNQxcm", title: "Rayak — Grocery Ratings", message: "The product card changed: the rating moves under the price, and the store logo is 20pt. Build it in the app's ProductCard and keep the dark theme's colours.", folder: null, answer: false, chat_title: null, at },
+              ]
+            : [];
+        }
+        case "webclaude_projects":
+          return [["/Users/me/dev/rayak", "rayak"], ["/Users/me/dev/lantern", "lantern"]];
+        case "webclaude_allow":
+        case "webclaude_revoke":
+        case "webclaude_run":
+          return undefined;
         case "remote_pair_cancel":
         case "remote_window_chats":
         case "remote_window_desk":

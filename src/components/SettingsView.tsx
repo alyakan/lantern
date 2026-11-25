@@ -22,6 +22,7 @@ import { LinearSettings, type LinearSettingsProps } from "./LinearSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
 import { RemoteControl } from "./RemoteControl";
+import { WebClaudeSettings } from "./WebClaudeSettings";
 import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings";
 import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
@@ -30,15 +31,15 @@ import { ProviderDefaults, type ProviderDefault } from "./ProviderModels";
 import { SettingsHint, SettingsRow } from "./SettingsRow";
 import { BranchIcon, ClockIcon, DownloadIcon, GearIcon, GlobeIcon, KeyIcon, LearnIcon, LinkIcon, PhoneIcon, PlugIcon, ServerIcon, ShieldIcon, SparkIcon, SunIcon } from "./icons";
 
-export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "preset" | "updates" | "permissions" | "routines" | "prs" | "remote" | "accounts" | "endpoints" | "apikeys" | "hooks" | "integrations";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", preset: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", accounts: "Accounts", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations" };
+export type SettingsTab = "general" | "appearance" | "mcp" | "skills" | "preset" | "updates" | "permissions" | "routines" | "prs" | "remote" | "accounts" | "endpoints" | "apikeys" | "hooks" | "integrations" | "webclaude";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", appearance: "Appearance", mcp: "MCP servers", skills: "Skills", preset: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", accounts: "Accounts", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks", integrations: "Integrations", webclaude: "Web Claude" };
 
 /** The nav's sections: by what you're changing, not by when the feature landed. A page absent from a group is not offered. */
 const GROUPS: { title: string; tabs: SettingsTab[] }[] = [
   { title: "Lantern", tabs: ["general", "appearance", "updates"] },
   { title: "Agent", tabs: ["preset", "permissions", "skills"] },
   { title: "Automation", tabs: ["routines", "hooks", "prs"] },
-  { title: "Connected", tabs: ["mcp", "accounts", "endpoints", "apikeys", "integrations", "remote"] },
+  { title: "Connected", tabs: ["mcp", "accounts", "endpoints", "apikeys", "integrations", "remote", "webclaude"] },
 ];
 
 /** What else a page can be found by: the search matches these as well as its name. */
@@ -58,6 +59,7 @@ const KEYWORDS: Partial<Record<SettingsTab, string[]>> = {
   apikeys: ["api", "key", "keys", "token"],
   integrations: ["linear", "issues", "teams", "github", "slack"],
   remote: ["phone", "iphone", "ipad", "pair"],
+  webclaude: ["claude.ai", "connector", "design", "canvas", "funnel", "tailscale", "web"],
 };
 
 /** The settings inside the pages, so the search finds one by name and not only its page. `anchor` is the section to scroll to. */
@@ -81,6 +83,7 @@ const SETTING_INDEX: { tab: SettingsTab; label: string; anchor?: string }[] = [
   { tab: "prs", label: "Run tests when a merge is proposed", anchor: "prs-merge-tests" },
   { tab: "integrations", label: "Linear", anchor: "integrations-linear" },
   { tab: "remote", label: "Pair a phone" },
+  { tab: "webclaude", label: "Connect claude.ai" },
   { tab: "apikeys", label: "API keys" },
   { tab: "mcp", label: "Log in to a server" },
 ];
@@ -102,6 +105,7 @@ const TAB_ICON: Record<SettingsTab, () => ReactElement> = {
   apikeys: KeyIcon,
   integrations: PlugIcon,
   remote: PhoneIcon,
+  webclaude: GlobeIcon,
 };
 
 function TabIcon({ tab }: { tab: SettingsTab }) {
@@ -305,6 +309,8 @@ export function SettingsView({ open, onClose, preset, providers, updates, genera
               <SkillsPage {...page} />
             ) : tab === "remote" ? (
               <RemoteControl />
+            ) : tab === "webclaude" ? (
+              <WebClaudeSettings />
             ) : tab === "permissions" ? (
               <PermissionRules slot={page.slot} />
             ) : tab === "prs" && prChecks ? (

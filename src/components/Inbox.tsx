@@ -5,6 +5,7 @@ import { CONTINUE_MESSAGE, pausedLine, type PlanPause } from "../lib/planPause";
 import { elapsed } from "../lib/time";
 import { usePopover } from "../lib/usePopover";
 import { InboxIcon } from "./icons";
+import { WebClaudeRows, type WebInboxProps } from "./WebClaudeCards";
 
 export interface InboxProps {
   items: InboxItem[];
@@ -18,6 +19,8 @@ export interface InboxProps {
   onResume?: () => void;
   /** Closes the pause without telling them to: they stay stopped. */
   onDismissPause?: () => void;
+  /** Web Claude's cards: claude.ai sign-ins to Allow, and work to Run. */
+  web?: WebInboxProps;
 }
 
 /** How often the times in the list are redrawn while it is open. */
@@ -51,10 +54,11 @@ export function AllowButton({ title, onAllow }: { title: string; onAllow: () => 
  * and how long it has waited. Go takes you there; a plain permission request can be answered here. Arrow keys move
  * between the rows (Left and Right between a row's buttons), Escape closes it.
  */
-export function Inbox({ items, onGo, onDecide, paused = null, onResume, onDismissPause }: InboxProps) {
+export function Inbox({ items, onGo, onDecide, paused = null, onResume, onDismissPause, web }: InboxProps) {
   const [open, setOpen] = useState(false);
   const { box, button, list, id } = usePopover(open, () => setOpen(false), false);
-  const waiting = items.filter((it) => it.needsYou).length + (paused ? 1 : 0);
+  const webCards = web?.cards.length ?? 0;
+  const waiting = items.filter((it) => it.needsYou).length + (paused ? 1 : 0) + webCards;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!open) return;
@@ -72,7 +76,7 @@ export function Inbox({ items, onGo, onDecide, paused = null, onResume, onDismis
     if (!open) return;
     const active = document.activeElement;
     if (!active || active === document.body || !list.current?.contains(active)) list.current?.querySelector<HTMLElement>("[data-go]")?.focus();
-  }, [items.length, !!paused]);
+  }, [items.length, !!paused, webCards]);
 
   const go = (item: InboxItem) => {
     setOpen(false);
@@ -110,10 +114,11 @@ export function Inbox({ items, onGo, onDecide, paused = null, onResume, onDismis
       {open && (
         <div id={id} ref={list} className="menu inbox-menu" role="dialog" aria-label="What needs you" onKeyDown={keys}>
           <div className="menu-heading">Needs you</div>
-          {items.length === 0 && !paused ? (
+          {items.length === 0 && !paused && webCards === 0 ? (
             <div className="menu-empty">Nothing is waiting for you.</div>
           ) : (
             <ul className="menu-list">
+              {web && <WebClaudeRows {...web} now={now} />}
               {paused && (
                 <li className="inbox-row paused" key="plan-paused">
                   <span className="node-dot held" aria-hidden />

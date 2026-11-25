@@ -23,6 +23,8 @@ pub const AUTH_TTL: u64 = 10 * 60 * 1000;
 /// Limits that keep anyone who reaches the address from filling Lantern up.
 pub const CLIENTS_MAX: usize = 20;
 pub const AUTHS_WAITING_MAX: usize = 3;
+/// Wrong codes a sign-in card takes before it is denied.
+pub const CODE_TRIES: u32 = 3;
 pub const RUNS_WAITING_MAX: usize = 10;
 const REQUESTS_KEPT: usize = 100;
 const OUTBOX_KEPT: usize = 300;
@@ -194,11 +196,24 @@ pub struct OutItem {
     pub slot: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+fn yes() -> bool {
+    true
+}
+
+impl Default for Saved {
+    fn default() -> Self {
+        Self { enabled: false, new_chats_auto: true, clients: vec![], grants: vec![], links: vec![], requests: vec![], outbox: vec![] }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct Saved {
     /// Settings › Web Claude is on.
     #[serde(default)]
     enabled: bool,
+    /// A new chat that web Claude's work starts runs on Auto (else Ask). On unless the user turns it off.
+    #[serde(default = "yes")]
+    new_chats_auto: bool,
     #[serde(default)]
     clients: Vec<Client>,
     #[serde(default)]
@@ -218,8 +233,10 @@ struct PendingAuth {
     state: Option<String>,
     challenge: String,
     created_at: u64,
-    /// The match code shown on the page and the card.
+    /// The code shown on the sign-in page, which the user types on the card to Allow.
     code: String,
+    /// Wrong codes typed so far.
+    tries: u32,
     /// None: waiting for the user. Some(Ok(code)) or Some(Err(())) once they answered.
     answer: Option<Result<String, ()>>,
 }
@@ -253,9 +270,9 @@ struct Live {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Card {
-    /// `code` is shown on the sign-in page too: the user allows only a sign-in whose page they have open (anyone who reaches
-    /// the address can start one, so the card alone can't say whose it is). `site` is where it sends the browser back to.
-    Connect { id: String, client: String, site: String, code: String, at: u64 },
+    /// Anyone who reaches the address can start a sign-in, so the card alone can't say whose it is: its code is shown only on
+    /// the sign-in page, and Allow needs the user to type it (see `decide_auth`). `client` is the name the client gave itself.
+    Connect { id: String, client: String, at: u64 },
     Run { id: String, canvas: String, title: String, message: String, folder: Option<String>, answer: bool, chat_title: Option<String>, at: u64 },
 }
 
@@ -361,6 +378,14 @@ impl Store {
         self.edit(|s| s.enabled = on);
     }
 
+    pub fn new_chats_auto(&self) -> bool {
+        self.saved.lock().unwrap().new_chats_auto
+    }
+
+    pub fn set_new_chats_auto(&self, on: bool) {
+        self.edit(|s| s.new_chats_auto = on);
+    }
+
     // ---- Sign-in (OAuth 2.1 with dynamic client registration and PKCE) ----
 
     pub fn register(&self, name: Option<&str>, redirect_uris: &[String], now: u64) -> Result<Client, String> {
@@ -400,16 +425,32 @@ impl Store {
             if live.auths.values().filter(|a| a.answer.is_none()).count() >= AUTHS_WAITING_MAX {
                 return Err("Too many sign-ins are waiting in Lantern already. Answer those first.".into());
             }
-            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, code: match_code(), answer: None });
+            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, code: match_code(), tries: 0, answer: None });
         }
         self.changed();
         Ok(id)
     }
 
-    pub fn decide_auth(&self, id: &str, allow: bool, now: u64) -> Result<(), String> {
+    /// The user's answer to a sign-in card. Allow needs the code from the sign-in page, typed (`typed`): a wrong one is refused,
+    /// and after `CODE_TRIES` wrong ones the sign-in is denied.
+    pub fn decide_auth(&self, id: &str, allow: bool, typed: Option<&str>, now: u64) -> Result<(), String> {
         {
             let mut live = self.live.lock().unwrap();
             let auth = live.auths.get(id).filter(|a| a.answer.is_none() && a.created_at + AUTH_TTL > now).cloned().ok_or("That sign-in has ended.")?;
+            if allow {
+                let typed: String = typed.unwrap_or("").chars().filter(|c| !c.is_whitespace() && *c != '-').collect::<String>().to_uppercase();
+                if typed != auth.code {
+                    let a = live.auths.get_mut(id).unwrap();
+                    a.tries += 1;
+                    if a.tries >= CODE_TRIES {
+                        a.answer = Some(Err(()));
+                        drop(live);
+                        self.changed();
+                        return Err("That code was wrong too many times, so the sign-in was denied. Start again from claude.ai.".into());
+                    }
+                    return Err("That isn't the code on the sign-in page. Type the code the claude.ai page shows; if no page you opened shows one, Deny.".into());
+                }
+            }
             let answer = if allow {
                 let code = random_token(32);
                 live.codes.insert(hash(&code), Code { client_id: auth.client.id.clone(), redirect_uri: auth.redirect_uri.clone(), challenge: auth.challenge.clone(), expires: now + CODE_TTL });
@@ -697,7 +738,12 @@ impl Store {
 
     /// A chat leaves a question or a note for web Claude. Only a chat working on a canvas can.
     pub fn chat_post(&self, slot: &str, chat_title: Option<String>, kind: OutKind, text: &str, preview: Option<&str>, now: u64) -> Result<OutItem, String> {
-        let key = self.canvas_of_slot(slot).ok_or("This chat isn't working on a web Claude canvas: only a chat started from web Claude can leave it a note or a question.")?;
+        // Only during a turn web Claude's work started: a later turn of the user's own in that chat sends nothing to the web.
+        let key = {
+            let live = self.live.lock().unwrap();
+            live.turns.contains_key(slot).then(|| live.slots.get(slot).cloned()).flatten()
+        }
+        .ok_or("Only a turn that web Claude's work started can leave web Claude a note or a question, and this isn't one.")?;
         let text = clean("text", text, MESSAGE_MAX)?;
         let preview = match preview.map(str::trim).filter(|p| !p.is_empty()) {
             Some(p) if p.starts_with("https://") && p.len() <= CANVAS_MAX && !p.chars().any(|c| c.is_whitespace() || c.is_control()) => Some(p.to_string()),
@@ -725,7 +771,7 @@ impl Store {
     }
 
     pub fn cards(&self, now: u64) -> Vec<Card> {
-        let mut cards: Vec<Card> = self.live.lock().unwrap().auths.iter().filter(|(_, a)| a.answer.is_none() && a.created_at + AUTH_TTL > now).map(|(id, a)| Card::Connect { id: id.clone(), client: a.client.name.clone(), site: site_of(&a.redirect_uri), code: a.code.clone(), at: a.created_at }).collect();
+        let mut cards: Vec<Card> = self.live.lock().unwrap().auths.iter().filter(|(_, a)| a.answer.is_none() && a.created_at + AUTH_TTL > now).map(|(id, a)| Card::Connect { id: id.clone(), client: a.client.name.clone(), at: a.created_at }).collect();
         cards.extend(self.saved.lock().unwrap().requests.iter().filter(|r| r.status == Status::Waiting).map(|r| Card::Run {
             id: r.id.clone(),
             canvas: r.canvas.clone(),
@@ -752,17 +798,12 @@ impl Store {
     }
 }
 
-/// Four letters and digits that can't be misread (no 0/O, 1/I/L), for the user to match the sign-in page to its card.
+/// Six letters and digits that can't be misread (no 0/O, 1/I/L): shown on the sign-in page, typed on the card.
 fn match_code() -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-    let mut b = [0u8; 4];
+    let mut b = [0u8; 6];
     getrandom::fill(&mut b).expect("the system's random numbers");
     b.iter().map(|x| ALPHABET[*x as usize % ALPHABET.len()] as char).collect()
-}
-
-/// The host a redirect goes to, for the card.
-fn site_of(uri: &str) -> String {
-    uri.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).unwrap_or(uri).to_string()
 }
 
 impl Store {
@@ -804,7 +845,8 @@ mod tests {
         let c = s.register(Some("Claude"), &[CB.into()], 1).unwrap();
         let verifier = "v".repeat(50);
         let id = s.begin_auth(&c.id, CB, Some("st"), &challenge_of(&verifier), "S256", 1).unwrap();
-        s.decide_auth(&id, true, 2).unwrap();
+        let code = s.auth_code(&id).unwrap().0;
+        s.decide_auth(&id, true, Some(&code), 2).unwrap();
         let AuthStatus::Redirect(url) = s.auth_status(&id, 3) else { panic!() };
         let code = url.split("code=").nth(1).unwrap().split('&').next().unwrap().to_string();
         let t = s.exchange_code(&code, &c.id, CB, &verifier, 4).unwrap();
@@ -830,7 +872,14 @@ mod tests {
         let id = s.begin_auth(&c.id, CB, Some("xyz"), &challenge_of(&verifier), "S256", 1).unwrap();
         assert_eq!(s.auth_status(&id, 2), AuthStatus::Waiting);
         assert!(matches!(s.cards(2).as_slice(), [Card::Connect { .. }]));
-        s.decide_auth(&id, true, 3).unwrap();
+        assert!(s.decide_auth(&id, true, None, 3).is_err(), "Allow needs the page's code");
+        assert!(s.decide_auth(&id, true, Some("WRONG1"), 3).is_err());
+        assert_eq!(s.auth_status(&id, 3), AuthStatus::Waiting, "a wrong code leaves it waiting");
+        let code = s.auth_code(&id).unwrap().0;
+        assert_eq!(code.len(), 6);
+        // Typed loosely: lower case, with a space.
+        let typed = format!("{} {}", code[..3].to_lowercase(), &code[3..]);
+        s.decide_auth(&id, true, Some(&typed), 3).unwrap();
         assert!(s.cards(3).is_empty());
         let AuthStatus::Redirect(url) = s.auth_status(&id, 4) else { panic!() };
         assert!(url.starts_with(CB) && url.contains("state=xyz"), "{url}");
@@ -845,9 +894,34 @@ mod tests {
         let s = store();
         let c = s.register(None, &[CB.into()], 1).unwrap();
         let id = s.begin_auth(&c.id, CB, None, &challenge_of(&"q".repeat(50)), "S256", 1).unwrap();
-        s.decide_auth(&id, false, 2).unwrap();
+        s.decide_auth(&id, false, None, 2).unwrap();
         let AuthStatus::Redirect(url) = s.auth_status(&id, 3) else { panic!() };
         assert_eq!(url, format!("{CB}?error=access_denied"));
+    }
+
+    #[test]
+    fn three_wrong_codes_deny_the_sign_in() {
+        let s = store();
+        let c = s.register(None, &[CB.into()], 1).unwrap();
+        let id = s.begin_auth(&c.id, CB, None, &challenge_of(&"q".repeat(50)), "S256", 1).unwrap();
+        for _ in 0..CODE_TRIES {
+            assert!(s.decide_auth(&id, true, Some("AAAAAA"), 2).is_err());
+        }
+        assert!(s.cards(2).is_empty());
+        let AuthStatus::Redirect(url) = s.auth_status(&id, 3) else { panic!() };
+        assert!(url.contains("error=access_denied"));
+    }
+
+    #[test]
+    fn web_chats_start_on_auto_until_the_user_turns_it_off_and_that_lasts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("w.json");
+        let s = Store::load(Some(path.clone()));
+        assert!(s.new_chats_auto());
+        s.set_new_chats_auto(false);
+        assert!(!Store::load(Some(path)).new_chats_auto());
+        // A file from before the setting existed reads as on.
+        assert!(serde_json::from_str::<Saved>("{}").unwrap().new_chats_auto);
     }
 
     #[test]
@@ -974,7 +1048,11 @@ mod tests {
         s.started(&r.id, "s1", Some("Header".into()));
         assert!(s.chat_post("s1", None, OutKind::Note, "see", Some("http://x"), 1).is_err(), "previews are https links");
         let q = s.chat_post("s1", Some("Header".into()), OutKind::Question, "16 or 20?", None, 2).unwrap();
-        let first = s.outbox(None, None, 10);
+        // Once the web turn is over, the chat (now the user's own again) can't post.
+        s.on_event("s1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None }, 2);
+        assert!(s.chat_post("s1", None, OutKind::Note, "later", None, 2).is_err());
+        let first = s.outbox(None, Some(&q.id), 10);
+        assert_eq!(first.len(), 1, "the turn's reply came after the question");
         assert_eq!(s.outbox(None, Some(&first[0].id), 10).len(), 0, "nothing after the newest");
         let ans = s.propose_answer(&q.id, "20", "g", 3).unwrap();
         assert!(matches!(&s.cards(3)[0], Card::Run { answer: true, chat_title: Some(t), .. } if t == "Header"));
