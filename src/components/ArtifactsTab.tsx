@@ -173,9 +173,13 @@ function TextArtifact({ folder, artifact }: { folder: string; artifact: Artifact
   if (!text) return <div className="tests-note dash-loading">Loading…</div>;
   if (!text.ok) return <div className="tests-note">{text.text}</div>;
   const source = artifact.kind === "mermaid" ? "```mermaid\n" + text.text + "\n```" : text.text;
+  // In a message's class, as the Markdown preview is: the chat's Markdown styles are scoped to it, and without them a code block's
+  // long lines were cut off by its frame instead of scrolling sideways (and it had no padding or ground of its own).
   return (
     <div className="artifact-body artifact-text">
-      <Md>{source}</Md>
+      <div className="msg assistant">
+        <Md>{source}</Md>
+      </div>
     </div>
   );
 }

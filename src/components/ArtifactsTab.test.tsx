@@ -59,6 +59,15 @@ describe("ArtifactsTab", () => {
     expect(document.querySelector("iframe")).toBeNull();
   });
 
+  it("draws Markdown with the chat's styles, so a code block's long lines scroll sideways instead of being cut off", async () => {
+    vi.mocked(api.artifactsList).mockResolvedValue(listing(item("notes.md", "markdown")));
+    vi.mocked(api.artifactsRead).mockResolvedValue("Run it:\n\n```sh\n" + "x".repeat(400) + "\n```");
+    render(<ArtifactsTab folder="/p" refreshKey={0} />);
+    await screen.findByText("Run it:");
+    // `.msg.assistant pre` is what scrolls a code block sideways (styles.css); the chat and the Markdown preview draw it the same way.
+    expect(document.querySelector(".artifact-text .msg.assistant pre")).not.toBeNull();
+  });
+
   it("asks Claude to refresh the artifact on screen, and reads it again when the turn ends", async () => {
     vi.mocked(api.artifactsList).mockResolvedValue(listing(item("stats.html", "html")));
     const onRefresh = vi.fn();
