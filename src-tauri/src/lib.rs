@@ -59,6 +59,7 @@ pub mod revert;
 pub mod checkpoint;
 pub mod ui_event;
 pub mod updates;
+pub mod webclaude;
 pub mod workdir;
 
 use args::{HelperConfig, Mode, Role};
