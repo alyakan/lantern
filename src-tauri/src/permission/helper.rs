@@ -136,6 +136,8 @@ impl Server {
             DASHBOARD_RUN => self.dashboard_run(args, ask),
             // The other dashboard tools read and show; the app answers them like the network ones.
             // The user's to-do list: the app reads and changes it for this chat's project.
+            // web_ask and web_note: the app puts them in web Claude's outbox, for a chat that works on a canvas only.
+            t if crate::webclaude::CHAT_TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             t if crate::todos::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             // Putting the chat in a worktree sets what its slot reads Git and Branch from (see workdir.rs). It is not in the tools
             // that run without asking, so the CLI asks the user with a card before it gets here.
@@ -936,7 +938,7 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("Lantern has no tool \"frobnicate\". Its tools here are: steps_guide, review_target, request_approval, network_requests"), "{text}");
-        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("todo_done, enter_worktree, checklist_set."), "{text}");
+        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("todo_done, enter_worktree, web_ask, web_note, checklist_set."), "{text}");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
         let approve = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "approve").unwrap().clone();
         assert_eq!(approve["description"], "Internal: Claude Code's permission prompt. Lantern calls it for the CLI; never call it yourself.");
@@ -995,7 +997,7 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).chain(crate::dashboard_tools::TOOLS.iter().copied()).chain(crate::todos::TOOLS.iter().copied()).chain([crate::workdir::TOOL, CHECKLIST_TOOL]).collect();
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "request_approval"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).chain(crate::dashboard_tools::TOOLS.iter().copied()).chain(crate::todos::TOOLS.iter().copied()).chain([crate::workdir::TOOL]).chain(crate::webclaude::CHAT_TOOLS.iter().copied()).chain([CHECKLIST_TOOL]).collect();
         assert_eq!(tool_names(&handle_message_as(&list, &allow_all, Offer::default()).unwrap()), every_chats);
         let names = tool_names(&handle_message_as(&list, &allow_all, LEAD).unwrap());
         assert_eq!(names[..every_chats.len()], every_chats);

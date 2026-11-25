@@ -76,9 +76,9 @@ pub fn parse_query(q: &str) -> HashMap<String, String> {
         }
         String::from_utf8_lossy(&out).into_owned()
     }
-    q.split('&').filter(|p| !p.is_empty()).filter_map(|p| {
+    q.split('&').filter(|p| !p.is_empty()).map(|p| {
         let (k, v) = p.split_once('=').unwrap_or((p, ""));
-        Some((dec(k), dec(v)))
+        (dec(k), dec(v))
     }).collect()
 }
 
@@ -103,20 +103,21 @@ fn page(title: &str, body: &str) -> String {
 @media (prefers-color-scheme:dark){{:root{{--bg:#191817;--fg:#ecebe7;--muted:#a29f98;--card:#232220;--line:#363431;--accent:#fb923c}}}}
 body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
 main{{max-width:420px;margin:16px;padding:28px;background:var(--card);border:1px solid var(--line);border-radius:14px}}
-h1{{font-size:20px;margin:0 0 8px}}p{{margin:8px 0;color:var(--muted)}}.dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:8px;animation:p 1.4s infinite}}@keyframes p{{50%{{opacity:.3}}}}
+h1{{font-size:20px;margin:0 0 8px}}p{{margin:8px 0;color:var(--muted)}}.code{{font:600 32px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.2em;color:var(--fg);text-align:center;margin:16px 0}}.dot{{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:8px;animation:p 1.4s infinite}}@keyframes p{{50%{{opacity:.3}}}}
 </style></head><body><main>{body}</main></body></html>"#)
 }
 
-fn waiting_page(id: &str, client: &str) -> String {
+fn waiting_page(id: &str, client: &str, code: &str) -> String {
     page("Connect to Lantern", &format!(r#"<h1>Allow {client} in Lantern</h1>
-<p id="say"><span class="dot"></span>Lantern on your Mac is asking whether {client} may connect. Tap <b>Allow</b> there or on your phone.</p>
-<p>This page moves on by itself once you answer.</p>
+<p id="say"><span class="dot"></span>Lantern on your Mac is asking whether {client} may connect. Tap <b>Allow</b> there or on your phone, on the card that shows this code:</p>
+<p class="code">{code}</p>
+<p>Allow only a card with this code. This page moves on by itself once you answer.</p>
 <script>
 (function(){{var id="{id}";function tick(){{fetch("/authorize/wait?id="+encodeURIComponent(id),{{cache:"no-store"}}).then(function(r){{return r.json()}}).then(function(j){{
 if(j.state==="done"){{location.replace(j.redirect);return}}
 if(j.state==="gone"){{document.getElementById("say").textContent="This sign-in ended. Start again from claude.ai.";return}}
 setTimeout(tick,1500)}}).catch(function(){{setTimeout(tick,3000)}})}}tick()}})();
-</script>"#, client = esc(client), id = esc(id)))
+</script>"#, client = esc(client), id = esc(id), code = esc(code)))
 }
 
 fn error_page(why: &str) -> Reply {
@@ -180,13 +181,10 @@ pub async fn route(ctx: &Ctx, method: &str, path: &str, query: &str, headers: &H
                 return error_page("Only response_type=code is supported.");
             }
             match ctx.store.begin_auth(get("client_id"), get("redirect_uri"), q.get("state").map(String::as_str), get("code_challenge"), get("code_challenge_method"), now) {
-                Ok(id) => {
-                    let client = ctx.store.cards(now).into_iter().find_map(|c| match c {
-                        super::store::Card::Connect { id: cid, client, .. } if cid == id => Some(client),
-                        _ => None,
-                    });
-                    Reply::html(200, waiting_page(&id, &client.unwrap_or_else(|| "claude.ai".into())))
-                }
+                Ok(id) => match ctx.store.auth_code(&id) {
+                    Some((code, client)) => Reply::html(200, waiting_page(&id, &client, &code)),
+                    None => error_page("That sign-in has ended. Start again from claude.ai."),
+                },
                 Err(e) => error_page(&e),
             }
         }
@@ -341,7 +339,12 @@ mod tests {
         let html = String::from_utf8(page.body).unwrap();
         assert!(html.contains("Allow Claude in Lantern"));
         let id = match &c.store.cards(now_ms())[0] {
-            crate::webclaude::store::Card::Connect { id, .. } => id.clone(),
+            crate::webclaude::store::Card::Connect { id, code, site, .. } => {
+                // The card and the page show the same code, and the card names where the browser goes back to.
+                assert!(html.contains(&format!("<p class=\"code\">{code}</p>")), "{html}");
+                assert_eq!(site, "claude.ai");
+                id.clone()
+            }
             _ => panic!(),
         };
         let wait = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;

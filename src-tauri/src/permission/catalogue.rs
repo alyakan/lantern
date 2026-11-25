@@ -53,6 +53,8 @@ pub fn instructions(offer: Offer) -> String {
 - todo_list, todo_add, todo_done: the user's own to-do list for this project, in the Todos tab (not your checklist). Read it when they mention their to-dos; add items when they ask (a due date makes Lantern remind them); tick one off only when its work is really done. You can't reword, reopen or delete items.
 - request_approval: ask the user to approve one named action that is hard to reverse or outward-facing (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside your own worktree). It waits for them and returns their answer, with their note. A yes covers exactly that action and nothing more; Lantern does not run it, you do.",
     );
+    text.push('\n');
+    text.push_str(crate::webclaude::CHAT_INSTRUCTIONS);
     if offer.steps {
         text.push_str("\n- reproduce: ask the user to reproduce a bug now, with your diagnostic logging in place. It waits for them and returns whether they could, with their note. Use it in the Step by step workflow's Debug flavour instead of ending your turn to ask.");
     }
@@ -248,6 +250,8 @@ const HINTS: &[(&str, &str, bool, bool, bool)] = &[
     ("todo_add", "Add to the user's to-do list", false, false, false),
     ("todo_done", "Tick off one of the user's to-dos", false, false, true),
     ("enter_worktree", "Show a worktree in the Changes tab", false, false, true),
+    ("web_ask", "Ask web Claude about the design", false, false, false),
+    ("web_note", "Leave web Claude a note", false, false, false),
     ("checklist_set", "Set the chat's checklist", false, false, true),
     ("spawn_agent", "Start an agent", false, false, false),
     ("list_agents", "List agents", true, false, true),
@@ -283,6 +287,7 @@ pub fn tool_list(offer: Offer, version: &str) -> Vec<Value> {
     tools.extend(crate::dashboard_tools::tool_list());
     tools.extend(crate::todos::tool_list());
     tools.extend(crate::workdir::tool_list());
+    tools.extend(crate::webclaude::chat_tool_list());
     tools.push(checklist_tool());
     if offer.orchestrator {
         tools.extend(orchestra_tools());

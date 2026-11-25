@@ -218,6 +218,8 @@ struct PendingAuth {
     state: Option<String>,
     challenge: String,
     created_at: u64,
+    /// The match code shown on the page and the card.
+    code: String,
     /// None: waiting for the user. Some(Ok(code)) or Some(Err(())) once they answered.
     answer: Option<Result<String, ()>>,
 }
@@ -251,7 +253,9 @@ struct Live {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Card {
-    Connect { id: String, client: String, at: u64 },
+    /// `code` is shown on the sign-in page too: the user allows only a sign-in whose page they have open (anyone who reaches
+    /// the address can start one, so the card alone can't say whose it is). `site` is where it sends the browser back to.
+    Connect { id: String, client: String, site: String, code: String, at: u64 },
     Run { id: String, canvas: String, title: String, message: String, folder: Option<String>, answer: bool, chat_title: Option<String>, at: u64 },
 }
 
@@ -396,7 +400,7 @@ impl Store {
             if live.auths.values().filter(|a| a.answer.is_none()).count() >= AUTHS_WAITING_MAX {
                 return Err("Too many sign-ins are waiting in Lantern already. Answer those first.".into());
             }
-            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, answer: None });
+            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, code: match_code(), answer: None });
         }
         self.changed();
         Ok(id)
@@ -534,6 +538,7 @@ impl Store {
     }
 
     /// Web Claude asks for something: it waits for the user's Run. `folder` was checked against the Mac's projects.
+    #[allow(clippy::too_many_arguments)]
     pub fn propose(&self, kind: Kind, canvas: &str, title: &str, message: &str, folder: Option<String>, grant: &str, now: u64) -> Result<Request, String> {
         let canvas = clean("canvas", canvas, CANVAS_MAX)?;
         let title = clean("title", title, TITLE_MAX).unwrap_or_else(|_| cut(&canvas, TITLE_MAX));
@@ -720,7 +725,7 @@ impl Store {
     }
 
     pub fn cards(&self, now: u64) -> Vec<Card> {
-        let mut cards: Vec<Card> = self.live.lock().unwrap().auths.iter().filter(|(_, a)| a.answer.is_none() && a.created_at + AUTH_TTL > now).map(|(id, a)| Card::Connect { id: id.clone(), client: a.client.name.clone(), at: a.created_at }).collect();
+        let mut cards: Vec<Card> = self.live.lock().unwrap().auths.iter().filter(|(_, a)| a.answer.is_none() && a.created_at + AUTH_TTL > now).map(|(id, a)| Card::Connect { id: id.clone(), client: a.client.name.clone(), site: site_of(&a.redirect_uri), code: a.code.clone(), at: a.created_at }).collect();
         cards.extend(self.saved.lock().unwrap().requests.iter().filter(|r| r.status == Status::Waiting).map(|r| Card::Run {
             id: r.id.clone(),
             canvas: r.canvas.clone(),
@@ -744,6 +749,26 @@ impl Store {
                 r.status = Status::Failed { reason: "Lantern restarted while this was being worked on. Look in the chat for how far it got.".into() };
             }
         });
+    }
+}
+
+/// Four letters and digits that can't be misread (no 0/O, 1/I/L), for the user to match the sign-in page to its card.
+fn match_code() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    let mut b = [0u8; 4];
+    getrandom::fill(&mut b).expect("the system's random numbers");
+    b.iter().map(|x| ALPHABET[*x as usize % ALPHABET.len()] as char).collect()
+}
+
+/// The host a redirect goes to, for the card.
+fn site_of(uri: &str) -> String {
+    uri.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).unwrap_or(uri).to_string()
+}
+
+impl Store {
+    /// The match code of a sign-in that waits, for its page.
+    pub fn auth_code(&self, id: &str) -> Option<(String, String)> {
+        self.live.lock().unwrap().auths.get(id).filter(|a| a.answer.is_none()).map(|a| (a.code.clone(), a.client.name.clone()))
     }
 }
 

@@ -122,6 +122,8 @@ pub struct AppState {
     hooks: std::sync::Mutex<hooks::HookTable>,
     /// Where every chat's events leave from, and what is kept of them for a client joining late (see remote/).
     remote: remote::Remote,
+    /// The connector web Claude adds in claude.ai (Settings › Web Claude, see webclaude/).
+    web: Arc<webclaude::WebClaude>,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -510,6 +512,146 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
             *s.settings_note.lock().unwrap() = Some(note);
         }
         told_ask(app, worker);
+    }
+}
+
+/// What the web Claude connector reads of the Mac (see webclaude/mcp.rs): the projects a phone may start a chat in, and the
+/// chats as the hub lists them.
+struct WebMac {
+    app: AppHandle,
+}
+
+impl webclaude::mcp::Mac for WebMac {
+    fn projects(&self) -> webclaude::mcp::BoxFut<Vec<(String, String)>> {
+        let host = RemoteHost { app: self.app.clone(), mac_name: String::new() };
+        remote::gateway::Host::projects(&host)
+    }
+
+    fn chats(&self) -> Vec<webclaude::mcp::ChatLine> {
+        self.app.state::<AppState>().remote.hub.chats().into_iter().map(|c| webclaude::mcp::ChatLine {
+            status: serde_json::to_value(c.status).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default(),
+            slot: c.slot,
+            title: c.title,
+            folder: c.folder,
+        }).collect()
+    }
+}
+
+/// Who a message from web Claude is said to be sent by (UserText's `sent_by`).
+const SENT_BY_WEB_CLAUDE: &str = "web-claude";
+
+/// The connector goes on the internet through Tailscale Funnel, unless LANTERN_WEBCLAUDE_LOCAL is set (a dev run tried with
+/// curl on this Mac only).
+fn web_claude_public() -> bool {
+    std::env::var_os("LANTERN_WEBCLAUDE_LOCAL").is_none()
+}
+
+fn start_web_claude_wiring(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let web = state.web.clone();
+    let handle = app.clone();
+    web.store.on_change(Arc::new(move || {
+        let _ = handle.emit("webclaude-changed", ());
+    }));
+    let following = web.clone();
+    state.remote.bus.tap(Arc::new(move |ev: &remote::bus::BusEvent| following.store.on_event(&ev.slot, &ev.event, webclaude::server::now_ms())));
+    if web.store.enabled() {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let web = handle.state::<AppState>().web.clone();
+            let _ = web.start(Arc::new(WebMac { app: handle.clone() }), web_claude_public()).await;
+            let _ = handle.emit("webclaude-changed", ());
+        });
+    }
+}
+
+#[tauri::command]
+fn webclaude_view(state: State<'_, AppState>) -> webclaude::View {
+    state.web.view()
+}
+
+/// Settings › Web Claude's switch: on starts the connector and its Funnel (an error says why it couldn't), off stops both.
+#[tauri::command]
+async fn webclaude_set_enabled(app: AppHandle, on: bool) -> Result<webclaude::View, String> {
+    let web = app.state::<AppState>().web.clone();
+    if on {
+        web.start(Arc::new(WebMac { app: app.clone() }), web_claude_public()).await?;
+    } else {
+        web.stop(web_claude_public()).await;
+    }
+    web.store.set_enabled(on);
+    let _ = app.emit("webclaude-changed", ());
+    Ok(web.view())
+}
+
+/// What waits for the user: claude.ai sign-ins to Allow, and work to Run.
+#[tauri::command]
+fn webclaude_cards(state: State<'_, AppState>) -> Vec<webclaude::store::Card> {
+    state.web.store.cards(webclaude::server::now_ms())
+}
+
+#[tauri::command]
+fn webclaude_allow(state: State<'_, AppState>, id: String, allow: bool) -> Result<(), String> {
+    state.web.store.decide_auth(&id, allow, webclaude::server::now_ms())
+}
+
+#[tauri::command]
+fn webclaude_revoke(state: State<'_, AppState>, id: String) {
+    state.web.store.revoke(&id);
+}
+
+/// The projects a Run card may pick from.
+#[tauri::command]
+async fn webclaude_projects(app: AppHandle) -> Vec<(String, String)> {
+    webclaude::mcp::Mac::projects(&WebMac { app }).await
+}
+
+/// Run (or Decline) on a card: the message goes into the canvas's chat, or a new chat in the project the card names. A new
+/// chat starts as a phone's would: Auto only when Settings lets paired phones use it, else Ask.
+#[tauri::command]
+async fn webclaude_run(app: AppHandle, id: String, run: bool, folder: Option<String>) -> Result<(), String> {
+    run_web_request(&app, &id, run, folder).await
+}
+
+async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<String>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let web = state.web.clone();
+    if let Some(f) = &folder {
+        let projects = webclaude::mcp::Mac::projects(&WebMac { app: app.clone() }).await;
+        if !projects.iter().any(|(p, _)| p == f) && !web.store.links().iter().any(|l| &l.folder == f) {
+            return Err("That isn't one of your projects.".into());
+        }
+    }
+    let Some(action) = web.store.decide_run(id, run, folder)? else { return Ok(()) };
+    let request_folder = web.store.request(&action.request).and_then(|r| r.folder);
+    let open = |slot: &str| state.remote.hub.chat(slot).is_some();
+    let result = match &action.target {
+        webclaude::store::Target::Chat(slot) if open(slot) => send_user_message(app, &state, slot, &action.text, SENT_BY_WEB_CLAUDE, &[], true).await.map(|_| slot.clone()),
+        // The canvas's chat was closed since: a new chat in its project takes it.
+        webclaude::store::Target::Chat(_) | webclaude::store::Target::NewChat(_) => {
+            let folder = match &action.target {
+                webclaude::store::Target::NewChat(f) => Some(f.clone()),
+                _ => request_folder,
+            };
+            match folder {
+                Some(folder) => {
+                    let auto = state.remote.store.saved().allow_phone_auto;
+                    let permissions = if auto { remote::protocol::RemotePermissions::Auto } else { remote::protocol::RemotePermissions::Ask };
+                    request_new_chat(app, folder, action.text.clone(), SENT_BY_WEB_CLAUDE.into(), permissions, None, remote::protocol::RemoteWorkflow::Chat, None, vec![], remote::gateway::NewChatModel::default()).await
+                }
+                None => Err("The chat for this canvas was closed, and the canvas has no project to start a new one in.".into()),
+            }
+        }
+    };
+    match result {
+        Ok(slot) => {
+            web.store.started(&action.request, &slot, state.remote.hub.chat(&slot).and_then(|c| c.title));
+            Ok(())
+        }
+        Err(e) => {
+            web.store.failed(&action.request, &e);
+            Err(e)
+        }
     }
 }
 
@@ -1237,7 +1379,10 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // And enter_worktree (see workdir.rs): it sets what the chat's slot reads Git and Branch from, so the bridge shares the
     // slot's two cells (not the slot itself, which owns the bridge).
     let (pin, view_main) = (slot.pin.clone(), slot.view_main.clone());
+    // And web_ask / web_note (see webclaude/), for this chat.
+    let web = state.web.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
+        let web = web.clone();
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
@@ -1248,6 +1393,13 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
             if tool == workdir::TOOL {
                 let result = tauri::async_runtime::spawn_blocking(move || workdir::call(folder.as_deref(), &pin, &view_main, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
                 let (allow, text) = match result {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
+            if webclaude::CHAT_TOOLS.contains(&tool.as_str()) {
+                let (allow, text) = match web.chat_call(&chat_id, hub.chat(&chat_id).and_then(|c| c.title), &tool, &input) {
                     Ok(text) => (true, text),
                     Err(text) => (false, text),
                 };
@@ -4602,7 +4754,10 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), accounts: Arc::new(accounts::AccountStore::load(app.path().app_data_dir().ok().map(|d| d.join("accounts.json")), app.path().app_data_dir().map(|d| d.join("accounts")).unwrap_or_else(|_| std::env::temp_dir().join("lantern-accounts")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, capture, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { conversations: Arc::new(conversations::Store::load(app.path().app_data_dir().ok().map(|d| d.join("conversations")))), slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), accounts: Arc::new(accounts::AccountStore::load(app.path().app_data_dir().ok().map(|d| d.join("accounts.json")), app.path().app_data_dir().map(|d| d.join("accounts")).unwrap_or_else(|_| std::env::temp_dir().join("lantern-accounts")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, capture, dashboards, todos, artifacts, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), desk_agents: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()), web: Arc::new(webclaude::WebClaude::new(webclaude::store::Store::load(app.path().app_data_dir().ok().map(|d| d.join("webclaude.json"))))) });
+            // Web Claude: its cards and Settings follow what changes, it follows the turns it started, and if it was left on it
+            // listens again from launch.
+            start_web_claude_wiring(app.handle());
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -4659,6 +4814,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            webclaude_view,
+            webclaude_set_enabled,
+            webclaude_cards,
+            webclaude_allow,
+            webclaude_revoke,
+            webclaude_projects,
+            webclaude_run,
             locate_claude,
             insights,
             remote_window_chats,

@@ -21,6 +21,27 @@ use store::{OutKind, Store};
 /// The tools a chat is offered on Lantern's MCP server.
 pub const CHAT_TOOLS: &[&str] = &["web_ask", "web_note"];
 
+/// Their line in the server's instructions.
+pub const CHAT_INSTRUCTIONS: &str = "- web_ask, web_note: only in a chat working on a web Claude design canvas (its message starts \"[Web Claude sent this about the design canvas\"). web_ask leaves web Claude a question; its answer comes later as a message. web_note leaves it a note, with a preview link (an artifact you published) when you have one. Your last message of each such turn goes back to web Claude on its own.";
+
+pub fn chat_tool_list() -> Vec<Value> {
+    vec![
+        serde_json::json!({
+            "name": "web_ask",
+            "description": "In a chat working on a web Claude design canvas: leave web Claude a question about the design (a size, a state the canvas doesn't show). It returns at once; the answer arrives later as a message, after the user taps Run. Carry on meanwhile with what you can.",
+            "inputSchema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": store::MESSAGE_MAX, "description": "The question, complete on its own: web Claude sees this, not this chat."}}, "required": ["text"], "additionalProperties": false}
+        }),
+        serde_json::json!({
+            "name": "web_note",
+            "description": "In a chat working on a web Claude design canvas: leave web Claude a note, such as what you built and a link to a preview artifact you published, or where the code differs from the design and why.",
+            "inputSchema": {"type": "object", "properties": {
+                "text": {"type": "string", "maxLength": store::MESSAGE_MAX, "description": "The note, complete on its own."},
+                "preview_url": {"type": "string", "maxLength": store::CANVAS_MAX, "description": "An https link to a preview: a claude.ai artifact you published."}
+            }, "required": ["text"], "additionalProperties": false}
+        }),
+    ]
+}
+
 /// The connector's local port; LANTERN_WEBCLAUDE_PORT moves it (a dev run beside the real app).
 pub const PORT: u16 = 47124;
 
