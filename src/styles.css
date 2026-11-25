@@ -4239,7 +4239,8 @@ nav > .sb-note { padding-left: 14px; }
 .web-message[open] > summary { -webkit-line-clamp: unset; }
 .web-project { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: calc(12px * var(--font-scale)); }
 .web-project select { max-width: 220px; }
-.web-code-input { width: 9ch; font: 600 calc(13px * var(--font-scale)) var(--mono); letter-spacing: 0.15em; text-transform: uppercase; }
+.web-card .inbox-actions button[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.web-code-input { width: 10ch; font: 600 calc(13px * var(--font-scale)) var(--mono); letter-spacing: 0.15em; text-transform: uppercase; }
 .web-address { padding: 4px 8px; border-radius: var(--radius-inner); background: var(--bg); font: calc(12px * var(--font-scale)) var(--mono); overflow-wrap: anywhere; user-select: all; }
 .inbox-actions { flex: none; display: flex; align-items: center; gap: 4px; }
 .inbox-actions button { height: 24px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); }

@@ -2330,7 +2330,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
           return show
             ? [
                 { kind: "connect", id: "c1", client: "Claude", at },
-                { kind: "run", id: "r1", canvas: "https://claude.ai/artifact/MJNCsnh1bNKR6xmbMNQxcm", title: "Rayak — Grocery Ratings", message: "The product card changed: the rating moves under the price, and the store logo is 20pt. Build it in the app's ProductCard and keep the dark theme's colours.", folder: null, answer: false, chat_title: null, at },
+                { kind: "run", id: "r1", canvas: "https://claude.ai/artifact/sample-canvas", title: "Rayak — Grocery Ratings", message: "The product card changed: the rating moves under the price, and the store logo is 20pt. Build it in the app's ProductCard and keep the dark theme's colours.", folder: null, answer: false, chat_title: null, at },
               ]
             : [];
         }

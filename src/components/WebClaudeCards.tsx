@@ -49,6 +49,7 @@ function ConnectRow({ card, now, onAllow }: { card: Extract<WebCard, { kind: "co
             autoComplete="off"
             spellCheck={false}
             aria-label="The code on the claude.ai sign-in page"
+            placeholder="······"
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             onKeyDown={(e) => {
               if (e.key === "Enter" && armed && typed.length === 6) answer(true);
@@ -73,6 +74,7 @@ function RunRow({ card, now, projects, onRun }: { card: Extract<WebCard, { kind:
   const armed = useArmed();
   const [folder, setFolder] = useState<string>(card.folder ?? "");
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const needsProject = !card.answer && !card.folder;
   const decide = (run: boolean) => {
@@ -96,9 +98,9 @@ function RunRow({ card, now, projects, onRun }: { card: Extract<WebCard, { kind:
           <span className="inbox-time">{elapsed(now - card.at)}</span>
         </span>
         <span className="inbox-where">{where}</span>
-        <details className="web-message">
-          <summary className="inbox-need">{firstLine(card.message)}</summary>
-          <span className="inbox-full">{card.message}</span>
+        <details className="web-message" onToggle={(e) => setOpen(e.currentTarget.open)}>
+          {/* Closed, the summary is the message cut to three lines; open, it is the whole message. */}
+          <summary className="inbox-need">{open ? card.message : firstLine(card.message)}</summary>
           {link && <span className="inbox-full settings-muted">{link}</span>}
         </details>
         {needsProject && (
