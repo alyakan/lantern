@@ -160,6 +160,48 @@ describe("starting a chat from Home", () => {
     expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
   });
 
+  it("keeps the first message in the chat once the Mac has it, until the Mac's copy takes its place, and shows it once", async () => {
+    let answer: (v: unknown) => void = () => {};
+    const { controller } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => new Promise((r) => (answer = r)) });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    await act(async () => answer({ slot: "s9" }));
+    await settle();
+    // The chat itself now, and the Mac hasn't told of the message yet: it is there all the same (it used to be an empty chat).
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(screen.getByLabelText("You: Fix the login bug")).toBeTruthy();
+    // The Mac's copy names no client id (it came with the chat, not as a send): it takes the message's place.
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "s9", seq: 1, page: 0, done: true, hidden: 0, events: [{ kind: "user_text", text: "Fix the login bug", at: 1, sent_by: "phone-abc" }] } }));
+    await settle();
+    expect(screen.getAllByLabelText("You: Fix the login bug")).toHaveLength(1);
+    expect(controller.sync.getState().views.s9.items).toEqual([expect.objectContaining({ kind: "user", sentBy: "phone-abc" })]);
+  });
+
+  it("has the chat's message box while it starts: what is sent there goes once the chat is there, and what is typed stays", async () => {
+    let answer: (v: unknown) => void = () => {};
+    const { asked } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => new Promise((r) => (answer = r)) });
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    await fireEvent.changeText(screen.getByLabelText("Message"), "And the logout one");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await settle();
+    // Shown under the first message, not sent: there is no chat to send it to yet.
+    expect(screen.getByLabelText("You: And the logout one")).toBeTruthy();
+    expect(asked.filter((r) => r.op === "send")).toHaveLength(0);
+    await fireEvent.changeText(screen.getByLabelText("Message"), "Half a thought");
+    await act(async () => answer({ slot: "s9" }));
+    await settle();
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(asked.filter((r) => r.op === "send")).toEqual([expect.objectContaining({ slot: "s9", text: "And the logout one" })]);
+    await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("Half a thought"));
+  });
+
   it("says on the chat's page why the Mac didn't start it, and starts it from Try again", async () => {
     let fail = true;
     const { asked } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => (fail ? new Error("That isn't one of your projects.") : { slot: "s9" }) });

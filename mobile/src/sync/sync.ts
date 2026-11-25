@@ -512,6 +512,9 @@ export class Sync {
     // the model, the effort and the pictures are left out altogether, not sent empty, when there are none.
     const request: Request = { op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}), ...(choice.model ? { model: choice.model } : {}), ...(choice.effort ? { effort: choice.effort } : {}), ...(choice.account ? { account: choice.account } : {}), ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
     const started = await (images.length > 0 ? this.ask<StartedChat>(request, UPLOAD_WAIT) : this.ask<StartedChat>(request));
+    // The chat opens with its first message in it, going, until the Mac's copy takes its place: the Mac answers as soon as the chat
+    // is made, and tells of the message only once its agent has it, which was a few seconds of an empty chat.
+    this.apply({ type: "sending", slot: started.slot, clientId: this.newId(), text, at: this.now(), opening: true, ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
     return started.slot;
   }
 

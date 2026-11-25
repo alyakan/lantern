@@ -274,6 +274,27 @@ describe("a message sent from this phone", () => {
   });
 });
 
+describe("the first message of a chat started from this phone", () => {
+  it("shows from the moment the chat is there, and the Mac's copy (with no client id) takes its place, keeping its row", () => {
+    let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "Fix the login bug", at: 5, opening: true, thumbs: ["file:///a.jpg"] });
+    expect(items(s)).toEqual([expect.objectContaining({ id: "local-m-1", sending: true, opening: true })]);
+    // The chat's history comes as it is opened, and the Mac has the message by then.
+    s = reducer(s, reset("a", 2, [{ kind: "user_text", text: "Fix the login bug", at: 6, sent_by: "phone-abc", images: 1 }]));
+    expect(items(s)).toHaveLength(1);
+    expect(items(s)[0]).toMatchObject({ id: "local-m-1", at: 6, sentBy: "phone-abc", thumbs: ["file:///a.jpg"] });
+    expect(items(s)[0]).not.toHaveProperty("sending");
+    // A later message from elsewhere is a message of its own.
+    s = reducer(s, event("a", 3, { kind: "user_text", text: "And the logout one", at: 7, sent_by: "desktop" }));
+    expect(items(s)).toHaveLength(2);
+  });
+
+  it("isn't shown twice when the Mac told of it before the chat was opened here", () => {
+    let s = reducer(initialState, event("a", 1, { kind: "user_text", text: "Fix the login bug", at: 6, sent_by: "phone-abc" }));
+    s = reducer(s, { type: "sending", slot: "a", clientId: "m-1", text: "Fix the login bug", at: 5, opening: true });
+    expect(items(s)).toHaveLength(1);
+  });
+});
+
 describe("prompts", () => {
   const asked: RemoteEvent = { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: { command: "git push" } };
 
