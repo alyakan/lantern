@@ -101,7 +101,7 @@ export const recordUsage = (plan: PlanUsage, now = Date.now(), provider = "claud
 export const useUsageHistory = (provider = "claude") => history(provider).useUsageHistory();
 export function resetUsageHistory() { histories.forEach(h => h.resetUsageHistory()); }
 export async function forgetUsageHistory() {
-  // Include both built-in providers even when they weren't opened in this run.
-  history("claude"); history("codex");
+  // Include the built-in providers even when they weren't opened in this run.
+  history("claude"); history("codex"); history("antigravity");
   await Promise.all([...histories.values()].map(h => h.forgetUsageHistory()));
 }

@@ -7,6 +7,7 @@
 //! and the approval path belong to each provider's session, not to this trait.
 
 pub mod acp_question;
+pub mod antigravity_quota;
 pub mod claude;
 pub mod claude_session;
 pub mod codex;
