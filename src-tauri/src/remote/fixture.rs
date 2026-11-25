@@ -167,6 +167,10 @@ impl FixtureHost {
 
 impl Host for FixtureHost {
     fn send(&self, slot: String, text: String, by: String, images: Vec<super::protocol::RemoteImage>) -> BoxFut<Result<(), String>> {
+        // A chat the phone started with no message is named by its first one, as the window names it.
+        if self.hub.chat(&slot).is_some_and(|c| c.title.is_none()) {
+            self.hub.titled(&slot, &title_of(&text));
+        }
         self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: images.len() as u32 });
         self.reply(&slot, text);
         Box::pin(async { Ok(()) })
@@ -282,9 +286,12 @@ impl Host for FixtureHost {
         }
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
         self.hub.flow(&slot, workflow.as_str());
-        self.hub.titled(&slot, &title_of(&text));
-        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: images.len() as u32 });
-        self.reply(&slot, text);
+        // With no message, the phone sends the first one itself once the chat is there.
+        if !text.trim().is_empty() {
+            self.hub.titled(&slot, &title_of(&text));
+            self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: images.len() as u32 });
+            self.reply(&slot, text);
+        }
         Box::pin(async move { Ok(slot) })
     }
 

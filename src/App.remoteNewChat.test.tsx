@@ -82,6 +82,18 @@ describe("a chat a paired phone starts", () => {
     expect(sent(calls).some((t) => t.includes("add a dark mode toggle"))).toBe(false);
   });
 
+  it("starts a chat with no message when the backend holds the first one (the phone sends it once the chat is there), and not otherwise", async () => {
+    const calls = await launch();
+    const before = { started: sessions(calls).length, sent: sent(calls).length };
+    await fromPhone(ask({ id: "held", text: "", hold_first: true }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before.started + 1));
+    await waitFor(() => expect(answers(calls).find((a) => a?.id === "held")).toMatchObject({ error: null }));
+    expect(sent(calls).length).toBe(before.sent);
+    await fromPhone(ask({ id: "bare", text: "" }));
+    await waitFor(() => expect(answers(calls).find((a) => a?.id === "bare")).toMatchObject({ slot: null, error: expect.any(String) }));
+    expect(sessions(calls).length).toBe(before.started + 1);
+  });
+
   it("starts on Ask even when the project was left on Auto", async () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     const calls = await launch();

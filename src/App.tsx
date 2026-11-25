@@ -1146,7 +1146,9 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
     Promise.all([api.recentFolders(), remoteContext()]).then(
       ([recent, ctx]) => {
         const openFolders = Object.values(chats.slots).map((s) => s.folder);
-        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text), ctx);
+        // No message is fine when the backend holds the first one (a phone that sends it itself once the chat is there).
+        const textOk = typeof r.text === "string" && r.text.trim() === "" ? r.hold_first === true : validChatText(r.text);
+        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), textOk, ctx);
         if (why) return fail(why);
         if (!agentReady) return fail("No agent provider is set up on your Mac yet.");
         // Where the phone chose, else the project's own; but a project on a provider whose questions a phone can't answer starts on
@@ -1159,6 +1161,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         // The account, against the window's own list and where the chat really runs.
         const badAccount = checkRemoteAccount(r.account ?? null, providerId, ctx);
         if (badAccount) return fail(badAccount);
+        // A provider that isn't there any more: said now, not after the chat is made with no agent to start (startIn stops there).
+        if (!binaryOf(providerId)) return fail(isGateway(providerId) ? `${providerName(providerId)} isn't set up any more on your Mac.` : `${providerName(providerId)} isn't installed on your Mac.`);
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
         // (With pictures, the backend sends the first message itself once the chat is ready: they never come through here.)
