@@ -79,8 +79,34 @@ export interface ChatView {
   stopping: boolean;
 }
 
+/**
+ * A chat this phone asked the Mac to start, kept here (not on its page) so it is never lost: going back to the chats shows it
+ * as a row, starting or not sent, until its chat is in the Mac's list. The first message goes into the chat once the Mac has
+ * made it, as any message does, and what was sent from its page meanwhile goes after it.
+ */
+export interface ChatStart {
+  /** The phone's name for it: asked again by it, the Mac answers with the chat it made, never a second one. */
+  id: string;
+  /** The project's folder, and its name as the sheet showed it. */
+  project: string;
+  projectName: string;
+  /** The first message. */
+  text: string;
+  /** Where this phone has the photos that go with it. */
+  thumbs: string[];
+  at: number;
+  /** The chat the Mac made for it, once it has (it stays here until the Mac lists it). */
+  slot: string | null;
+  /** Why the Mac didn't make it (null: it is being made). */
+  problem: string | null;
+  /** Sent from its page before the chat was there, in order: they go after the first message. */
+  queued: string[];
+}
+
 export interface State {
   chats: RemoteChat[];
+  /** The chats this phone asked for that the Mac hasn't listed yet, oldest first. */
+  starts: ChatStart[];
   /**
    * When each chat that is working started, as the Mac's `active_at` stood when this phone first saw it working. A working chat's
    * `active_at` moves with every event, so Home orders the working chats by this instead, which holds still while they work.
@@ -112,7 +138,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, single: null };
+export const initialState: State = { chats: [], starts: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, single: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null, stopping: false };
 
@@ -134,7 +160,23 @@ export type Action =
   | { type: "answered_with"; slot: string; requestId: string; text: string }
   | { type: "earlier"; slot: string; events: RemoteEvent[]; hidden: number }
   /** A chat closed a while ago: its messages are let go (opening it again asks the Mac for them). */
-  | { type: "forget"; slot: string };
+  | { type: "forget"; slot: string }
+  /** A chat asked of the Mac (see ChatStart), made, not made (with why), asked again, sent to meanwhile, or let go. */
+  | { type: "start_added"; start: ChatStart }
+  | { type: "start_made"; id: string; slot: string }
+  | { type: "start_failed"; id: string; problem: string }
+  | { type: "start_again"; id: string }
+  | { type: "start_queued"; id: string; text: string }
+  | { type: "start_gone"; id: string };
+
+/** The starts with `id` changed by `f` (the state as it was when there is none). */
+function onStart(state: State, id: string, f: (s: ChatStart) => ChatStart): State {
+  if (!state.starts.some((s) => s.id === id)) return state;
+  return { ...state, starts: state.starts.map((s) => (s.id === id ? f(s) : s)) };
+}
+
+/** The starts still to show once the Mac lists `chats`: one whose chat is listed is that chat now. */
+const unlisted = (starts: ChatStart[], chats: RemoteChat[]) => (starts.some((s) => s.slot !== null && chats.some((c) => c.slot === s.slot)) ? starts.filter((s) => s.slot === null || !chats.some((c) => c.slot === s.slot)) : starts);
 
 /** The client id a message's `sent_by` ends with ("phone-…:<client id>"). */
 const clientIdOf = (sentBy: string | null) => (sentBy?.includes(":") ? sentBy.slice(sentBy.lastIndexOf(":") + 1) : null);
@@ -301,11 +343,24 @@ function settleWaiting(waiting: Waiting[], slot: string, event: RemoteEvent): Wa
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
+    case "start_added":
+      return { ...state, starts: [...state.starts.filter((s) => s.id !== action.start.id), action.start] };
+    case "start_made":
+      return onStart(state, action.id, (s) => ({ ...s, slot: action.slot, problem: null, queued: [] }));
+    case "start_failed":
+      return onStart(state, action.id, (s) => ({ ...s, problem: action.problem }));
+    case "start_again":
+      return onStart(state, action.id, (s) => ({ ...s, problem: null }));
+    case "start_queued":
+      return onStart(state, action.id, (s) => ({ ...s, queued: [...s.queued, action.text] }));
+    case "start_gone":
+      return state.starts.some((s) => s.id === action.id) ? { ...state, starts: state.starts.filter((s) => s.id !== action.id) } : state;
     case "welcome":
       // Each connection is told the One project afresh (when the Mac has one): until it is, every project shows.
       if (state.epoch === action.epoch) return state.single === null ? state : { ...state, single: null };
-      // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again.
-      return { ...state, epoch: action.epoch, single: null, plan: null, providerUsage: {}, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
+      // Another run of Lantern: its numbers start again, so what was followed starts over when subscribed again. A chat made
+      // for a start was the last run's: the start is done with (its first message, if it didn't go, says so in that chat).
+      return { ...state, epoch: action.epoch, single: null, plan: null, providerUsage: {}, starts: state.starts.filter((s) => s.slot === null), views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
     case "waiting": {
       const views = { ...state.views };
       for (const [slot, ids] of Object.entries(action.observedPrompts ?? {})) {
@@ -372,7 +427,7 @@ export function reducer(state: State, action: Action): State {
       const msg = action.msg;
       switch (msg.type) {
         case "chats":
-          return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
+          return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats), starts: unlisted(state.starts, msg.chats) };
         case "desk":
           return { ...state, desk: msg.desk };
         case "work":

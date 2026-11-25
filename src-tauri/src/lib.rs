@@ -539,6 +539,8 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone();
         Box::pin(async move {
             let state = app.state::<AppState>();
+            // A chat this phone just started: its first message waits for the agent instead of finding none.
+            agent_up(&state, &slot).await?;
             send_user_message(&app, &state, &slot, &text, &by, &images, true).await.map(|_| ())
         })
     }
@@ -2235,10 +2237,18 @@ async fn fetch_endpoint_models(state: State<'_, AppState>, url: String, key_env:
 
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
-    let s = slot_for(&app, &state, &slot)?;
+    let started = start_agent(&app, &state, &slot, claude_path, folder, settings).await;
+    // Up or not, a message sent to it no longer waits for it (see agent_up).
+    state.remote.started(&slot);
+    started
+}
+
+async fn start_agent(app: &AppHandle, state: &State<'_, AppState>, slot: &str, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
+    let (app, slot) = (app.clone(), slot.to_string());
+    let s = slot_for(&app, state, &slot)?;
     let asked = settings.mode;
-    let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
-    enroll(&state, &slot, &s, &cfg.helper.role);
+    let cfg = new_config(state, &s, claude_path, folder, settings, None).await?;
+    enroll(state, &slot, &s, &cfg.helper.role);
     let provider = chat_info(&cfg);
     let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
@@ -3564,7 +3574,6 @@ fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), Str
 
 /// How long the window has to open the chat a phone asked for, and then to list it where the phone can follow it.
 const NEW_CHAT_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
-const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
@@ -3572,7 +3581,10 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 async fn request_new_chat(app: &AppHandle, folder: String, text: String, by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>, images: Vec<remote::protocol::RemoteImage>, model: remote::gateway::NewChatModel) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let hold_first = !images.is_empty();
+    // With no message (the phone sends it itself once the chat is there) or with pictures (they never go through the window), the
+    // window starts the chat with nothing in it.
+    let hold_first = !images.is_empty() || text.trim().is_empty();
+    let listed_in = folder.clone();
     let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first, model: model.model, effort: model.effort, account: model.account };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
@@ -3586,33 +3598,46 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, by: Str
             return Err("Lantern didn't answer in time. The chat may still have started on your Mac: look in your chats before trying again.".into());
         }
     };
-    // The window has made the chat; the phone may only follow it once the hub lists it.
-    let listed = tokio::time::timeout(NEW_CHAT_LISTED_WAIT, async {
-        while state.remote.hub.chat(&slot).is_none() {
-            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-        }
-    })
-    .await;
-    listed.map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())?;
-    if hold_first {
-        // The window held the first message back: it goes from here, with its pictures, once the chat's agent is running.
-        let ready = tokio::time::timeout(NEW_CHAT_WAIT, async {
-            loop {
-                if let Ok(s) = state.slots.get(&slot) {
-                    if s.session.lock().await.is_some() {
-                        break;
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            }
-        })
-        .await;
-        if ready.is_err() {
-            return Err("The chat started, but your message and photos didn't go. Open the chat and send them again.".into());
-        }
+    // The window has made the chat: it is listed now, so the phone can follow it and send to it at once. (It used to be listed
+    // only once its agent was up, and a start whose agent took over 3 seconds, as Antigravity's can, was told to the phone as
+    // failed although the chat was there: the phone then started another.)
+    state.remote.hub.opened(&slot, &listed_in);
+    state.remote.starting(&slot);
+    if !images.is_empty() {
+        // An older phone's first message with pictures: it goes from here, once the chat's agent is running.
+        agent_up(&state, &slot).await.map_err(|_| "The chat started, but your message and photos didn't go. Open the chat and send them again.".to_string())?;
         send_user_message(app, &state, &slot, &text, &format!("{by}:first"), &images, true).await?;
     }
     Ok(slot)
+}
+
+/// How long a message waits for the agent of a chat a phone just started (Codex and Antigravity can take a while).
+const AGENT_START_WAIT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Waits for the agent of a chat a phone just started to be up (see Remote::starting): at once for any other chat, which then
+/// has an agent or says it hasn't when sent to, as before.
+async fn agent_up(state: &AppState, slot: &str) -> Result<(), String> {
+    if !state.remote.is_starting(slot) {
+        return Ok(());
+    }
+    // Until its start is over (start_session), not only until the agent runs: the start arms the pre-hook the first message carries.
+    let over = tokio::time::timeout(AGENT_START_WAIT, async {
+        while state.remote.is_starting(slot) {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        }
+    })
+    .await;
+    if over.is_err() {
+        state.remote.started(slot);
+    }
+    let running = match state.slots.get(slot) {
+        Ok(s) => s.session.lock().await.is_some(),
+        Err(_) => false,
+    };
+    if !running {
+        return Err("The chat's agent didn't start on your Mac. Open the chat there to see why, then try again.".into());
+    }
+    Ok(())
 }
 
 /// A phone asked for a step of the user's work: the window is asked (it knows what the item is and where the chat for it is), and

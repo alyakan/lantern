@@ -63,6 +63,8 @@ pub struct Remote {
     claude: std::sync::Mutex<Option<String>>,
     /// Chats a phone asked the window to start, waiting for the window to say which slot it made (see `expect_new_chat`).
     new_chats: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>>,
+    /// Chats a phone started whose agent isn't up yet: a message sent to one waits for it (see `starting`).
+    starting: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Keeps the Mac from sleeping from idling while Remote control is on and the user asked for that. Its own hold,
     /// apart from the one that lasts while Claude works (awake.rs), so neither lets go of the other's.
     pub awake: crate::awake::Awake,
@@ -377,7 +379,7 @@ impl Remote {
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
         let mut e = [0u8; 8];
         let _ = getrandom::fill(&mut e);
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default(), awake: Default::default(), live: Default::default() }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default(), starting: Default::default(), awake: Default::default(), live: Default::default() }
     }
 
     /// The setting for holding the Mac awake, applied now.
@@ -537,6 +539,22 @@ impl Remote {
     /// Stops waiting for the window's answer (it took too long).
     pub fn forget_new_chat(&self, id: &str) {
         self.new_chats.lock().unwrap().remove(id);
+    }
+
+    /// A chat a phone started was made, and its agent is starting: a message sent to it now waits for the agent, rather than
+    /// being refused for having none (the phone sends the first message as soon as the chat is there).
+    pub fn starting(&self, slot: &str) {
+        self.starting.lock().unwrap().insert(slot.to_string());
+    }
+
+    /// The chat's agent is up, or couldn't start: a message to it no longer waits.
+    pub fn started(&self, slot: &str) {
+        self.starting.lock().unwrap().remove(slot);
+    }
+
+    /// Whether the chat's agent is still starting (see `starting`).
+    pub fn is_starting(&self, slot: &str) -> bool {
+        self.starting.lock().unwrap().contains(slot)
     }
 
     /// Takes in what the window says its Desks hold (see desk.rs).

@@ -55,10 +55,10 @@ pub const NEW_CHAT_WINDOW_MS: u64 = 10 * 60 * 1000;
 /// What a Mac without a window to ask says of the user's work.
 const NO_WORK: &str = "This Mac can't do that step.";
 
-fn check_new_chat(project: &str, text: &str) -> Result<(), String> {
+fn check_new_chat(project: &str, text: &str, sends_first: bool) -> Result<(), String> {
     if !project.starts_with('/') || project.len() > 4096 || project.contains('\0') {
         Err("That isn't a project folder.".into())
-    } else if text.trim().is_empty() {
+    } else if text.trim().is_empty() && !sends_first {
         Err("Write what the chat should start with.".into())
     } else if text.chars().count() > NEW_CHAT_TEXT_MAX {
         Err("That message is too long.".into())
@@ -328,6 +328,20 @@ pub struct Gateway {
     shells: Mutex<ShellOwners>,
     /// The ids of each phone's latest messages, so one sent again (its answer was lost on the way) isn't sent twice.
     sent: Mutex<HashMap<String, std::collections::VecDeque<String>>>,
+    /// The starts each phone named (Request::NewChat's `start_id`), newest last, each with the chat made for it once there is one:
+    /// asked again, it is that chat. Held while it is being made, so a second ask waits for the first instead of making another.
+    starts: Mutex<HashMap<String, std::collections::VecDeque<(String, NamedStart)>>>,
+}
+
+/// A start a phone named: the chat made for it, once it is made.
+type NamedStart = Arc<tokio::sync::Mutex<Option<String>>>;
+
+/// How many of a phone's latest starts are remembered: a phone asks again moments after the start it repeats.
+const STARTS_MAX: usize = 32;
+
+/// A phone's id for a start: what its message ids are.
+fn valid_start_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// How many of a phone's latest message ids are remembered: a retry comes moments after the message it repeats.
@@ -394,6 +408,7 @@ impl Gateway {
             cruiser: Default::default(),
             shells: Mutex::default(),
             sent: Mutex::default(),
+            starts: Mutex::default(),
         })
     }
 
@@ -593,10 +608,50 @@ impl Gateway {
     }
 
     /// Starts a chat for `device` in `project` with `text`: the answer to Request::NewChat. The folder must be exactly one
-    /// of the projects, and the phone may only start so many.
+    /// of the projects, and the phone may only start so many. A start the phone named (`start_id`) is made once: asked again
+    /// (its answer was lost, or it timed out on the phone while the Mac went on), it is the chat already made, and it doesn't
+    /// count again against the limit.
     #[allow(clippy::too_many_arguments)]
-    async fn start_chat(&self, device: &str, project: String, text: String, permissions: Option<protocol::RemotePermissions>, preset: Option<String>, workflow: Option<protocol::RemoteWorkflow>, provider: Option<String>, images: Option<Vec<protocol::RemoteImage>>, model: NewChatModel) -> Result<serde_json::Value, String> {
-        check_new_chat(&project, &text)?;
+    async fn start_chat(&self, device: &str, project: String, text: String, permissions: Option<protocol::RemotePermissions>, preset: Option<String>, workflow: Option<protocol::RemoteWorkflow>, provider: Option<String>, images: Option<Vec<protocol::RemoteImage>>, model: NewChatModel, start_id: Option<String>) -> Result<serde_json::Value, String> {
+        let Some(start_id) = start_id else {
+            return self.make_chat(device, project, text, permissions, preset, workflow, provider, images, model, false).await;
+        };
+        if !valid_start_id(&start_id) {
+            return Err("That chat has no proper id.".into());
+        }
+        let named = {
+            let mut starts = self.starts.lock().unwrap();
+            let mine = starts.entry(device.to_string()).or_default();
+            match mine.iter().find(|(id, _)| *id == start_id) {
+                Some((_, named)) => named.clone(),
+                None => {
+                    let named: NamedStart = Arc::default();
+                    mine.push_back((start_id.clone(), named.clone()));
+                    if mine.len() > STARTS_MAX {
+                        mine.pop_front();
+                    }
+                    named
+                }
+            }
+        };
+        // One at a time per start: a second ask waits here for the first, and then has its chat.
+        let mut made = named.lock().await;
+        if let Some(slot) = made.as_ref() {
+            return serde_json::to_value(protocol::StartedChat { slot: slot.clone() }).map_err(|e| e.to_string());
+        }
+        let answer = self.make_chat(device, project, text, permissions, preset, workflow, provider, images, model, true).await?;
+        *made = answer.get("slot").and_then(|s| s.as_str()).map(str::to_string);
+        Ok(answer)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn make_chat(&self, device: &str, project: String, text: String, permissions: Option<protocol::RemotePermissions>, preset: Option<String>, workflow: Option<protocol::RemoteWorkflow>, provider: Option<String>, images: Option<Vec<protocol::RemoteImage>>, model: NewChatModel, named: bool) -> Result<serde_json::Value, String> {
+        // With no message, a phone that named its start sends the first one itself once the chat is there. Unnamed, a chat needs its message.
+        let sends_first = named && text.trim().is_empty();
+        check_new_chat(&project, &text, sends_first)?;
+        if sends_first && images.as_ref().is_some_and(|i| !i.is_empty()) {
+            return Err("Send the photos with the chat's first message.".into());
+        }
         let images = images.unwrap_or_default();
         protocol::check_images(&images)?;
         // A plain chat unless Step by step was asked for: a team is started and led on the Mac.
@@ -615,7 +670,8 @@ impl Gateway {
             return Err("That isn't one of your projects.".into());
         }
         self.allow_new_chat(device)?;
-        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow, provider, images, model).await?;
+        // A start the Mac didn't make doesn't count against the phone's limit: asking again is not starting another chat.
+        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow, provider, images, model).await.inspect_err(|_| self.uncount_new_chat(device))?;
         serde_json::to_value(protocol::StartedChat { slot }).map_err(|e| e.to_string())
     }
 
@@ -749,6 +805,13 @@ impl Gateway {
     /// Counts a chat started by `device`, or refuses it: too many lately.
     fn allow_new_chat(&self, device: &str) -> Result<(), String> {
         self.allow_new_chat_at(device, (self.now)())
+    }
+
+    /// Takes back the latest start counted for `device` (it wasn't made).
+    fn uncount_new_chat(&self, device: &str) {
+        if let Some(recent) = self.started.lock().unwrap().get_mut(device) {
+            recent.pop();
+        }
     }
 
     fn allow_new_chat_at(&self, device: &str, now: u64) -> Result<(), String> {
@@ -1075,7 +1138,7 @@ impl<'a> Session<'a> {
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
                     match request {
-                        Request::Suggest { .. } | Request::Cruise { .. } | Request::NewChat { .. } | Request::Insights { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } | Request::WorkStep { .. } if slow.len() >= SLOW_AT_ONCE => {
+                        Request::Suggest { .. } | Request::Cruise { .. } | Request::Insights { .. } | Request::ReviewDiff { .. } | Request::DeskRoute { .. } | Request::DeskTalk { .. } | Request::DeskReply { .. } | Request::WorkStep { .. } if slow.len() >= SLOW_AT_ONCE => {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
@@ -1094,9 +1157,11 @@ impl<'a> Session<'a> {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.work_step(&device, key, sig).await) }));
                         }
-                        Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account } => {
+                        // Never refused for the others in flight (suggestions, Insights…): starting a chat is what the person is
+                        // waiting on, and it has a limit of its own (allow_new_chat).
+                        Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => {
                             let device = self.device.clone();
-                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }).await) }));
+                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }, start_id).await) }));
                         }
                         request => {
                             let answer = self.handle(link, channel, request).await;
@@ -1393,7 +1458,7 @@ impl<'a> Session<'a> {
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
-            Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }).await,
+            Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }, start_id).await,
             Request::SetWorkflow { slot, workflow, when } => {
                 if workflow == protocol::RemoteWorkflow::Team {
                     return Err(TEAM_ON_MAC.into());
@@ -1742,6 +1807,8 @@ pub(crate) mod tests {
         pub cruise_prompts: Mutex<Vec<String>>,
         pub cruise_replies: Mutex<Vec<Result<String, String>>>,
         pub new_chat_delay: Mutex<Duration>,
+        /// Why the next chat a phone starts isn't made (taken by that start).
+        pub new_chat_refusal: Mutex<Option<String>>,
         /// The steps of the user's work it was asked to do (key, sig), what it answers to them, and how often it was asked to look again.
         pub work_steps: Mutex<Vec<(String, String)>>,
         pub work_answer: Mutex<Option<Result<(String, String), String>>>,
@@ -1859,9 +1926,10 @@ pub(crate) mod tests {
             self.started_with.lock().unwrap().push((permissions, preset));
             self.started.lock().unwrap().push((folder, text, by));
             let delay = *self.new_chat_delay.lock().unwrap();
+            let refused = self.new_chat_refusal.lock().unwrap().take();
             Box::pin(async move {
                 tokio::time::sleep(delay).await;
-                Ok("s9".to_string())
+                refused.map_or(Ok("s9".to_string()), Err)
             })
         }
         fn work_step(&self, key: String, sig: String) -> BoxFut<Result<(String, String), String>> {
@@ -2512,7 +2580,7 @@ pub(crate) mod tests {
         let (_, mut p) = paired(&r).await;
         let device = r.store.saved().devices[0].id.clone();
         assert_eq!(p.ask(Request::Projects).await.0, Some(json!([{"id": "/Users/me/app", "name": "app"}, {"id": "/Users/me/site", "name": "site"}])));
-        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "Fix the login bug".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None }).await;
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "Fix the login bug".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None }).await;
         assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
         let started = r.host.started.lock().unwrap();
         assert_eq!(started.len(), 1);
@@ -2525,7 +2593,7 @@ pub(crate) mod tests {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        let ask = |images: Option<Vec<protocol::RemoteImage>>| Request::NewChat { project: "/Users/me/app".into(), text: "What's wrong here?".into(), permissions: None, preset: None, workflow: None, provider: None, images, model: None, effort: None, account: None };
+        let ask = |images: Option<Vec<protocol::RemoteImage>>| Request::NewChat { project: "/Users/me/app".into(), text: "What's wrong here?".into(), permissions: None, preset: None, workflow: None, provider: None, images, model: None, effort: None, account: None, start_id: None };
         let jpeg = protocol::RemoteImage { media_type: "image/jpeg".into(), data: "/9j/4AAQSkZJRg==".into() };
         assert!(p.ask(ask(Some(vec![jpeg.clone(), jpeg]))).await.1.is_none());
         let script = protocol::RemoteImage { media_type: "image/png".into(), data: "IyEvYmluL3No".into() };
@@ -2541,7 +2609,7 @@ pub(crate) mod tests {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        let ask = |project: &str, text: &str| Request::NewChat { project: project.into(), text: text.into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None };
+        let ask = |project: &str, text: &str| Request::NewChat { project: project.into(), text: text.into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None };
         for (project, text, why) in [
             ("/etc", "hi", "isn't one of your projects"),
             ("/Users/me/app/../../..", "hi", "isn't one of your projects"),
@@ -2767,7 +2835,7 @@ pub(crate) mod tests {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        let ask = |workflow| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow, provider: None, images: None, model: None, effort: None, account: None };
+        let ask = |workflow| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow, provider: None, images: None, model: None, effort: None, account: None, start_id: None };
         assert!(p.ask(ask(None)).await.1.is_none());
         assert!(p.ask(ask(Some(Steps))).await.1.is_none());
         let (ok, err, _) = p.ask(ask(Some(Team))).await;
@@ -2957,7 +3025,7 @@ pub(crate) mod tests {
         r.store.set_allow_phone_auto(true).unwrap();
         let (_, mut p) = paired(&r).await;
         use protocol::RemotePermissions::{Ask, Auto};
-        let ask = |provider: Option<&str>, permissions, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: provider.map(String::from), images: None, model: None, effort: None, account: None };
+        let ask = |provider: Option<&str>, permissions, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: provider.map(String::from), images: None, model: None, effort: None, account: None, start_id: None };
         // A name the phone made up, or one the window didn't list: refused, and nothing reaches the app.
         for made_up in ["codex", "gateway:other", "", "claude "] {
             let (ok, err, _) = p.ask(ask(Some(made_up), None, None)).await;
@@ -2988,7 +3056,7 @@ pub(crate) mod tests {
         r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
         r.hub.set_models(vec![models("claude", &[("opus", &["low", "high", "max"]), ("haiku", &[])]), models("gateway:ollama", &[("qwen3", &[])])]);
         let (_, mut p) = paired(&r).await;
-        let ask = |provider: Option<&str>, preset: Option<&str>, model: Option<&str>, effort: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: preset.map(String::from), workflow: None, provider: provider.map(String::from), images: None, model: model.map(String::from), effort: effort.map(String::from), account: None };
+        let ask = |provider: Option<&str>, preset: Option<&str>, model: Option<&str>, effort: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: preset.map(String::from), workflow: None, provider: provider.map(String::from), images: None, model: model.map(String::from), effort: effort.map(String::from), account: None, start_id: None };
         // The Controls a phone reads list them.
         let (ok, _, _) = p.ask(Request::Controls).await;
         assert_eq!(ok.unwrap()["models"][0], json!({"provider": "claude", "models": [{"value": "opus", "name": "opus", "effort_levels": ["low", "high", "max"]}, {"value": "haiku", "name": "haiku", "effort_levels": []}]}));
@@ -3021,7 +3089,7 @@ pub(crate) mod tests {
         r.hub.set_providers(vec![provider("claude", "Claude", true, true)]);
         r.hub.set_models(vec![models("claude", &[("sonnet", &["low", "high"])])]);
         let (_, mut p) = paired(&r).await;
-        let ask = |model: &str| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: Some(model.into()), effort: None, account: None };
+        let ask = |model: &str| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: Some(model.into()), effort: None, account: None, start_id: None };
         assert!(p.ask(ask("sonnet")).await.1.is_none());
         assert!(p.ask(ask("opus")).await.1.is_some_and(|e| e.contains("isn't one of its models")));
         // A Mac whose window never listed any models takes none.
@@ -3065,7 +3133,7 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         r.hub.set_presets(vec![preset("balanced")]);
         let (_, mut p) = paired(&r).await;
-        let ask = |permissions: Option<protocol::RemotePermissions>, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: None, images: None, model: None, effort: None, account: None };
+        let ask = |permissions: Option<protocol::RemotePermissions>, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None };
         use protocol::RemotePermissions::{Ask, Auto};
         // Nothing said: Ask. Auto while the setting is off: refused, and nothing reaches the app.
         assert!(p.ask(ask(None, None)).await.1.is_none());
@@ -3229,7 +3297,7 @@ pub(crate) mod tests {
         r.hub.set_accounts(vec![account("work", "Work")]);
         r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
         let (_, mut p) = paired(&r).await;
-        let ask = |provider: Option<&str>, account: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: provider.map(String::from), images: None, model: None, effort: None, account: account.map(String::from) };
+        let ask = |provider: Option<&str>, account: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: provider.map(String::from), images: None, model: None, effort: None, account: account.map(String::from), start_id: None };
         // An id the phone made up (the Mac would look it up as a folder), or an account on another provider: refused, nothing reaches the app.
         for made_up in ["other", "", "../work", "work "] {
             let (ok, err, _) = p.ask(ask(None, Some(made_up))).await;
@@ -3285,9 +3353,9 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
         for i in 0..NEW_CHATS_PER_WINDOW {
-            assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}"), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None }).await.1.is_none());
+            assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}"), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None }).await.1.is_none());
         }
-        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None }).await;
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None }).await;
         assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
         assert_eq!(r.host.started.lock().unwrap().len(), NEW_CHATS_PER_WINDOW);
     }
@@ -3376,7 +3444,7 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(600);
         let (_, mut p) = paired(&r).await;
-        p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None } });
+        p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None } });
         p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
         let order = heard_until(&mut p, &[100, 101]).await;
         assert_eq!(order, vec!["answer 101".to_string(), "answer 100".to_string()]);
@@ -3396,29 +3464,72 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn one_phone_cant_have_more_than_a_few_slow_requests_going_at_once() {
+    async fn one_phone_cant_have_more_than_a_few_slow_requests_going_at_once_but_a_new_chat_always_goes() {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
-        *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(400);
+        r.hub.asleep("z", "/p", Some("Review".into()), Some("s".into()));
+        r.hub.record(&BusEvent { slot: "z".into(), seq: 1, event: UiEvent::ReviewTarget { pr: Some(512), base: None } });
+        *r.host.review_delay.lock().unwrap() = Duration::from_millis(400);
         let (_, mut p) = paired(&r).await;
-        for id in 100..110 {
-            p.send(&ClientMessage::Request { id, request: Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {id}"), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None } });
+        for id in 100..106 {
+            p.send(&ClientMessage::Request { id, request: Request::ReviewDiff { slot: "z".into(), path: format!("src/{id}.rs") } });
         }
-        // All ten arrive before the first of the slow ones finishes: three run, and the rest are refused at once.
-        let (mut ran, mut refused) = (0, Vec::new());
-        while ran + refused.len() < 10 {
-            if let Some(ServerMessage::Response { ok, error, .. }) = p.next().await {
-                match (ok, error) {
-                    (Some(_), _) => ran += 1,
-                    (_, Some(why)) => refused.push(why),
+        // A chat started while they are going: it is what the person is waiting on, and it isn't held back by them.
+        p.send(&ClientMessage::Request { id: 200, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None } });
+        let (mut ran, mut refused, mut started) = (0, Vec::new(), None);
+        while ran + refused.len() < 6 || started.is_none() {
+            if let Some(ServerMessage::Response { id, ok, error }) = p.next().await {
+                match (id, ok, error) {
+                    (200, ok, error) => started = Some((ok, error)),
+                    (_, Some(_), _) => ran += 1,
+                    (_, _, Some(why)) => refused.push(why),
                     _ => {}
                 }
             }
         }
         assert_eq!(ran, SLOW_AT_ONCE);
-        assert_eq!(refused.len(), 10 - SLOW_AT_ONCE);
+        assert_eq!(refused.len(), 6 - SLOW_AT_ONCE);
         assert!(refused.iter().all(|e| e.contains("one thing at a time")), "{refused:?}");
-        assert_eq!(r.host.started.lock().unwrap().len(), SLOW_AT_ONCE, "only the ones that ran reached the app");
+        assert_eq!(started, Some((Some(json!({"slot": "s9"})), None)));
+    }
+
+    #[tokio::test]
+    async fn a_start_the_phone_names_is_made_once_however_often_it_asks_and_counts_once() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        let (_, mut p) = paired(&r).await;
+        let ask = |text: &str, start: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: text.into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: start.map(String::from) };
+        // Named, it may come with no message: the phone sends the first one itself once the chat is there.
+        let (ok, err, _) = p.ask(ask("", Some("start-1"))).await;
+        assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
+        // Asked again (its answer didn't reach the phone, or the phone gave up waiting): the same chat, not a second one.
+        let (ok, err, _) = p.ask(ask("", Some("start-1"))).await;
+        assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
+        assert_eq!(r.host.started.lock().unwrap().len(), 1, "made once");
+        assert_eq!(r.host.started.lock().unwrap()[0].1, "", "with no message: the phone sends it");
+        // It counted once against the limit: the rest of the limit is still there.
+        for i in 0..NEW_CHATS_PER_WINDOW - 1 {
+            assert!(p.ask(ask("", Some(&format!("start-n{i}")))).await.1.is_none());
+        }
+        assert!(p.ask(ask("", Some("start-over"))).await.1.is_some_and(|e| e.contains("a lot of chats")));
+        // Unnamed, a chat still needs its message; a name must be a plain id; photos go with the first message, not with no message.
+        assert!(p.ask(ask("", None)).await.1.is_some());
+        assert!(p.ask(ask("", Some("../x"))).await.1.is_some());
+        let with_photos = Request::NewChat { project: "/Users/me/app".into(), text: "".into(), permissions: None, preset: None, workflow: None, provider: None, images: Some(vec![protocol::RemoteImage { media_type: "image/png".into(), data: "aGk=".into() }]), model: None, effort: None, account: None, start_id: Some("start-p".into()) };
+        assert!(p.ask(with_photos).await.1.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_named_start_the_mac_couldnt_make_is_made_when_the_phone_asks_again() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        *r.host.new_chat_refusal.lock().unwrap() = Some("Lantern couldn't look up your projects.".into());
+        let (_, mut p) = paired(&r).await;
+        let ask = || Request::NewChat { project: "/Users/me/app".into(), text: "".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: Some("start-1".into()) };
+        assert_eq!(p.ask(ask()).await.1.as_deref(), Some("Lantern couldn't look up your projects."));
+        // Nothing was made for it: asked again, it is made now.
+        assert_eq!(p.ask(ask()).await.0, Some(json!({"slot": "s9"})));
+        assert_eq!(r.host.started.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 import type { Request } from "../protocol/generated/Request";
 import { ANSWER_WAIT, UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
-import { RESTARTED, Sync, SUGGESTIONS_KEPT_MS } from "./sync";
+import { FIRST_SEND_WAIT, NEW_CHAT_WAIT, RESTARTED, Sync, SUGGESTIONS_KEPT_MS } from "./sync";
 import type { Held, OutboxStore } from "../outbox";
 
 /** A session that records what it was asked and answers from a table. */
@@ -507,8 +507,9 @@ describe("what a phone may choose for a chat", () => {
     const { sync } = rig();
     const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["controls", "accounts"]);
     sync.onSession(session);
-    await sync.newChat("/p", "hi", { account: "work" });
-    await sync.newChat("/p", "hi");
+    sync.startChat({ id: "start-1", project: "/p", projectName: "p", text: "hi", choice: { account: "work" } });
+    sync.startChat({ id: "start-2", project: "/p", projectName: "p", text: "hi" });
+    await settle();
     await sync.setAccount("a", "work");
     await sync.setAccount("a", null);
     expect(asked.filter((r) => r.op !== "list_waiting")).toEqual([
@@ -522,7 +523,10 @@ describe("what a phone may choose for a chat", () => {
     const old = rig().sync;
     const oldSession = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["controls"]);
     old.onSession(oldSession.session);
-    await expect(old.newChat("/p", "hi", { account: "work" })).rejects.toThrow("Update Lantern");
+    old.startChat({ id: "start-1", project: "/p", projectName: "p", text: "hi", choice: { account: "work" } });
+    await settle();
+    old.flush();
+    expect(old.getState().starts[0].problem).toContain("Update Lantern");
     await expect(old.setAccount("a", "work")).rejects.toThrow("Update Lantern");
     expect(oldSession.asked.some((r) => r.op === "set_account" || r.op === "new_chat")).toBe(false);
   });
@@ -548,9 +552,10 @@ describe("what a phone may choose for a chat", () => {
     sync.onSession(session);
     await sync.setPermissions("a", "auto");
     await sync.setPreset("a", "max");
-    await sync.newChat("/p", "hi", { permissions: "auto", preset: "max" });
-    await sync.newChat("/p", "hi");
-    await sync.newChat("/p", "hi", { permissions: "ask", provider: "gateway:ollama" });
+    sync.startChat({ id: "start-1", project: "/p", projectName: "p", text: "hi", choice: { permissions: "auto", preset: "max" } });
+    sync.startChat({ id: "start-2", project: "/p", projectName: "p", text: "hi" });
+    sync.startChat({ id: "start-3", project: "/p", projectName: "p", text: "hi", choice: { permissions: "ask", provider: "gateway:ollama" } });
+    await settle();
     expect(asked.filter((r) => r.op !== "list_waiting")).toEqual([
       { op: "set_permissions", slot: "a", permissions: "auto" },
       { op: "set_preset", slot: "a", preset: "max" },
@@ -560,6 +565,164 @@ describe("what a phone may choose for a chat", () => {
       { op: "new_chat", project: "/p", text: "hi", permissions: "ask", preset: null, workflow: null, provider: "gateway:ollama" },
     ]);
     expect("provider" in (asked.filter((r) => r.op === "new_chat")[1] as object)).toBe(false);
+  });
+
+  describe("a chat started from the phone", () => {
+    const photo = { id: "p1", uri: "file:///a.jpg", mediaType: "image/jpeg" as const, data: "/9j/", width: 10, height: 10 };
+    const listed = (slot: string): Pushed => ({ type: "chats", chats: [{ slot, title: null, project: "web", status: "idle", last_seq: 0, active_at: 1, permissions: null, preset: null, project_color: null, workflow: null }] });
+    /** A session whose answers to `send` wait until let go, one by one, in the order they were asked. */
+    const gatedSession = (features: string[], newChat: () => Promise<unknown> = async () => ({ slot: "s9" })) => {
+      const asked: Request[] = [];
+      const waits: (number | undefined)[] = [];
+      const gates: (() => void)[] = [];
+      const session = {
+        welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1, features },
+        ask: (r: Request, wait?: number) => {
+          asked.push(r);
+          waits.push(wait);
+          if (r.op === "new_chat") return newChat();
+          if (r.op === "send") return new Promise<null>((res) => gates.push(() => res(null)));
+          return Promise.resolve(null);
+        },
+      } as unknown as Session;
+      return { session, asked, waits, letGo: () => gates.shift()?.() };
+    };
+
+    it("is asked of the Mac by its id with no message, then its first message goes into the chat with its photos, given time for the agent to start", async () => {
+      const { sync } = rig();
+      const { session, asked, waits } = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["newchatstart", "images"]);
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "Fix the footer", images: [photo] });
+      sync.flush();
+      // It shows at once, starting, before the Mac has answered.
+      expect(sync.getState().starts).toEqual([expect.objectContaining({ id: "start-1", slot: null, problem: null, text: "Fix the footer", thumbs: ["file:///a.jpg"] })]);
+      await settle();
+      sync.flush();
+      const mine = asked.filter((r) => r.op === "new_chat" || r.op === "send");
+      expect(mine).toEqual([
+        { op: "new_chat", project: "/p", text: "", permissions: null, preset: null, workflow: null, start_id: "start-1" },
+        { op: "send", slot: "s9", text: "Fix the footer", client_id: "m-1", images: [{ media_type: "image/jpeg", data: "/9j/" }] },
+      ]);
+      expect(waits.filter((_, i) => asked[i].op === "new_chat" || asked[i].op === "send")).toEqual([NEW_CHAT_WAIT, FIRST_SEND_WAIT]);
+      // Made: it is that chat now, its message in it as any message is.
+      expect(sync.getState().starts[0].slot).toBe("s9");
+      expect(sync.getState().views.s9.items).toEqual([expect.objectContaining({ id: "local-m-1", text: "Fix the footer", thumbs: ["file:///a.jpg"] })]);
+      // Once the Mac lists the chat, the chat's own row takes the start's place.
+      sync.apply({ type: "pushed", msg: listed("s9") });
+      sync.flush();
+      expect(sync.getState().starts).toEqual([]);
+    });
+
+    it("isn't lost when the Mac doesn't make it: it stays with why, and Try again asks by the same id, so a chat made after all is the one opened", async () => {
+      const { sync } = rig();
+      const fail: Partial<Record<Request["op"], string>> = { new_chat: "Not connected to your Mac." };
+      const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, fail, ["newchatstart"]);
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "hi" });
+      await settle();
+      sync.flush();
+      expect(sync.getState().starts).toEqual([expect.objectContaining({ id: "start-1", slot: null, problem: "Not connected to your Mac." })]);
+      delete fail.new_chat;
+      sync.retryStart("start-1");
+      sync.flush();
+      expect(sync.getState().starts[0].problem).toBeNull();
+      await settle();
+      sync.flush();
+      const starts = asked.filter((r) => r.op === "new_chat");
+      expect(starts).toHaveLength(2);
+      expect(starts.every((r) => r.op === "new_chat" && r.start_id === "start-1")).toBe(true);
+      expect(sync.getState().starts[0].slot).toBe("s9");
+      expect(asked.filter((r) => r.op === "send")).toEqual([{ op: "send", slot: "s9", text: "hi", client_id: "m-1" }]);
+    });
+
+    it("sends what was written on its page after the first message, in order, and a message from the chat waits for the first too", async () => {
+      let made!: (v: unknown) => void;
+      const { sync } = rig();
+      let n = 0;
+      (sync as unknown as { newId: () => string }).newId = () => `m-${++n}`;
+      const { session, asked, letGo } = gatedSession(["newchatstart"], () => new Promise((r) => (made = r)));
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "one" });
+      sync.queueStart("start-1", "two");
+      sync.flush();
+      expect(sync.getState().starts[0].queued).toEqual(["two"]);
+      made({ slot: "s9" });
+      await settle();
+      sync.flush();
+      // Both show in the chat, in order; only the first has gone to the Mac.
+      expect(sync.getState().views.s9.items.map((it) => it.kind === "user" && it.text)).toEqual(["one", "two"]);
+      void sync.send("s9", "three");
+      await settle();
+      sync.flush();
+      const sent = () => asked.filter((r) => r.op === "send").map((r) => r.op === "send" && r.text);
+      expect(sent()).toEqual(["one"]);
+      expect(sync.getState().views.s9.items.map((it) => it.kind === "user" && it.text)).toEqual(["one", "two", "three"]);
+      letGo();
+      await settle();
+      expect(sent()).toEqual(["one", "two"]);
+      letGo();
+      await settle();
+      expect(sent()).toEqual(["one", "two", "three"]);
+    });
+
+    it("holds back what was written after a first message that didn't go, saying why, instead of sending it without it", async () => {
+      const { sync } = rig();
+      let n = 0;
+      (sync as unknown as { newId: () => string }).newId = () => `m-${++n}`;
+      const fail: Partial<Record<Request["op"], string>> = { send: "The chat's agent didn't start on your Mac." };
+      const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, fail, ["newchatstart"]);
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "one" });
+      sync.queueStart("start-1", "two");
+      await settle();
+      sync.flush();
+      expect(asked.filter((r) => r.op === "send").map((r) => r.op === "send" && r.text)).toEqual(["one"]);
+      expect(sync.getState().views.s9.items).toEqual([expect.objectContaining({ text: "one", failed: "The chat's agent didn't start on your Mac." }), expect.objectContaining({ text: "two", failed: "Not sent: the message before it didn't go." })]);
+    });
+
+    it("says in the chat when its first message didn't go, and Try again sends it again under the same id, photos and all", async () => {
+      const { sync } = rig();
+      const fail: Partial<Record<Request["op"], string>> = { send: "The chat's agent didn't start on your Mac." };
+      const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, fail, ["newchatstart", "images"]);
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "look", images: [photo] });
+      await settle();
+      sync.flush();
+      expect(sync.getState().views.s9.items).toEqual([expect.objectContaining({ id: "local-m-1", failed: "The chat's agent didn't start on your Mac." })]);
+      delete fail.send;
+      await sync.retry("s9", "local-m-1");
+      const sends = asked.filter((r) => r.op === "send");
+      expect(sends).toHaveLength(2);
+      expect(sends[1]).toEqual({ op: "send", slot: "s9", text: "look", client_id: "m-1", images: [{ media_type: "image/jpeg", data: "/9j/" }] });
+    });
+
+    it("lets a start go: one the Mac then refuses says nothing, and what it had is given back first", async () => {
+      const { sync } = rig();
+      let refuse!: (e: Error) => void;
+      const { session } = gatedSession(["newchatstart"], () => new Promise((_, no) => (refuse = no)));
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "one" });
+      sync.queueStart("start-1", "two");
+      expect(sync.startText("start-1")).toBe("one\n\ntwo");
+      sync.dropStart("start-1");
+      refuse(new Error("nope"));
+      await settle();
+      sync.flush();
+      expect(sync.getState().starts).toEqual([]);
+    });
+
+    it("sends an older Mac the message with the chat, as it did, and shows it going until the Mac tells of it", async () => {
+      const { sync } = rig();
+      const { session, asked, waits } = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["newchatimages"]);
+      sync.onSession(session);
+      sync.startChat({ id: "start-1", project: "/p", projectName: "web", text: "hi", images: [photo] });
+      await settle();
+      sync.flush();
+      expect(asked.filter((r) => r.op === "new_chat")).toEqual([{ op: "new_chat", project: "/p", text: "hi", permissions: null, preset: null, workflow: null, images: [{ media_type: "image/jpeg", data: "/9j/" }] }]);
+      expect(waits[asked.findIndex((r) => r.op === "new_chat")]).toBe(UPLOAD_WAIT);
+      expect(asked.some((r) => r.op === "send")).toBe(false);
+      expect(sync.getState().views.s9.items).toEqual([expect.objectContaining({ text: "hi", sending: true, opening: true })]);
+    });
   });
 
   describe("messages written while the Mac was out of reach", () => {

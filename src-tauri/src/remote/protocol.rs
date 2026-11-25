@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, ACCOUNTS, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, NEW_CHAT_START, ACCOUNTS, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -116,6 +116,10 @@ pub const INSIGHTS: &str = "insights";
 pub const NEW_CHAT_IMAGES: &str = "newchatimages";
 /// A phone may choose the model and effort of a chat it starts (Request::NewChat's `model` and `effort`, from Controls' `models`).
 pub const NEW_CHAT_MODEL: &str = "newchatmodel";
+/// A phone names each chat it starts (Request::NewChat's `start_id`) and may start it with no message: the Mac answers as soon as
+/// the chat is made and listed, the same chat again when the phone asks again, and a send to it waits for its agent to be up. The
+/// phone then sends the first message as it sends any other.
+pub const NEW_CHAT_START: &str = "newchatstart";
 /// A phone may choose which Claude account a chat runs on (Request::NewChat's `account`, Request::SetAccount, from Controls'
 /// `accounts`), and sees the one each chat is on (RemoteChat's `account`).
 pub const ACCOUNTS: &str = "accounts";
@@ -1144,6 +1148,12 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional)]
         account: Option<String>,
+        /// The phone's own id for this start (letters, digits and "-"; only to a Mac whose Welcome lists "newchatstart"). Asked again
+        /// with the same id, the Mac answers with the chat it made for it, never a second one. With it, `text` may be empty: the chat
+        /// starts with no message and the phone sends the first one itself.
+        #[serde(default)]
+        #[ts(optional)]
+        start_id: Option<String>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
@@ -1488,7 +1498,7 @@ mod tests {
     fn what_an_older_phone_or_mac_says_still_reads() {
         // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
         let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
-        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None });
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None });
         // An older Mac's chat list and Welcome have neither field.
         let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
         assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow, chat.provider), (None, None, None, None, None));

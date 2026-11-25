@@ -3,8 +3,7 @@ import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSyncState } from "../shell/hooks";
 import { useLayout } from "../shell/useLayout";
-import type { StartShown } from "../shell/starting";
-import type { Item } from "../sync/reducer";
+import type { ChatStart, Item } from "../sync/reducer";
 import { BackButton } from "../ui/BackButton";
 import { BAR_TEXT_SCALE, Button, ProjectTag, Txt } from "../ui/components";
 import { Glass } from "../ui/Glass";
@@ -18,16 +17,17 @@ import { Composer, UserRow } from "./ChatParts";
 
 /**
  * A chat this phone has asked the Mac to start, open at once: its project, the first message (sending), a word that the Mac is
- * starting it, and the chat's message box. It becomes the chat itself when the Mac answers: what was sent from here meanwhile goes
- * then, and what was typed and not sent stays in the box. If the Mac couldn't start it, the message says why, with Try again (the
- * same message and choices), and Edit message goes back to the New chat sheet with it.
+ * starting it, and the chat's message box. It becomes the chat itself when the Mac has made it: what was sent from here meanwhile
+ * goes after the first message, and what was typed and not sent stays in the box. If the Mac couldn't make it, the message says
+ * why, with Try again (the same start, so never a second chat); Edit message goes back to the New chat sheet with it, and Discard
+ * lets it go. Gone back from, it stays in the chats as a row until it is a chat or let go.
  */
-export function StartingChat({ shown, onBack, onRetry, onEdit, onQueue }: { shown: StartShown; /** None on a tablet, where the chats are beside it. */ onBack?: () => void; onRetry: () => void; onEdit: () => void; /** A message sent from the box before the chat is there: it goes once it is. */ onQueue: (text: string) => void }) {
+export function StartingChat({ start, onBack, onRetry, onEdit, onDiscard, onQueue }: { start: ChatStart; /** None on a tablet, where the chats are beside it. */ onBack?: () => void; onRetry: () => void; onEdit: () => void; onDiscard: () => void; /** A message sent from the box before the chat is there: it goes once it is. */ onQueue: (text: string) => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const gutter = gutterFor(useLayout());
   const { chats } = useSyncState();
-  const { start, problem, queued } = shown;
+  const { problem, queued } = start;
   const color = projectColorOf(chats.find((c) => c.project === start.projectName)?.project_color);
   // The message as the chat will show it, sending until the Mac has the chat (or failed, with why, if it didn't).
   const item: Extract<Item, { kind: "user" }> = { kind: "user", id: `start-${start.id}`, text: start.text, at: null, sentBy: null, ...(problem ? { failed: problem } : { sending: true }), ...(start.thumbs.length ? { images: start.thumbs.length, thumbs: start.thumbs } : {}) };
@@ -56,7 +56,10 @@ export function StartingChat({ shown, onBack, onRetry, onEdit, onQueue }: { show
         ))}
         <View style={{ paddingHorizontal: gutter, gap: 10, alignItems: "flex-end" }}>
           {problem ? (
-            <Button label="Edit message" kind="ghost" onPress={onEdit} accessibilityHint="Opens New chat with this message" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Button label="Discard" kind="ghost" onPress={onDiscard} accessibilityHint="Lets this message go" />
+              <Button label="Edit message" kind="ghost" onPress={onEdit} accessibilityHint="Opens New chat with this message" />
+            </View>
           ) : (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" }} accessibilityLiveRegion="polite" accessibilityLabel="Starting the chat on your Mac">
               <Dots />

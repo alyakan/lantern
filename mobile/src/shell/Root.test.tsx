@@ -15,10 +15,10 @@ jest.mock("./useLayout", () => ({ useLayout: () => "phone" }));
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
 
-async function open(s: Parameters<typeof seed>[1], props: Partial<RootProps> = {}, answers: Parameters<typeof attachSession>[1] = {}) {
+async function open(s: Parameters<typeof seed>[1], props: Partial<RootProps> = {}, answers: Parameters<typeof attachSession>[1] = {}, features: string[] = []) {
   const { controller } = makeController();
   seed(controller, s);
-  const session = attachSession(controller, { list_waiting: s.waiting ?? [], ...answers });
+  const session = attachSession(controller, { list_waiting: s.waiting ?? [], ...answers }, features);
   const view = await render(<Root controller={controller} {...props} />);
   await settle();
   return { controller, view, ...session };
@@ -231,10 +231,11 @@ describe("starting a chat from Home", () => {
     expect(screen.getByLabelText("What to start with").props.value).toBe("Fix the login bug");
   });
 
-  it("says so, message and all, when the Mac couldn't start it after its page was left", async () => {
+  it("keeps a chat it couldn't start in the chats after its page was left, with why, and makes the one chat from Try again", async () => {
     const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
     let answer: (e: Error) => void = () => {};
-    await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => new Promise((_, no) => (answer = no)) });
+    let fail = true;
+    const { asked } = await open({ chats: [chat()] }, {}, { ...answers, new_chat: () => (fail ? new Promise((_, no) => (answer = no)) : { slot: "s9" }) }, ["newchatstart"]);
     await press("New chat");
     await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
     await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
@@ -242,9 +243,41 @@ describe("starting a chat from Home", () => {
     await settle();
     await press("Back");
     await settle();
+    // Back in the chats, it is there, starting.
+    expect(screen.getByRole("button", { name: /^Fix the login bug, lantern, Starting on your Mac/ })).toBeTruthy();
     await act(async () => answer(new Error("Lantern didn't answer in time.")));
-    expect(alert).toHaveBeenCalledWith("Your chat didn't start", expect.stringContaining("Fix the login bug"), expect.anything());
+    await settle();
+    // It didn't start: still there, saying so (it used to vanish, or be said once in an alert).
+    expect(screen.getByRole("button", { name: /^Fix the login bug, lantern, Not sent: Lantern didn't answer in time\./ })).toBeTruthy();
+    expect(alert).not.toHaveBeenCalled();
+    await press(/^Fix the login bug, lantern, Not sent/);
+    await settle();
+    expect(screen.getByTestId("starting-chat")).toBeTruthy();
+    fail = false;
+    await press("Try again");
+    await settle();
+    // Asked again by the same start: the one chat, with its first message sent into it.
+    const starts = asked.filter((r) => r.op === "new_chat");
+    expect(starts).toHaveLength(2);
+    expect(new Set(starts.map((r) => r.op === "new_chat" && r.start_id)).size).toBe(1);
+    expect(starts.every((r) => r.op === "new_chat" && r.text === "")).toBe(true);
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(asked.filter((r) => r.op === "send")).toEqual([expect.objectContaining({ slot: "s9", text: "Fix the login bug" })]);
+    expect(screen.getByLabelText("You: Fix the login bug")).toBeTruthy();
     alert.mockRestore();
+  });
+
+  it("lets a chat that didn't start go from Discard, and its row with it", async () => {
+    await open({ chats: [chat()] }, {}, { ...answers, new_chat: new Error("Your Mac said no.") }, ["newchatstart"]);
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Project: lantern/ })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await settle();
+    await press("Discard");
+    await settle();
+    expect(screen.queryByTestId("starting-chat")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Fix the login bug, lantern/ })).toBeNull();
   });
 
   it("closes the sheet with the system's back button before it leaves anything else", async () => {

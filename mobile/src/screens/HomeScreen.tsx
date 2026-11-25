@@ -25,6 +25,7 @@ import { gutterFor } from "../view/layout";
 import { useLayout } from "../shell/useLayout";
 import { cards, groups, headline, matches, projectTint, rows, sections, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
+import type { ChatStart } from "../sync/reducer";
 import { HomeSearch } from "./HomeSearch";
 
 import { ChatActionsSheet } from "./ChatActions";
@@ -48,6 +49,8 @@ export interface HomeProps {
   onCompose: () => void;
   /** Starts a chat in a project, with a first message the user writes (or a suggestion's draft); or carries one on. */
   onNewChat: (draft?: Draft) => void;
+  /** A chat this phone asked for that isn't in the list yet: its page (or its chat, once the Mac has made it). */
+  onOpenStart?: (id: string) => void;
   /** Opens the optional tips. */
   onSupport: () => void;
   /** On a tablet, Home is the side column and the chat open beside it is marked here. */
@@ -235,6 +238,49 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   );
 }
 
+/**
+ * A chat this phone asked for that the Mac hasn't listed yet: its first words, its project, and how it goes (starting, or not
+ * sent, with why). It is kept until it is a chat or let go, so going back to the chats never loses it.
+ */
+function StartRow({ start, color, inset, background, onPress }: { start: ChatStart; color: string | null; inset: number; background: string; onPress: () => void }) {
+  const colors = useColors();
+  const { bg, fg } = projectTint(color, colors.plainTint);
+  const pad = inset > 8 ? inset - 8 : inset;
+  const title = start.text.split("\n").find((l) => l.trim())?.trim() || (start.thumbs.length ? "Photos" : "New chat");
+  const failed = start.problem !== null;
+  const how = failed ? `Not sent: ${start.problem}` : start.slot ? "Sending your message…" : "Starting on your Mac…";
+  return (
+    <Glide>
+      <FadeSlideIn from={14} delay={60}>
+        <PressScale testID={`start-row-${start.id}`} accessibilityRole="button" accessibilityLabel={`${title}, ${start.projectName}, ${how}`} onPress={onPress} haptic="none" scaleTo={0.975} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56, backgroundColor: background }}>
+          <Tile letter={(title[0] ?? "N").toUpperCase()} bg={bg} fg={fg} />
+          <View style={{ flex: 1 }}>
+            <Txt variant="body" numberOfLines={1}>
+              {title}
+            </Txt>
+            <Txt variant="small" numberOfLines={1} style={{ marginTop: 1, color: failed ? colors.stop : colors.ink2 }}>
+              {how}
+            </Txt>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 }}>
+              <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
+              <Txt variant="tiny" numberOfLines={1} style={{ flexShrink: 1, color: fg, fontWeight: "600" }}>
+                {start.projectName}
+              </Txt>
+            </View>
+          </View>
+          {failed ? (
+            <Txt variant="tiny" style={{ color: colors.stop, fontWeight: "700" }}>
+              Not sent
+            </Txt>
+          ) : (
+            <Dots size={3} color={colors.ink3} />
+          )}
+        </PressScale>
+      </FadeSlideIn>
+    </Glide>
+  );
+}
+
 /** A quiet label over a stretch of the list ("Waiting on you", "Earlier"). */
 function SectionLabel({ label, count, gutter }: { label: string; count: number; gutter: number }) {
   return (
@@ -376,13 +422,13 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin, column, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onOpenStart, onSupport, selectedSlot, pinned = false, onTogglePin, column, onOpenInsights, insightsShown = false, tabbed = false, toTop }: HomeProps) {
   const canInsights = useMacCan("insights");
   const scroller = useRef<ComponentRef<typeof Animated.ScrollView>>(null);
   useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work, starts } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
@@ -603,7 +649,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </Txt>
           </PressScale>}
         </View>
-        {list.length === 0 ? (
+        {/* Chats asked for from this phone, not listed yet: at the top, until each is a chat or let go. */}
+        {!asked &&
+          onOpenStart &&
+          starts.map((st) => <StartRow key={st.id} start={st} color={allChats.find((c) => c.project === st.projectName)?.project_color ?? null} inset={gutter} background={colors.paper} onPress={() => onOpenStart(st.id)} />)}
+        {list.length === 0 && starts.length > 0 && !asked ? null : list.length === 0 ? (
           <View style={{ alignItems: "center", paddingHorizontal: space.xxl, paddingTop: 36, paddingBottom: 12 }}>
             <View style={{ transform: [{ scale: 0.75 }], marginBottom: 6 }}>
               <DarkLantern />
