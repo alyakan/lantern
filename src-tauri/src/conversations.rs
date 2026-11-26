@@ -173,9 +173,10 @@ impl Store {
         chat.updated_ms = crate::remote::now_ms();
         let mut d = self.data.lock().unwrap();
         if !chat.id.is_empty() { self.keep(&mut d, chat.clone()); }
-        // A switch replaces a conversation that had a session: not the same one again (a restart, a provider switch, Continue
-        // fresh), and not a chat still being set up.
-        let other = d.slots.get(slot).is_some_and(|c| !c.id.is_empty() && c.id != chat.id);
+        // A switch puts another conversation in the slot: not the same one again (a restart, a provider switch, Continue fresh),
+        // and not a new chat's own setup (it attaches none with an id). A past conversation opened into a chat that had no
+        // session yet is one.
+        let other = d.slots.get(slot).is_some_and(|c| c.id != chat.id && !(c.id.is_empty() && chat.id.is_empty()));
         d.slots.insert(slot.into(), chat);
         drop(d);
         if other { self.switched(slot); }
@@ -249,6 +250,11 @@ mod tests {
         store.attach("s1", Conversation { id: "eeee".into(), native_id: "eeee".into(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![] });
         store.detach("s1");
         assert_eq!(*switched.lock().unwrap(), ["s1", "s1"]);
+        // A chat with no session yet, given a past conversation: a switch too.
+        store.attach("s2", Conversation { id: String::new(), native_id: String::new(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![] });
+        assert_eq!(switched.lock().unwrap().len(), 2, "a new chat's own setup is no switch");
+        store.attach("s2", store.get("aaaa-bbbb").unwrap());
+        assert_eq!(switched.lock().unwrap().len(), 3);
         assert_eq!(restored.events.last().unwrap()["session_id"], "aaaa-bbbb");
     }
 

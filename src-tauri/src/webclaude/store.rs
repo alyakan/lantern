@@ -672,7 +672,9 @@ impl Store {
         if q.answered {
             return Err("That question has been answered already.".into());
         }
-        self.propose(Kind::Answer { question: q.id.clone() }, &q.canvas, &q.title, text, None, grant, now)
+        // Work with no design is known by its project: the asking chat's, so the answer finds that chat again.
+        let folder = if q.canvas.is_empty() { q.slot.as_deref().and_then(|s| self.canvas_of_slot(s)).and_then(|k| k.strip_prefix("project:").map(String::from)) } else { None };
+        self.propose(Kind::Answer { question: q.id.clone() }, &q.canvas, &q.title, text, folder, grant, now)
     }
 
     pub fn request(&self, id: &str) -> Option<Request> {
@@ -686,8 +688,10 @@ impl Store {
     /// that asked, for an answer), or a new chat in `folder` (the card's pick, else the request's).
     pub fn decide_run(&self, id: &str, run: bool, folder: Option<String>) -> Result<Option<RunAction>, String> {
         // Only the live map is locked in here (the saved one is held by edit).
+        // The chat that asked, while it still works on the question's canvas; else the canvas's chat now.
         let live_slot = |s: &Saved, key: &str, question: Option<&str>| -> Option<String> {
-            question.and_then(|q| s.outbox.iter().find(|o| o.id == q).and_then(|o| o.slot.clone())).or_else(|| self.slot_of(key))
+            let asker = question.and_then(|q| s.outbox.iter().find(|o| o.id == q).and_then(|o| o.slot.clone()));
+            asker.filter(|slot| self.canvas_of_slot(slot).as_deref() == Some(key)).or_else(|| self.slot_of(key))
         };
         let out = self.edit(|s| {
             let at = s.requests.iter().position(|r| r.id == id && r.status == Status::Waiting).ok_or("That request has been answered already.")?;
@@ -753,13 +757,11 @@ impl Store {
     /// The chat in `slot` now holds another conversation, or was cleared: what web Claude sent was the old one's business, so
     /// nothing of the new one is followed, readable, or sent answers.
     pub fn forget_slot(&self, slot: &str) {
-        let (linked, turn) = {
+        let turn = {
             let mut live = self.live.lock().unwrap();
-            (live.slots.remove(slot).is_some(), live.turns.remove(slot))
+            live.slots.remove(slot);
+            live.turns.remove(slot)
         };
-        if !linked && turn.is_none() {
-            return;
-        }
         self.edit(|s| {
             for r in s.requests.iter_mut().filter(|r| r.slot.as_deref() == Some(slot)) {
                 r.slot = None;
@@ -1159,8 +1161,11 @@ mod tests {
         // Another piece of work for the same project is another task: it gets a chat of its own.
         let r2 = sent(&s, "", Some("/p"));
         assert_eq!(s.decide_run(&r2.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()));
-        // While it works, its chat can still write to web Claude.
+        // While it works, its chat can still write to web Claude, and an answer to its question goes back to it.
         assert!(s.chat_post("slot-1", None, OutKind::Note, "Preview is up", None, 11).is_ok());
+        let q = s.chat_post("slot-1", None, OutKind::Question, "Which page?", None, 12).unwrap();
+        let ans = s.propose_answer(&q.id, "Home", "g", 13).unwrap();
+        assert_eq!(s.decide_run(&ans.id, true, None).unwrap().unwrap().target, Target::Chat("slot-1".into()));
     }
 
     fn user(t: &str, by: Option<&str>) -> UiEvent {
