@@ -12,6 +12,7 @@ pub mod funnel;
 pub mod mcp;
 pub mod server;
 pub mod store;
+pub mod transcript;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -22,7 +23,7 @@ use store::{OutKind, Store};
 pub const CHAT_TOOLS: &[&str] = &["web_ask", "web_note"];
 
 /// Their line in the server's instructions.
-pub const CHAT_INSTRUCTIONS: &str = "- web_ask, web_note: only in a chat working on a web Claude design canvas (its message starts \"[Web Claude sent this about the design canvas\"). web_ask leaves web Claude a question; its answer comes later as a message. web_note leaves it a note, with a preview link (an artifact you published) when you have one. Your last message of each such turn goes back to web Claude on its own.";
+pub const CHAT_INSTRUCTIONS: &str = "- web_ask, web_note: only in a chat working on a web Claude design canvas (its message starts \"[Web Claude sent this about the design canvas\"). web_ask leaves web Claude a question; its answer comes later as a message. web_note leaves it a note, with a preview link (an artifact you published) when you have one. Web Claude sees this whole chat: your last message of every turn (also the user's own turns here) goes back to it on its own, and it can read the rest.";
 
 pub fn chat_tool_list() -> Vec<Value> {
     vec![
@@ -204,6 +205,9 @@ mod tests {
             }
             fn chats(&self) -> Vec<mcp::ChatLine> {
                 vec![]
+            }
+            fn chat_events(&self, _: &str) -> Option<Vec<crate::ui_event::UiEvent>> {
+                None
             }
         }
         std::env::set_var("LANTERN_WEBCLAUDE_PORT", "47999");

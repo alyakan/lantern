@@ -62,7 +62,7 @@ export function WebClaudeSettings({ now = Date.now }: { now?: () => number }) {
         <div>
           <h2 className="mode-guide-title">Web Claude</h2>
           <p className="mode-guide-summary">Let Claude on claude.ai, where you design, send work to Lantern's chats and read what they built. A chat here can leave web Claude questions and notes.</p>
-          <SettingsHint>Everything web Claude sends waits for you to tap Run, on this Mac or your phone. Signing in from claude.ai waits for your Allow.</SettingsHint>
+          <SettingsHint>Everything web Claude sends waits for you to tap Run, on this Mac or your phone. Signing in from claude.ai waits for your Allow. A chat that works on web Claude's work is shared with it in full: every turn's last message, yours too, and the rest (steps, their output, diffs) when web Claude reads it. Your other chats stay private.</SettingsHint>
         </div>
       </div>
       {error && (

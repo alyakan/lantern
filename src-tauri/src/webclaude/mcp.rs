@@ -1,5 +1,5 @@
 //! The connector's MCP side: JSON-RPC as claude.ai's servers send it (Streamable HTTP, one JSON reply per request), and
-//! the six tools web Claude gets. Nothing here runs anything on the Mac: sending work makes a card that waits for the
+//! the seven tools web Claude gets. Nothing here runs anything on the Mac: sending work makes a card that waits for the
 //! user's Run (see store.rs); the rest reads.
 
 use super::store::{self, Kind, Store};
@@ -24,11 +24,13 @@ pub trait Mac: Send + Sync + 'static {
     /// The projects a chat may start in, as (folder, name).
     fn projects(&self) -> BoxFut<Vec<(String, String)>>;
     fn chats(&self) -> Vec<ChatLine>;
+    /// Everything the chat open in `slot` kept, as events (None: no such chat is open).
+    fn chat_events(&self, slot: &str) -> Option<Vec<crate::ui_event::UiEvent>>;
 }
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message; nothing runs until the user taps Run there, so tell the user it is waiting. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message; nothing runs until the user taps Run there, so tell the user it is waiting. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
 
 fn tools() -> Value {
     json!([
@@ -67,12 +69,26 @@ fn tools() -> Value {
         },
         {
             "name": "read_outbox",
-            "description": "What Lantern's chats left for you, oldest first: their questions (answer them with answer), notes, preview links, and the last message of each finished request.",
+            "description": "What Lantern's chats left for you, oldest first: their questions (answer them with answer), notes, preview links, and the last message of every turn a chat on your canvas finished, with the files it changed (`asked` is the user's own message, for a turn they started there themselves).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "canvas": {"type": "string", "description": "Only this canvas's items (link or title)."},
                     "after": {"type": "string", "description": "Only items after this item id (the last one you read)."}
+                }
+            },
+            "annotations": {"readOnlyHint": true}
+        },
+        {
+            "name": "read_chat",
+            "description": "Read the Lantern chat working on a canvas, or the one a request went to: everything in it, numbered, as Lantern kept it. The user's and your messages, Claude's words, each step with what it printed (cut when long), each edit with its diff, and where turns ended. Returns the newest page; pass `before` with the first number you got to read further back, or `after` with the last one to read what came since.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "canvas": {"type": "string", "description": "The canvas's claude.ai link or title."},
+                    "id": {"type": "string", "description": "Or the id of a request you sent (for work with no design)."},
+                    "before": {"type": "integer", "description": "Only entries before this number."},
+                    "after": {"type": "integer", "description": "Only entries after this number."}
                 }
             },
             "annotations": {"readOnlyHint": true}
@@ -238,6 +254,12 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
             let items = store.outbox(arg(args, "canvas"), arg(args, "after"), 30);
             Ok(json!({"items": items.iter().map(|o| {
                 let mut v = json!({"id": o.id, "kind": o.kind, "canvas": shown(&o.canvas), "chat": o.chat_title, "text": o.text, "at_ms": o.at});
+                if let Some(a) = &o.asked {
+                    v["asked"] = json!(a);
+                }
+                if !o.files.is_empty() {
+                    v["files_changed"] = json!(o.files);
+                }
                 if let Some(p) = &o.preview {
                     v["preview_url"] = json!(p);
                 }
@@ -246,6 +268,24 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                 }
                 v
             }).collect::<Vec<_>>()}))
+        }
+        "read_chat" => {
+            let number = |name: &str| args.get(name).and_then(Value::as_u64).map(|n| n as usize);
+            let slot = store.readable_chat(arg(args, "canvas"), arg(args, "id"))?;
+            let events = mac.chat_events(&slot).ok_or("That chat isn't open in Lantern any more.")?;
+            let all = super::transcript::entries(&events);
+            let (entries, earlier, later) = super::transcript::page(&all, number("before"), number("after"));
+            let line = mac.chats().into_iter().find(|c| c.slot == slot);
+            let projects = mac.projects().await;
+            Ok(json!({
+                "chat": line.as_ref().and_then(|c| c.title.clone()),
+                "project": line.as_ref().and_then(|c| c.folder.as_deref()).map(|f| name_of(&projects, f)),
+                "status": line.map(|c| c.status),
+                "total": all.len(),
+                "earlier": earlier,
+                "later": later,
+                "entries": entries,
+            }))
         }
         "answer" => {
             let r = store.propose_answer(need(args, "question_id")?, need(args, "text")?, grant, now)?;
@@ -269,6 +309,12 @@ mod tests {
         fn chats(&self) -> Vec<ChatLine> {
             vec![ChatLine { slot: "s1".into(), title: Some("Header".into()), folder: Some("/dev/rayak".into()), status: "idle".into() }]
         }
+        fn chat_events(&self, slot: &str) -> Option<Vec<crate::ui_event::UiEvent>> {
+            (slot == "s1").then(|| vec![
+                crate::ui_event::UiEvent::UserText { text: "Make it blue".into(), at: None, sent_by: Some("desktop".into()), images: 0 },
+                crate::ui_event::UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "It's blue.".into() },
+            ])
+        }
     }
 
     async fn rpc(store: &Store, method: &str, params: Value) -> Value {
@@ -280,7 +326,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_says_hello_in_the_clients_protocol_and_lists_six_tools() {
+    async fn it_says_hello_in_the_clients_protocol_and_lists_seven_tools() {
         let s = Store::load(None);
         let init = rpc(&s, "initialize", json!({"protocolVersion": "2025-03-26"})).await;
         assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
@@ -288,7 +334,7 @@ mod tests {
         let unknown = rpc(&s, "initialize", json!({"protocolVersion": "1999"})).await;
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOLS[0]);
         let names: Vec<String> = rpc(&s, "tools/list", json!({})).await["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-        assert_eq!(names, ["list_projects", "list_chats", "send_to_lantern", "check", "read_outbox", "answer"]);
+        assert_eq!(names, ["list_projects", "list_chats", "send_to_lantern", "check", "read_outbox", "read_chat", "answer"]);
         assert!(handle(&s, &FakeMac, "g", &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), 1).await.is_none());
         assert_eq!(rpc(&s, "nope", json!({})).await["error"]["code"], -32601);
     }
@@ -334,5 +380,22 @@ mod tests {
         let c = tool(&s, "list_chats", json!({"project": "rayak"})).await;
         assert_eq!(c["structuredContent"]["chats"][0]["canvas"], "https://claude.ai/artifact/abc");
         assert_eq!(tool(&s, "list_chats", json!({"project": "lantern"})).await["structuredContent"]["chats"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn read_chat_reads_the_whole_chat_on_a_canvas_and_nothing_else() {
+        let s = Store::load(None);
+        assert_eq!(tool(&s, "read_chat", json!({"canvas": "https://claude.ai/artifact/abc"})).await["isError"], true, "no chat on it yet");
+        let r = s.propose(Kind::Send, "https://claude.ai/artifact/abc", "Rayak", "m", Some("/dev/rayak".into()), "g", 1).unwrap();
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s1", None);
+        for args in [json!({"canvas": "https://claude.ai/artifact/abc"}), json!({"id": r.id})] {
+            let v = &tool(&s, "read_chat", args).await["structuredContent"];
+            assert_eq!((v["chat"].as_str(), v["project"].as_str(), v["total"].as_u64(), v["earlier"].as_bool()), (Some("Header"), Some("rayak"), Some(2), Some(false)));
+            assert_eq!((v["entries"][0]["from"].as_str(), v["entries"][1]["text"].as_str()), (Some("user"), Some("It's blue.")));
+        }
+        let later = &tool(&s, "read_chat", json!({"canvas": "https://claude.ai/artifact/abc", "after": 1})).await["structuredContent"];
+        assert_eq!(later["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(tool(&s, "read_chat", json!({"canvas": "Another canvas"})).await["isError"], true);
     }
 }

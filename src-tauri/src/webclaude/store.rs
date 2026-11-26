@@ -35,6 +35,9 @@ pub const TITLE_MAX: usize = 200;
 const REPLY_MAX: usize = 12_000;
 const FILES_MAX: usize = 50;
 
+/// Who a message from web Claude is said to be sent by (UserText's `sent_by`).
+pub const SENT_BY: &str = "web-claude";
+
 pub fn random_token(bytes: usize) -> String {
     let mut b = vec![0u8; bytes];
     getrandom::fill(&mut b).expect("the system's random numbers");
@@ -207,6 +210,12 @@ pub struct OutItem {
     pub at: u64,
     #[serde(default)]
     pub answered: bool,
+    /// For the reply to a turn the user started in the chat themselves: what they wrote (web Claude didn't ask it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asked: Option<String>,
+    /// The files the turn changed (a reply's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// The chat that left it, so an answer goes back there (only good while Lantern runs).
     #[serde(skip)]
     pub slot: Option<String>,
@@ -268,10 +277,12 @@ struct Code {
     expires: u64,
 }
 
-/// A turn started from the web, followed until it ends.
+/// A turn of a chat that works on a canvas, followed until it ends: one web Claude's Run started (`request`), or one the
+/// user started in that chat themselves (`asked`: what they wrote). Either way web Claude gets its last words.
 #[derive(Debug, Clone, Default)]
 struct Turn {
-    request: String,
+    request: Option<String>,
+    asked: Option<String>,
     text: String,
     files: Vec<String>,
 }
@@ -597,6 +608,25 @@ impl Store {
         self.live.lock().unwrap().slots.get(slot).cloned()
     }
 
+    /// The chat web Claude may read: the one working on `canvas` (link or title), or the one request `request` went to.
+    /// Only a chat that works on something web Claude sent: nothing else in Lantern can be read this way.
+    pub fn readable_chat(&self, canvas: Option<&str>, request: Option<&str>) -> Result<String, String> {
+        let slot = match (request, canvas) {
+            (Some(id), _) => {
+                let saved = self.saved.lock().unwrap();
+                let r = saved.requests.iter().find(|r| r.id == id).ok_or("Lantern has no request with that id.")?;
+                r.slot.clone().ok_or("That request hasn't gone to a chat (yet), or Lantern has restarted since.")?
+            }
+            (None, Some(canvas)) => self.slot_of(&canvas_key(canvas)).ok_or("No chat in Lantern is working on that canvas right now.")?,
+            (None, None) => return Err("Name the canvas (its link or title), or give the id of a request you sent.".into()),
+        };
+        // Still that canvas's chat (a chat closed since, or now on another canvas, isn't).
+        if !self.live.lock().unwrap().slots.contains_key(&slot) {
+            return Err("That chat no longer works on anything you sent.".into());
+        }
+        Ok(slot)
+    }
+
     /// Web Claude asks for something: it waits for the user's Run. `folder` was checked against the Mac's projects. An empty
     /// `canvas` is work with no design, which must name its project.
     #[allow(clippy::too_many_arguments)]
@@ -710,7 +740,7 @@ impl Store {
             let mut live = self.live.lock().unwrap();
             live.slots.retain(|_, k| *k != key);
             live.slots.insert(slot.into(), key);
-            live.turns.insert(slot.into(), Turn { request: request.into(), ..Turn::default() });
+            live.turns.insert(slot.into(), Turn { request: Some(request.into()), ..Turn::default() });
         }
         self.changed();
     }
@@ -724,12 +754,20 @@ impl Store {
         self.changed();
     }
 
-    /// A chat's event: a turn started from the web keeps its last words and the files it changed, and when it ends that
-    /// goes to the request and, as a reply, to the outbox.
+    /// A chat's event. In a chat that works on a canvas every turn is followed: it keeps its last words and the files it
+    /// changed, and when it ends that goes, as a reply, to the outbox (and to the request, for a turn web Claude's Run
+    /// started). A turn the user starts in that chat themselves is followed from their message on.
     pub fn on_event(&self, slot: &str, event: &crate::ui_event::UiEvent, now: u64) {
         use crate::ui_event::UiEvent;
         let done = {
             let mut live = self.live.lock().unwrap();
+            if let UiEvent::UserText { text, sent_by, .. } = event {
+                // Web Claude's own message is followed by `started`, which comes right after it.
+                if live.slots.contains_key(slot) && !live.turns.contains_key(slot) && sent_by.as_deref() != Some(SENT_BY) {
+                    let asked = cut(crate::remote::hub::without_notes(text).trim(), MESSAGE_MAX);
+                    live.turns.insert(slot.into(), Turn { asked: Some(asked), ..Turn::default() });
+                }
+            }
             let Some(turn) = live.turns.get_mut(slot) else { return };
             match event {
                 UiEvent::AssistantText { parent: None, text, .. } => {
@@ -755,12 +793,26 @@ impl Store {
         };
         let Some((turn, is_error, result)) = done else { return };
         let text = if turn.text.trim().is_empty() { result.clone().unwrap_or_default() } else { turn.text.clone() };
+        let key = self.canvas_of_slot(slot);
         self.edit(|s| {
-            let Some(r) = s.requests.iter_mut().find(|r| r.id == turn.request) else { return };
-            r.files = turn.files.clone();
-            r.reply = Some(cut(&text, REPLY_MAX));
-            r.status = if is_error { Status::Failed { reason: cut(&result.unwrap_or_else(|| "The turn ended with an error.".into()), 500) } } else { Status::Done };
-            let item = OutItem { id: random_token(9), canvas: r.canvas.clone(), title: r.title.clone(), kind: OutKind::Reply, text: cut(&text, REPLY_MAX), preview: None, chat_title: r.chat_title.clone(), at: now, answered: false, slot: Some(slot.into()) };
+            let (canvas, title, chat_title) = match &turn.request {
+                Some(id) => {
+                    let Some(r) = s.requests.iter_mut().find(|r| &r.id == id) else { return };
+                    r.files = turn.files.clone();
+                    r.reply = Some(cut(&text, REPLY_MAX));
+                    r.status = if is_error { Status::Failed { reason: cut(&result.unwrap_or_else(|| "The turn ended with an error.".into()), 500) } } else { Status::Done };
+                    (r.canvas.clone(), r.title.clone(), r.chat_title.clone())
+                }
+                // The user's own turn: about whatever the chat's latest request from the web was about.
+                None => match s.requests.iter().rev().find(|r| r.slot.as_deref() == Some(slot)) {
+                    Some(r) => (r.canvas.clone(), r.title.clone(), r.chat_title.clone()),
+                    None => match key.as_ref().and_then(|k| s.links.iter().find(|l| &l.key == k)) {
+                        Some(l) => (l.canvas.clone(), l.title.clone(), None),
+                        None => return,
+                    },
+                },
+            };
+            let item = OutItem { id: random_token(9), canvas, title, kind: OutKind::Reply, text: cut(&text, REPLY_MAX), preview: None, chat_title, at: now, answered: false, asked: turn.asked.clone(), files: turn.files.clone(), slot: Some(slot.into()) };
             push_out(s, item);
         });
         self.changed();
@@ -768,12 +820,12 @@ impl Store {
 
     /// A chat leaves a question or a note for web Claude. Only a chat working on a canvas can.
     pub fn chat_post(&self, slot: &str, chat_title: Option<String>, kind: OutKind, text: &str, preview: Option<&str>, now: u64) -> Result<OutItem, String> {
-        // Only during a turn web Claude's work started: a later turn of the user's own in that chat sends nothing to the web.
+        // Only in a chat that works on a canvas (any of its turns).
         let (key, request) = {
             let live = self.live.lock().unwrap();
-            live.turns.get(slot).and_then(|t| Some((live.slots.get(slot)?.clone(), t.request.clone())))
+            live.slots.get(slot).map(|k| (k.clone(), live.turns.get(slot).and_then(|t| t.request.clone())))
         }
-        .ok_or("Only a turn that web Claude's work started can leave web Claude a note or a question, and this isn't one.")?;
+        .ok_or("Only a chat that works on web Claude's canvas (one web Claude's work started) can leave web Claude a note or a question, and this isn't one.")?;
         let text = clean("text", text, MESSAGE_MAX)?;
         let preview = match preview.map(str::trim).filter(|p| !p.is_empty()) {
             Some(p) if p.starts_with("https://") && p.len() <= CANVAS_MAX && !p.chars().any(|c| c.is_whitespace() || c.is_control()) => Some(p.to_string()),
@@ -781,8 +833,9 @@ impl Store {
             None => None,
         };
         let item = self.edit(|s| {
-            let (canvas, title) = s.requests.iter().find(|r| r.id == request).map(|r| (r.canvas.clone(), r.title.clone())).or_else(|| s.links.iter().find(|l| l.key == key).map(|l| (l.canvas.clone(), l.title.clone()))).unwrap_or((key.clone(), key.clone()));
-            let item = OutItem { id: random_token(9), canvas, title, kind, text, preview, chat_title, at: now, answered: false, slot: Some(slot.into()) };
+            let by_request = |r: &&Request| request.as_ref().map_or(r.slot.as_deref() == Some(slot), |id| &r.id == id);
+            let (canvas, title) = s.requests.iter().rev().find(by_request).map(|r| (r.canvas.clone(), r.title.clone())).or_else(|| s.links.iter().find(|l| l.key == key).map(|l| (l.canvas.clone(), l.title.clone()))).unwrap_or((key.clone(), key.clone()));
+            let item = OutItem { id: random_token(9), canvas, title, kind, text, preview, chat_title, at: now, answered: false, asked: None, files: vec![], slot: Some(slot.into()) };
             push_out(s, item.clone());
             item
         });
@@ -878,7 +931,7 @@ pub fn framed(r: &Request) -> String {
         (Kind::Answer { .. }, true) => "[Web Claude answered your question. The user tapped Run in Lantern.]".into(),
     };
     let read = if link.is_empty() { "" } else { " Read the canvas with your Artifact tool when you need the design itself." };
-    format!("{intro}\n\n{}\n\n[When you're done, your last message goes back to web Claude on its own.{read} To ask web Claude something, use mcp__lantern__web_ask; to send it a note or a preview link (an artifact you published), use mcp__lantern__web_note.]", r.message)
+    format!("{intro}\n\n{}\n\n[Web Claude sees this whole chat from now on: your last message of every turn goes back to it on its own, and it can read the rest.{read} To ask web Claude something, use mcp__lantern__web_ask; to send it a note or a preview link (an artifact you published), use mcp__lantern__web_note.]", r.message)
 }
 
 #[cfg(test)]
@@ -1078,6 +1131,14 @@ mod tests {
         assert!(s.chat_post("slot-1", None, OutKind::Note, "Preview is up", None, 11).is_ok());
     }
 
+    fn user(t: &str, by: Option<&str>) -> UiEvent {
+        UiEvent::UserText { text: t.into(), at: None, sent_by: by.map(String::from), images: 0 }
+    }
+
+    fn done() -> UiEvent {
+        UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None }
+    }
+
     fn sent(s: &Store, canvas: &str, folder: Option<&str>) -> Request {
         s.propose(Kind::Send, canvas, "Rayak", "Build the header", folder.map(String::from), "g", 10).unwrap()
     }
@@ -1135,9 +1196,51 @@ mod tests {
         let out = s.outbox(Some("c"), None, 10);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, OutKind::Reply);
-        // A later turn the user starts in that chat isn't web Claude's business.
+        // Words with no turn of the chat's own behind them aren't followed.
         s.on_event("s1", &text("something else", None), 20);
         assert_eq!(s.outbox(None, None, 10).len(), 1);
+    }
+
+    #[test]
+    fn a_turn_the_user_starts_in_a_canvas_chat_goes_to_web_claude_too_with_what_they_wrote() {
+        let s = store();
+        let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+        s.decide_run(&r.id, true, None).unwrap();
+        // Web Claude's own message comes before `started`: it doesn't start a turn of the user's.
+        s.on_event("s1", &user("[Web Claude sent this…] Build the header", Some(SENT_BY)), 10);
+        s.started(&r.id, "s1", Some("Header".into()));
+        s.on_event("s1", &UiEvent::AssistantText { parent: None, block_id: "a".into(), text: "Built it.".into() }, 11);
+        s.on_event("s1", &done(), 11);
+        assert_eq!(s.outbox(None, None, 10).len(), 1);
+        s.on_event("s1", &user("[Lantern note: a hook ran]\n\nMake it blue too", Some("desktop")), 12);
+        s.on_event("s1", &UiEvent::EditApplied { parent: None, tool_use_id: "t".into(), path: "src/Header.css".into(), created: false, hunks: vec![], original: None }, 13);
+        s.on_event("s1", &UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "It's blue.".into() }, 13);
+        // Mid-turn, the chat may still write to web Claude.
+        assert!(s.chat_post("s1", None, OutKind::Note, "Preview is up", None, 13).is_ok());
+        s.on_event("s1", &done(), 14);
+        let out = s.outbox(Some("https://claude.ai/artifact/abc"), None, 10);
+        let reply = out.last().unwrap();
+        assert_eq!((reply.kind, reply.text.as_str(), reply.asked.as_deref()), (OutKind::Reply, "It's blue.", Some("Make it blue too")));
+        assert_eq!((reply.files.clone(), reply.chat_title.as_deref()), (vec!["src/Header.css".to_string()], Some("Header")));
+        assert_eq!(s.request(&r.id).unwrap().reply.as_deref(), Some("Built it."), "the user's turn isn't the request's");
+        // A chat that never worked on anything web Claude sent is never followed.
+        s.on_event("s2", &user("private", Some("desktop")), 15);
+        s.on_event("s2", &done(), 16);
+        assert_eq!(s.outbox(None, None, 10).len(), 3);
+    }
+
+    #[test]
+    fn web_claude_reads_only_the_chat_on_its_canvas_or_its_request() {
+        let s = store();
+        let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+        assert!(s.readable_chat(None, Some(&r.id)).is_err(), "not run yet");
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s1", None);
+        assert_eq!(s.readable_chat(Some("https://claude.ai/artifact/abc?x=1"), None).as_deref(), Ok("s1"));
+        assert_eq!(s.readable_chat(None, Some(&r.id)).as_deref(), Ok("s1"));
+        assert!(s.readable_chat(Some("another canvas"), None).is_err());
+        assert!(s.readable_chat(None, None).is_err());
+        assert!(s.readable_chat(None, Some("nope")).is_err());
     }
 
     #[test]
@@ -1149,12 +1252,13 @@ mod tests {
         s.started(&r.id, "s1", Some("Header".into()));
         assert!(s.chat_post("s1", None, OutKind::Note, "see", Some("http://x"), 1).is_err(), "previews are https links");
         let q = s.chat_post("s1", Some("Header".into()), OutKind::Question, "16 or 20?", None, 2).unwrap();
-        // Once the web turn is over, the chat (now the user's own again) can't post.
+        // Once the web turn is over, the chat still works on the canvas: it may still post.
         s.on_event("s1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None }, 2);
-        assert!(s.chat_post("s1", None, OutKind::Note, "later", None, 2).is_err());
+        let later = s.chat_post("s1", None, OutKind::Note, "later", None, 2).unwrap();
+        assert_eq!(later.canvas, "https://claude.ai/artifact/abc");
         let first = s.outbox(None, Some(&q.id), 10);
-        assert_eq!(first.len(), 1, "the turn's reply came after the question");
-        assert_eq!(s.outbox(None, Some(&first[0].id), 10).len(), 0, "nothing after the newest");
+        assert_eq!(first.len(), 2, "the turn's reply and the later note came after the question");
+        assert_eq!(s.outbox(None, Some(&first[1].id), 10).len(), 0, "nothing after the newest");
         let ans = s.propose_answer(&q.id, "20", "g", 3).unwrap();
         assert!(matches!(&s.cards(3)[0], Card::Run { answer: true, chat_title: Some(t), .. } if t == "Header"));
         let a = s.decide_run(&ans.id, true, None).unwrap().unwrap();

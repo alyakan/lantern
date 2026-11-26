@@ -154,6 +154,8 @@ impl Store {
         if let Some(writer) = &self.writer { let _ = writer.send(Job::Save(c)); }
     }
     pub fn detach(&self, slot: &str) { self.data.lock().unwrap().slots.remove(slot); }
+    /// Everything the chat open in `slot` has kept (its history too, for a resumed chat), as events.
+    pub fn events_of_slot(&self, slot: &str) -> Option<Vec<UiEvent>> { self.data.lock().unwrap().slots.get(slot).map(Conversation::replay) }
     pub fn attach(&self, slot: &str, mut chat: Conversation) {
         chat.updated_ms = crate::remote::now_ms();
         let mut d = self.data.lock().unwrap();

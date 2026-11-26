@@ -535,10 +535,14 @@ impl webclaude::mcp::Mac for WebMac {
             folder: c.folder,
         }).collect()
     }
+
+    fn chat_events(&self, slot: &str) -> Option<Vec<ui_event::UiEvent>> {
+        self.app.state::<AppState>().conversations.events_of_slot(slot)
+    }
 }
 
 /// Who a message from web Claude is said to be sent by (UserText's `sent_by`).
-const SENT_BY_WEB_CLAUDE: &str = "web-claude";
+const SENT_BY_WEB_CLAUDE: &str = webclaude::store::SENT_BY;
 
 /// The connector goes on the internet through Tailscale Funnel, unless LANTERN_WEBCLAUDE_LOCAL is set (a dev run tried with
 /// curl on this Mac only).

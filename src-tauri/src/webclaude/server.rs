@@ -319,6 +319,9 @@ mod tests {
         fn chats(&self) -> Vec<ChatLine> {
             vec![]
         }
+        fn chat_events(&self, _: &str) -> Option<Vec<crate::ui_event::UiEvent>> {
+            None
+        }
     }
 
     fn ctx() -> Ctx {
