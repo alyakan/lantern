@@ -715,7 +715,8 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
     let open = |slot: &str| state.remote.hub.chat(slot).is_some();
     // The chat holding the conversation that last worked on this (after a restart its slot is another): woken when asleep.
     let holding = match &action.target {
-        webclaude::store::Target::Conversation { id, .. } => match state.remote.hub.chats().into_iter().find(|c| c.session_id.as_deref() == Some(id.as_str())) {
+        // Only in the project the work is for (a chat that has since moved to another folder isn't taken).
+        webclaude::store::Target::Conversation { id, folder } => match state.remote.hub.chats().into_iter().find(|c| c.session_id.as_deref() == Some(id.as_str()) && (folder.is_none() || c.folder == *folder)) {
             Some(c) => awake_for_web(app, &state, &c.slot).await.ok().map(|_| c.slot),
             None => None,
         },
