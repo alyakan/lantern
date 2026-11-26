@@ -480,6 +480,7 @@ export const api = {
   /** Allow needs the code the claude.ai sign-in page shows; rejects, in words, when it doesn't match. */
   webclaudeAllow: (id: string, allow: boolean, code: string | null) => invoke<void>("webclaude_allow", { id, allow, code }),
   webclaudeSetAuto: (on: boolean) => invoke<WebClaudeView>("webclaude_set_auto", { on }),
+  webclaudeSetAutoRun: (on: boolean) => invoke<WebClaudeView>("webclaude_set_auto_run", { on }),
   webclaudeRevoke: (id: string) => invoke<void>("webclaude_revoke", { id }),
   /** The projects a Run card may pick from, as [folder, name]. */
   webclaudeProjects: () => invoke<[string, string][]>("webclaude_projects"),

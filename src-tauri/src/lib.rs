@@ -568,21 +568,47 @@ fn web_cards_for_phones(store: &webclaude::store::Store) -> Vec<remote::protocol
     }).collect()
 }
 
+/// Runs web Claude's request `id` with no Run tap (auto-run is on). One that can't run yet (no project to run in) stays a card for the
+/// user: its chat won't be told it ran on its own, and the phones are pushed it as any new card.
+async fn auto_run_web_request(app: &AppHandle, web: &webclaude::WebClaude, pushed: &std::sync::Mutex<std::collections::HashSet<String>>, id: &str) {
+    web.store.mark_auto(id, true);
+    if run_web_request(app, id, true, None).await.is_ok() {
+        return;
+    }
+    let Some(r) = web.store.request(id).filter(|r| r.status == webclaude::store::Status::Waiting) else { return };
+    web.store.mark_auto(id, false);
+    let state = app.state::<AppState>();
+    let first = pushed.lock().unwrap().insert(id.to_string());
+    if let (true, Some(notifier)) = (first, state.remote.notifier()) {
+        let project = r.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
+        notifier.web_sent(&r.title, project.as_deref()).await;
+    }
+}
+
 fn start_web_claude_wiring(app: &AppHandle) {
     let state = app.state::<AppState>();
     let web = state.web.clone();
     // Phones are sent the cards as they change, and pushed a notification for each new one (not for those already waiting at launch).
     let cards = web_cards_for_phones(&web.store);
     let pushed: Arc<std::sync::Mutex<std::collections::HashSet<String>>> = Arc::new(std::sync::Mutex::new(cards.iter().map(|c| c.id.clone()).collect()));
+    // With auto-run on, each request is run once, as it comes. Those already waiting at launch with it on stay cards (the window may not
+    // be up yet); turned on later, it runs what waits then.
+    let seed = if web.store.auto_run() { cards.iter().map(|c| c.id.clone()).collect() } else { Default::default() };
+    let tried: Arc<std::sync::Mutex<std::collections::HashSet<String>>> = Arc::new(std::sync::Mutex::new(seed));
     state.remote.hub.web.set(cards);
     let handle = app.clone();
     let reading = web.clone();
     web.store.on_change(Arc::new(move || {
         let _ = handle.emit("webclaude-changed", ());
+        let auto: Vec<String> = {
+            let mut tried = tried.lock().unwrap();
+            reading.store.auto_runnable().into_iter().filter(|id| tried.insert(id.clone())).collect()
+        };
         let cards = web_cards_for_phones(&reading.store);
         let new: Vec<remote::protocol::RemoteWebCard> = {
             let mut pushed = pushed.lock().unwrap();
-            cards.iter().filter(|c| pushed.insert(c.id.clone())).cloned().collect()
+            // One that runs on its own is no news: no push for it (unless it comes back as a card, below).
+            cards.iter().filter(|c| !auto.contains(&c.id) && pushed.insert(c.id.clone())).cloned().collect()
         };
         let state = handle.state::<AppState>();
         state.remote.hub.web.set(cards);
@@ -592,6 +618,10 @@ fn start_web_claude_wiring(app: &AppHandle) {
                     notifier.web_sent(&card.title, card.project_name.as_deref()).await;
                 }
             });
+        }
+        for id in auto {
+            let (app, web, pushed) = (handle.clone(), reading.clone(), pushed.clone());
+            tauri::async_runtime::spawn(async move { auto_run_web_request(&app, &web, &pushed, &id).await });
         }
     }));
     // A chat that moves on to another conversation is no longer web Claude's.
@@ -643,6 +673,13 @@ fn webclaude_allow(state: State<'_, AppState>, id: String, allow: bool, code: Op
 #[tauri::command]
 fn webclaude_set_auto(state: State<'_, AppState>, on: bool) -> webclaude::View {
     state.web.store.set_new_chats_auto(on);
+    state.web.view()
+}
+
+/// Settings › Web Claude's "Run web Claude's work as soon as it arrives". Turned on, what waits now runs too.
+#[tauri::command]
+fn webclaude_set_auto_run(state: State<'_, AppState>, on: bool) -> webclaude::View {
+    state.web.store.set_auto_run(on);
     state.web.view()
 }
 
@@ -4877,6 +4914,7 @@ pub fn run() {
             webclaude_cards,
             webclaude_allow,
             webclaude_set_auto,
+            webclaude_set_auto_run,
             webclaude_revoke,
             webclaude_projects,
             webclaude_run,

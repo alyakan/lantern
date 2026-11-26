@@ -361,7 +361,7 @@ describe("a chat web Claude's work starts", () => {
   });
 
   /** Web Claude's chats start on Auto by Settings › Web Claude's own switch, not the phone's. */
-  const webView = (auto: boolean) => ({ webclaude_view: { enabled: true, listening: true, address: null, error: null, new_chats_auto: auto, connections: [], links: [] } });
+  const webView = (auto: boolean) => ({ webclaude_view: { enabled: true, listening: true, address: null, error: null, new_chats_auto: auto, auto_run: false, connections: [], links: [] } });
 
   it("starts on Auto when Web Claude's setting says so, though phones may not use Auto", async () => {
     const calls = await launch({ ...settingsSaying(false), ...webView(true) });

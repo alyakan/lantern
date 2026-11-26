@@ -2321,7 +2321,8 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         // Web Claude: off, with sample cards in the inbox when the page's address has ?webclaude (to look at them).
         case "webclaude_view":
         case "webclaude_set_auto":
-          return { enabled: false, listening: false, address: null, error: null, new_chats_auto: true, connections: [], links: [] };
+        case "webclaude_set_auto_run":
+          return { enabled: false, listening: false, address: null, error: null, new_chats_auto: true, auto_run: false, connections: [], links: [] };
         case "webclaude_set_enabled":
           throw "Web Claude needs the app (it starts a server and Tailscale Funnel).";
         case "webclaude_cards": {

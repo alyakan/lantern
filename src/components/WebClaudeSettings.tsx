@@ -62,7 +62,7 @@ export function WebClaudeSettings({ now = Date.now }: { now?: () => number }) {
         <div>
           <h2 className="mode-guide-title">Web Claude</h2>
           <p className="mode-guide-summary">Let Claude on claude.ai, where you design, send work to Lantern's chats and read what they built. A chat here can leave web Claude questions and notes.</p>
-          <SettingsHint>Everything web Claude sends waits for you to tap Run, on this Mac or your phone. Signing in from claude.ai waits for your Allow. A chat that works on web Claude's work is shared with it in full: every turn's last message, yours too, and the rest (steps, their output, diffs) when web Claude reads it. Your other chats stay private.</SettingsHint>
+          <SettingsHint>Everything web Claude sends waits for you to tap Run, on this Mac or your phone, unless you let it run on its own (below). Signing in from claude.ai waits for your Allow. A chat that works on web Claude's work is shared with it in full: every turn's last message, yours too, and the rest (steps, their output, diffs) when web Claude reads it. Your other chats stay private.</SettingsHint>
         </div>
       </div>
       {error && (
@@ -99,6 +99,16 @@ export function WebClaudeSettings({ now = Date.now }: { now?: () => number }) {
               <SettingsHint>In claude.ai, open Settings › Connectors, choose Add custom connector, and paste this address. claude.ai then opens a sign-in page with a six-character code, and Lantern shows a card: type the code on it, then Allow.</SettingsHint>
             </section>
           )}
+          <section className="general-section" aria-labelledby="web-run">
+            <h3 id="web-run" className="general-title">
+              Running
+            </h3>
+            <label className="general-option">
+              <input type="checkbox" checked={view.auto_run} onChange={(e) => api.webclaudeSetAutoRun(e.target.checked).then(setView, (err) => setError(errText(err)))} />
+              <span>Run web Claude's work as soon as it arrives</span>
+            </label>
+            <SettingsHint>On, nothing waits for your Run: what web Claude sends goes straight to its chat, or starts one. Work for a canvas with no project yet still waits for you to pick one. Web Claude can be steered by what it reads (a canvas, a pasted page), so on, whatever gets it to send work runs on this Mac unseen; with New chats on Auto below, the chat runs commands without asking too.</SettingsHint>
+          </section>
           <section className="general-section" aria-labelledby="web-auto">
             <h3 id="web-auto" className="general-title">
               New chats
@@ -107,7 +117,7 @@ export function WebClaudeSettings({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.new_chats_auto} onChange={(e) => api.webclaudeSetAuto(e.target.checked).then(setView, (err) => setError(errText(err)))} />
               <span>Start web Claude's chats on Auto</span>
             </label>
-            <SettingsHint>When you Run work for a canvas with no chat yet, Lantern starts one in its project, on Claude and the project's own Claude account (Settings › Accounts), whatever provider the project usually runs on. On Auto, a classifier approves most of what it does; off, it starts on Ask and asks you for each change. A chat already working on the canvas keeps its own setting.</SettingsHint>
+            <SettingsHint>When work for a canvas with no chat yet runs, Lantern starts one in its project, on Claude and the project's own Claude account (Settings › Accounts), whatever provider the project usually runs on. On Auto, a classifier approves most of what it does; off, it starts on Ask and asks you for each change. A chat already working on the canvas keeps its own setting.</SettingsHint>
           </section>
           <section className="general-section" aria-labelledby="web-connections">
             <h3 id="web-connections" className="general-title">

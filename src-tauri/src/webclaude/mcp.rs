@@ -1,6 +1,6 @@
 //! The connector's MCP side: JSON-RPC as claude.ai's servers send it (Streamable HTTP, one JSON reply per request), and
 //! the seven tools web Claude gets. Nothing here runs anything on the Mac: sending work makes a card that waits for the
-//! user's Run (see store.rs); the rest reads.
+//! user's Run, or that the app runs on its own when the user turned auto-run on (see store.rs); the rest reads.
 
 use super::store::{self, Kind, Store};
 use serde_json::{json, Value};
@@ -30,7 +30,7 @@ pub trait Mac: Send + Sync + 'static {
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message; nothing runs until the user taps Run there, so tell the user it is waiting. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
 
 fn tools() -> Value {
     json!([
@@ -48,7 +48,7 @@ fn tools() -> Value {
         },
         {
             "name": "send_to_lantern",
-            "description": "Send work to Lantern: about a design canvas, or for a project when there is no design. It shows the user a card; nothing happens until the user taps Run. On Run, work on a canvas goes to the chat already working on that canvas, or a new chat in the canvas's project; work with no design always starts a new chat in its project. Returns an id: call check with it before saying how the work went or sending more about it.",
+            "description": "Send work to Lantern: about a design canvas, or for a project when there is no design. It shows the user a card and waits for their Run, unless they let web Claude's work run on its own (the answer says which). On Run, work on a canvas goes to the chat already working on that canvas, or a new chat in the canvas's project; work with no design always starts a new chat in its project. Returns an id: call check with it before saying how the work went or sending more about it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -242,7 +242,11 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
             };
             let r = store.propose(Kind::Send, canvas, &title, message, folder, grant, now)?;
             let mut v = request_view(&r, &projects);
-            v["note"] = json!("Waiting for the user to tap Run in Lantern (on the Mac or the phone). Call check with this id to follow it.");
+            v["note"] = json!(if store.auto_run() {
+                "Lantern runs this on its own (the user turned that on): it starts in a moment, unless it has no project to run in, which the user then picks. Call check with this id to follow it."
+            } else {
+                "Waiting for the user to tap Run in Lantern (on the Mac or the phone). Call check with this id to follow it."
+            });
             Ok(v)
         }
         "check" => {
@@ -290,7 +294,11 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
         "answer" => {
             let r = store.propose_answer(need(args, "question_id")?, need(args, "text")?, grant, now)?;
             let mut v = request_view(&r, &mac.projects().await);
-            v["note"] = json!("Waiting for the user to tap Run in Lantern; then it goes to the chat that asked. Call check with this id to follow it.");
+            v["note"] = json!(if store.auto_run() {
+                "Lantern sends this to the chat that asked on its own (the user turned that on). Call check with this id to follow it."
+            } else {
+                "Waiting for the user to tap Run in Lantern; then it goes to the chat that asked. Call check with this id to follow it."
+            });
             Ok(v)
         }
         _ => Err(format!("Lantern has no tool \"{name}\".")),

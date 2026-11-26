@@ -74,6 +74,8 @@ pub struct View {
     pub error: Option<String>,
     /// A new chat web Claude's work starts runs on Auto (else Ask).
     pub new_chats_auto: bool,
+    /// Web Claude's work runs as soon as it arrives (no Run card).
+    pub auto_run: bool,
     pub connections: Vec<store::Connection>,
     pub links: Vec<LinkView>,
 }
@@ -100,6 +102,7 @@ impl WebClaude {
             address,
             error: self.error.lock().unwrap().clone(),
             new_chats_auto: self.store.new_chats_auto(),
+            auto_run: self.store.auto_run(),
             connections: self.store.connections(server::now_ms()),
             links: self.store.links().into_iter().map(|l| LinkView { canvas: l.canvas, title: l.title, folder: l.folder }).collect(),
         }

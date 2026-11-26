@@ -44,6 +44,8 @@ export interface WebClaudeView {
   error: string | null;
   /** A new chat web Claude's work starts runs on Auto (else Ask). */
   new_chats_auto: boolean;
+  /** Web Claude's work runs as soon as it arrives, with no Run card (one with no project to run in still waits for a pick). */
+  auto_run: boolean;
   connections: WebConnection[];
   links: WebLink[];
 }

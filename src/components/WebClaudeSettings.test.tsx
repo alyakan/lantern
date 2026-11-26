@@ -20,6 +20,11 @@ vi.mock("../api", () => ({
       view = { ...view, new_chats_auto: on };
       return Promise.resolve(view);
     },
+    webclaudeSetAutoRun: (on: boolean) => {
+      calls.push(["auto_run", on]);
+      view = { ...view, auto_run: on };
+      return Promise.resolve(view);
+    },
     webclaudeRevoke: (id: string) => {
       calls.push(["revoke", id]);
       view = { ...view, connections: [] };
@@ -30,9 +35,21 @@ vi.mock("../api", () => ({
 
 const { WebClaudeSettings } = await import("./WebClaudeSettings");
 
-const off = (): WebClaudeView => ({ enabled: false, listening: false, address: null, error: null, new_chats_auto: true, connections: [], links: [] });
+const off = (): WebClaudeView => ({ enabled: false, listening: false, address: null, error: null, new_chats_auto: true, auto_run: false, connections: [], links: [] });
 
 describe("Settings › Web Claude", () => {
+  it("runs web Claude's work as it arrives only once turned on, and says what that lets through", async () => {
+    render(<WebClaudeSettings />);
+    await act(async () => {});
+    const box = screen.getByRole("checkbox", { name: "Run web Claude's work as soon as it arrives" });
+    expect(box).not.toBeChecked();
+    expect(screen.getByText(/whatever gets it to send work runs on this Mac unseen/)).toBeInTheDocument();
+    fireEvent.click(box);
+    await act(async () => {});
+    expect(calls).toEqual([["auto_run", true]]);
+    expect(screen.getByRole("checkbox", { name: "Run web Claude's work as soon as it arrives" })).toBeChecked();
+  });
+
   beforeEach(() => {
     view = off();
     calls.length = 0;

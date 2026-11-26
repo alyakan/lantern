@@ -188,6 +188,9 @@ pub struct Request {
     pub reply: Option<String>,
     pub files: Vec<String>,
     pub grant: String,
+    /// Lantern ran it on its own (auto-run), not on the user's Run.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,7 +230,7 @@ fn yes() -> bool {
 
 impl Default for Saved {
     fn default() -> Self {
-        Self { enabled: false, new_chats_auto: true, clients: vec![], grants: vec![], links: vec![], requests: vec![], outbox: vec![] }
+        Self { enabled: false, new_chats_auto: true, auto_run: false, clients: vec![], grants: vec![], links: vec![], requests: vec![], outbox: vec![] }
     }
 }
 
@@ -239,6 +242,10 @@ struct Saved {
     /// A new chat that web Claude's work starts runs on Auto (else Ask). On unless the user turns it off.
     #[serde(default = "yes")]
     new_chats_auto: bool,
+    /// Web Claude's work runs as soon as it arrives, with no Run card (one that has no project to run in still waits for a pick).
+    /// Off unless the user turns it on.
+    #[serde(default)]
+    auto_run: bool,
     #[serde(default)]
     clients: Vec<Client>,
     #[serde(default)]
@@ -414,6 +421,35 @@ impl Store {
 
     pub fn set_new_chats_auto(&self, on: bool) {
         self.edit(|s| s.new_chats_auto = on);
+    }
+
+    pub fn auto_run(&self) -> bool {
+        self.saved.lock().unwrap().auto_run
+    }
+
+    /// Turned on, what waits now is told to the app as a change, so it runs too.
+    pub fn set_auto_run(&self, on: bool) {
+        self.edit(|s| s.auto_run = on);
+        self.changed();
+    }
+
+    /// The requests that wait for a Run and that Lantern may run on its own now (auto-run is on), oldest first.
+    pub fn auto_runnable(&self) -> Vec<String> {
+        let saved = self.saved.lock().unwrap();
+        if !saved.auto_run {
+            return vec![];
+        }
+        saved.requests.iter().filter(|r| r.status == Status::Waiting).map(|r| r.id.clone()).collect()
+    }
+
+    /// Lantern is about to run request `id` on its own (auto-run): its chat is told so, not that the user tapped Run. Unmarked when
+    /// it couldn't run and waits for the user after all.
+    pub fn mark_auto(&self, id: &str, on: bool) {
+        self.edit(|s| {
+            if let Some(r) = s.requests.iter_mut().find(|r| r.id == id) {
+                r.auto = on;
+            }
+        });
     }
 
     // ---- Sign-in (OAuth 2.1 with dynamic client registration and PKCE) ----
@@ -652,7 +688,7 @@ impl Store {
             Kind::Answer { question } => self.saved.lock().unwrap().outbox.iter().find(|o| &o.id == question).and_then(|o| o.chat_title.clone()),
             Kind::Send => None,
         };
-        let req = Request { id: random_token(9), kind, canvas, title, message, folder, created_at: now, status: Status::Waiting, slot: None, chat_title, reply: None, files: vec![], grant: grant.into() };
+        let req = Request { id: random_token(9), kind, canvas, title, message, folder, created_at: now, status: Status::Waiting, slot: None, chat_title, reply: None, files: vec![], grant: grant.into(), auto: false };
         self.edit(|s| {
             if s.requests.iter().filter(|r| r.status == Status::Waiting).count() >= RUNS_WAITING_MAX {
                 return Err(format!("{RUNS_WAITING_MAX} requests are already waiting for the user's Run in Lantern. Wait for those first."));
@@ -958,11 +994,12 @@ pub fn framed(r: &Request) -> String {
     let plain = |s: &str| s.chars().map(|c| if matches!(c, '[' | ']' | '\n' | '\r') { ' ' } else { c }).collect::<String>().replace('"', "'");
     let link = if r.canvas.starts_with("https://") { format!(" ({})", plain(&r.canvas)) } else { String::new() };
     let title = plain(&r.title);
+    let ran = if r.auto { "Lantern ran it on its own: the user lets web Claude's work run without a Run tap, so they haven't seen it." } else { "The user tapped Run in Lantern." };
     let intro = match (&r.kind, r.canvas.is_empty()) {
-        (Kind::Send, false) => format!("[Web Claude sent this about the design canvas \"{title}\"{link}. The user tapped Run in Lantern.]"),
-        (Kind::Answer { .. }, false) => format!("[Web Claude answered your question about the design canvas \"{title}\"{link}. The user tapped Run in Lantern.]"),
-        (Kind::Send, true) => "[Web Claude sent this work for this project; it isn't about a design canvas, so don't look for one. The user tapped Run in Lantern.]".into(),
-        (Kind::Answer { .. }, true) => "[Web Claude answered your question. The user tapped Run in Lantern.]".into(),
+        (Kind::Send, false) => format!("[Web Claude sent this about the design canvas \"{title}\"{link}. {ran}]"),
+        (Kind::Answer { .. }, false) => format!("[Web Claude answered your question about the design canvas \"{title}\"{link}. {ran}]"),
+        (Kind::Send, true) => format!("[Web Claude sent this work for this project; it isn't about a design canvas, so don't look for one. {ran}]"),
+        (Kind::Answer { .. }, true) => format!("[Web Claude answered your question. {ran}]"),
     };
     let read = if link.is_empty() { "" } else { " Read the canvas with your Artifact tool when you need the design itself." };
     format!("{intro}\n\n{}\n\n[Web Claude sees this whole chat from now on: your last message of every turn goes back to it on its own, and it can read the rest.{read} To ask web Claude something, use mcp__lantern__web_ask; to send it a note or a preview link (an artifact you published), use mcp__lantern__web_note.]", r.message)
@@ -1178,6 +1215,33 @@ mod tests {
 
     fn sent(s: &Store, canvas: &str, folder: Option<&str>) -> Request {
         s.propose(Kind::Send, canvas, "Rayak", "Build the header", folder.map(String::from), "g", 10).unwrap()
+    }
+
+    #[test]
+    fn auto_run_is_off_until_turned_on_lasts_and_its_chat_is_told_the_user_didn_t_tap_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("webclaude.json");
+        let s = Store::load(Some(path.clone()));
+        let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+        assert!(!s.auto_run() && s.auto_runnable().is_empty(), "off by default: everything waits for Run");
+        let changes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = changes.clone();
+        s.on_change(std::sync::Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        s.set_auto_run(true);
+        assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 1, "turning it on is a change, so what waits runs");
+        assert_eq!(s.auto_runnable(), vec![r.id.clone()]);
+        assert!(Store::load(Some(path)).auto_run(), "kept");
+        s.mark_auto(&r.id, true);
+        let a = s.decide_run(&r.id, true, None).unwrap().unwrap();
+        assert!(a.text.contains("Lantern ran it on its own") && !a.text.contains("tapped Run"), "{}", a.text);
+        assert!(s.auto_runnable().is_empty(), "running, not waiting");
+        // Unmarked (it couldn't run and went back to the user), a Run says the user tapped it.
+        let r2 = sent(&s, "https://claude.ai/artifact/abc", None);
+        s.mark_auto(&r2.id, true);
+        s.mark_auto(&r2.id, false);
+        assert!(s.decide_run(&r2.id, true, None).unwrap().unwrap().text.contains("The user tapped Run"));
     }
 
     #[test]
