@@ -254,6 +254,11 @@ pub async fn route(ctx: &Ctx, method: &str, path: &str, query: &str, headers: &H
                 Value::Array(batch) if batch.len() <= 20 => {
                     let mut out = Vec::new();
                     for m in batch {
+                        // A batch runs its calls one after another, so waits in one would hold the request for their sum.
+                        if m["method"] == "tools/call" && m["params"]["name"] == "wait" {
+                            out.push(json!({"jsonrpc": "2.0", "id": m.get("id").cloned().unwrap_or(Value::Null), "error": {"code": -32600, "message": "wait can't go in a batch: call it on its own."}}));
+                            continue;
+                        }
                         out.extend(mcp::handle(&ctx.store, ctx.mac.as_ref(), &grant, m, now).await);
                     }
                     out
@@ -426,6 +431,12 @@ mod tests {
         let note = route(&c, "POST", "/mcp", "", &h(&[("authorization", &auth)]), br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
         assert_eq!(note.status, 202);
         assert_eq!(route(&c, "GET", "/mcp", "", &h(&[("authorization", &auth)]), b"").await.status, 405);
+        // A batch runs one call after another, so a wait in one is turned away (its waits would add up); the rest still run.
+        let wait = json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "wait", "arguments": {"seconds": 300}}});
+        let batch = route(&c, "POST", "/mcp", "", &h(&[("authorization", &auth)]), json!([wait, call]).to_string().as_bytes()).await;
+        let replies = body(&batch);
+        assert_eq!((replies[0]["id"].as_i64(), replies[0]["error"]["code"].as_i64()), (Some(8), Some(-32600)));
+        assert_eq!(replies[1]["result"]["structuredContent"]["projects"][0]["name"], "rayak");
         // The same code can't be used twice.
         assert_eq!(route(&c, "POST", "/token", "", &h(&[]), form.as_bytes()).await.status, 400);
     }
