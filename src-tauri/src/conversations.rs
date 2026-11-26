@@ -77,7 +77,11 @@ impl Conversation {
 }
 #[derive(Default)]
 struct Data { chats: HashMap<String, Arc<Conversation>>, slots: HashMap<String, Conversation> }
-pub struct Store { writer: Option<mpsc::Sender<Job>>, data: Mutex<Data> }
+pub struct Store { writer: Option<mpsc::Sender<Job>>, data: Mutex<Data>, on_switch: Mutex<Option<OnSwitch>> }
+
+/// Told a chat's slot now holds another conversation (or a new one), so whoever tied something to the conversation in that
+/// slot (web Claude's canvas link) lets go of it.
+pub type OnSwitch = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// What the writer thread is asked: to save a conversation, or to say when everything asked before is on disk.
 enum Job { Save(Arc<Conversation>), Flush(mpsc::Sender<()>) }
@@ -135,7 +139,7 @@ impl Store {
                 }
             }
         }
-        Self { writer: root.map(writer), data: Mutex::new(data) }
+        Self { writer: root.map(writer), data: Mutex::new(data), on_switch: Mutex::new(None) }
     }
     pub fn get(&self, id: &str) -> Option<Conversation> { self.data.lock().unwrap().chats.get(id).map(|c| (**c).clone()) }
     pub fn all(&self) -> Vec<Conversation> { self.data.lock().unwrap().chats.values().map(|c| (**c).clone()).collect() }
@@ -153,14 +157,28 @@ impl Store {
         d.chats.insert(c.id.clone(), c.clone());
         if let Some(writer) = &self.writer { let _ = writer.send(Job::Save(c)); }
     }
-    pub fn detach(&self, slot: &str) { self.data.lock().unwrap().slots.remove(slot); }
+    pub fn on_switch(&self, f: OnSwitch) { *self.on_switch.lock().unwrap() = Some(f); }
+    fn switched(&self, slot: &str) {
+        let f = self.on_switch.lock().unwrap().clone();
+        if let Some(f) = f { f(slot); }
+    }
+    /// A new conversation starts in `slot`. It is a switch when one with a session was there (a chat being set up has none).
+    pub fn detach(&self, slot: &str) {
+        let gone = self.data.lock().unwrap().slots.remove(slot);
+        if gone.is_some_and(|c| !c.id.is_empty()) { self.switched(slot); }
+    }
     /// Everything the chat open in `slot` has kept (its history too, for a resumed chat), as events.
     pub fn events_of_slot(&self, slot: &str) -> Option<Vec<UiEvent>> { self.data.lock().unwrap().slots.get(slot).map(Conversation::replay) }
     pub fn attach(&self, slot: &str, mut chat: Conversation) {
         chat.updated_ms = crate::remote::now_ms();
         let mut d = self.data.lock().unwrap();
         if !chat.id.is_empty() { self.keep(&mut d, chat.clone()); }
+        // A switch replaces a conversation that had a session: not the same one again (a restart, a provider switch, Continue
+        // fresh), and not a chat still being set up.
+        let other = d.slots.get(slot).is_some_and(|c| !c.id.is_empty() && c.id != chat.id);
         d.slots.insert(slot.into(), chat);
+        drop(d);
+        if other { self.switched(slot); }
     }
     /// The slot's conversation now goes on with `handoff` (None: none, as after a /clear).
     pub fn set_handoff(&self, slot: &str, handoff: Option<String>) {
@@ -221,6 +239,16 @@ mod tests {
         let restored = Store::load(Some(dir.path().into())).get("aaaa-bbbb").unwrap();
         assert_eq!(restored.native_id, "cccc-dddd");
         assert!(restored.words().contains("Fix the bug"));
+        let switched = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = switched.clone();
+        store.on_switch(Arc::new(move |slot| seen.lock().unwrap().push(slot.into())));
+        // The same conversation again is no switch; another one, or a new one, is.
+        let again = store.get("aaaa-bbbb").unwrap();
+        store.attach("s1", again);
+        assert!(switched.lock().unwrap().is_empty());
+        store.attach("s1", Conversation { id: "eeee".into(), native_id: "eeee".into(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![] });
+        store.detach("s1");
+        assert_eq!(*switched.lock().unwrap(), ["s1", "s1"]);
         assert_eq!(restored.events.last().unwrap()["session_id"], "aaaa-bbbb");
     }
 

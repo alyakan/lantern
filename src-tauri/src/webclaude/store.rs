@@ -615,7 +615,12 @@ impl Store {
             (Some(id), _) => {
                 let saved = self.saved.lock().unwrap();
                 let r = saved.requests.iter().find(|r| r.id == id).ok_or("Lantern has no request with that id.")?;
-                r.slot.clone().ok_or("That request hasn't gone to a chat (yet), or Lantern has restarted since.")?
+                let slot = r.slot.clone().ok_or("That request's chat isn't working on it any more (it hasn't started, moved on, or Lantern restarted).")?;
+                // The chat must still be on that request's canvas (or its project's work), not on something else since.
+                if self.canvas_of_slot(&slot).as_deref() != Some(request_key(&r.canvas, r.folder.as_deref()).as_str()) {
+                    return Err("That request's chat works on something else now.".into());
+                }
+                slot
             }
             (None, Some(canvas)) => self.slot_of(&canvas_key(canvas)).ok_or("No chat in Lantern is working on that canvas right now.")?,
             (None, None) => return Err("Name the canvas (its link or title), or give the id of a request you sent.".into()),
@@ -745,6 +750,30 @@ impl Store {
         self.changed();
     }
 
+    /// The chat in `slot` now holds another conversation, or was cleared: what web Claude sent was the old one's business, so
+    /// nothing of the new one is followed, readable, or sent answers.
+    pub fn forget_slot(&self, slot: &str) {
+        let (linked, turn) = {
+            let mut live = self.live.lock().unwrap();
+            (live.slots.remove(slot).is_some(), live.turns.remove(slot))
+        };
+        if !linked && turn.is_none() {
+            return;
+        }
+        self.edit(|s| {
+            for r in s.requests.iter_mut().filter(|r| r.slot.as_deref() == Some(slot)) {
+                r.slot = None;
+                if turn.as_ref().and_then(|t| t.request.as_ref()) == Some(&r.id) && r.status == Status::Working {
+                    r.status = Status::Failed { reason: "The chat moved on to another conversation before this was done.".into() };
+                }
+            }
+            for o in s.outbox.iter_mut().filter(|o| o.slot.as_deref() == Some(slot)) {
+                o.slot = None;
+            }
+        });
+        self.changed();
+    }
+
     pub fn failed(&self, request: &str, reason: &str) {
         self.edit(|s| {
             if let Some(r) = s.requests.iter_mut().find(|r| r.id == request) {
@@ -759,6 +788,9 @@ impl Store {
     /// started). A turn the user starts in that chat themselves is followed from their message on.
     pub fn on_event(&self, slot: &str, event: &crate::ui_event::UiEvent, now: u64) {
         use crate::ui_event::UiEvent;
+        if matches!(event, UiEvent::ConversationReset) {
+            return self.forget_slot(slot);
+        }
         let done = {
             let mut live = self.live.lock().unwrap();
             if let UiEvent::UserText { text, sent_by, .. } = event {
@@ -1230,6 +1262,31 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_that_moves_on_to_another_conversation_or_is_cleared_is_no_longer_web_claude_s() {
+        for how in ["switch", "clear"] {
+            let s = store();
+            let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+            s.decide_run(&r.id, true, None).unwrap();
+            s.started(&r.id, "s1", None);
+            let q = s.chat_post("s1", None, OutKind::Question, "16 or 20?", None, 1).unwrap();
+            match how {
+                "switch" => s.forget_slot("s1"),
+                _ => s.on_event("s1", &UiEvent::ConversationReset, 2),
+            }
+            assert!(matches!(s.request(&r.id).unwrap().status, Status::Failed { .. }), "{how}");
+            assert!(s.readable_chat(Some("https://claude.ai/artifact/abc"), None).is_err(), "{how}");
+            assert!(s.readable_chat(None, Some(&r.id)).is_err(), "{how}");
+            assert!(s.chat_post("s1", None, OutKind::Note, "hi", None, 3).is_err(), "{how}");
+            s.on_event("s1", &user("private", Some("desktop")), 4);
+            s.on_event("s1", &done(), 5);
+            assert_eq!(s.outbox(None, None, 10).len(), 1, "{how}: only the question");
+            // An answer to the old question doesn't go into whatever the slot holds now: a new chat in the project takes it.
+            let ans = s.propose_answer(&q.id, "20", "g", 6).unwrap();
+            assert_eq!(s.decide_run(&ans.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()), "{how}");
+        }
+    }
+
+    #[test]
     fn web_claude_reads_only_the_chat_on_its_canvas_or_its_request() {
         let s = store();
         let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
@@ -1239,6 +1296,12 @@ mod tests {
         assert_eq!(s.readable_chat(Some("https://claude.ai/artifact/abc?x=1"), None).as_deref(), Ok("s1"));
         assert_eq!(s.readable_chat(None, Some(&r.id)).as_deref(), Ok("s1"));
         assert!(s.readable_chat(Some("another canvas"), None).is_err());
+        // The chat takes work for another canvas: the first request no longer reads it.
+        let r2 = sent(&s, "another canvas", Some("/p"));
+        s.decide_run(&r2.id, true, None).unwrap();
+        s.started(&r2.id, "s1", None);
+        assert!(s.readable_chat(None, Some(&r.id)).is_err());
+        assert_eq!(s.readable_chat(None, Some(&r2.id)).as_deref(), Ok("s1"));
         assert!(s.readable_chat(None, None).is_err());
         assert!(s.readable_chat(None, Some("nope")).is_err());
     }

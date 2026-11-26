@@ -557,6 +557,9 @@ fn start_web_claude_wiring(app: &AppHandle) {
     web.store.on_change(Arc::new(move || {
         let _ = handle.emit("webclaude-changed", ());
     }));
+    // A chat that moves on to another conversation is no longer web Claude's.
+    let forgetting = web.clone();
+    state.conversations.on_switch(Arc::new(move |slot: &str| forgetting.store.forget_slot(slot)));
     let following = web.clone();
     state.remote.bus.tap(Arc::new(move |ev: &remote::bus::BusEvent| following.store.on_event(&ev.slot, &ev.event, webclaude::server::now_ms())));
     if web.store.enabled() {
