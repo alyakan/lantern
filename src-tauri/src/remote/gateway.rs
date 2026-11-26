@@ -49,9 +49,6 @@ const PAGE_BYTES: usize = 512 << 10;
 pub const SLOW_AT_ONCE: usize = 3;
 /// The longest first message a phone may start a chat with (the menu bar panel's limit, in characters).
 pub const NEW_CHAT_TEXT_MAX: usize = 20_000;
-/// How many chats one phone may start, in how long: a stuck or hostile phone can't fill the Mac with them.
-pub const NEW_CHATS_PER_WINDOW: usize = 5;
-pub const NEW_CHAT_WINDOW_MS: u64 = 10 * 60 * 1000;
 
 /// Whether a phone's request to start a chat is well formed (whether the project is one is for the gateway to decide).
 /// What a Mac without a window to ask says of the user's work.
@@ -325,8 +322,6 @@ pub struct Gateway {
     /// How many phones follow each chat now (a chat nobody follows is one a push may be about).
     watchers: Mutex<HashMap<String, u32>>,
     on_open: Mutex<Option<OnOpen>>,
-    /// When each phone started its latest chats (ms), for the limit on how fast it may.
-    started: Mutex<HashMap<String, Vec<u64>>>,
     /// What Claude suggests next, kept and shared by every phone.
     suggester: super::suggest::Suggester,
     /// Cruise's next steps, kept per chat and asked rarely (see suggest.rs::Cruiser).
@@ -410,7 +405,6 @@ impl Gateway {
             shut: Default::default(),
             watchers: Mutex::default(),
             on_open: Mutex::new(None),
-            started: Mutex::default(),
             suggester: Default::default(),
             cruiser: Default::default(),
             shells: Mutex::default(),
@@ -676,16 +670,13 @@ impl Gateway {
         if !self.host.projects().await.iter().any(|(folder, _)| *folder == project) {
             return Err("That isn't one of your projects.".into());
         }
-        self.allow_new_chat(device)?;
-        // A start the Mac didn't make doesn't count against the phone's limit: asking again is not starting another chat.
-        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow, provider, images, model).await.inspect_err(|_| self.uncount_new_chat(device))?;
+        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow, provider, images, model).await?;
         serde_json::to_value(protocol::StartedChat { slot }).map_err(|e| e.to_string())
     }
 
     /// Does a step of the user's work for `device` (Request::WorkStep). The phone names the item and the state it saw it in, nothing
-    /// else: what is sent is written on the Mac. A step that moved on since, an item with no step, and too many lately are refused;
-    /// each counts against the same limit as a chat the phone starts, since a step may start one.
-    async fn work_step(&self, device: &str, key: String, sig: String) -> Result<serde_json::Value, String> {
+    /// else: what is sent is written on the Mac. A step that moved on since, and an item with no step, are refused.
+    async fn work_step(&self, key: String, sig: String) -> Result<serde_json::Value, String> {
         let item = self.hub.work.find(&key).ok_or("That isn't on your Mac's list any more. Look again.")?;
         if item.sig != sig {
             return Err("That moved on since you looked. Look again.".into());
@@ -693,7 +684,6 @@ impl Gateway {
         if item.next.is_none() {
             return Err("There is nothing to do for that.".into());
         }
-        self.allow_new_chat(device)?;
         let (kind, to) = self.host.work_step(key, sig).await?;
         if !matches!(kind.as_str(), "sent" | "started") {
             return Err("Your Mac answered in a way this phone doesn't know.".into());
@@ -701,14 +691,11 @@ impl Gateway {
         serde_json::to_value(protocol::RemoteWorkStep { kind, to: to.chars().take(120).collect() }).map_err(|e| e.to_string())
     }
 
-    /// Runs or declines web Claude's card `id` for `device` (Request::WebRun). Only a card that waits now; a Run counts against the
-    /// phone's limit on new chats, since it may start one. The project the phone picked is checked by the Mac against its own.
-    async fn web_run(&self, device: &str, id: String, run: bool, project: Option<String>) -> Result<serde_json::Value, String> {
+    /// Runs or declines web Claude's card `id` (Request::WebRun). Only a card that waits now. The project the phone picked is checked
+    /// by the Mac against its own.
+    async fn web_run(&self, id: String, run: bool, project: Option<String>) -> Result<serde_json::Value, String> {
         if !self.hub.web.waits(&id) {
             return Err("That was answered already, on your Mac or another phone.".into());
-        }
-        if run {
-            self.allow_new_chat(device)?;
         }
         self.host.web_run(id, run, project).await.map(|()| serde_json::Value::Null)
     }
@@ -819,29 +806,6 @@ impl Gateway {
             S::Asleep => Err("This chat is asleep. Wake it first.".into()),
             S::Ended => Err("This chat has stopped.".into()),
         }
-    }
-
-    /// Counts a chat started by `device`, or refuses it: too many lately.
-    fn allow_new_chat(&self, device: &str) -> Result<(), String> {
-        self.allow_new_chat_at(device, (self.now)())
-    }
-
-    /// Takes back the latest start counted for `device` (it wasn't made).
-    fn uncount_new_chat(&self, device: &str) {
-        if let Some(recent) = self.started.lock().unwrap().get_mut(device) {
-            recent.pop();
-        }
-    }
-
-    fn allow_new_chat_at(&self, device: &str, now: u64) -> Result<(), String> {
-        let mut started = self.started.lock().unwrap();
-        let recent = started.entry(device.to_string()).or_default();
-        recent.retain(|t| now.saturating_sub(*t) < NEW_CHAT_WINDOW_MS);
-        if recent.len() >= NEW_CHATS_PER_WINDOW {
-            return Err("This phone has started a lot of chats just now. Try again in a few minutes.".into());
-        }
-        recent.push(now);
-        Ok(())
     }
 
     /// Notes a message `device` sends, or false when it sent this one already.
@@ -1177,17 +1141,11 @@ impl<'a> Session<'a> {
                             let host = gw.host.clone();
                             slow.push(Box::pin(async move { (id, host.insights(range).await.and_then(|i| serde_json::to_value(i).map_err(|e| e.to_string()))) }));
                         }
-                        Request::WorkStep { key, sig } => {
-                            let device = self.device.clone();
-                            slow.push(Box::pin(async move { (id, gw.work_step(&device, key, sig).await) }));
-                        }
+                        Request::WorkStep { key, sig } => slow.push(Box::pin(async move { (id, gw.work_step(key, sig).await) })),
                         // Like starting a chat: never refused for the others in flight.
-                        Request::WebRun { id: card, run, project } => {
-                            let device = self.device.clone();
-                            slow.push(Box::pin(async move { (id, gw.web_run(&device, card, run, project).await) }));
-                        }
+                        Request::WebRun { id: card, run, project } => slow.push(Box::pin(async move { (id, gw.web_run(card, run, project).await) })),
                         // Never refused for the others in flight (suggestions, Insights…): starting a chat is what the person is
-                        // waiting on, and it has a limit of its own (allow_new_chat).
+                        // waiting on.
                         Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account, web: false }, start_id).await) }));
@@ -1676,11 +1634,11 @@ impl<'a> Session<'a> {
             Request::Cruise { slot, refresh } => self.gw.cruise(slot, refresh).await,
             Request::Desk => Ok(json(&self.gw.hub.desk.phone().0)),
             Request::Work => Ok(json(&self.gw.hub.work.phone().0)),
-            Request::WorkStep { key, sig } => self.gw.work_step(&self.device, key, sig).await,
+            Request::WorkStep { key, sig } => self.gw.work_step(key, sig).await,
             Request::WorkRefresh => host.work_refresh().map(|()| serde_json::Value::Null),
             Request::WebCards => Ok(json(&self.gw.hub.web.phone().0)),
             // Done beside the loop (see run); here only for completeness.
-            Request::WebRun { id, run, project } => self.gw.web_run(&self.device, id, run, project).await,
+            Request::WebRun { id, run, project } => self.gw.web_run(id, run, project).await,
             Request::Insights { range } => host.insights(range).await.and_then(|i| serde_json::to_value(i).map_err(|e| e.to_string())),
             Request::DeskRoute { desk, text } => self.gw.desk_route(desk, text).await,
             Request::DeskTalk { desk, text, history } => self.gw.desk_talk(desk, text, history).await,
@@ -3398,28 +3356,14 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_phone_may_only_start_so_many_chats_in_a_while() {
+    async fn a_phone_may_start_as_many_chats_as_it_asks_for() {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        for i in 0..NEW_CHATS_PER_WINDOW {
+        for i in 0..12 {
             assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}"), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None }).await.1.is_none());
         }
-        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into(), permissions: None, preset: None, workflow: None, provider: None, images: None, model: None, effort: None, account: None, start_id: None }).await;
-        assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
-        assert_eq!(r.host.started.lock().unwrap().len(), NEW_CHATS_PER_WINDOW);
-    }
-
-    #[tokio::test]
-    async fn the_limit_on_new_chats_is_per_phone_and_lifts_with_time() {
-        let r = rig();
-        let at = |t: u64| NEW_CHAT_WINDOW_MS * 10 + t;
-        for i in 0..NEW_CHATS_PER_WINDOW as u64 {
-            assert!(r.gw.allow_new_chat_at("phone-a", at(i)).is_ok());
-        }
-        assert!(r.gw.allow_new_chat_at("phone-a", at(10)).is_err());
-        assert!(r.gw.allow_new_chat_at("phone-b", at(10)).is_ok(), "another phone has its own count");
-        assert!(r.gw.allow_new_chat_at("phone-a", at(NEW_CHAT_WINDOW_MS + 5)).is_ok(), "the earliest ones have aged out");
+        assert_eq!(r.host.started.lock().unwrap().len(), 12);
     }
 
     /// A chat "a" with something said in it, for the suggestions to go on.
@@ -3544,7 +3488,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_start_the_phone_names_is_made_once_however_often_it_asks_and_counts_once() {
+    async fn a_start_the_phone_names_is_made_once_however_often_it_asks() {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
@@ -3557,11 +3501,6 @@ pub(crate) mod tests {
         assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
         assert_eq!(r.host.started.lock().unwrap().len(), 1, "made once");
         assert_eq!(r.host.started.lock().unwrap()[0].1, "", "with no message: the phone sends it");
-        // It counted once against the limit: the rest of the limit is still there.
-        for i in 0..NEW_CHATS_PER_WINDOW - 1 {
-            assert!(p.ask(ask("", Some(&format!("start-n{i}")))).await.1.is_none());
-        }
-        assert!(p.ask(ask("", Some("start-over"))).await.1.is_some_and(|e| e.contains("a lot of chats")));
         // Unnamed, a chat still needs its message; a name must be a plain id; photos go with the first message, not with no message.
         assert!(p.ask(ask("", None)).await.1.is_some());
         assert!(p.ask(ask("", Some("../x"))).await.1.is_some());
@@ -4092,7 +4031,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_step_is_done_only_for_an_item_the_phone_saw_as_it_is_and_counts_against_the_limit_on_new_chats() {
+    async fn a_step_is_done_only_for_an_item_the_phone_saw_as_it_is() {
         let r = rig();
         r.hub.work.set(work_said("a"));
         let (_, mut p) = paired(&r).await;
@@ -4117,14 +4056,6 @@ pub(crate) mod tests {
         *r.host.work_answer.lock().unwrap() = Some(Ok(("rm -rf".into(), "x".into())));
         let (_, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
         assert!(err.is_some_and(|e| e.contains("doesn't know")));
-        // Each step the Mac was asked for counts against the phone's chats in a while: three so far (the refusals before the Mac was
-        // asked didn't count).
-        *r.host.work_answer.lock().unwrap() = None;
-        for _ in 3..NEW_CHATS_PER_WINDOW {
-            assert!(p.ask(step("/p/app:pr:7", "a")).await.1.is_none());
-        }
-        let (ok, err, _) = p.ask(step("/p/app:pr:7", "a")).await;
-        assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
     }
 
     #[tokio::test]

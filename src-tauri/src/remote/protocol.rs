@@ -1337,7 +1337,7 @@ pub enum Request {
     Work,
     /// Does the step of the item `key` as the Desk's button does (RemoteWorkStep): the Mac sends a message it wrote to the chat on the
     /// item's branch, or starts a chat on Ask. The phone sends no words, only the `sig` it was shown the item with: a step that
-    /// moved on since, or was sent already, is refused. Counts against the phone's limit on new chats.
+    /// moved on since, or was sent already, is refused.
     WorkStep { key: String, sig: String },
     /// Asks the Mac to look at git, GitHub and Linear again (it won't more than every 15 seconds).
     WorkRefresh,
@@ -1345,8 +1345,8 @@ pub enum Request {
     /// when it changes, to a phone that said "webclaude"). Only sent to a Mac whose Welcome lists "webclaude".
     WebCards,
     /// Runs (`run`) or declines the web card `id`, as its Run card on the Mac does: in `project` (one of Projects' ids) when the user
-    /// picked one, else the card's own. A card that was answered already, on the Mac or another phone, is refused. Counts against the
-    /// phone's limit on new chats. Only sent to a Mac whose Welcome lists "webclaude".
+    /// picked one, else the card's own. A card that was answered already, on the Mac or another phone, is refused. Only sent to a Mac
+    /// whose Welcome lists "webclaude".
     WebRun {
         id: String,
         run: bool,
