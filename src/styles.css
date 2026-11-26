@@ -3145,6 +3145,25 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .question-desc { font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--muted); }
 .question-other { height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(12.5px * var(--font-scale)) var(--ui); outline: none; }
 .question-other:focus { border-color: var(--faint); }
+/* One question at a time: where you are in them, and the question shown fading away as the next fades in. */
+.question-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.question-steps { display: flex; align-items: center; gap: 2px; }
+.question-count { margin-right: 4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
+button.question-dot { width: 15px; height: 15px; min-height: 0; padding: 4px; border: none; border-radius: var(--radius-pill); background: var(--line-strong); background-clip: content-box; transition: width var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out); }
+button.question-dot.done { background-color: var(--faint); }
+button.question-dot.current { width: 24px; background-color: var(--text-2); }
+button.question-dot:hover:not(:disabled) { background-color: var(--muted); }
+button.question-dot:disabled { cursor: default; opacity: 1; }
+.question-step { animation: question-in var(--dur-2) var(--ease-out) backwards; }
+.question-step.back { animation-name: question-in-back; }
+.question-step.leaving { animation: question-out 0.14s ease-in forwards; }
+@keyframes question-in { from { opacity: 0; transform: translateX(12px); } }
+@keyframes question-in-back { from { opacity: 0; transform: translateX(-12px); } }
+@keyframes question-out { to { opacity: 0; transform: translateX(-8px); } }
+@media (prefers-reduced-motion: reduce) {
+  .question-step, .question-step.back, .question-step.leaving { animation: none; }
+  button.question-dot { transition: none; }
+}
 
 /* The Plan tab's map: the panel under it that says what a box does. */
 @keyframes graph-flow { to { stroke-dashoffset: -9; } }

@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { QuestionCard } from "./QuestionCard";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { LEAVE_MS, PICK_BEAT_MS, QuestionCard } from "./QuestionCard";
 import { PermissionCard } from "./PermissionCard";
 import { readQuestions, withAnswers } from "../lib/questions";
 
@@ -26,22 +26,86 @@ describe("questions", () => {
 });
 
 describe("QuestionCard", () => {
-  it("sends the chosen options once every question has an answer", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  /** Past the beat a pick shows for, and the fade of the question it leaves. */
+  const moveOn = () => act(() => void vi.advanceTimersByTime(PICK_BEAT_MS + LEAVE_MS + 1));
+
+  it("asks one question at a time: a pick moves on to the next, and the last answer sends them all", () => {
     const onDecide = vi.fn();
     render(<QuestionCard item={item()} onDecide={onDecide} />);
     expect(screen.getByText("Claude has 2 questions")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
     expect(screen.getByText("Recommended")).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Send answers" });
+    expect(screen.queryByText("Which codes?")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: /In fetchJson/ }));
+    // The pick shows first, then the question fades to the next.
+    expect(screen.getByRole("radio", { name: /In fetchJson/ })).toHaveAttribute("aria-checked", "true");
+    moveOn();
+    expect(screen.queryByText("Where should retries live?")).not.toBeInTheDocument();
+    expect(screen.getByText("Which codes?")).toBeInTheDocument();
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+    // Several can be picked here: nothing moves on until Send.
+    const send = screen.getByRole("button", { name: "Send answers" });
     expect(send).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: /429/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /503/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /429/ }));
+    moveOn();
+    expect(onDecide).not.toHaveBeenCalled();
     fireEvent.click(send);
+    expect(onDecide).toHaveBeenCalledTimes(1);
     expect(onDecide).toHaveBeenCalledWith("q1", true, "Retries: In fetchJson (Recommended) · Codes: 503", {
       ...input,
       answers: { "Where should retries live?": "In fetchJson (Recommended)", "Which codes?": "503" },
     });
+  });
+
+  it("goes back to an earlier question with its answer kept, from Back or its dot, and on again from the dot", () => {
+    render(<QuestionCard item={item()} onDecide={() => {}} />);
+    // A question not reached yet can't be skipped to.
+    expect(screen.getByRole("button", { name: "Question 2: Codes" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("radio", { name: /In each caller/ }));
+    moveOn();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    moveOn();
+    expect(screen.getByRole("radio", { name: /In each caller/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Question 2: Codes" }));
+    moveOn();
+    expect(screen.getByText("Which codes?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Question 1: Retries, answered" })).toBeEnabled();
+  });
+
+  it("sends a lone question's answer as soon as it is picked", () => {
+    const onDecide = vi.fn();
+    render(<QuestionCard item={item({ input: { questions: [input.questions[0]] } })} onDecide={onDecide} />);
+    expect(screen.getByText("Claude is asking")).toBeInTheDocument();
+    expect(screen.queryByText(/of 1/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /In each caller/ }));
+    expect(onDecide).not.toHaveBeenCalled();
+    moveOn();
+    expect(onDecide).toHaveBeenCalledWith("q1", true, "Retries: In each caller", expect.objectContaining({ answers: { "Where should retries live?": "In each caller" } }));
+  });
+
+  it("sends nothing of its own once it was answered elsewhere while a pick waited", () => {
+    const onDecide = vi.fn();
+    const one = { input: { questions: [input.questions[0]] } };
+    const { rerender } = render(<QuestionCard item={item(one)} onDecide={onDecide} />);
+    fireEvent.click(screen.getByRole("radio", { name: /In each caller/ }));
+    rerender(<QuestionCard item={item({ ...one, decision: "allowed", note: "Retries: In fetchJson" })} onDecide={onDecide} />);
+    moveOn();
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
+  it("moves on from your own words with Enter", () => {
+    render(<QuestionCard item={item()} onDecide={() => {}} />);
+    const own = screen.getByLabelText(/Your own answer: Where/);
+    fireEvent.change(own, { target: { value: "Behind a flag" } });
+    fireEvent.keyDown(own, { key: "Enter" });
+    moveOn();
+    expect(screen.getByText("Which codes?")).toBeInTheDocument();
   });
 
   it("moves between the options with the arrow keys, and a radio group picks as it moves", () => {
@@ -59,6 +123,18 @@ describe("QuestionCard", () => {
     fireEvent.keyDown(second, { key: "ArrowDown" });
     expect(first).toHaveFocus();
     expect(first).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("doesn't move on or send when the arrow keys pick", () => {
+    const onDecide = vi.fn();
+    render(<QuestionCard item={item({ input: { questions: [input.questions[0]] } })} onDecide={onDecide} />);
+    const first = screen.getByRole("radio", { name: /In fetchJson/ });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    moveOn();
+    expect(onDecide).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(onDecide.mock.lastCall![3].answers).toEqual({ "Where should retries live?": "In each caller" });
   });
 
   it("takes an answer in your own words instead", () => {
