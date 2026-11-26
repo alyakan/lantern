@@ -37,6 +37,7 @@ import { nextSteps } from "../view/work";
 import { SearchBar, type BarSearch } from "./SearchBar";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { Deck } from "./NeedsDeck";
+import { WebCards } from "./WebCards";
 import { FocusGlyph, SingleBanner, SingleSheet } from "./SingleProject";
 
 export interface HomeProps {
@@ -428,7 +429,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   useToTop(toTop, () => scroller.current?.scrollTo({ y: 0, animated: true }));
   const colors = useColors();
   const controller = useController();
-  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work, starts } = useSyncState();
+  const { chats: allChats, workingSince, waiting: allWaiting, chatsLoaded, waitingLoaded, plan, providerUsage, single, desk, work, starts, webCards } = useSyncState();
   // The Mac's One project: only its chats, and what they wait on, are listed (the Desk and search of the past are left as they are).
   const canSingle = useMacCan("single");
   const [picking, setPicking] = useState(false);
@@ -634,6 +635,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
                 {stack.length - 1} more after this one
               </Txt>
             )}
+            {/* Work web Claude sent from claude.ai: it waits for a Run, here as on the Mac. */}
+            <WebCards cards={webCards} gutter={gutter} />
           </>
         )}
 

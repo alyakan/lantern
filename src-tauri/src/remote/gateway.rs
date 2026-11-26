@@ -187,6 +187,11 @@ pub trait Host: Send + Sync + 'static {
     fn work_refresh(&self) -> Result<(), String> {
         Err(NO_WORK.into())
     }
+    /// Runs (`run`) or declines web Claude's card `id`, as its Run card on the Mac does, in `folder` when the phone picked a project
+    /// (the gateway has checked the card waits).
+    fn web_run(&self, _id: String, _run: bool, _folder: Option<String>) -> BoxFut<Result<(), String>> {
+        Box::pin(async { Err("This Mac has no web Claude.".to_string()) })
+    }
     /// Insights for `range`, worked out from Claude Code's logs and git (see insights.rs).
     fn insights(&self, _range: crate::insights::InsightsRange) -> BoxFut<Result<crate::insights::Insights, String>> {
         Box::pin(async { Err("This Mac can't work out insights.".to_string()) })
@@ -696,6 +701,18 @@ impl Gateway {
         serde_json::to_value(protocol::RemoteWorkStep { kind, to: to.chars().take(120).collect() }).map_err(|e| e.to_string())
     }
 
+    /// Runs or declines web Claude's card `id` for `device` (Request::WebRun). Only a card that waits now; a Run counts against the
+    /// phone's limit on new chats, since it may start one. The project the phone picked is checked by the Mac against its own.
+    async fn web_run(&self, device: &str, id: String, run: bool, project: Option<String>) -> Result<serde_json::Value, String> {
+        if !self.hub.web.waits(&id) {
+            return Err("That was answered already, on your Mac or another phone.".into());
+        }
+        if run {
+            self.allow_new_chat(device)?;
+        }
+        self.host.web_run(id, run, project).await.map(|()| serde_json::Value::Null)
+    }
+
     /// Whether a phone may start a chat on the model and effort it asks for: only one the window listed for where it runs (never a
     /// name the phone made up), and never with a preset, which is a model of its own for each role. With no provider named, the chat
     /// is on the project's own, which only the window knows: a model is taken then only when Claude Code is the only provider.
@@ -926,6 +943,7 @@ impl Gateway {
         let (device, mut channel, features) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
         let said = |name: &str| features.iter().any(|f| f == name);
         let (extras, desk, single, work) = (said(protocol::PHONE_EXTRAS), said(protocol::PHONE_DESK), said(protocol::PHONE_SINGLE), said(protocol::PHONE_WORK));
+        let web = said(protocol::PHONE_WEB);
         drop(permit);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
@@ -937,7 +955,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, provider_usage: said("provider_usage"), last_provider_usage: Vec::new(), desk, last_desk: None, single, last_single: None, work, last_work: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, provider_usage: said("provider_usage"), last_provider_usage: Vec::new(), desk, last_desk: None, single, last_single: None, work, last_work: None, web, last_web: None, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -1058,6 +1076,9 @@ struct Session<'a> {
     /// Whether it shows Your work (protocol::PHONE_WORK), and the version it was last sent.
     work: bool,
     last_work: Option<u64>,
+    /// Whether it shows web Claude's cards (protocol::PHONE_WEB), and the version it was last sent.
+    web: bool,
+    last_web: Option<u64>,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
@@ -1131,6 +1152,7 @@ impl<'a> Session<'a> {
         self.send_desk(link, channel)?;
         self.send_single(link, channel)?;
         self.send_work(link, channel)?;
+        self.send_web(link, channel)?;
         loop {
             tokio::select! {
                 _ = killed.changed() => return Ok(()),
@@ -1158,6 +1180,11 @@ impl<'a> Session<'a> {
                         Request::WorkStep { key, sig } => {
                             let device = self.device.clone();
                             slow.push(Box::pin(async move { (id, gw.work_step(&device, key, sig).await) }));
+                        }
+                        // Like starting a chat: never refused for the others in flight.
+                        Request::WebRun { id: card, run, project } => {
+                            let device = self.device.clone();
+                            slow.push(Box::pin(async move { (id, gw.web_run(&device, card, run, project).await) }));
                         }
                         // Never refused for the others in flight (suggestions, Insights…): starting a chat is what the person is
                         // waiting on, and it has a limit of its own (allow_new_chat).
@@ -1193,6 +1220,7 @@ impl<'a> Session<'a> {
                     self.send_desk(link, channel)?;
                     self.send_single(link, channel)?;
                     self.send_work(link, channel)?;
+        self.send_web(link, channel)?;
                     for slot in self.named_since_reset() {
                         self.reset(link, channel, &slot).await?;
                     }
@@ -1243,6 +1271,17 @@ impl<'a> Session<'a> {
         let (desk, version) = self.gw.hub.desk.phone();
         send_message(link, channel, &ServerMessage::Desk { desk })?;
         self.last_desk = Some(version);
+        Ok(())
+    }
+
+    /// Web Claude's cards, to a phone that shows them: once the app has said them, and when they changed since this phone was sent them.
+    fn send_web(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
+        let (cards, version) = self.gw.hub.web.phone();
+        if !self.web || version == 0 || self.last_web == Some(version) {
+            return Ok(());
+        }
+        send_message(link, channel, &ServerMessage::WebCards { cards })?;
+        self.last_web = Some(version);
         Ok(())
     }
 
@@ -1639,6 +1678,9 @@ impl<'a> Session<'a> {
             Request::Work => Ok(json(&self.gw.hub.work.phone().0)),
             Request::WorkStep { key, sig } => self.gw.work_step(&self.device, key, sig).await,
             Request::WorkRefresh => host.work_refresh().map(|()| serde_json::Value::Null),
+            Request::WebCards => Ok(json(&self.gw.hub.web.phone().0)),
+            // Done beside the loop (see run); here only for completeness.
+            Request::WebRun { id, run, project } => self.gw.web_run(&self.device, id, run, project).await,
             Request::Insights { range } => host.insights(range).await.and_then(|i| serde_json::to_value(i).map_err(|e| e.to_string())),
             Request::DeskRoute { desk, text } => self.gw.desk_route(desk, text).await,
             Request::DeskTalk { desk, text, history } => self.gw.desk_talk(desk, text, history).await,
@@ -1813,6 +1855,8 @@ pub(crate) mod tests {
         pub new_chat_refusal: Mutex<Option<String>>,
         /// The steps of the user's work it was asked to do (key, sig), what it answers to them, and how often it was asked to look again.
         pub work_steps: Mutex<Vec<(String, String)>>,
+        /// Web Claude's cards it was asked to Run or Decline (id, run, project).
+        pub web_runs: Mutex<Vec<(String, bool, Option<String>)>>,
         pub work_answer: Mutex<Option<Result<(String, String), String>>>,
         pub work_refreshed: Mutex<u32>,
         /// How long a reviewed file's diff takes (a pull request fetched the first time).
@@ -1942,6 +1986,10 @@ pub(crate) mod tests {
         fn work_refresh(&self) -> Result<(), String> {
             *self.work_refreshed.lock().unwrap() += 1;
             Ok(())
+        }
+        fn web_run(&self, id: String, run: bool, folder: Option<String>) -> BoxFut<Result<(), String>> {
+            self.web_runs.lock().unwrap().push((id, run, folder));
+            Box::pin(async { Ok(()) })
         }
         fn desk_route(&self, _text: String, chats: Vec<crate::desk::Candidate>, projects: Vec<String>) -> BoxFut<crate::desk::Route> {
             self.desk_shown.lock().unwrap().push((chats, projects));
@@ -4006,6 +4054,41 @@ pub(crate) mod tests {
         let (ok, _, before) = old.ask(Request::Work).await;
         assert!(!before.iter().any(|m| matches!(m, ServerMessage::Work { .. })));
         assert_eq!(ok.unwrap()["items"][0]["key"], "/p/app:pr:7");
+    }
+
+    fn web_card(id: &str) -> protocol::RemoteWebCard {
+        protocol::RemoteWebCard { id: id.into(), title: "Rayak".into(), canvas: "https://claude.ai/artifact/abc".into(), message: "Build the header".into(), project: Some("/p/app".into()), project_name: Some("app".into()), answer: false, chat: None, at: 5 }
+    }
+
+    #[tokio::test]
+    async fn web_claude_s_cards_go_to_a_phone_that_shows_them_and_only_a_waiting_one_is_run() {
+        let r = rig();
+        r.hub.web.set(vec![web_card("w1")]);
+        let key = generate_keypair().unwrap();
+        let mut p = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_WEB]).await.unwrap();
+        let cards = loop {
+            if let Some(ServerMessage::WebCards { cards }) = p.next().await {
+                break cards;
+            }
+        };
+        assert_eq!(cards, vec![web_card("w1")]);
+        r.hub.web.set(vec![web_card("w1"), web_card("w2")]);
+        let again = loop {
+            if let Some(ServerMessage::WebCards { cards }) = p.next().await {
+                break cards;
+            }
+        };
+        assert_eq!(again.len(), 2);
+        let (_, err, _) = p.ask(Request::WebRun { id: "w2".into(), run: true, project: Some("/p/other".into()) }).await;
+        assert!(err.is_none(), "{err:?}");
+        let (_, err, _) = p.ask(Request::WebRun { id: "gone".into(), run: false, project: None }).await;
+        assert!(err.unwrap().contains("answered already"));
+        assert_eq!(*r.host.web_runs.lock().unwrap(), vec![("w2".to_string(), true, Some("/p/other".to_string()))]);
+        // A phone that didn't say "webclaude" is never pushed them, but may ask.
+        let (_, mut old) = paired(&r).await;
+        let (ok, _, before) = old.ask(Request::WebCards).await;
+        assert!(!before.iter().any(|m| matches!(m, ServerMessage::WebCards { .. })));
+        assert_eq!(ok.unwrap()[0]["id"], "w1");
     }
 
     #[tokio::test]

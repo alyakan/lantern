@@ -7,6 +7,7 @@ pub mod bus;
 pub mod desk;
 pub mod single;
 pub mod work;
+pub mod webcards;
 pub mod fixture;
 pub mod hub;
 pub mod keys;

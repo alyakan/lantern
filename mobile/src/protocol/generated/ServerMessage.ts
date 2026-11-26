@@ -4,6 +4,7 @@ import type { RemoteChat } from "./RemoteChat";
 import type { RemoteDesk } from "./RemoteDesk";
 import type { RemoteEvent } from "./RemoteEvent";
 import type { RemoteSingle } from "./RemoteSingle";
+import type { RemoteWebCard } from "./RemoteWebCard";
 import type { RemoteWork } from "./RemoteWork";
 
 /**
@@ -23,4 +24,4 @@ features: Array<string>, } | { "type": "response", id: number, ok: unknown, erro
 /**
  * The weekly window, when the Mac knows it: how much of it (0 to 1) and when it resets. An older phone ignores both.
  */
-week_used?: number, week_resets_at?: number | null, } | { "type": "desk", desk: RemoteDesk, } | { "type": "single", single: RemoteSingle | null, } | { "type": "work", work: RemoteWork, };
+week_used?: number, week_resets_at?: number | null, } | { "type": "desk", desk: RemoteDesk, } | { "type": "single", single: RemoteSingle | null, } | { "type": "work", work: RemoteWork, } | { "type": "web_cards", cards: Array<RemoteWebCard>, };

@@ -38,6 +38,8 @@ pub enum Kind {
     Failed,
     /// A to-do's reminder: about a project's list, not a chat.
     Todo,
+    /// Web Claude sent work that waits for the user's Run: a tap opens the chats, where its card is.
+    Web,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -166,6 +168,7 @@ fn words(kind: Kind, title: Option<&str>) -> (String, String) {
         (Kind::NeedsYou, Some(t)) => (t.into(), "Needs you.".into()),
         (Kind::Failed, Some(t)) => (t.into(), "Stopped with an error.".into()),
         (Kind::Todo, _) => ("Lantern".into(), "A to-do is due.".into()),
+        (Kind::Web, _) => ("Web Claude".into(), "Sent work that waits for your Run.".into()),
     }
 }
 
@@ -348,7 +351,55 @@ fn todo_alert(project: &str, title: &str, body: &str, todo: Option<&str>) -> Ale
     Alert { body: serde_json::json!({"aps": aps, "body": data}) }
 }
 
+/// What a push for web Claude's work says: the project, and the canvas's title only with "Show titles" on. Returns the title line
+/// and the body.
+fn web_words(title: &str, project: Option<&str>, show_titles: bool) -> (String, String) {
+    let head = match project {
+        Some(p) => format!("Web Claude · {p}"),
+        None => "Web Claude".to_string(),
+    };
+    let body = if show_titles { format!("Sent work for {}. Tap Run to start it.", title.chars().take(80).collect::<String>()) } else { "Sent work that waits for your Run.".to_string() };
+    (head, body)
+}
+
 impl Notifier {
+    /// Pushes to every phone that takes pushes that web Claude sent work, once per card (the app tells only new ones).
+    pub async fn web_sent(&self, title: &str, project: Option<&str>) {
+        let saved = self.store.saved();
+        if !saved.enabled {
+            return;
+        }
+        let devices: Vec<&Device> = saved.devices.iter().filter(|d| d.push_token.is_some()).collect();
+        if devices.is_empty() {
+            note("web work not pushed: no phone has a push token");
+            return;
+        }
+        let (head, body) = web_words(title, project, saved.show_titles);
+        let (apple, expo): (Vec<&&Device>, Vec<&&Device>) = devices.iter().partition(|d| d.push_token.as_deref().is_some_and(is_apns_token));
+        if !expo.is_empty() {
+            let messages = expo.iter().map(|d| PushMessage { to: d.push_token.clone().unwrap_or_default(), title: head.clone(), body: body.clone(), data: PushData { slot: String::new(), kind: Kind::Web, project: None, todo: None }, sound: "default" }).collect();
+            match self.sender.send(messages).await {
+                Ok(tickets) => {
+                    note("web work to Expo: sent");
+                    for (device, ticket) in expo.iter().zip(tickets) {
+                        if ticket.error.as_deref() == Some("DeviceNotRegistered") {
+                            let _ = self.store.clear_push_token(&device.id);
+                        }
+                    }
+                }
+                Err(_) => note("web work to Expo: not sent"),
+            }
+        }
+        let alert = Alert { body: serde_json::json!({"aps": {"alert": {"title": head, "body": body}, "sound": "default", "thread-id": "web"}, "body": {"slot": "", "kind": Kind::Web}}) };
+        for device in apple {
+            if let Ok(reply) = self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
+                if reply.gone() {
+                    let _ = self.store.clear_push_token(&device.id);
+                }
+            }
+        }
+    }
+
     /// Pushes the to-do reminders that just went off to every phone that takes pushes: one notification per project. Not
     /// kept in `sent`: each reminder goes off once anyway (todos.rs).
     pub async fn remind(&self, due: &[crate::todos::Reminder]) {
@@ -407,6 +458,7 @@ fn kind_name(kind: Kind) -> &'static str {
         Kind::NeedsYou => "needs-you",
         Kind::Failed => "failed",
         Kind::Todo => "to-do",
+        Kind::Web => "web",
     }
 }
 
@@ -422,6 +474,7 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: O
         (Kind::NeedsYou, _) => ("A chat needs you.", "Needs you."),
         (Kind::Failed, _) => ("A chat stopped with an error.", "Stopped with an error."),
         (Kind::Todo, _) => ("A to-do is due.", "A to-do is due."),
+        (Kind::Web, _) => ("Web Claude sent work.", "Web Claude sent work."),
     };
     // Which tool, program or file, in place of the general words.
     let named = match (kind, needs, detail) {
@@ -669,6 +722,25 @@ pub(crate) mod tests {
         assert!(!body.to_string().contains("/code"), "{body}");
         r.notifier.remind(&[reminder("/code/app", "a"), reminder("/code/app", "b")]).await;
         assert!(r.alerts()[1].1["aps"]["category"].is_null());
+    }
+
+    #[tokio::test]
+    async fn web_claude_s_work_names_its_project_and_its_canvas_only_with_show_titles_on() {
+        let r = rig(1);
+        r.notifier.web_sent("SECRET canvas", Some("rayak")).await;
+        let sent = r.pushed();
+        assert_eq!((sent[0].title.as_str(), sent[0].body.as_str()), ("Web Claude · rayak", "Sent work that waits for your Run."));
+        assert_eq!(sent[0].data, PushData { slot: String::new(), kind: Kind::Web, project: None, todo: None });
+        assert!(!serde_json::to_string(&sent).unwrap().contains("SECRET"));
+        r.store.set_show_titles(true).unwrap();
+        r.notifier.web_sent("Header", None).await;
+        assert_eq!((r.pushed()[1].title.as_str(), r.pushed()[1].body.as_str()), ("Web Claude", "Sent work for Header. Tap Run to start it."));
+        let a = rig_apple(1);
+        a.notifier.web_sent("x", None).await;
+        assert_eq!(a.alerts()[0].1["body"]["kind"], "web");
+        a.store.set_enabled(false).unwrap();
+        a.notifier.web_sent("x", None).await;
+        assert_eq!(a.alerts().len(), 1, "nothing with remote control off");
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
+import type { RemoteWebCard } from "../protocol/generated/RemoteWebCard";
 import type { RemoteWorkStep } from "../protocol/generated/RemoteWorkStep";
 import type { RemoteDeskRoute } from "../protocol/generated/RemoteDeskRoute";
 import type { RemoteDeskExchange } from "../protocol/generated/RemoteDeskExchange";
@@ -190,6 +191,7 @@ export class Sync {
     void this.refreshWaiting();
     void this.refreshDesk();
     void this.refreshWork();
+    void this.refreshWebCards();
     this.onConnected?.();
   };
 
@@ -272,6 +274,26 @@ export class Sync {
   workStep(key: string, sig: string) {
     if (!this.has("work")) return Promise.reject(new Error("Update Lantern on your Mac to do that from here."));
     return this.ask<RemoteWorkStep>({ op: "work_step", key, sig }, DESK_WAIT);
+  }
+
+  /** Asks for the work web Claude sent that waits for a Run, from a Mac that has it (it pushes them as they change). */
+  async refreshWebCards() {
+    if (!this.has("webclaude")) return;
+    try {
+      const cards = await this.ask<RemoteWebCard[]>({ op: "web_cards" });
+      if (Array.isArray(cards)) this.apply({ type: "webCards", cards });
+    } catch {
+      // What was known stays: the Mac pushes them again when they change.
+    }
+  }
+
+  /**
+   * Runs (or declines) web Claude's card `id`, as its card on the Mac does: in `project` (one of projects()' ids) when the user picked
+   * one, else the card's own. Rejects with why not (answered already, no project, too many lately).
+   */
+  webRun(id: string, run: boolean, project: string | null = null) {
+    if (!this.has("webclaude")) return Promise.reject(new Error("Update Lantern on your Mac to do that from here."));
+    return this.ask<null>({ op: "web_run", id, run, project }, DESK_WAIT);
   }
 
   /** Asks the Mac to look at git, GitHub and Linear again; what it finds comes as Your work changes. */

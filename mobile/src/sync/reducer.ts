@@ -11,6 +11,7 @@ import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteDesk } from "../protocol/generated/RemoteDesk";
 import type { RemoteWork } from "../protocol/generated/RemoteWork";
+import type { RemoteWebCard } from "../protocol/generated/RemoteWebCard";
 import type { RemoteSingle } from "../protocol/generated/RemoteSingle";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
@@ -126,6 +127,8 @@ export interface State {
   desk: RemoteDesk | null;
   /** Your work as the Mac's window has it, once a Mac that has it has said (null: not yet, or a Mac without). */
   work: RemoteWork | null;
+  /** The work web Claude sent that waits for the user's Run, oldest first (empty from a Mac without web Claude). */
+  webCards: RemoteWebCard[];
   /** The Mac's One project: Home lists only its chats (null: every project, or a Mac that doesn't say). */
   single: RemoteSingle | null;
 }
@@ -138,7 +141,7 @@ function workingSince(before: Record<string, number>, chats: RemoteChat[]): Reco
   return same ? before : next;
 }
 
-export const initialState: State = { chats: [], starts: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, single: null };
+export const initialState: State = { chats: [], starts: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, providerUsage: {}, epoch: null, desk: null, work: null, webCards: [], single: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, background: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null, stopping: false };
 
@@ -150,6 +153,8 @@ export type Action =
   | { type: "desk"; desk: RemoteDesk }
   /** Your work, as the Mac answered when asked (it pushes it too, as it changes). */
   | { type: "work"; work: RemoteWork }
+  /** Web Claude's cards, as the Mac answered when asked (it pushes them too, as they change). */
+  | { type: "webCards"; cards: RemoteWebCard[] }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[]; /** A new chat's first message (see the item's `opening`). */ opening?: boolean }
   | { type: "held"; slot: string; clientId: string; text: string; at: number }
   | { type: "send_failed"; slot: string; clientId: string; error: string; /** See the item's `stale`. */ stale?: boolean }
@@ -376,6 +381,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, desk: action.desk };
     case "work":
       return { ...state, work: action.work };
+    case "webCards":
+      return { ...state, webCards: action.cards };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
       // A new chat whose first message the Mac has already told of: it is there, and isn't shown twice.
@@ -432,6 +439,8 @@ export function reducer(state: State, action: Action): State {
           return { ...state, desk: msg.desk };
         case "work":
           return { ...state, work: msg.work };
+        case "web_cards":
+          return { ...state, webCards: msg.cards };
         case "single":
           return { ...state, single: msg.single };
         case "provider_usage":

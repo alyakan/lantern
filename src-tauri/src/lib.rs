@@ -550,12 +550,49 @@ fn web_claude_public() -> bool {
     std::env::var_os("LANTERN_WEBCLAUDE_LOCAL").is_none()
 }
 
+/// Web Claude's Run cards as a phone is sent them (sign-ins stay on the Mac).
+fn web_cards_for_phones(store: &webclaude::store::Store) -> Vec<remote::protocol::RemoteWebCard> {
+    store.cards(webclaude::server::now_ms()).into_iter().filter_map(|c| match c {
+        webclaude::store::Card::Run { id, canvas, title, message, folder, answer, chat_title, at } => Some(remote::protocol::RemoteWebCard {
+            id,
+            title,
+            canvas,
+            message,
+            project_name: folder.as_deref().map(|f| std::path::Path::new(f).file_name().map_or_else(|| f.to_string(), |n| n.to_string_lossy().into_owned())),
+            project: folder,
+            answer,
+            chat: chat_title,
+            at,
+        }),
+        webclaude::store::Card::Connect { .. } => None,
+    }).collect()
+}
+
 fn start_web_claude_wiring(app: &AppHandle) {
     let state = app.state::<AppState>();
     let web = state.web.clone();
+    // Phones are sent the cards as they change, and pushed a notification for each new one (not for those already waiting at launch).
+    let cards = web_cards_for_phones(&web.store);
+    let pushed: Arc<std::sync::Mutex<std::collections::HashSet<String>>> = Arc::new(std::sync::Mutex::new(cards.iter().map(|c| c.id.clone()).collect()));
+    state.remote.hub.web.set(cards);
     let handle = app.clone();
+    let reading = web.clone();
     web.store.on_change(Arc::new(move || {
         let _ = handle.emit("webclaude-changed", ());
+        let cards = web_cards_for_phones(&reading.store);
+        let new: Vec<remote::protocol::RemoteWebCard> = {
+            let mut pushed = pushed.lock().unwrap();
+            cards.iter().filter(|c| pushed.insert(c.id.clone())).cloned().collect()
+        };
+        let state = handle.state::<AppState>();
+        state.remote.hub.web.set(cards);
+        if let (false, Some(notifier)) = (new.is_empty(), state.remote.notifier()) {
+            tauri::async_runtime::spawn(async move {
+                for card in new {
+                    notifier.web_sent(&card.title, card.project_name.as_deref()).await;
+                }
+            });
+        }
     }));
     // A chat that moves on to another conversation is no longer web Claude's.
     let forgetting = web.clone();
@@ -817,6 +854,11 @@ impl remote::gateway::Host for RemoteHost {
 
     fn work_refresh(&self) -> Result<(), String> {
         self.app.emit("remote-work-refresh", ()).map_err(|e| e.to_string())
+    }
+
+    fn web_run(&self, id: String, run: bool, folder: Option<String>) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move { run_web_request(&app, &id, run, folder).await })
     }
 
     fn insights(&self, range: insights::InsightsRange) -> remote::gateway::BoxFut<Result<insights::Insights, String>> {

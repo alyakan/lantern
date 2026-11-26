@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, NEW_CHAT_START, ACCOUNTS, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK];
+pub const FEATURES: &[&str] = &["conversation", "controls", "close", "workflow", SWITCH_BUSY, "output", "shell", "images", NEW_CHAT_IMAGES, NEW_CHAT_MODEL, NEW_CHAT_START, ACCOUNTS, INSIGHTS, "pair", "liveactivity", "storage", "pushkey", "reviewdiff", "todos", "artifacts", "rename", "livesummary", "cruise", CHANGE_SCOPES, PHONE_DESK, DESK_TALK, PHONE_SINGLE, PHONE_WORK, PHONE_WEB];
 
 /// A chat's settings may be changed while it works (a switch's `when`): the Mac stops it and carries on, or waits for its turn
 /// to end. A phone offers the choice only to a Mac that lists this; to an older one, a busy chat's settings stay shut.
@@ -129,6 +129,9 @@ pub const ACCOUNTS: &str = "accounts";
 pub const PHONE_WORK: &str = "work";
 /// A phone that follows the Mac's One project: it is pushed ServerMessage::Single, and may pick one (Request::SetSingle).
 pub const PHONE_SINGLE: &str = "single";
+/// A phone that shows the work web Claude sent (claude.ai's connector, see webclaude/): it is pushed ServerMessage::WebCards, may ask
+/// for them (Request::WebCards), and Run or Decline one (Request::WebRun).
+pub const PHONE_WEB: &str = "webclaude";
 
 /// A slash command or skill the chat's claude offers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -938,6 +941,31 @@ pub struct RemoteWorkNext {
     pub warn: bool,
 }
 
+/// Work web Claude sent from claude.ai, waiting for the user's Run (the Mac's Run card, see webclaude/store.rs).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteWebCard {
+    /// What Request::WebRun names it by.
+    pub id: String,
+    /// The design canvas's title, or "Work for <project>" for work with no design.
+    pub title: String,
+    /// The canvas's claude.ai link or title; empty for work with no design.
+    pub canvas: String,
+    /// What web Claude asks the chat to do.
+    pub message: String,
+    /// The project it runs in (one of Request::Projects' ids), when web Claude or the canvas named one; none: the user picks.
+    pub project: Option<String>,
+    /// That project's name, for showing.
+    pub project_name: Option<String>,
+    /// An answer to a question a chat left web Claude: it goes back to that chat (`chat`).
+    pub answer: bool,
+    /// The chat it goes to, when it is known.
+    pub chat: Option<String>,
+    /// When web Claude sent it (ms since the epoch).
+    #[ts(type = "number")]
+    pub at: u64,
+}
+
 /// The answer to Request::WorkStep: what the Mac did with the step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -1313,6 +1341,18 @@ pub enum Request {
     WorkStep { key: String, sig: String },
     /// Asks the Mac to look at git, GitHub and Linear again (it won't more than every 15 seconds).
     WorkRefresh,
+    /// The work web Claude sent that waits for the user's Run, oldest first, as RemoteWebCard (also pushed as ServerMessage::WebCards
+    /// when it changes, to a phone that said "webclaude"). Only sent to a Mac whose Welcome lists "webclaude".
+    WebCards,
+    /// Runs (`run`) or declines the web card `id`, as its Run card on the Mac does: in `project` (one of Projects' ids) when the user
+    /// picked one, else the card's own. A card that was answered already, on the Mac or another phone, is refused. Counts against the
+    /// phone's limit on new chats. Only sent to a Mac whose Welcome lists "webclaude".
+    WebRun {
+        id: String,
+        run: bool,
+        #[serde(default)]
+        project: Option<String>,
+    },
     /// Insights for a stretch of time (crate::insights::Insights): where the usage goes, what got done, how the user works, whether
     /// the savings work. Only sent to a Mac whose Welcome lists "insights".
     Insights { range: crate::insights::InsightsRange },
@@ -1487,6 +1527,9 @@ pub enum ServerMessage {
     Single { single: Option<RemoteSingle> },
     /// Your work changed (see Request::Work). Only sent to a phone that said "work".
     Work { work: RemoteWork },
+    /// The work web Claude sent that waits for the user's Run changed (see Request::WebCards). Only sent to a phone that said
+    /// "webclaude".
+    WebCards { cards: Vec<RemoteWebCard> },
 }
 
 #[cfg(test)]
