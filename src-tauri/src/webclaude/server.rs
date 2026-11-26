@@ -127,6 +127,16 @@ fn error_page(why: &str) -> Reply {
     Reply::html(400, page("Lantern", &format!("<h1>Lantern can't connect this</h1><p>{}</p>", esc(why))))
 }
 
+/// The cookie that ties sign-in `id` to its browser (a sign-in id is URL-safe letters, digits, - and _).
+fn signin_cookie(id: &str) -> String {
+    format!("lantern_signin_{}", id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>())
+}
+
+/// Cookie `name` from the request's Cookie header.
+fn cookie(headers: &HashMap<String, String>, name: &str) -> Option<String> {
+    headers.get("cookie")?.split(';').filter_map(|p| p.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v.to_string())
+}
+
 fn oauth_error(status: u16, code: &str) -> Reply {
     Reply::json(status, json!({"error": code}))
 }
@@ -184,9 +194,14 @@ pub async fn route(ctx: &Ctx, method: &str, path: &str, query: &str, headers: &H
                 return error_page("Only response_type=code is supported.");
             }
             match ctx.store.begin_auth(get("client_id"), get("redirect_uri"), q.get("state").map(String::as_str), get("code_challenge"), get("code_challenge_method"), now) {
-                Ok(id) => match ctx.store.auth_code(&id) {
-                    Some((code, client)) => Reply::html(200, waiting_page(&id, &client, &code)),
-                    None => error_page("That sign-in has ended. Start again from claude.ai."),
+                Ok(id) => match (ctx.store.auth_code(&id), ctx.store.bind_browser(&id)) {
+                    (Some((code, client)), Some(secret)) => {
+                        let secure = if base.starts_with("https://") { "; Secure" } else { "" };
+                        let mut r = Reply::html(200, waiting_page(&id, &client, &code));
+                        r.headers.push(("set-cookie", format!("{}={secret}; Path=/authorize; Max-Age=600; HttpOnly; SameSite=Lax{secure}", signin_cookie(&id))));
+                        r
+                    }
+                    _ => error_page("That sign-in has ended. Start again from claude.ai."),
                 },
                 Err(e) => error_page(&e),
             }
@@ -194,6 +209,11 @@ pub async fn route(ctx: &Ctx, method: &str, path: &str, query: &str, headers: &H
         ("GET", "/authorize/wait") => {
             let q = parse_query(query);
             let id = q.get("id").map(String::as_str).unwrap_or("");
+            // Only the browser that opened the sign-in sees its code and gets the way back: a link to this page sent to
+            // the user by someone who started a sign-in from their own claude.ai shows nothing.
+            if !ctx.store.browser_is(id, cookie(headers, &signin_cookie(id)).as_deref()) {
+                return error_page("This sign-in page only works in the browser that started it. Start again from claude.ai.");
+            }
             match ctx.store.auth_status(id, now) {
                 AuthStatus::Waiting => match ctx.store.auth_code(id) {
                     Some((code, client)) => Reply::html(200, waiting_page(id, &client, &code)),
@@ -355,20 +375,39 @@ mod tests {
         assert!(!html.contains("<script"));
         let csp = &page.headers.iter().find(|(k, _)| *k == "content-security-policy").unwrap().1;
         assert!(csp.starts_with("default-src 'none'") && !csp.contains("script-src"), "{csp}");
-        let wait = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
+        // The sign-in belongs to the browser that opened it: a cookie only that browser holds.
+        let set = page.headers.iter().find(|(k, _)| *k == "set-cookie").unwrap().1.clone();
+        assert!(set.contains("HttpOnly") && set.contains("SameSite=Lax") && set.contains("Secure") && set.contains("Path=/authorize"), "{set}");
+        let mine = set.split(';').next().unwrap().to_string();
+        assert!(mine.starts_with(&format!("lantern_signin_{id}=")));
+        let wait_as = |cookie: Option<&str>| {
+            let hs = cookie.map(|c| h(&[("cookie", c)])).unwrap_or_default();
+            let q = format!("id={id}");
+            let c = &c;
+            async move { route(c, "GET", "/authorize/wait", &q, &hs, b"").await }
+        };
+        let code = c.store.auth_code(&id).unwrap().0;
+        // Another browser given the link sees no code and can't take the way back to claude.ai (someone could start a
+        // sign-in from their own claude.ai and send the user this link).
+        for other in [None, Some("x=1"), Some(&*format!("lantern_signin_{id}=forged"))] {
+            let r = wait_as(other).await;
+            assert_eq!(r.status, 400, "{other:?}");
+            assert!(!String::from_utf8_lossy(&r.body).contains(&code));
+        }
+        let wait = wait_as(Some(&format!("theme=dark; {mine}"))).await;
         assert_eq!(wait.status, 200);
         // The code is on the page only (the card doesn't carry it): the user types what the page shows.
-        let code = c.store.auth_code(&id).unwrap().0;
         assert!(html.contains(&format!("<p class=\"code\">{code}</p>")), "{html}");
         assert!(String::from_utf8_lossy(&wait.body).contains(&format!("<p class=\"code\">{code}</p>")));
         assert!(!serde_json::to_string(&c.store.cards(now_ms())).unwrap().contains(&code));
         c.store.decide_auth(&id, true, Some(&code), now_ms()).unwrap();
-        let done = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
+        assert_eq!(wait_as(None).await.status, 400, "the answer isn't handed to another browser either");
+        let done = wait_as(Some(&mine)).await;
         assert_eq!(done.status, 302);
         let redirect = done.headers.iter().find(|(k, _)| *k == "location").unwrap().1.clone();
         assert!(redirect.starts_with(cb) && redirect.contains("state=s1"), "{redirect}");
         // The redirect is handed out once: a reload after it says to start again.
-        let again = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
+        let again = wait_as(Some(&mine)).await;
         assert_eq!(again.status, 400);
         assert!(String::from_utf8_lossy(&again.body).contains("Start again from claude.ai"));
         let code = redirect.split("code=").nth(1).unwrap().split('&').next().unwrap();

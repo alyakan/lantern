@@ -89,6 +89,13 @@ describe("web Claude's cards in the inbox", () => {
     expect(runIt).toHaveBeenCalledWith("r2", false, null);
   });
 
+  it("says when the work has no design behind it", () => {
+    setup([run({ canvas: "", title: "Work for rayak", folder: "/dev/rayak" })]);
+    const row = screen.getAllByRole("listitem")[0];
+    expect(within(row).getByText("From web Claude · rayak · no design")).toBeInTheDocument();
+    expect(within(row).getByText("Work for rayak")).not.toHaveAttribute("title");
+  });
+
   it("notifies in words that never carry a sign-in code", () => {
     expect(cardNotice(connect).title).toBe("Web Claude wants to connect");
     expect(cardNotice(run())).toEqual({ title: "Web Claude sent work: Rayak — Grocery", body: "Move the rating under the price." });

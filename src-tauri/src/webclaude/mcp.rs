@@ -28,7 +28,7 @@ pub trait Mac: Send + Sync + 'static {
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message; nothing runs until the user taps Run there, so tell the user it is waiting. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Then call check with the id to see how it went: when the chat is done its last message comes back, with the files it changed. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message; nothing runs until the user taps Run there, so tell the user it is waiting. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
 
 fn tools() -> Value {
     json!([
@@ -46,16 +46,16 @@ fn tools() -> Value {
         },
         {
             "name": "send_to_lantern",
-            "description": "Send work or a question about a design canvas to Lantern. It shows the user a card; nothing happens until the user taps Run. On Run it goes to the chat already working on that canvas, or a new chat in the canvas's project. Returns an id for check.",
+            "description": "Send work to Lantern: about a design canvas, or for a project when there is no design. It shows the user a card; nothing happens until the user taps Run. On Run, work on a canvas goes to the chat already working on that canvas, or a new chat in the canvas's project; work with no design always starts a new chat in its project. Returns an id: call check with it before saying how the work went or sending more about it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "canvas": {"type": "string", "description": "The canvas's claude.ai link (best), or its exact title."},
+                    "canvas": {"type": "string", "description": "The canvas's claude.ai link (best), or its exact title. Leave it out when the work isn't about a design (then name the project); never put a project's name here."},
                     "canvas_title": {"type": "string", "description": "The canvas's title, for the user's card."},
                     "message": {"type": "string", "description": "What the chat should do or answer, complete on its own: the chat sees this message and the canvas, not this conversation."},
-                    "project": {"type": "string", "description": "The project's name from list_projects. Leave it out when the canvas is linked already, or to let the user pick."}
+                    "project": {"type": "string", "description": "The project's name from list_projects. Needed when there is no canvas. With a canvas, leave it out when the canvas is linked already, or to let the user pick."}
                 },
-                "required": ["canvas", "message"]
+                "required": ["message"]
             },
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "openWorldHint": false}
         },
@@ -142,6 +142,11 @@ fn need<'a>(args: &'a Value, name: &str) -> Result<&'a str, String> {
     arg(args, name).ok_or_else(|| format!("`{name}` is needed."))
 }
 
+/// A request's canvas as web Claude sees it: none for work with no design.
+fn shown(canvas: &str) -> Option<&str> {
+    (!canvas.is_empty()).then_some(canvas)
+}
+
 fn name_of(projects: &[(String, String)], folder: &str) -> String {
     projects.iter().find(|(f, _)| f == folder).map(|(_, n)| n.clone()).unwrap_or_else(|| folder.rsplit('/').next().unwrap_or(folder).to_string())
 }
@@ -157,7 +162,7 @@ fn request_view(r: &store::Request, projects: &[(String, String)]) -> Value {
     let mut v = json!({
         "id": r.id,
         "state": state,
-        "canvas": r.canvas,
+        "canvas": shown(&r.canvas),
         "project": r.folder.as_deref().map(|f| name_of(projects, f)),
         "chat": r.chat_title,
     });
@@ -193,16 +198,19 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                 if only.as_ref().is_some_and(|o| project.as_deref().map(str::to_lowercase).as_ref() != Some(o)) {
                     return None;
                 }
-                let canvas = store.canvas_of_slot(&c.slot).and_then(|k| links.iter().find(|l| l.key == k).map(|l| l.canvas.clone()).or(Some(k)));
+                // Work with no design is keyed by its project: it shows no canvas.
+                let canvas = store.canvas_of_slot(&c.slot).filter(|k| !k.starts_with("project:")).and_then(|k| links.iter().find(|l| l.key == k).map(|l| l.canvas.clone()).or(Some(k)));
                 Some(json!({"title": c.title, "project": project, "status": c.status, "canvas": canvas}))
             }).collect();
             Ok(json!({"chats": chats}))
         }
         "send_to_lantern" => {
-            let canvas = need(args, "canvas")?;
-            let title = arg(args, "canvas_title").unwrap_or(canvas);
+            let canvas = arg(args, "canvas").unwrap_or("");
             let message = need(args, "message")?;
             let projects = mac.projects().await;
+            if canvas.trim().is_empty() && arg(args, "project").is_none() {
+                return Err(format!("Name the design canvas this is about, or, when the work has no design, the project it is for. Lantern's projects: {}.", projects.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")));
+            }
             let folder = match arg(args, "project") {
                 None => None,
                 Some(p) => {
@@ -211,7 +219,12 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                     Some(found.ok_or_else(|| format!("Lantern has no project called \"{p}\". Its projects: {}.", projects.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")))?)
                 }
             };
-            let r = store.propose(Kind::Send, canvas, title, message, folder, grant, now)?;
+            let title = match arg(args, "canvas_title") {
+                Some(t) => t.to_string(),
+                None if canvas.trim().is_empty() => format!("Work for {}", folder.as_deref().map(|f| name_of(&projects, f)).unwrap_or_default()),
+                None => canvas.to_string(),
+            };
+            let r = store.propose(Kind::Send, canvas, &title, message, folder, grant, now)?;
             let mut v = request_view(&r, &projects);
             v["note"] = json!("Waiting for the user to tap Run in Lantern (on the Mac or the phone). Call check with this id to follow it.");
             Ok(v)
@@ -224,7 +237,7 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
         "read_outbox" => {
             let items = store.outbox(arg(args, "canvas"), arg(args, "after"), 30);
             Ok(json!({"items": items.iter().map(|o| {
-                let mut v = json!({"id": o.id, "kind": o.kind, "canvas": o.canvas, "chat": o.chat_title, "text": o.text, "at_ms": o.at});
+                let mut v = json!({"id": o.id, "kind": o.kind, "canvas": shown(&o.canvas), "chat": o.chat_title, "text": o.text, "at_ms": o.at});
                 if let Some(p) = &o.preview {
                     v["preview_url"] = json!(p);
                 }
@@ -295,6 +308,19 @@ mod tests {
         assert!(bad["content"][0]["text"].as_str().unwrap().contains("rayak, lantern"));
         assert_eq!(tool(&s, "send_to_lantern", json!({"canvas": "x"})).await["isError"], true);
         assert_eq!(tool(&s, "check", json!({"id": "nope"})).await["isError"], true);
+    }
+
+    #[tokio::test]
+    async fn work_with_no_design_needs_a_project_and_shows_no_canvas() {
+        let s = Store::load(None);
+        let none = tool(&s, "send_to_lantern", json!({"message": "Make the header sticky"})).await;
+        assert_eq!(none["isError"], true);
+        assert!(none["content"][0]["text"].as_str().unwrap().contains("project"));
+        let r = tool(&s, "send_to_lantern", json!({"message": "Make the header sticky", "project": "rayak"})).await;
+        assert_eq!(r["isError"], false, "{r}");
+        let v = &r["structuredContent"];
+        assert_eq!((v["canvas"].clone(), v["project"].as_str()), (Value::Null, Some("rayak")));
+        assert!(matches!(&s.cards(100)[0], store::Card::Run { title, canvas, .. } if title == "Work for rayak" && canvas.is_empty()));
     }
 
     #[tokio::test]

@@ -85,14 +85,16 @@ function RunRow({ card, now, projects, onRun }: { card: Extract<WebCard, { kind:
       setBusy(false);
     });
   };
-  const where = card.answer ? `An answer for ${card.chat_title ?? "the chat that asked"}` : card.folder ? `From web Claude · ${folderName(card.folder)}` : "From web Claude · pick its project";
+  // Work with no design (an empty canvas) always names its project.
+  const noDesign = card.canvas === "" ? " · no design" : "";
+  const where = card.answer ? `An answer for ${card.chat_title ?? "the chat that asked"}` : card.folder ? `From web Claude · ${folderName(card.folder)}${noDesign}` : "From web Claude · pick its project";
   const link = canvasLink(card.canvas);
   return (
     <li className="inbox-row web-card">
       <span className="node-dot waiting" aria-hidden />
       <span className="inbox-text">
         <span className="inbox-head">
-          <span className="inbox-title" title={card.canvas}>
+          <span className="inbox-title" title={card.canvas || undefined}>
             {card.title}
           </span>
           <span className="inbox-time">{elapsed(now - card.at)}</span>

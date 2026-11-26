@@ -64,6 +64,16 @@ pub fn canvas_key(canvas: &str) -> String {
     format!("title:{}", c.to_lowercase())
 }
 
+/// What a request is about: its canvas, or for work with no design (an empty canvas) its project. Work with no design
+/// never shares a chat or a link: each piece is a task of its own.
+pub fn request_key(canvas: &str, folder: Option<&str>) -> String {
+    if canvas.is_empty() {
+        format!("project:{}", folder.unwrap_or(""))
+    } else {
+        canvas_key(canvas)
+    }
+}
+
 /// Text from outside, checked: not blank, not too long, and no control characters other than line breaks and tabs.
 pub fn clean(what: &str, text: &str, max: usize) -> Result<String, String> {
     let t = text.trim();
@@ -239,6 +249,9 @@ struct PendingAuth {
     tries: u32,
     /// None: waiting for the user. Some(Ok(code)) or Some(Err(())) once they answered.
     answer: Option<Result<String, ()>>,
+    /// The hash of the secret in the cookie of the browser that opened the sign-in page: only that browser sees the code
+    /// and gets the way back to claude.ai.
+    browser: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -425,7 +438,7 @@ impl Store {
             if live.auths.values().filter(|a| a.answer.is_none()).count() >= AUTHS_WAITING_MAX {
                 return Err("Too many sign-ins are waiting in Lantern already. Answer those first.".into());
             }
-            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, code: match_code(), tries: 0, answer: None });
+            live.auths.insert(id.clone(), PendingAuth { client, redirect_uri: redirect_uri.into(), state: state.map(String::from), challenge: challenge.into(), created_at: now, code: match_code(), tries: 0, answer: None, browser: None });
         }
         self.changed();
         Ok(id)
@@ -578,14 +591,22 @@ impl Store {
         self.live.lock().unwrap().slots.get(slot).cloned()
     }
 
-    /// Web Claude asks for something: it waits for the user's Run. `folder` was checked against the Mac's projects.
+    /// Web Claude asks for something: it waits for the user's Run. `folder` was checked against the Mac's projects. An empty
+    /// `canvas` is work with no design, which must name its project.
     #[allow(clippy::too_many_arguments)]
     pub fn propose(&self, kind: Kind, canvas: &str, title: &str, message: &str, folder: Option<String>, grant: &str, now: u64) -> Result<Request, String> {
-        let canvas = clean("canvas", canvas, CANVAS_MAX)?;
+        let canvas = if canvas.trim().is_empty() {
+            // An answer goes back to the chat that asked, so it needs no project.
+            if folder.is_none() && matches!(kind, Kind::Send) {
+                return Err("Name the design canvas this is about, or the project when the work has no design.".into());
+            }
+            String::new()
+        } else {
+            clean("canvas", canvas, CANVAS_MAX)?
+        };
         let title = clean("title", title, TITLE_MAX).unwrap_or_else(|_| cut(&canvas, TITLE_MAX));
         let message = clean("message", message, MESSAGE_MAX)?;
-        let key = canvas_key(&canvas);
-        let folder = folder.or_else(|| self.link_of(&key).map(|l| l.folder));
+        let folder = if canvas.is_empty() { folder } else { folder.or_else(|| self.link_of(&canvas_key(&canvas)).map(|l| l.folder)) };
         let chat_title = match &kind {
             Kind::Answer { question } => self.saved.lock().unwrap().outbox.iter().find(|o| &o.id == question).and_then(|o| o.chat_title.clone()),
             Kind::Send => None,
@@ -633,19 +654,22 @@ impl Store {
                 s.requests[at].status = Status::Declined;
                 return Ok(None);
             }
-            let key = canvas_key(&s.requests[at].canvas);
+            let designless = s.requests[at].canvas.is_empty();
+            let key = request_key(&s.requests[at].canvas, s.requests[at].folder.as_deref());
             let question = match &s.requests[at].kind {
                 Kind::Answer { question } => Some(question.clone()),
                 Kind::Send => None,
             };
             let asked = s.requests[at].folder.clone();
             let folder = folder.or_else(|| asked.clone());
-            let target = match live_slot(s, &key, question.as_deref()) {
+            // Work with no design goes to a new chat, unless it answers a question (then to the chat that asked).
+            let slot = if designless && question.is_none() { None } else { live_slot(s, &key, question.as_deref()) };
+            let target = match slot {
                 // A chat already on this canvas takes it, unless the user picked another project for it.
                 Some(slot) if folder.is_none() || folder == asked || s.links.iter().any(|l| l.key == key && Some(&l.folder) == folder.as_ref()) => Target::Chat(slot),
                 _ => Target::NewChat(folder.clone().ok_or("Pick the project this canvas belongs to.")?),
             };
-            if let Some(f) = &folder {
+            if let Some(f) = folder.as_ref().filter(|_| !designless) {
                 let (canvas, title) = (s.requests[at].canvas.clone(), s.requests[at].title.clone());
                 match s.links.iter_mut().find(|l| l.key == key) {
                     Some(l) => l.folder = f.clone(),
@@ -674,7 +698,7 @@ impl Store {
             let r = s.requests.iter_mut().find(|r| r.id == request)?;
             r.slot = Some(slot.into());
             r.chat_title = chat_title.or(r.chat_title.take());
-            Some(canvas_key(&r.canvas))
+            Some(request_key(&r.canvas, r.folder.as_deref()))
         });
         if let Some(key) = key {
             let mut live = self.live.lock().unwrap();
@@ -739,9 +763,9 @@ impl Store {
     /// A chat leaves a question or a note for web Claude. Only a chat working on a canvas can.
     pub fn chat_post(&self, slot: &str, chat_title: Option<String>, kind: OutKind, text: &str, preview: Option<&str>, now: u64) -> Result<OutItem, String> {
         // Only during a turn web Claude's work started: a later turn of the user's own in that chat sends nothing to the web.
-        let key = {
+        let (key, request) = {
             let live = self.live.lock().unwrap();
-            live.turns.contains_key(slot).then(|| live.slots.get(slot).cloned()).flatten()
+            live.turns.get(slot).and_then(|t| Some((live.slots.get(slot)?.clone(), t.request.clone())))
         }
         .ok_or("Only a turn that web Claude's work started can leave web Claude a note or a question, and this isn't one.")?;
         let text = clean("text", text, MESSAGE_MAX)?;
@@ -751,7 +775,7 @@ impl Store {
             None => None,
         };
         let item = self.edit(|s| {
-            let (canvas, title) = s.requests.iter().rev().find(|r| canvas_key(&r.canvas) == key).map(|r| (r.canvas.clone(), r.title.clone())).or_else(|| s.links.iter().find(|l| l.key == key).map(|l| (l.canvas.clone(), l.title.clone()))).unwrap_or((key.clone(), key.clone()));
+            let (canvas, title) = s.requests.iter().find(|r| r.id == request).map(|r| (r.canvas.clone(), r.title.clone())).or_else(|| s.links.iter().find(|l| l.key == key).map(|l| (l.canvas.clone(), l.title.clone()))).unwrap_or((key.clone(), key.clone()));
             let item = OutItem { id: random_token(9), canvas, title, kind, text, preview, chat_title, at: now, answered: false, slot: Some(slot.into()) };
             push_out(s, item.clone());
             item
@@ -811,6 +835,21 @@ impl Store {
     pub fn auth_code(&self, id: &str) -> Option<(String, String)> {
         self.live.lock().unwrap().auths.get(id).filter(|a| a.answer.is_none()).map(|a| (a.code.clone(), a.client.name.clone()))
     }
+
+    /// Ties sign-in `id` to the browser that opened its page: returns the secret for that browser's cookie (once).
+    pub fn bind_browser(&self, id: &str) -> Option<String> {
+        let mut live = self.live.lock().unwrap();
+        let auth = live.auths.get_mut(id).filter(|a| a.browser.is_none())?;
+        let secret = random_token(24);
+        auth.browser = Some(hash(&secret));
+        Some(secret)
+    }
+
+    /// The browser asking holds sign-in `id`'s cookie.
+    pub fn browser_is(&self, id: &str, secret: Option<&str>) -> bool {
+        let Some(secret) = secret else { return false };
+        self.live.lock().unwrap().auths.get(id).and_then(|a| a.browser.as_ref()).is_some_and(|h| *h == hash(secret))
+    }
 }
 
 fn push_out(s: &mut Saved, item: OutItem) {
@@ -822,9 +861,11 @@ fn push_out(s: &mut Saved, item: OutItem) {
 /// The message a chat gets: what web Claude asked, said to come from it, with the canvas to read and how to answer.
 pub fn framed(r: &Request) -> String {
     let link = if r.canvas.starts_with("https://") { format!(" ({})", r.canvas) } else { String::new() };
-    let intro = match r.kind {
-        Kind::Send => format!("[Web Claude sent this about the design canvas \"{}\"{link}. The user tapped Run in Lantern.]", r.title),
-        Kind::Answer { .. } => format!("[Web Claude answered your question about the design canvas \"{}\"{link}. The user tapped Run in Lantern.]", r.title),
+    let intro = match (&r.kind, r.canvas.is_empty()) {
+        (Kind::Send, false) => format!("[Web Claude sent this about the design canvas \"{}\"{link}. The user tapped Run in Lantern.]", r.title),
+        (Kind::Answer { .. }, false) => format!("[Web Claude answered your question about the design canvas \"{}\"{link}. The user tapped Run in Lantern.]", r.title),
+        (Kind::Send, true) => "[Web Claude sent this work for this project; it isn't about a design canvas, so don't look for one. The user tapped Run in Lantern.]".into(),
+        (Kind::Answer { .. }, true) => "[Web Claude answered your question. The user tapped Run in Lantern.]".into(),
     };
     let read = if link.is_empty() { "" } else { " Read the canvas with your Artifact tool when you need the design itself." };
     format!("{intro}\n\n{}\n\n[When you're done, your last message goes back to web Claude on its own.{read} To ask web Claude something, use mcp__lantern__web_ask; to send it a note or a preview link (an artifact you published), use mcp__lantern__web_note.]", r.message)
@@ -972,9 +1013,27 @@ mod tests {
 
     #[test]
     fn canvases_are_the_same_by_link_or_by_title_in_any_case() {
-        assert_eq!(canvas_key("https://claude.ai/artifact/MJNCsnh1bNKR6xmbMNQxcm"), "artifact:MJNCsnh1bNKR6xmbMNQxcm");
-        assert_eq!(canvas_key(" claude.ai/artifact/MJNCsnh1bNKR6xmbMNQxcm?x=1 "), "artifact:MJNCsnh1bNKR6xmbMNQxcm");
+        assert_eq!(canvas_key("https://claude.ai/artifact/sample123"), "artifact:sample123");
+        assert_eq!(canvas_key(" claude.ai/artifact/sample123?x=1 "), "artifact:sample123");
         assert_eq!(canvas_key("Rayak — Grocery"), canvas_key("rayak — grocery"));
+    }
+
+    #[test]
+    fn work_with_no_design_names_its_project_starts_its_own_chat_and_links_nothing() {
+        let s = store();
+        assert!(s.propose(Kind::Send, "", "x", "Make the header sticky", None, "g", 10).is_err(), "no design and no project");
+        let r = sent(&s, "", Some("/p"));
+        assert_eq!((r.canvas.as_str(), r.folder.as_deref()), ("", Some("/p")));
+        let a = s.decide_run(&r.id, true, None).unwrap().unwrap();
+        assert_eq!(a.target, Target::NewChat("/p".into()));
+        assert!(a.text.contains("isn't about a design canvas") && !a.text.contains("Artifact tool"), "{}", a.text);
+        s.started(&r.id, "slot-1", None);
+        assert!(s.links().is_empty(), "no canvas to remember a project for");
+        // Another piece of work for the same project is another task: it gets a chat of its own.
+        let r2 = sent(&s, "", Some("/p"));
+        assert_eq!(s.decide_run(&r2.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()));
+        // While it works, its chat can still write to web Claude.
+        assert!(s.chat_post("slot-1", None, OutKind::Note, "Preview is up", None, 11).is_ok());
     }
 
     fn sent(s: &Store, canvas: &str, folder: Option<&str>) -> Request {
