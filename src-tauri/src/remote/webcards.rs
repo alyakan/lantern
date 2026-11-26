@@ -4,9 +4,9 @@
 use super::protocol::RemoteWebCard;
 use std::sync::Mutex;
 
-/// The most cards kept (the connector lets no more than ten wait), and the longest message a phone is sent.
+/// The most cards kept (the connector lets no more than ten wait). Each message goes whole (the connector takes no more than 20,000
+/// characters): a Run on the phone runs exactly what the phone showed.
 const CARDS_MAX: usize = 20;
-const MESSAGE_MAX: usize = 4_000;
 
 #[derive(Default)]
 struct Held {
@@ -21,18 +21,10 @@ pub struct WebBoard {
     held: Mutex<Held>,
 }
 
-fn cut(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(max.saturating_sub(1)).collect::<String>())
-    }
-}
-
 impl WebBoard {
     /// Takes in the cards waiting now, in place of those before.
     pub fn set(&self, cards: Vec<RemoteWebCard>) {
-        let cards: Vec<RemoteWebCard> = cards.into_iter().take(CARDS_MAX).map(|c| RemoteWebCard { message: cut(&c.message, MESSAGE_MAX), ..c }).collect();
+        let cards: Vec<RemoteWebCard> = cards.into_iter().take(CARDS_MAX).collect();
         let mut held = self.held.lock().unwrap();
         if held.cards != cards {
             held.version += 1;
@@ -61,15 +53,16 @@ mod tests {
     }
 
     #[test]
-    fn the_version_moves_only_when_the_cards_change_and_long_messages_are_cut() {
+    fn the_version_moves_only_when_the_cards_change_and_messages_go_whole() {
         let b = WebBoard::default();
         assert_eq!(b.phone().1, 0);
         b.set(vec![card("a", "m")]);
         b.set(vec![card("a", "m")]);
         assert_eq!(b.phone().1, 1);
         assert!(b.waits("a") && !b.waits("b"));
-        b.set(vec![card("b", &"x".repeat(MESSAGE_MAX + 5))]);
+        // What a Run runs is what the phone was shown: never a cut message.
+        b.set(vec![card("b", &"x".repeat(crate::webclaude::store::MESSAGE_MAX))]);
         let (cards, version) = b.phone();
-        assert_eq!((version, cards[0].message.chars().count()), (2, MESSAGE_MAX));
+        assert_eq!((version, cards[0].message.chars().count()), (2, crate::webclaude::store::MESSAGE_MAX));
     }
 }
