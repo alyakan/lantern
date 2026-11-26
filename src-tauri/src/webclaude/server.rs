@@ -38,7 +38,8 @@ impl Reply {
             headers: vec![
                 ("content-type", "text/html; charset=utf-8".into()),
                 ("cache-control", "no-store".into()),
-                ("content-security-policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'".into()),
+                // No script: the sign-in page moves on by reloading itself.
+                ("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'".into()),
                 ("x-frame-options", "DENY".into()),
                 ("referrer-policy", "no-referrer".into()),
             ],
@@ -98,7 +99,12 @@ fn base(ctx: &Ctx, host: Option<&str>) -> String {
 }
 
 fn page(title: &str, body: &str) -> String {
-    format!(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>
+    page_with(title, "", body)
+}
+
+/// `head`: more of the page's head, as HTML (already escaped).
+fn page_with(title: &str, head: &str, body: &str) -> String {
+    format!(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{head}<title>{title}</title><style>
 :root{{color-scheme:light dark;--bg:#f7f6f3;--fg:#1d1c1a;--muted:#6b6862;--card:#fff;--line:#e4e1da;--accent:#c2410c}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#191817;--fg:#ecebe7;--muted:#a29f98;--card:#232220;--line:#363431;--accent:#fb923c}}}}
 body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
@@ -107,17 +113,14 @@ h1{{font-size:20px;margin:0 0 8px}}p{{margin:8px 0;color:var(--muted)}}.code{{fo
 </style></head><body><main>{body}</main></body></html>"#)
 }
 
+/// The sign-in page. It moves on with no script, which a browser or an extension may block: it reloads itself from
+/// /authorize/wait, which shows it again until the user answers, then sends the browser back to claude.ai.
 fn waiting_page(id: &str, client: &str, code: &str) -> String {
-    page("Connect to Lantern", &format!(r#"<h1>Allow {client} in Lantern</h1>
+    let refresh = format!(r#"<meta http-equiv="refresh" content="2;url=/authorize/wait?id={}">"#, esc(id));
+    page_with("Connect to Lantern", &refresh, &format!(r#"<h1>Allow {client} in Lantern</h1>
 <p id="say"><span class="dot"></span>Lantern on your Mac shows a card asking whether {client} may connect. Type this code on that card, then Allow:</p>
 <p class="code">{code}</p>
-<p>This page moves on by itself once you answer.</p>
-<script>
-(function(){{var id="{id}";function tick(){{fetch("/authorize/wait?id="+encodeURIComponent(id),{{cache:"no-store"}}).then(function(r){{return r.json()}}).then(function(j){{
-if(j.state==="done"){{location.replace(j.redirect);return}}
-if(j.state==="gone"){{document.getElementById("say").textContent="This sign-in ended. Start again from claude.ai.";return}}
-setTimeout(tick,1500)}}).catch(function(){{setTimeout(tick,3000)}})}}tick()}})();
-</script>"#, client = esc(client), id = esc(id), code = esc(code)))
+<p>This page moves on by itself once you answer.</p>"#, client = esc(client), code = esc(code)))
 }
 
 fn error_page(why: &str) -> Reply {
@@ -190,10 +193,14 @@ pub async fn route(ctx: &Ctx, method: &str, path: &str, query: &str, headers: &H
         }
         ("GET", "/authorize/wait") => {
             let q = parse_query(query);
-            match ctx.store.auth_status(q.get("id").map(String::as_str).unwrap_or(""), now) {
-                AuthStatus::Waiting => Reply::json(200, json!({"state": "waiting"})),
-                AuthStatus::Redirect(url) => Reply::json(200, json!({"state": "done", "redirect": url})),
-                AuthStatus::Gone => Reply::json(404, json!({"state": "gone"})),
+            let id = q.get("id").map(String::as_str).unwrap_or("");
+            match ctx.store.auth_status(id, now) {
+                AuthStatus::Waiting => match ctx.store.auth_code(id) {
+                    Some((code, client)) => Reply::html(200, waiting_page(id, &client, &code)),
+                    None => error_page("This sign-in ended. Start again from claude.ai."),
+                },
+                AuthStatus::Redirect(url) => Reply { status: 302, headers: vec![("location", url), ("cache-control", "no-store".into()), ("referrer-policy", "no-referrer".into())], body: vec![] },
+                AuthStatus::Gone => error_page("This sign-in ended. Start again from claude.ai."),
             }
         }
         ("POST", "/token") => {
@@ -336,21 +343,34 @@ mod tests {
         let q = format!("response_type=code&client_id={client}&redirect_uri={}&code_challenge={}&code_challenge_method=S256&state=s1", cb.replace(':', "%3A").replace('/', "%2F"), challenge_of(&verifier));
         let page = route(&c, "GET", "/authorize", &q, &h(&[]), b"").await;
         assert_eq!(page.status, 200);
-        let html = String::from_utf8(page.body).unwrap();
+        let html = String::from_utf8(page.body.clone()).unwrap();
         assert!(html.contains("Allow Claude in Lantern"));
         let id = match &c.store.cards(now_ms())[0] {
             crate::webclaude::store::Card::Connect { id, .. } => id.clone(),
             _ => panic!(),
         };
+        // The page moves on with no script (a browser or extension that blocks scripts would leave it stuck): it reloads
+        // itself from /authorize/wait, and its policy lets no script run at all.
+        assert!(html.contains(&format!(r#"<meta http-equiv="refresh" content="2;url=/authorize/wait?id={id}">"#)), "{html}");
+        assert!(!html.contains("<script"));
+        let csp = &page.headers.iter().find(|(k, _)| *k == "content-security-policy").unwrap().1;
+        assert!(csp.starts_with("default-src 'none'") && !csp.contains("script-src"), "{csp}");
         let wait = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
-        assert_eq!(body(&wait)["state"], "waiting");
+        assert_eq!(wait.status, 200);
         // The code is on the page only (the card doesn't carry it): the user types what the page shows.
         let code = c.store.auth_code(&id).unwrap().0;
         assert!(html.contains(&format!("<p class=\"code\">{code}</p>")), "{html}");
+        assert!(String::from_utf8_lossy(&wait.body).contains(&format!("<p class=\"code\">{code}</p>")));
         assert!(!serde_json::to_string(&c.store.cards(now_ms())).unwrap().contains(&code));
         c.store.decide_auth(&id, true, Some(&code), now_ms()).unwrap();
-        let done = body(&route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await);
-        let redirect = done["redirect"].as_str().unwrap();
+        let done = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
+        assert_eq!(done.status, 302);
+        let redirect = done.headers.iter().find(|(k, _)| *k == "location").unwrap().1.clone();
+        assert!(redirect.starts_with(cb) && redirect.contains("state=s1"), "{redirect}");
+        // The redirect is handed out once: a reload after it says to start again.
+        let again = route(&c, "GET", "/authorize/wait", &format!("id={id}"), &h(&[]), b"").await;
+        assert_eq!(again.status, 400);
+        assert!(String::from_utf8_lossy(&again.body).contains("Start again from claude.ai"));
         let code = redirect.split("code=").nth(1).unwrap().split('&').next().unwrap();
         let form = format!("grant_type=authorization_code&code={code}&client_id={client}&redirect_uri={}&code_verifier={verifier}", cb.replace(':', "%3A").replace('/', "%2F"));
         let tok = route(&c, "POST", "/token", "", &h(&[]), form.as_bytes()).await;
