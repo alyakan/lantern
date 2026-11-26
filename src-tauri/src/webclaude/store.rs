@@ -433,10 +433,11 @@ impl Store {
         self.changed();
     }
 
-    /// The requests that wait for a Run and that Lantern may run on its own now (auto-run is on), oldest first.
+    /// The requests that wait for a Run and that Lantern may run on its own now (auto-run and the connector are on), oldest first.
+    /// With the connector off nothing of web Claude's runs on its own, whatever waits from before.
     pub fn auto_runnable(&self) -> Vec<String> {
         let saved = self.saved.lock().unwrap();
-        if !saved.auto_run {
+        if !saved.auto_run || !saved.enabled {
             return vec![];
         }
         saved.requests.iter().filter(|r| r.status == Status::Waiting).map(|r| r.id.clone()).collect()
@@ -1224,6 +1225,10 @@ mod tests {
         let s = Store::load(Some(path.clone()));
         let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
         assert!(!s.auto_run() && s.auto_runnable().is_empty(), "off by default: everything waits for Run");
+        s.set_auto_run(true);
+        assert!(s.auto_runnable().is_empty(), "nothing runs on its own while the connector is off");
+        s.set_auto_run(false);
+        s.set_enabled(true);
         let changes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = changes.clone();
         s.on_change(std::sync::Arc::new(move || {
