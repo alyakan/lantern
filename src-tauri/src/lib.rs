@@ -644,7 +644,9 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
                 Some(folder) => {
                     let auto = web.store.new_chats_auto();
                     let permissions = if auto { remote::protocol::RemotePermissions::Auto } else { remote::protocol::RemotePermissions::Ask };
-                    request_new_chat(app, folder, action.text.clone(), SENT_BY_WEB_CLAUDE.into(), permissions, None, remote::protocol::RemoteWorkflow::Chat, None, vec![], remote::gateway::NewChatModel::default()).await
+                    // On Claude, whatever the project's own provider is, and on the project's own Claude account (the window picks it).
+                    let model = remote::gateway::NewChatModel { web: true, ..Default::default() };
+                    request_new_chat(app, folder, action.text.clone(), SENT_BY_WEB_CLAUDE.into(), permissions, None, remote::protocol::RemoteWorkflow::Chat, Some("claude".into()), vec![], model).await
                 }
                 None => Err("The chat for this canvas was closed, and the canvas has no project to start a new one in.".into()),
             }
@@ -3745,7 +3747,7 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String, by: Str
     // window starts the chat with nothing in it.
     let hold_first = !images.is_empty() || text.trim().is_empty();
     let listed_in = folder.clone();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first, model: model.model, effort: model.effort, account: model.account };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text: text.clone(), permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider, hold_first, model: model.model, effort: model.effort, account: model.account, web: model.web };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());

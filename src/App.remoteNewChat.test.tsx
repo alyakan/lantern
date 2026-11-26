@@ -331,6 +331,66 @@ describe("a chat a paired phone starts on an endpoint", () => {
   });
 });
 
+describe("a chat web Claude's work starts", () => {
+  const started = (calls: Call[]) => sessions(calls)[sessions(calls).length - 1]?.[1] as { claudePath: string; settings: Record<string, unknown> };
+  /** The project runs on Codex, on the "Work" Claude account when it is on Claude. */
+  const project = () => {
+    window.history.replaceState({}, "", "/?accounts=1");
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
+    localStorage.setItem("settings.accountByFolder", JSON.stringify({ [FOLDER]: "work" }));
+  };
+
+  it("runs on Claude, on the project's own Claude account, as a chat started on the Mac would", async () => {
+    project();
+    const calls = await launch({}, { providers: true });
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "claude", web: true }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).settings.provider).toBeUndefined();
+    expect(started(calls).settings.account).toBe("work");
+    expect(answers(calls)[0]).toMatchObject({ error: null });
+  });
+
+  it("is on the default login when the project has no account of its own", async () => {
+    window.history.replaceState({}, "", "/?accounts=1");
+    const calls = await launch({}, { providers: true });
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "claude", web: true }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).settings.account).toBeUndefined();
+  });
+
+  /** Web Claude's chats start on Auto by Settings › Web Claude's own switch, not the phone's. */
+  const webView = (auto: boolean) => ({ webclaude_view: { enabled: true, listening: true, address: null, error: null, new_chats_auto: auto, connections: [], links: [] } });
+
+  it("starts on Auto when Web Claude's setting says so, though phones may not use Auto", async () => {
+    const calls = await launch({ ...settingsSaying(false), ...webView(true) });
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "claude", web: true, permissions: "auto" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect((started(calls).settings as { mode: string }).mode).toBe("auto");
+    expect(answers(calls)[0]).toMatchObject({ error: null });
+  });
+
+  it("starts nothing on Auto once Web Claude's setting is off, whatever the request says", async () => {
+    const calls = await launch({ ...settingsSaying(true), ...webView(false) });
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "claude", web: true, permissions: "auto" }));
+    await waitFor(() => expect(answers(calls)).toHaveLength(1));
+    expect(sessions(calls).length).toBe(before);
+    expect(answers(calls)[0]).toMatchObject({ slot: null });
+  });
+
+  it("leaves a phone's chat on the default login, as before", async () => {
+    project();
+    const calls = await launch({}, { providers: true });
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "claude" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).settings.account).toBeUndefined();
+  });
+});
+
 describe("a chat a paired phone switches", () => {
   const firstSlot = (calls: Call[]) => String(sessions(calls)[0]?.[1]?.slot);
 

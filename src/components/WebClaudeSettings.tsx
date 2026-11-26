@@ -107,7 +107,7 @@ export function WebClaudeSettings({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.new_chats_auto} onChange={(e) => api.webclaudeSetAuto(e.target.checked).then(setView, (err) => setError(errText(err)))} />
               <span>Start web Claude's chats on Auto</span>
             </label>
-            <SettingsHint>When you Run work for a canvas with no chat yet, Lantern starts one in its project. On Auto, a classifier approves most of what it does; off, it starts on Ask and asks you for each change. A chat already working on the canvas keeps its own setting.</SettingsHint>
+            <SettingsHint>When you Run work for a canvas with no chat yet, Lantern starts one in its project, on Claude and the project's own Claude account (Settings › Accounts), whatever provider the project usually runs on. On Auto, a classifier approves most of what it does; off, it starts on Ask and asks you for each change. A chat already working on the canvas keeps its own setting.</SettingsHint>
           </section>
           <section className="general-section" aria-labelledby="web-connections">
             <h3 id="web-connections" className="general-title">

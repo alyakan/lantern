@@ -30,6 +30,8 @@ pub struct NewChatModel {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub account: Option<String>,
+    /// Not a phone's: web Claude's work (see remote::NewChatRequest::web).
+    pub web: bool,
 }
 
 /// How long a phone has to finish its handshake and say hello.
@@ -1161,7 +1163,7 @@ impl<'a> Session<'a> {
                         // waiting on, and it has a limit of its own (allow_new_chat).
                         Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => {
                             let device = self.device.clone();
-                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }, start_id).await) }));
+                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account, web: false }, start_id).await) }));
                         }
                         request => {
                             let answer = self.handle(link, channel, request).await;
@@ -1458,7 +1460,7 @@ impl<'a> Session<'a> {
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
-            Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account }, start_id).await,
+            Request::NewChat { project, text, permissions, preset, workflow, provider, images, model, effort, account, start_id } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider, images, NewChatModel { model, effort, account, web: false }, start_id).await,
             Request::SetWorkflow { slot, workflow, when } => {
                 if workflow == protocol::RemoteWorkflow::Team {
                     return Err(TEAM_ON_MAC.into());
@@ -3078,7 +3080,7 @@ pub(crate) mod tests {
         assert!(p.ask(ask(Some("claude"), None, None, Some("low"))).await.1.is_none());
         assert!(p.ask(ask(Some("gateway:ollama"), None, Some("qwen3"), None)).await.1.is_none());
         assert!(p.ask(ask(Some("claude"), Some("balanced"), None, None)).await.1.is_none());
-        let model = |m: Option<&str>, e: Option<&str>| NewChatModel { model: m.map(String::from), effort: e.map(String::from), account: None };
+        let model = |m: Option<&str>, e: Option<&str>| NewChatModel { model: m.map(String::from), effort: e.map(String::from), account: None, web: false };
         assert_eq!(*r.host.started_model.lock().unwrap(), vec![model(Some("opus"), Some("max")), model(None, Some("low")), model(Some("qwen3"), None), model(None, None)]);
     }
 

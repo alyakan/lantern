@@ -209,6 +209,8 @@ export interface RemoteNewChat {
   effort?: string | null;
   /** One of the Claude accounts the window listed, or null (missing too) for the default login. */
   account?: string | null;
+  /** Web Claude's work (the user tapped Run on its card): on the project's own Claude account, and Auto by Settings › Web Claude. */
+  web?: boolean;
 }
 
 /**

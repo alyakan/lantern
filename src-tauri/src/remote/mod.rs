@@ -98,6 +98,9 @@ pub struct NewChatRequest {
     /// The id of one of the Claude accounts the window listed, or None for the default login (the window's own choice of account for a
     /// project never applies to a chat a phone starts).
     pub account: Option<String>,
+    /// Web Claude's work, Run by the user: the window starts it on the project's own Claude account, and lets it be on Auto by
+    /// Settings › Web Claude (not the phone's setting).
+    pub web: bool,
 }
 
 /// What the window is asked when a phone asks for a step of the user's work (a button of Your work). The gateway has checked the item

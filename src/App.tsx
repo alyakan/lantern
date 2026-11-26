@@ -1134,9 +1134,11 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const phoneModels = windowModels(phoneProviders, claudeOptions, providers.list);
   // The Claude accounts a phone may choose besides the default login (Settings → Accounts).
   const phoneAccounts: WindowAccount[] = accounts.map((a) => ({ id: a.id, name: a.name }));
-  const remoteContext = async (): Promise<RemoteContext> => {
-    const view = await api.remoteSettings().catch(() => null);
-    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders, models: phoneModels, accounts: phoneAccounts };
+  // `web`: for web Claude's work, whose chats may start on Auto by Settings › Web Claude's own switch (read here, never from the request).
+  const remoteContext = async (web = false): Promise<RemoteContext> => {
+    const webView = web ? await api.webclaudeView().catch(() => null) : null;
+    const allowAuto = web ? webView?.enabled === true && webView.new_chats_auto === true : (await api.remoteSettings().catch(() => null))?.allow_phone_auto === true;
+    return { allowAuto, presetIds: presets.map((h) => h.id), providers: phoneProviders, models: phoneModels, accounts: phoneAccounts };
   };
   // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask or Auto, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
@@ -1144,7 +1146,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   const newChatRef = useRef<(r: RemoteNewChat) => void>(() => {});
   newChatRef.current = (r) => {
     const fail = (why: string) => void api.remoteNewChatDone(r.id, null, why).catch(() => {});
-    Promise.all([api.recentFolders(), remoteContext()]).then(
+    Promise.all([api.recentFolders(), remoteContext(r.web === true)]).then(
       ([recent, ctx]) => {
         const openFolders = Object.values(chats.slots).map((s) => s.folder);
         // No message is fine when the backend holds the first one (a phone that sends it itself once the chat is there).
@@ -1164,10 +1166,13 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
         if (badAccount) return fail(badAccount);
         // A provider that isn't there any more: said now, not after the chat is made with no agent to start (startIn stops there).
         if (!binaryOf(providerId)) return fail(isGateway(providerId) ? `${providerName(providerId)} isn't set up any more on your Mac.` : `${providerName(providerId)} isn't installed on your Mac.`);
+        // Web Claude's work runs where a chat the user starts on the Mac would: on the project's own Claude account (a phone's chat
+        // stays on the default login unless it named one).
+        const account = r.web === true && providerId === CLAUDE ? (accountByFolder[r.folder] ?? null) : (r.account ?? null);
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
         // (With pictures, the backend sends the first message itself once the chat is ready: they never come through here.)
-        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat", model: r.model ?? null, effort: r.effort ?? null }, providerId, r.account ?? null);
+        startIn(slot, r.folder, false, false, r.hold_first ? undefined : r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat", model: r.model ?? null, effort: r.effort ?? null }, providerId, account);
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
