@@ -822,14 +822,11 @@ impl Store {
         self.changed();
     }
 
-    /// A chat's event. In a chat that works on a canvas every turn is followed: it keeps its last words and the files it
+    /// A chat's event (a /clear reaches `forget_slot` through the conversations store, as a switch does). In a chat that works on a canvas every turn is followed: it keeps its last words and the files it
     /// changed, and when it ends that goes, as a reply, to the outbox (and to the request, for a turn web Claude's Run
     /// started). A turn the user starts in that chat themselves is followed from their message on.
     pub fn on_event(&self, slot: &str, event: &crate::ui_event::UiEvent, now: u64) {
         use crate::ui_event::UiEvent;
-        if matches!(event, UiEvent::ConversationReset) {
-            return self.forget_slot(slot);
-        }
         let done = {
             let mut live = self.live.lock().unwrap();
             if let UiEvent::UserText { text, sent_by, .. } = event {
@@ -1337,16 +1334,15 @@ mod tests {
 
     #[test]
     fn a_chat_that_moves_on_to_another_conversation_or_is_cleared_is_no_longer_web_claude_s() {
-        for how in ["switch", "clear"] {
+        // (A /clear reaches forget_slot as a switch does: see conversations::Store::observe.)
+        {
+            let how = "switch";
             let s = store();
             let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
             s.decide_run(&r.id, true, None).unwrap();
             s.started(&r.id, "s1", None);
             let q = s.chat_post("s1", None, OutKind::Question, "16 or 20?", None, 1).unwrap();
-            match how {
-                "switch" => s.forget_slot("s1"),
-                _ => s.on_event("s1", &UiEvent::ConversationReset, 2),
-            }
+            s.forget_slot("s1");
             assert!(matches!(s.request(&r.id).unwrap().status, Status::Failed { .. }), "{how}");
             assert!(s.readable_chat(Some("https://claude.ai/artifact/abc"), None).is_err(), "{how}");
             assert!(s.readable_chat(None, Some(&r.id)).is_err(), "{how}");
@@ -1358,6 +1354,22 @@ mod tests {
             let ans = s.propose_answer(&q.id, "20", "g", 6).unwrap();
             assert_eq!(s.decide_run(&ans.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()), "{how}");
         }
+    }
+
+    #[test]
+    fn a_new_chat_s_own_start_after_its_run_doesn_t_end_web_claude_s_request() {
+        // The first Run after a restart starts a new chat (no chat is on the canvas yet): its start says the conversation was
+        // reset, after `started`. That isn't the chat moving on.
+        let s = store();
+        let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s7", None);
+        s.on_event("s7", &UiEvent::ConversationReset, 11);
+        s.on_event("s7", &user("[Web Claude sent this…]", Some("desktop")), 12);
+        s.on_event("s7", &UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "Done.".into() }, 13);
+        s.on_event("s7", &done(), 14);
+        let r = s.request(&r.id).unwrap();
+        assert_eq!((r.status, r.reply.as_deref()), (Status::Done, Some("Done.")));
     }
 
     #[test]

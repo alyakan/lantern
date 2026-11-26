@@ -207,6 +207,13 @@ impl Store {
     /// Called before publishing, including desktop user messages. Never retain streaming deltas,
     /// secrets, or account-wide usage. Completed events replay identically on either client.
     pub fn observe(&self, slot: &str, event: &mut UiEvent) {
+        // The agent cleared the conversation the chat holds (a /clear): whoever was tied to it lets go. A chat's start
+        // announces a reset too, but after `detach` and before `configure`, so it finds nothing here: a new chat's own
+        // start is no switch (it was taken for one, and web Claude's first request after a restart, which starts a new
+        // chat, failed as soon as that chat came up), and a new conversation in a chat that had one was told by `detach`.
+        if matches!(event, UiEvent::ConversationReset) && self.data.lock().unwrap().slots.contains_key(slot) {
+            self.switched(slot);
+        }
         let mut d = self.data.lock().unwrap();
         let Some(c) = d.slots.get_mut(slot) else { return };
         if let UiEvent::SessionStarted { session_id, .. } = event {
@@ -255,6 +262,12 @@ mod tests {
         assert_eq!(switched.lock().unwrap().len(), 2, "a new chat's own setup is no switch");
         store.attach("s2", store.get("aaaa-bbbb").unwrap());
         assert_eq!(switched.lock().unwrap().len(), 3);
+        // A /clear in a chat that holds a conversation is one; a chat's own start (which resets before it is configured) isn't.
+        store.observe("s2", &mut UiEvent::ConversationReset);
+        assert_eq!(switched.lock().unwrap().len(), 4);
+        store.observe("s3", &mut UiEvent::ConversationReset);
+        store.attach("s3", Conversation { id: String::new(), native_id: String::new(), model: None, effort: None, folder: "/p".into(), provider: ProviderId::Claude, endpoint: None, handoff: None, updated_ms: 0, events: vec![] });
+        assert_eq!(switched.lock().unwrap().len(), 4, "a new chat starting is no switch");
         assert_eq!(restored.events.last().unwrap()["session_id"], "aaaa-bbbb");
     }
 
