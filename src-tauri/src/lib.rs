@@ -713,13 +713,23 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
     let Some(action) = web.store.decide_run(id, run, folder)? else { return Ok(()) };
     let request_folder = web.store.request(&action.request).and_then(|r| r.folder);
     let open = |slot: &str| state.remote.hub.chat(slot).is_some();
-    let result = match &action.target {
-        webclaude::store::Target::Chat(slot) if open(slot) => send_user_message(app, &state, slot, &action.text, SENT_BY_WEB_CLAUDE, &[], true).await.map(|_| slot.clone()),
-        // The canvas's chat was closed since: a new chat in its project takes it.
-        webclaude::store::Target::Chat(_) | webclaude::store::Target::NewChat(_) => {
-            let folder = match &action.target {
+    // The chat holding the conversation that last worked on this (after a restart its slot is another): woken when asleep.
+    let holding = match &action.target {
+        webclaude::store::Target::Conversation { id, .. } => match state.remote.hub.chats().into_iter().find(|c| c.session_id.as_deref() == Some(id.as_str())) {
+            Some(c) => awake_for_web(app, &state, &c.slot).await.ok().map(|_| c.slot),
+            None => None,
+        },
+        _ => None,
+    };
+    let result = match (&action.target, holding) {
+        (_, Some(slot)) => send_user_message(app, &state, &slot, &action.text, SENT_BY_WEB_CLAUDE, &[], true).await.map(|_| slot),
+        (webclaude::store::Target::Chat(slot), None) if open(slot) => send_user_message(app, &state, slot, &action.text, SENT_BY_WEB_CLAUDE, &[], true).await.map(|_| slot.clone()),
+        // The canvas's chat was closed since (or wouldn't wake): a new chat in its project takes it.
+        (target, None) => {
+            let folder = match target {
                 webclaude::store::Target::NewChat(f) => Some(f.clone()),
-                _ => request_folder,
+                webclaude::store::Target::Conversation { folder, .. } => folder.clone().or(request_folder),
+                webclaude::store::Target::Chat(_) => request_folder,
             };
             match folder {
                 Some(folder) => {
@@ -743,6 +753,26 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
             Err(e)
         }
     }
+}
+
+/// How long web Claude's work waits for an asleep chat to wake before it goes to a new chat instead.
+const WEB_WAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The chat in `slot`, awake and with its agent running: an asleep one is woken (the window does it, as for a phone) and
+/// waited for.
+async fn awake_for_web(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), String> {
+    let running = || async { matches!(state.slots.get(slot), Ok(s) if s.session.lock().await.is_some()) };
+    if !state.remote.wakeable(slot) {
+        return if running().await { Ok(()) } else { Err("That chat isn't running.".into()) };
+    }
+    request_wake(app, state, slot)?;
+    tokio::time::timeout(WEB_WAKE_WAIT, async {
+        while state.remote.wakeable(slot) || !running().await {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .map_err(|_| "The chat didn't wake in time.".to_string())
 }
 
 /// The app, as the remote gateway needs it (see remote::gateway::Host): what a paired phone may ask, done the way the

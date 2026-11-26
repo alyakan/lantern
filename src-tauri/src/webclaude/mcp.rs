@@ -30,7 +30,7 @@ pub trait Mac: Send + Sync + 'static {
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't start a message to you, but wait holds your turn until it has something, so the user needn't come back to tell you Lantern finished: after send_to_lantern or answer, call wait with the id, and call it again (with the `after` it gives) while it says still_working; then carry on with what came back (send the next step, answer a question, or tell the user how it went). To follow a chat on your canvas that the user works in themselves, wait with the canvas. While a request waits for the user's Run, stop waiting after a few tries and tell the user it needs their Run. Look at the outbox too when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Work goes on in the chat already working on that canvas or project, which knows what was done and costs less than a new chat finding its way again; set new_chat only for work unrelated to what that chat has been doing. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't start a message to you, but wait holds your turn until it has something, so the user needn't come back to tell you Lantern finished: after send_to_lantern or answer, call wait with the id, and call it again (with the `after` it gives) while it says still_working; then carry on with what came back (send the next step, answer a question, or tell the user how it went). To follow a chat on your canvas that the user works in themselves, wait with the canvas. While a request waits for the user's Run, stop waiting after a few tries and tell the user it needs their Run. Look at the outbox too when the user asks what Lantern did or said.";
 
 /// How long one wait holds the call by default, and at most (seconds): claude.ai drops a tool call that takes too long.
 const WAIT_DEFAULT: u64 = 50;
@@ -53,14 +53,15 @@ fn tools() -> Value {
         },
         {
             "name": "send_to_lantern",
-            "description": "Send work to Lantern: about a design canvas, or for a project when there is no design. It shows the user a card and waits for their Run, unless they let web Claude's work run on its own (the answer says which). On Run, work on a canvas goes to the chat already working on that canvas, or a new chat in the canvas's project; work with no design always starts a new chat in its project. Returns an id: call check with it before saying how the work went or sending more about it.",
+            "description": "Send work to Lantern: about a design canvas, or for a project when there is no design. It shows the user a card and waits for their Run, unless they let web Claude's work run on its own (the answer says which). On Run, it goes on in the chat already working on that canvas (or, with no design, the project's chat web Claude used last), or a new chat in the project when there is none or new_chat is set. Returns an id: call check with it before saying how the work went or sending more about it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "canvas": {"type": "string", "description": "The canvas's claude.ai link (best), or its exact title. Leave it out when the work isn't about a design (then name the project); never put a project's name here."},
                     "canvas_title": {"type": "string", "description": "The canvas's title, for the user's card."},
                     "message": {"type": "string", "description": "What the chat should do or answer, complete on its own: the chat sees this message and the canvas, not this conversation."},
-                    "project": {"type": "string", "description": "The project's name from list_projects. Needed when there is no canvas. With a canvas, leave it out when the canvas is linked already, or to let the user pick."}
+                    "project": {"type": "string", "description": "The project's name from list_projects. Needed when there is no canvas. With a canvas, leave it out when the canvas is linked already, or to let the user pick."},
+                    "new_chat": {"type": "boolean", "description": "Start a chat of its own instead of going on in the chat already on this canvas or project. Only for work unrelated to what that chat has been doing: a follow-up costs less where the work was done."}
                 },
                 "required": ["message"]
             },
@@ -332,7 +333,8 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                 None if canvas.trim().is_empty() => format!("Work for {}", folder.as_deref().map(|f| name_of(&projects, f)).unwrap_or_default()),
                 None => canvas.to_string(),
             };
-            let r = store.propose(Kind::Send, canvas, &title, message, folder, grant, now)?;
+            let new_chat = args.get("new_chat").and_then(Value::as_bool).unwrap_or(false);
+            let r = store.propose_to(Kind::Send, canvas, &title, message, folder, new_chat, grant, now)?;
             let mut v = request_view(&r, &projects);
             v["note"] = json!(if store.auto_run() {
                 "Lantern runs this on its own (the user turned that on): it starts in a moment, unless it has no project to run in, which the user then picks. Call wait with this id to hear back when it's done."
@@ -453,6 +455,9 @@ mod tests {
         let v = &r["structuredContent"];
         assert_eq!((v["canvas"].clone(), v["project"].as_str()), (Value::Null, Some("rayak")));
         assert!(matches!(&s.cards(100)[0], store::Card::Run { title, canvas, .. } if title == "Work for rayak" && canvas.is_empty()));
+        assert!(!s.request(v["id"].as_str().unwrap()).unwrap().new_chat, "follow-ups go on in the project's chat");
+        let own = tool(&s, "send_to_lantern", json!({"message": "Something unrelated", "project": "rayak", "new_chat": true})).await;
+        assert!(s.request(own["structuredContent"]["id"].as_str().unwrap()).unwrap().new_chat);
     }
 
     #[tokio::test]

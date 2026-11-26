@@ -191,6 +191,9 @@ pub struct Request {
     /// Lantern ran it on its own (auto-run), not on the user's Run.
     #[serde(default)]
     pub auto: bool,
+    /// Web Claude asked for a chat of its own (unrelated work): it doesn't go on in the chat already on its canvas or project.
+    #[serde(default)]
+    pub new_chat: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,7 +233,7 @@ fn yes() -> bool {
 
 impl Default for Saved {
     fn default() -> Self {
-        Self { enabled: false, new_chats_auto: true, auto_run: false, clients: vec![], grants: vec![], links: vec![], requests: vec![], outbox: vec![] }
+        Self { enabled: false, new_chats_auto: true, auto_run: false, clients: vec![], grants: vec![], links: vec![], requests: vec![], outbox: vec![], conversations: HashMap::new() }
     }
 }
 
@@ -256,6 +259,10 @@ struct Saved {
     requests: Vec<Request>,
     #[serde(default)]
     outbox: Vec<OutItem>,
+    /// Canvas or project key → the conversation (Lantern's id) of the chat that last worked on it for web Claude: found
+    /// again after a restart (slots are only good while Lantern runs), so work there goes on in that chat.
+    #[serde(default)]
+    conversations: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +348,9 @@ pub enum AuthStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
     Chat(String),
+    /// The chat holding this conversation (Lantern's id), found by the app among its open chats (an asleep one is woken);
+    /// when none holds it, a new chat in the folder, as `NewChat`.
+    Conversation { id: String, folder: Option<String> },
     NewChat(String),
 }
 
@@ -673,6 +683,12 @@ impl Store {
     /// `canvas` is work with no design, which must name its project.
     #[allow(clippy::too_many_arguments)]
     pub fn propose(&self, kind: Kind, canvas: &str, title: &str, message: &str, folder: Option<String>, grant: &str, now: u64) -> Result<Request, String> {
+        self.propose_to(kind, canvas, title, message, folder, false, grant, now)
+    }
+
+    /// `propose`, saying whether web Claude wants a chat of its own for it (`new_chat`, for unrelated work).
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_to(&self, kind: Kind, canvas: &str, title: &str, message: &str, folder: Option<String>, new_chat: bool, grant: &str, now: u64) -> Result<Request, String> {
         let canvas = if canvas.trim().is_empty() {
             // An answer goes back to the chat that asked, so it needs no project.
             if folder.is_none() && matches!(kind, Kind::Send) {
@@ -689,7 +705,7 @@ impl Store {
             Kind::Answer { question } => self.saved.lock().unwrap().outbox.iter().find(|o| &o.id == question).and_then(|o| o.chat_title.clone()),
             Kind::Send => None,
         };
-        let req = Request { id: random_token(9), kind, canvas, title, message, folder, created_at: now, status: Status::Waiting, slot: None, chat_title, reply: None, files: vec![], grant: grant.into(), auto: false };
+        let req = Request { id: random_token(9), kind, canvas, title, message, folder, created_at: now, status: Status::Waiting, slot: None, chat_title, reply: None, files: vec![], grant: grant.into(), auto: false, new_chat };
         self.edit(|s| {
             if s.requests.iter().filter(|r| r.status == Status::Waiting).count() >= RUNS_WAITING_MAX {
                 return Err(format!("{RUNS_WAITING_MAX} requests are already waiting for the user's Run in Lantern. Wait for those first."));
@@ -744,11 +760,17 @@ impl Store {
             };
             let asked = s.requests[at].folder.clone();
             let folder = folder.or_else(|| asked.clone());
-            // Work with no design goes to a new chat, unless it answers a question (then to the chat that asked).
-            let slot = if designless && question.is_none() { None } else { live_slot(s, &key, question.as_deref()) };
+            // Work goes on in the chat already on its canvas (or, with no design, its project), unless web Claude asked for a chat
+            // of its own: following on there costs less than a new chat finding its way around again. An answer goes to the
+            // chat that asked.
+            let fresh = s.requests[at].new_chat && question.is_none();
+            let slot = if fresh { None } else { live_slot(s, &key, question.as_deref()) };
+            let same_place = folder.is_none() || folder == asked || s.links.iter().any(|l| l.key == key && Some(&l.folder) == folder.as_ref());
             let target = match slot {
                 // A chat already on this canvas takes it, unless the user picked another project for it.
-                Some(slot) if folder.is_none() || folder == asked || s.links.iter().any(|l| l.key == key && Some(&l.folder) == folder.as_ref()) => Target::Chat(slot),
+                Some(slot) if same_place => Target::Chat(slot),
+                // None open on it now (Lantern restarted since): the chat that last worked on it, if it is still open.
+                None if !fresh && same_place && question.is_none() && s.conversations.contains_key(&key) => Target::Conversation { id: s.conversations[&key].clone(), folder: folder.clone() },
                 _ => Target::NewChat(folder.clone().ok_or("Pick the project this canvas belongs to.")?),
             };
             if let Some(f) = folder.as_ref().filter(|_| !designless) {
@@ -794,12 +816,15 @@ impl Store {
     /// The chat in `slot` now holds another conversation, or was cleared: what web Claude sent was the old one's business, so
     /// nothing of the new one is followed, readable, or sent answers.
     pub fn forget_slot(&self, slot: &str) {
-        let turn = {
+        let (key, turn) = {
             let mut live = self.live.lock().unwrap();
-            live.slots.remove(slot);
-            live.turns.remove(slot)
+            (live.slots.remove(slot), live.turns.remove(slot))
         };
         self.edit(|s| {
+            // Nor is it found again after a restart: the next work there starts a chat of its own.
+            if let Some(key) = &key {
+                s.conversations.remove(key);
+            }
             for r in s.requests.iter_mut().filter(|r| r.slot.as_deref() == Some(slot)) {
                 r.slot = None;
                 if turn.as_ref().and_then(|t| t.request.as_ref()) == Some(&r.id) && r.status == Status::Working {
@@ -827,6 +852,18 @@ impl Store {
     /// started). A turn the user starts in that chat themselves is followed from their message on.
     pub fn on_event(&self, slot: &str, event: &crate::ui_event::UiEvent, now: u64) {
         use crate::ui_event::UiEvent;
+        if let UiEvent::SessionStarted { session_id, .. } = event {
+            // The chat's conversation (Lantern's id, as the conversations store tells it): kept for its canvas or project, so
+            // that chat is found again after a restart.
+            let key = self.canvas_of_slot(slot);
+            if let Some(key) = key.filter(|_| crate::history::valid_id(session_id)) {
+                let known = self.saved.lock().unwrap().conversations.get(&key) == Some(session_id);
+                if !known {
+                    self.edit(|s| s.conversations.insert(key, session_id.clone()));
+                }
+            }
+            return;
+        }
         let done = {
             let mut live = self.live.lock().unwrap();
             if let UiEvent::UserText { text, sent_by, .. } = event {
@@ -1183,7 +1220,7 @@ mod tests {
     }
 
     #[test]
-    fn work_with_no_design_names_its_project_starts_its_own_chat_and_links_nothing() {
+    fn work_with_no_design_names_its_project_goes_on_in_its_chat_and_links_nothing() {
         let s = store();
         assert!(s.propose(Kind::Send, "", "x", "Make the header sticky", None, "g", 10).is_err(), "no design and no project");
         let r = sent(&s, "", Some("/p"));
@@ -1193,14 +1230,48 @@ mod tests {
         assert!(a.text.contains("isn't about a design canvas") && !a.text.contains("Artifact tool"), "{}", a.text);
         s.started(&r.id, "slot-1", None);
         assert!(s.links().is_empty(), "no canvas to remember a project for");
-        // Another piece of work for the same project is another task: it gets a chat of its own.
-        let r2 = sent(&s, "", Some("/p"));
-        assert_eq!(s.decide_run(&r2.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()));
         // While it works, its chat can still write to web Claude, and an answer to its question goes back to it.
         assert!(s.chat_post("slot-1", None, OutKind::Note, "Preview is up", None, 11).is_ok());
         let q = s.chat_post("slot-1", None, OutKind::Question, "Which page?", None, 12).unwrap();
         let ans = s.propose_answer(&q.id, "Home", "g", 13).unwrap();
         assert_eq!(s.decide_run(&ans.id, true, None).unwrap().unwrap().target, Target::Chat("slot-1".into()));
+        // A follow-up for the same project goes on in that chat (it knows the work; a new one would find its way again)...
+        let r2 = sent(&s, "", Some("/p"));
+        assert_eq!(s.decide_run(&r2.id, true, None).unwrap().unwrap().target, Target::Chat("slot-1".into()));
+        // ...unless web Claude asks for a chat of its own, for unrelated work.
+        let r3 = s.propose_to(Kind::Send, "", "x", "Something else", Some("/p".into()), true, "g", 14).unwrap();
+        assert_eq!(s.decide_run(&r3.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()));
+        // Another project's work isn't this chat's.
+        let other = sent(&s, "", Some("/q"));
+        assert_eq!(s.decide_run(&other.id, true, None).unwrap().unwrap().target, Target::NewChat("/q".into()));
+    }
+
+    fn session(id: &str) -> UiEvent {
+        UiEvent::SessionStarted { session_id: id.into(), model: "m".into(), cwd: "/p".into(), permission_mode: "auto".into(), claude_version: "1".into() }
+    }
+
+    #[test]
+    fn after_a_restart_work_goes_on_in_the_chat_holding_its_conversation_until_that_chat_moves_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("webclaude.json");
+        let s = Store::load(Some(path.clone()));
+        let r = sent(&s, "https://claude.ai/artifact/abc", Some("/p"));
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s4", None);
+        s.on_event("s4", &session("aaaa-bbbb"), 11);
+        s.on_event("s5", &session("cccc-dddd"), 11);
+        // Lantern restarts: no chat is on the canvas, but its conversation is known (another chat's isn't kept).
+        let s = Store::load(Some(path.clone()));
+        let again = sent(&s, "https://claude.ai/artifact/abc", None);
+        assert_eq!(s.decide_run(&again.id, true, None).unwrap().unwrap().target, Target::Conversation { id: "aaaa-bbbb".into(), folder: Some("/p".into()) });
+        let fresh = s.propose_to(Kind::Send, "https://claude.ai/artifact/abc", "x", "Unrelated", None, true, "g", 12).unwrap();
+        assert_eq!(s.decide_run(&fresh.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()), "a chat of its own");
+        // The chat it went to moves on to another conversation (or is cleared): it isn't found again.
+        s.started(&again.id, "s1", None);
+        s.forget_slot("s1");
+        let after = sent(&s, "https://claude.ai/artifact/abc", None);
+        assert_eq!(s.decide_run(&after.id, true, None).unwrap().unwrap().target, Target::NewChat("/p".into()));
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("cccc-dddd"));
     }
 
     fn user(t: &str, by: Option<&str>) -> UiEvent {
