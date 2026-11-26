@@ -12,6 +12,17 @@ const question = waiting({
   input: { questions: [{ question: "Which channel?", header: "Channel", options: [{ label: "Stable", description: "Everyone gets it" }, { label: "Beta", description: "Testers first" }], multiSelect: false }] },
 });
 
+const several = waiting({
+  request_id: "q2",
+  tool_name: "AskUserQuestion",
+  input: {
+    questions: [
+      { question: "Which channel?", header: "Channel", options: [{ label: "Stable", description: "Everyone gets it" }, { label: "Beta", description: "Testers first" }], multiSelect: false },
+      { question: "Which platforms?", header: "Platforms", options: [{ label: "iOS", description: "" }, { label: "Android", description: "" }], multiSelect: true },
+    ],
+  },
+});
+
 async function decide(w = push, answers: Parameters<typeof attachSession>[1] = {}) {
   const { controller } = makeController();
   const session = attachSession(controller, answers);
@@ -306,12 +317,63 @@ describe("a question", () => {
     expect(lastOf("answer")).toEqual({ op: "answer", slot: "a", request_id: "q1", allow: true, message: null, answers: { "Which channel?": "Beta" } });
   });
 
-  it("takes something typed instead of an option", async () => {
-    const { lastOf } = await decide(question);
+  it("sends a lone question's answer as soon as an option is picked, once", async () => {
+    const { asked } = await decide(question);
+    expect(screen.queryByTestId("question-steps")).toBeNull();
     await fireEvent.press(screen.getByText("Stable"));
+    await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
+    expect(asked.filter((r) => r.op === "answer")).toEqual([expect.objectContaining({ answers: { "Which channel?": "Stable" } })]);
+  });
+
+  it("asks several questions one at a time: a pick moves on, Back and the dots go back with the answers kept, and the last sends them all", async () => {
+    const { asked, lastOf } = await decide(several);
+    expect(screen.getByText("Claude has questions")).toBeTruthy();
+    expect(screen.getByText("1 of 2")).toBeTruthy();
+    expect(screen.getByText("Which channel?")).toBeTruthy();
+    expect(screen.queryByText("Which platforms?")).toBeNull();
+    expect(screen.getByRole("button", { name: "Next" }).props.accessibilityState).toMatchObject({ disabled: true });
+    // The second can't be skipped to before it is reached.
+    expect(screen.getByRole("button", { name: "Question 2: Platforms" }).props.accessibilityState).toMatchObject({ disabled: true });
+    await fireEvent.press(screen.getByText("Beta"));
+    await waitFor(() => expect(screen.getByText("Which platforms?")).toBeTruthy());
+    expect(screen.queryByText("Which channel?")).toBeNull();
+    expect(screen.getByText("2 of 2")).toBeTruthy();
+    // Several can be picked here: nothing goes until Send.
+    expect(screen.getByRole("button", { name: "Send answers" }).props.accessibilityState).toMatchObject({ disabled: true });
+    await fireEvent.press(screen.getByText("iOS"));
+    await fireEvent.press(screen.getByText("Android"));
+    expect(asked.some((r) => r.op === "answer")).toBe(false);
+    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText("Which channel?")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Beta/ }).props.accessibilityState).toMatchObject({ checked: true });
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Question 2: Platforms, answered" }));
+    expect(screen.getByText("Which platforms?")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /Android/ }).props.accessibilityState).toMatchObject({ checked: true });
+    await fireEvent.press(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
+    expect(lastOf("answer")).toMatchObject({ allow: true, answers: { "Which channel?": "Beta", "Which platforms?": "iOS, Android" } });
+  });
+
+  it("moves on from something typed with Next, and from the keyboard's return", async () => {
+    await decide(several);
+    await fireEvent.changeText(screen.getByLabelText("Something else"), "Nightly");
+    await fireEvent.press(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Which platforms?")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    await fireEvent(screen.getByLabelText("Something else"), "submitEditing");
+    expect(screen.getByText("Which platforms?")).toBeTruthy();
+  });
+
+  it("takes something typed instead of an option", async () => {
+    const { lastOf, asked } = await decide(question);
+    await fireEvent.press(screen.getByText("Stable"));
+    // Typing as soon as an option is picked: the pick doesn't send, what is typed does.
     await fireEvent.changeText(screen.getByLabelText("Something else"), "  Nightly only  ");
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(lastOf("answer")).toMatchObject({ answers: { "Which channel?": "Nightly only" } }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(asked.filter((r) => r.op === "answer")).toHaveLength(1);
   });
 
   it("can be declined", async () => {
