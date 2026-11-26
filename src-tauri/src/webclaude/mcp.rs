@@ -1,5 +1,5 @@
 //! The connector's MCP side: JSON-RPC as claude.ai's servers send it (Streamable HTTP, one JSON reply per request), and
-//! the seven tools web Claude gets. Nothing here runs anything on the Mac: sending work makes a card that waits for the
+//! the eight tools web Claude gets. Nothing here runs anything on the Mac: sending work makes a card that waits for the
 //! user's Run, or that the app runs on its own when the user turned auto-run on (see store.rs); the rest reads.
 
 use super::store::{self, Kind, Store};
@@ -30,7 +30,12 @@ pub trait Mac: Send + Sync + 'static {
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't reach you on its own, so look at the outbox when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't start a message to you, but wait holds your turn until it has something, so the user needn't come back to tell you Lantern finished: after send_to_lantern or answer, call wait with the id, and call it again (with the `after` it gives) while it says still_working; then carry on with what came back (send the next step, answer a question, or tell the user how it went). To follow a chat on your canvas that the user works in themselves, wait with the canvas. While a request waits for the user's Run, stop waiting after a few tries and tell the user it needs their Run. Look at the outbox too when the user asks what Lantern did or said.";
+
+/// How long one wait holds the call by default, and at most (seconds): claude.ai drops a tool call that takes too long.
+const WAIT_DEFAULT: u64 = 50;
+const WAIT_MAX: u64 = 300;
+const WAIT_TICK: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn tools() -> Value {
     json!([
@@ -89,6 +94,20 @@ fn tools() -> Value {
                     "id": {"type": "string", "description": "Or the id of a request you sent (for work with no design)."},
                     "before": {"type": "integer", "description": "Only entries before this number."},
                     "after": {"type": "integer", "description": "Only entries after this number."}
+                }
+            },
+            "annotations": {"readOnlyHint": true}
+        },
+        {
+            "name": "wait",
+            "description": "Wait for Lantern without the user coming back: returns as soon as the request is done, failed or declined, or a chat leaves something new in the outbox (a question, a note, a finished turn), or after `seconds` with still_working. Pass the request's id, or a canvas to follow its chat. Call it again with the `after` it returns while it says still_working.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "A request you sent (send_to_lantern or answer)."},
+                    "canvas": {"type": "string", "description": "Or a canvas (link or title): wait for its chat's next outbox item."},
+                    "after": {"type": "string", "description": "The outbox item id the last wait returned: only what comes after it counts."},
+                    "seconds": {"type": "integer", "description": "How long to wait at most (default 50, at most 300). Leave it out."}
                 }
             },
             "annotations": {"readOnlyHint": true}
@@ -194,6 +213,79 @@ fn request_view(r: &store::Request, projects: &[(String, String)]) -> Value {
     v
 }
 
+fn out_view(o: &store::OutItem) -> Value {
+    let mut v = json!({"id": o.id, "kind": o.kind, "canvas": shown(&o.canvas), "chat": o.chat_title, "text": o.text, "at_ms": o.at});
+    if let Some(a) = &o.asked {
+        v["asked"] = json!(a);
+    }
+    if !o.files.is_empty() {
+        v["files_changed"] = json!(o.files);
+    }
+    if let Some(p) = &o.preview {
+        v["preview_url"] = json!(p);
+    }
+    if o.kind == store::OutKind::Question {
+        v["answered"] = json!(o.answered);
+    }
+    v
+}
+
+/// Holds the call until the request settles or its canvas's chat leaves something new, or until time is up.
+/// It only reads the store, twice a second, so a long wait costs nothing on either side.
+async fn wait(store: &Store, mac: &dyn Mac, args: &Value) -> Result<Value, String> {
+    let id = arg(args, "id");
+    let request = match id {
+        Some(id) => Some(store.request(id).ok_or("Lantern has no request with that id.")?),
+        None => None,
+    };
+    // A request's own canvas is what its chat posts to (work with no design posts with no canvas).
+    let canvas: Option<String> = arg(args, "canvas").map(str::to_string).or_else(|| request.as_ref().map(|r| r.canvas.clone()));
+    let only = |items: Vec<store::OutItem>| -> Vec<store::OutItem> {
+        match &canvas {
+            Some(c) if c.is_empty() => items.into_iter().filter(|o| o.canvas.is_empty()).collect(),
+            _ => items,
+        }
+    };
+    let filter = canvas.as_deref().filter(|c| !c.is_empty());
+    // Without `after`, only what comes from now on counts.
+    let mark = match arg(args, "after") {
+        Some(a) => Some(a.to_string()),
+        None => store.outbox(filter, None, usize::MAX).last().map(|o| o.id.clone()),
+    };
+    let seconds = args.get("seconds").and_then(Value::as_u64).unwrap_or(WAIT_DEFAULT).clamp(1, WAIT_MAX);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        if !store.enabled() {
+            return Err("The user turned the Lantern connector off.".into());
+        }
+        let settled = match id.and_then(|id| store.request(id)) {
+            Some(r) => !matches!(r.status, store::Status::Waiting | store::Status::Working),
+            None => false,
+        };
+        let items = only(store.outbox(filter, mark.as_deref(), 30));
+        let timed_out = tokio::time::Instant::now() >= deadline;
+        if settled || !items.is_empty() || timed_out {
+            let after = items.last().map(|o| o.id.clone()).or(mark);
+            let mut v = json!({
+                "state": if settled || !items.is_empty() { "ready" } else { "still_working" },
+                "items": items.iter().map(out_view).collect::<Vec<_>>(),
+                "after": after,
+            });
+            if let Some(r) = id.and_then(|id| store.request(id)) {
+                v["request"] = request_view(&r, &mac.projects().await);
+                if !settled && r.status == store::Status::Waiting && !store.auto_run() {
+                    v["note"] = json!("It still waits for the user's Run in Lantern.");
+                }
+            }
+            if !settled && items.is_empty() {
+                v["note"] = v.get("note").cloned().unwrap_or_else(|| json!("Nothing yet: call wait again with this `after`."));
+            }
+            return Ok(v);
+        }
+        tokio::time::sleep(WAIT_TICK.min(deadline - tokio::time::Instant::now())).await;
+    }
+}
+
 async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Value, now: u64) -> Result<Value, String> {
     match name {
         "list_projects" => {
@@ -243,9 +335,9 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
             let r = store.propose(Kind::Send, canvas, &title, message, folder, grant, now)?;
             let mut v = request_view(&r, &projects);
             v["note"] = json!(if store.auto_run() {
-                "Lantern runs this on its own (the user turned that on): it starts in a moment, unless it has no project to run in, which the user then picks. Call check with this id to follow it."
+                "Lantern runs this on its own (the user turned that on): it starts in a moment, unless it has no project to run in, which the user then picks. Call wait with this id to hear back when it's done."
             } else {
-                "Waiting for the user to tap Run in Lantern (on the Mac or the phone). Call check with this id to follow it."
+                "Waiting for the user to tap Run in Lantern (on the Mac or the phone). Call wait with this id to hear back when it's done."
             });
             Ok(v)
         }
@@ -256,23 +348,9 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
         }
         "read_outbox" => {
             let items = store.outbox(arg(args, "canvas"), arg(args, "after"), 30);
-            Ok(json!({"items": items.iter().map(|o| {
-                let mut v = json!({"id": o.id, "kind": o.kind, "canvas": shown(&o.canvas), "chat": o.chat_title, "text": o.text, "at_ms": o.at});
-                if let Some(a) = &o.asked {
-                    v["asked"] = json!(a);
-                }
-                if !o.files.is_empty() {
-                    v["files_changed"] = json!(o.files);
-                }
-                if let Some(p) = &o.preview {
-                    v["preview_url"] = json!(p);
-                }
-                if o.kind == store::OutKind::Question {
-                    v["answered"] = json!(o.answered);
-                }
-                v
-            }).collect::<Vec<_>>()}))
+            Ok(json!({"items": items.iter().map(out_view).collect::<Vec<_>>()}))
         }
+        "wait" => wait(store, mac, args).await,
         "read_chat" => {
             let number = |name: &str| args.get(name).and_then(Value::as_u64).map(|n| n as usize);
             let slot = store.readable_chat(arg(args, "canvas"), arg(args, "id"))?;
@@ -295,9 +373,9 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
             let r = store.propose_answer(need(args, "question_id")?, need(args, "text")?, grant, now)?;
             let mut v = request_view(&r, &mac.projects().await);
             v["note"] = json!(if store.auto_run() {
-                "Lantern sends this to the chat that asked on its own (the user turned that on). Call check with this id to follow it."
+                "Lantern sends this to the chat that asked on its own (the user turned that on). Call wait with this id to hear back."
             } else {
-                "Waiting for the user to tap Run in Lantern; then it goes to the chat that asked. Call check with this id to follow it."
+                "Waiting for the user to tap Run in Lantern; then it goes to the chat that asked. Call wait with this id to hear back."
             });
             Ok(v)
         }
@@ -334,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_says_hello_in_the_clients_protocol_and_lists_seven_tools() {
+    async fn it_says_hello_in_the_clients_protocol_and_lists_eight_tools() {
         let s = Store::load(None);
         let init = rpc(&s, "initialize", json!({"protocolVersion": "2025-03-26"})).await;
         assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
@@ -342,7 +420,7 @@ mod tests {
         let unknown = rpc(&s, "initialize", json!({"protocolVersion": "1999"})).await;
         assert_eq!(unknown["result"]["protocolVersion"], PROTOCOLS[0]);
         let names: Vec<String> = rpc(&s, "tools/list", json!({})).await["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-        assert_eq!(names, ["list_projects", "list_chats", "send_to_lantern", "check", "read_outbox", "read_chat", "answer"]);
+        assert_eq!(names, ["list_projects", "list_chats", "send_to_lantern", "check", "read_outbox", "read_chat", "wait", "answer"]);
         assert!(handle(&s, &FakeMac, "g", &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), 1).await.is_none());
         assert_eq!(rpc(&s, "nope", json!({})).await["error"]["code"], -32601);
     }
@@ -405,5 +483,62 @@ mod tests {
         let later = &tool(&s, "read_chat", json!({"canvas": "https://claude.ai/artifact/abc", "after": 1})).await["structuredContent"];
         assert_eq!(later["entries"].as_array().unwrap().len(), 1);
         assert_eq!(tool(&s, "read_chat", json!({"canvas": "Another canvas"})).await["isError"], true);
+    }
+
+    fn done() -> crate::ui_event::UiEvent {
+        crate::ui_event::UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_holds_until_the_chat_is_done_then_hands_back_its_reply() {
+        let s = Store::load(None);
+        s.set_enabled(true);
+        let canvas = "https://claude.ai/artifact/abc";
+        let r = s.propose(Kind::Send, canvas, "Rayak", "m", Some("/dev/rayak".into()), "g", 1).unwrap();
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s1", None);
+
+        let nothing = &tool(&s, "wait", json!({"id": r.id, "seconds": 5})).await["structuredContent"];
+        assert_eq!((nothing["state"].as_str(), nothing["request"]["state"].as_str()), (Some("still_working"), Some("working")));
+        assert!(nothing["note"].as_str().unwrap().contains("again"));
+
+        let finish = async {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            s.on_event("s1", &crate::ui_event::UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "The header is blue.".into() }, 2);
+            s.on_event("s1", &done(), 2);
+        };
+        let started = tokio::time::Instant::now();
+        let (got, ()) = tokio::join!(tool(&s, "wait", json!({"id": r.id})), finish);
+        let got = &got["structuredContent"];
+        assert!(started.elapsed() < std::time::Duration::from_secs(25), "it returns when the turn ends, not at its time limit");
+        assert_eq!((got["state"].as_str(), got["request"]["state"].as_str(), got["request"]["reply"].as_str()), (Some("ready"), Some("done"), Some("The header is blue.")));
+        assert_eq!(got["items"][0]["text"], "The header is blue.");
+        assert_eq!(got["after"], got["items"][0]["id"]);
+
+        // Following the canvas from there: only what comes after counts, and the user's own next turn comes back too.
+        let next = async {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            s.on_event("s1", &crate::ui_event::UiEvent::UserText { text: "Make it red".into(), at: None, sent_by: Some("desktop".into()), images: 0 }, 3);
+            s.on_event("s1", &crate::ui_event::UiEvent::AssistantText { parent: None, block_id: "c".into(), text: "Red now.".into() }, 3);
+            s.on_event("s1", &done(), 3);
+        };
+        let (followed, ()) = tokio::join!(tool(&s, "wait", json!({"canvas": canvas, "after": got["after"]})), next);
+        let followed = &followed["structuredContent"];
+        assert_eq!((followed["state"].as_str(), followed["items"].as_array().unwrap().len(), followed["items"][0]["asked"].as_str()), (Some("ready"), 1, Some("Make it red")));
+
+        s.set_enabled(false);
+        assert_eq!(tool(&s, "wait", json!({"canvas": canvas})).await["isError"], true, "the connector off ends a wait");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_says_when_work_still_needs_the_users_run() {
+        let s = Store::load(None);
+        s.set_enabled(true);
+        let r = tool(&s, "send_to_lantern", json!({"message": "Make the header sticky", "project": "rayak"})).await;
+        assert!(r["structuredContent"]["note"].as_str().unwrap().contains("wait"));
+        let v = &tool(&s, "wait", json!({"id": r["structuredContent"]["id"], "seconds": 999})).await["structuredContent"];
+        assert_eq!((v["state"].as_str(), v["request"]["state"].as_str()), (Some("still_working"), Some("waiting_for_run")));
+        assert!(v["note"].as_str().unwrap().contains("Run"));
+        assert_eq!(tool(&s, "wait", json!({"id": "nope"})).await["isError"], true);
     }
 }
