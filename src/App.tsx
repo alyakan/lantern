@@ -120,6 +120,8 @@ import { MessageInput } from "./components/MessageInput";
 import { RecapLine, useRecap } from "./components/RecapLine";
 import type { PastedImage } from "./lib/images";
 import { describeInput } from "./components/PermissionCard";
+import { DockedQuestion, QuestionCard } from "./components/QuestionCard";
+import { QUESTION_TOOL } from "./lib/questions";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { fixNowMessage, type DiffComment } from "./lib/diffComments";
 import { ReviewDiffsProvider } from "./lib/reviewDiffs";
@@ -3482,6 +3484,8 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
   };
   const updateOffer = update && !updateLater ? { version: update.version, busy: Object.values(chats.slots).filter(isBusy).length, onRestart: restartToUpdate, onLater: () => setUpdateLater(true) } : undefined;
   // The chats open now, for an item's link in the Todos tab.
+  // Claude's question, still unanswered, in the chat shown: it waits where the message box is (the first, when there are several).
+  const docked = state.items.find((it): it is Extract<ChatItem, { type: "permission" }> => it.type === "permission" && it.toolName === QUESTION_TOOL && it.decision === null) ?? null;
   const todoChatList: Record<string, TodoChat> = Object.fromEntries(Object.entries(chats.slots).map(([slot, s]) => [slot, { title: chats.agents[slot]?.name ?? chatTitle(s, titles), working: isBusy(s) }]));
   const composer = (
     <MessageInput
@@ -3734,6 +3738,7 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                 <>
                   {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
                   <ErrorBoundary key={active} name="chat">
+                    <DockedQuestion.Provider value={docked?.id ?? null}>
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openLink} changed={reviewChanged}>
                       {stepsView ? (
@@ -3745,10 +3750,18 @@ export default function App({ startOnDesk = false }: { startOnDesk?: boolean } =
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
+                    </DockedQuestion.Provider>
                   </ErrorBoundary>
                   {recap && <RecapLine text={recap} />}
                   {chatExtras}
-                  {composer}
+                  {docked ? (
+                    // Claude's question waits where the message box is, as the Claude app asks: the box comes back once it is answered.
+                    <div className="composer question-dock-wrap">
+                      <QuestionCard key={docked.id} docked item={docked} onDecide={decide} />
+                    </div>
+                  ) : (
+                    composer
+                  )}
                 </>
               )}
             </section>

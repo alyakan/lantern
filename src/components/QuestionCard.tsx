@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ChatItem } from "../store";
 import { RECOMMENDED, answerText, answersLine, readQuestions, withAnswers, type Answer, type Question } from "../lib/questions";
 import { moveFocus } from "./useMenuKeys";
@@ -14,28 +14,42 @@ type Decide = (id: string, allow: boolean, note?: string, answered?: Record<stri
 export const PICK_BEAT_MS = 180;
 export const LEAVE_MS = 140;
 
+/**
+ * The question the chat shows where its message box was (see App): the same question in the chat's stream is only a line
+ * pointing down to it, so it is answered in one place.
+ */
+export const DockedQuestion = createContext<string | null>(null);
+
 const NONE: Answer = { picked: [], other: "" };
 const hasAnswer = (a: Answer | undefined) => answerText(a) !== "";
 const reducedMotion = () => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** Typing somewhere a number means something else: a field, or an editor. */
+const typingIn = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
 
 /**
- * Claude asking you to choose (its AskUserQuestion tool), one question at a time as the Claude app asks: its options as buttons
- * (checkboxes when several can be picked) and a field to answer in your own words. Picking one of a question's options moves on
- * to the next question, the one shown fading away and the next fading in; a question where several can be picked, or one
- * answered in your own words, moves on from Next. The last answer sends them all. Back, or a step's dot, goes to an earlier
- * question with its answer kept. Once sent, the card folds to a line saying what you chose.
+ * Claude asking you to choose (its AskUserQuestion tool), as the Claude app asks: one question at a time, its options as numbered
+ * rows (a number key picks one), then a row to answer in your own words. Picking one of a question's options moves on to the
+ * next question, the one shown fading away and the next fading in; a question where several can be picked, or one answered in
+ * your own words, moves on from Next. The last answer sends them all. The arrows beside "1 of 3" go back to an earlier
+ * question with its answer kept, and on again to one already reached. Once sent, the card folds to a line saying what you chose.
+ *
+ * `docked`: shown in place of the chat's message box, where number keys pick wherever the focus is (unless it is in a field).
  */
-export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+export function QuestionCard({ item, onDecide, docked = false }: { item: PermissionItem; onDecide: Decide; docked?: boolean }) {
   const questions = readQuestions(item.input);
+  const dockedHere = useContext(DockedQuestion);
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
   const [step, setStep] = useState(0);
-  // The furthest question reached: its dot, and those before it, go back to it.
+  // The furthest question reached: the arrows go back and forth up to it.
   const [reached, setReached] = useState(0);
   const [leaving, setLeaving] = useState(false);
   // Which way the next question comes in: from the right going on, from the left going back.
   const [back, setBack] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sent = useRef(false);
+  const root = useRef<HTMLDivElement>(null);
+  // The number keys, for the question shown now (kept fresh each render for the window's listener).
+  const digit = useRef<(n: number) => void>(() => {});
   const stop = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
@@ -45,6 +59,20 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
   useEffect(() => {
     if (item.decision !== null) stop();
   }, [item.decision]);
+  useEffect(() => {
+    if (!docked || item.decision !== null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || !/^[1-9]$/.test(e.key)) return;
+      const focus = document.activeElement;
+      // Not while something else is typed in, or another part of the window (the Files editor) has the keys.
+      if (typingIn(focus) || (focus && focus !== document.body && !root.current?.contains(focus))) return;
+      e.preventDefault();
+      digit.current(Number(e.key) - 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [docked, item.decision]);
+
   if (item.decision !== null) {
     return (
       <div className={`permission-done ${item.decision}`}>
@@ -55,15 +83,29 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
   }
   // The agent the chat runs on, by name: Claude, or another one that asked (Antigravity).
   const who = providerName(item.provider ?? CLAUDE);
+  // In the stream while the same question waits where the message box is: a line pointing to it.
+  if (!docked && dockedHere === item.id) {
+    return (
+      <div className="question-pointer" role="note">
+        {who} is asking {questions.length > 1 ? `${questions.length} questions` : "a question"} below
+      </div>
+    );
+  }
   const many = questions.length > 1;
   const at = Math.min(step, Math.max(questions.length - 1, 0));
   const last = at === questions.length - 1;
+  const cardClass = `permission question-card${docked ? " question-dock" : ""}`;
 
   const send = (all: Record<string, Answer>) => {
     if (sent.current) return;
     sent.current = true;
     stop();
     onDecide(item.id, true, answersLine(questions, all), withAnswers(item.input, questions, all));
+  };
+  const skip = () => {
+    stop();
+    sent.current = true;
+    onDecide(item.id, false, SKIPPED);
   };
   // To question `to`: the one shown fades away first (at once when motion is reduced).
   const go = (to: number) => {
@@ -82,7 +124,7 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
   // On from the question shown, with these answers: to the next, or, from the last, they all go.
   const onward = (all: Record<string, Answer>) => {
     if (!questions.every((q) => hasAnswer(all[q.question]))) {
-      // The last question answered while an earlier one isn't (a dot skipped ahead): to the first that waits.
+      // The last question answered while an earlier one isn't: to the first that waits.
       if (last) return go(questions.findIndex((q) => !hasAnswer(all[q.question])));
     }
     if (last) send(all);
@@ -91,11 +133,12 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
 
   if (questions.length === 0) {
     return (
-      <div className="permission question-card" role="group" aria-label={`${who}'s question`}>
-        <div className="permission-title">{who} is asking</div>
+      <div className={cardClass} role="group" aria-label={`${who}'s question`}>
+        <div className="question-kicker">{who} is asking</div>
         <div className="settings-muted">{who} asked something Lantern couldn't read. Skip it, and answer in the chat instead.</div>
-        <div className="permission-actions">
-          <button onClick={() => onDecide(item.id, false, SKIPPED)} title="Claude carries on without an answer">
+        <div className="question-foot">
+          <span />
+          <button onClick={() => onDecide(item.id, false, SKIPPED)} title={`${who} carries on without an answer`}>
             Skip
           </button>
         </div>
@@ -110,7 +153,8 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
     setAnswers(all);
     return all;
   };
-  // Picked with a click (or Enter): a question with one answer moves on once the pick has been seen. Arrows pick without moving on.
+  // Picked with a click, Enter or its number: a question with one answer moves on once the pick has been seen. Arrows pick
+  // without moving on.
   const pick = (label: string, moveOn: boolean) => {
     const picked = q.multiSelect ? (a.picked.includes(label) ? a.picked.filter((l) => l !== label) : [...a.picked, label]) : [label];
     const all = set({ picked, other: "" });
@@ -118,43 +162,54 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
     stop();
     timer.current = setTimeout(() => onward(all), PICK_BEAT_MS);
   };
+  digit.current = (n) => {
+    if (!leaving && q.options[n]) pick(q.options[n].label, true);
+  };
   const anyPicked = q.options.some((x) => a.picked.includes(x.label)) && !a.other.trim();
   const ready = hasAnswer(a);
   const allReady = questions.every((x) => hasAnswer(answers[x.question]));
   const sendLabel = many ? "Send answers" : "Send answer";
 
   return (
-    <div className="permission question-card" role="group" aria-label={`${who}'s question`}>
+    <div
+      ref={root}
+      className={cardClass}
+      role="group"
+      aria-label={`${who}'s question`}
+      onKeyDown={
+        docked
+          ? undefined
+          : (e) => {
+              if (e.metaKey || e.ctrlKey || e.altKey || !/^[1-9]$/.test(e.key) || typingIn(e.target as Element)) return;
+              e.preventDefault();
+              digit.current(Number(e.key) - 1);
+            }
+      }
+    >
       <div className="question-top">
-        <div className="permission-title">{many ? `${who} has ${questions.length} questions` : `${who} is asking`}</div>
+        <span className="question-kicker">{many ? `${who} has ${questions.length} questions` : `${who} is asking`}</span>
         {many && (
-          <div className="question-steps" role="group" aria-label="Questions">
+          <div className="question-pager" role="group" aria-label="Questions">
+            <button className="question-arrow" aria-label="Previous question" title="Previous question" disabled={at === 0} onClick={() => go(at - 1)}>
+              ‹
+            </button>
             <span className="question-count" aria-live="polite">
               {at + 1} of {questions.length}
             </span>
-            {questions.map((x, i) => (
-              <button
-                key={x.question}
-                className={`question-dot${i === at ? " current" : hasAnswer(answers[x.question]) ? " done" : ""}`}
-                aria-label={`Question ${i + 1}${x.header ? `: ${x.header}` : ""}${hasAnswer(answers[x.question]) ? ", answered" : ""}`}
-                aria-current={i === at ? "step" : undefined}
-                disabled={i > reached || i === at}
-                onClick={() => go(i)}
-              />
-            ))}
+            <button className="question-arrow" aria-label="Next question" title="Next question" disabled={at >= reached} onClick={() => go(at + 1)}>
+              ›
+            </button>
           </div>
         )}
       </div>
-      <fieldset key={q.question} className={`question question-step${back ? " back" : ""}${leaving ? " leaving" : ""}`}>
-        <legend>
-          {q.header && <span className="question-header">{q.header}</span>}
-          <span className="question-text">{q.question}</span>
-          {q.multiSelect && <span className="question-hint">Pick any</span>}
-        </legend>
+      <div key={q.question} className={`question question-step${back ? " back" : ""}${leaving ? " leaving" : ""}`}>
+        <div className="question-text" id={`${item.id}-q`}>
+          {q.question}
+        </div>
         <div
           className="question-options"
           role={q.multiSelect ? "group" : "radiogroup"}
-          aria-label={q.question}
+          aria-labelledby={`${item.id}-q`}
           onKeyDown={(e) => {
             // Arrows move between the options; with radio buttons, moving also picks, as a radio group does (without moving on).
             const to = moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>("button")]);
@@ -167,8 +222,8 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
             const tabbable = q.multiSelect || (anyPicked ? on : i === 0);
             return (
               <button key={o.label} className={`question-option${on ? " on" : ""}`} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} tabIndex={tabbable ? undefined : -1} onClick={() => pick(o.label, true)}>
-                <span className="question-mark" aria-hidden>
-                  {q.multiSelect ? (on ? "☑" : "☐") : on ? "●" : "○"}
+                <span className="question-num" aria-hidden>
+                  {i + 1}
                 </span>
                 <span className="question-option-text">
                   <span className="question-label">
@@ -177,42 +232,47 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
                   </span>
                   {o.description && <span className="question-desc">{o.description}</span>}
                 </span>
+                {on && (
+                  <span className="question-check" aria-hidden>
+                    ✓
+                  </span>
+                )}
               </button>
             );
           })}
+          <label className={`question-own${a.other.trim() ? " on" : ""}`}>
+            <span className="question-num pen" aria-hidden>
+              ✎
+            </span>
+            <input
+              className="question-other"
+              placeholder="Something else…"
+              aria-label={`Your own answer: ${q.question}`}
+              value={a.other}
+              onChange={(e) => {
+                stop();
+                set({ picked: a.picked, other: e.target.value });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && a.other.trim()) {
+                  e.preventDefault();
+                  onward(answers);
+                }
+              }}
+            />
+          </label>
         </div>
-        <input
-          className="question-other"
-          placeholder="Or answer in your own words…"
-          aria-label={`Your own answer: ${q.question}`}
-          value={a.other}
-          onChange={(e) => {
-            stop();
-            set({ picked: a.picked, other: e.target.value });
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && a.other.trim()) {
-              e.preventDefault();
-              onward(answers);
-            }
-          }}
-        />
-      </fieldset>
-      <div className="permission-actions">
-        <button className="primary" disabled={last ? !allReady : !ready} onClick={() => onward(answers)}>
-          {last ? sendLabel : "Next"}
-        </button>
-        {at > 0 && <button onClick={() => go(at - 1)}>Back</button>}
-        <button
-          onClick={() => {
-            stop();
-            sent.current = true;
-            onDecide(item.id, false, SKIPPED);
-          }}
-          title="Claude carries on without an answer"
-        >
-          Skip
-        </button>
+      </div>
+      <div className="question-foot">
+        <span className="question-hint">{q.multiSelect ? (last ? "Pick any, then send" : "Pick any, then Next") : q.options.length > 1 ? `Pick one, or press 1–${Math.min(q.options.length, 9)}` : "Pick it, or write your own"}</span>
+        <div className="question-buttons">
+          <button className="question-skip" onClick={skip} title={`${who} carries on without an answer`}>
+            Skip
+          </button>
+          <button className="primary" disabled={last ? !allReady : !ready} onClick={() => onward(answers)}>
+            {last ? sendLabel : "Next"}
+          </button>
+        </div>
       </div>
     </div>
   );

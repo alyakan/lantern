@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { LEAVE_MS, PICK_BEAT_MS, QuestionCard } from "./QuestionCard";
+import { DockedQuestion, LEAVE_MS, PICK_BEAT_MS, QuestionCard } from "./QuestionCard";
 import { PermissionCard } from "./PermissionCard";
 import { readQuestions, withAnswers } from "../lib/questions";
 
@@ -62,20 +62,61 @@ describe("QuestionCard", () => {
     });
   });
 
-  it("goes back to an earlier question with its answer kept, from Back or its dot, and on again from the dot", () => {
+  it("goes back to an earlier question with its answer kept, and on again to one already reached, from the arrows", () => {
     render(<QuestionCard item={item()} onDecide={() => {}} />);
-    // A question not reached yet can't be skipped to.
-    expect(screen.getByRole("button", { name: "Question 2: Codes" })).toBeDisabled();
+    // A question not reached yet can't be skipped to, and there is none before the first.
+    expect(screen.getByRole("button", { name: "Next question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Previous question" })).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: /In each caller/ }));
     moveOn();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
     moveOn();
     expect(screen.getByRole("radio", { name: /In each caller/ })).toHaveAttribute("aria-checked", "true");
-    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Question 2: Codes" }));
+    expect(screen.getByRole("button", { name: "Previous question" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
     moveOn();
     expect(screen.getByText("Which codes?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Question 1: Retries, answered" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Next question" })).toBeDisabled();
+  });
+
+  it("numbers the options, and a number key picks one and moves on", () => {
+    const onDecide = vi.fn();
+    render(<QuestionCard item={item()} onDecide={onDecide} />);
+    expect(screen.getByRole("radio", { name: /In each caller/ })).toHaveTextContent(/^2/);
+    expect(screen.getByText("Pick one, or press 1–2")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("group", { name: "Claude's question" }), { key: "2" });
+    expect(screen.getByRole("radio", { name: /In each caller/ })).toHaveAttribute("aria-checked", "true");
+    moveOn();
+    expect(screen.getByText("Which codes?")).toBeInTheDocument();
+    // A number typed in your own words is only typed.
+    const own = screen.getByLabelText(/Your own answer: Which codes/);
+    fireEvent.keyDown(own, { key: "1" });
+    expect(screen.getByRole("checkbox", { name: /429/ })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("docked where the message box is, takes number keys from the window, but not from a field elsewhere", () => {
+    render(
+      <>
+        <input aria-label="elsewhere" />
+        <QuestionCard docked item={item({ input: { questions: [input.questions[0]] } })} onDecide={() => {}} />
+      </>,
+    );
+    screen.getByLabelText("elsewhere").focus();
+    fireEvent.keyDown(window, { key: "1" });
+    expect(screen.getByRole("radio", { name: /In fetchJson/ })).toHaveAttribute("aria-checked", "false");
+    screen.getByLabelText("elsewhere").blur();
+    fireEvent.keyDown(window, { key: "1" });
+    expect(screen.getByRole("radio", { name: /In fetchJson/ })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("in the chat's stream, is only a line pointing to where it waits while it is docked", () => {
+    render(
+      <DockedQuestion.Provider value="q1">
+        <PermissionCard item={item()} onDecide={() => {}} />
+      </DockedQuestion.Provider>,
+    );
+    expect(screen.getByRole("note")).toHaveTextContent("Claude is asking 2 questions below");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 
   it("sends a lone question's answer as soon as it is picked", () => {
