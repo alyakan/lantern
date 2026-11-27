@@ -2,7 +2,7 @@ import { StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith, waiting } from "../test/render";
-import { answersFrom, APPROVED_CLOSE_MS, CLOSE_AFTER_MS, DecideScreen, DONE_CLOSE_MS } from "./DecideScreen";
+import { answersFrom, APPROVED_CLOSE_MS, CLOSE_AFTER_MS, DecideScreen, DONE_CLOSE_MS, PICK_BEAT_MS } from "./DecideScreen";
 import { approvalOf } from "../view/prompts";
 
 const push = waiting({ request_id: "p1" });
@@ -115,6 +115,7 @@ describe("deciding", () => {
   it("an answer to a question, or a denial, closes sooner than an approval does, by itself", async () => {
     const { onClose } = await decide(question);
     await fireEvent.press(screen.getByText("Stable"));
+    await waitFor(() => expect(screen.getByText("Check your answer")).toBeTruthy());
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
     const sentAt = Date.now();
@@ -207,6 +208,7 @@ describe("deciding", () => {
   it("can be minimized once the answer failed, and for a question", async () => {
     const { onClose } = await decide(question, { answer: new Error("No reply from your Mac.") });
     await fireEvent.press(screen.getByText("Stable"));
+    await waitFor(() => expect(screen.getByText("Check your answer")).toBeTruthy());
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(screen.getByText("No reply from your Mac.")).toBeTruthy());
     await fireEvent.press(screen.getByRole("button", { name: "Minimize" }));
@@ -310,22 +312,33 @@ describe("a question", () => {
     expect(screen.getByText("Claude has a question")).toBeTruthy();
     expect(screen.getByText("Which channel?")).toBeTruthy();
     expect(screen.getByText("Testers first")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send answer" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByRole("button", { name: "Next" }).props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(screen.getByText("Beta"));
+    // The pick holds, the others dimmed, then a recap of it: nothing has gone yet.
+    await waitFor(() => expect(screen.getByText("Check your answer")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Which channel\?: Beta/ })).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
     expect(lastOf("answer")).toEqual({ op: "answer", slot: "a", request_id: "q1", allow: true, message: null, answers: { "Which channel?": "Beta" } });
   });
 
-  it("sends a lone question's answer as soon as an option is picked, once", async () => {
+  it("a lone question's pick shows in a recap that can go back to change it, and goes from Send, once", async () => {
     const { asked } = await decide(question);
     expect(screen.queryByTestId("question-steps")).toBeNull();
     await fireEvent.press(screen.getByText("Stable"));
+    await waitFor(() => expect(screen.getByTestId("question-recap")).toBeTruthy());
+    expect(asked.some((r) => r.op === "answer")).toBe(false);
+    await fireEvent.press(screen.getByRole("button", { name: /Which channel\?: Stable/ }));
+    expect(screen.getByRole("radio", { name: /Stable/ }).props.accessibilityState).toMatchObject({ checked: true });
+    await fireEvent.press(screen.getByText("Beta"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Which channel\?: Beta/ })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
-    expect(asked.filter((r) => r.op === "answer")).toEqual([expect.objectContaining({ answers: { "Which channel?": "Stable" } })]);
+    expect(asked.filter((r) => r.op === "answer")).toEqual([expect.objectContaining({ answers: { "Which channel?": "Beta" } })]);
   });
 
-  it("asks several questions one at a time: a pick moves on, the arrows go back and on with the answers kept, and the last sends them all", async () => {
+  it("asks several questions one at a time: a pick moves on, the arrows go back and on with the answers kept, and a recap sends them all", async () => {
     const { asked, lastOf } = await decide(several);
     expect(screen.getByText("Claude has questions")).toBeTruthy();
     expect(screen.getByText("1 of 2")).toBeTruthy();
@@ -339,8 +352,8 @@ describe("a question", () => {
     await waitFor(() => expect(screen.getByText("Which platforms?")).toBeTruthy());
     expect(screen.queryByText("Which channel?")).toBeNull();
     expect(screen.getByText("2 of 2")).toBeTruthy();
-    // Several can be picked here: nothing goes until Send.
-    expect(screen.getByRole("button", { name: "Send answers" }).props.accessibilityState).toMatchObject({ disabled: true });
+    // Several can be picked here: nothing moves on until Next.
+    expect(screen.getByRole("button", { name: "Next" }).props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(screen.getByText("iOS"));
     await fireEvent.press(screen.getByText("Android"));
     expect(asked.some((r) => r.op === "answer")).toBe(false);
@@ -351,6 +364,11 @@ describe("a question", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Next question" }));
     expect(screen.getByText("Which platforms?")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: /Android/ }).props.accessibilityState).toMatchObject({ checked: true });
+    await fireEvent.press(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Check your answers")).toBeTruthy();
+    expect(screen.getByText("Review")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Which platforms\?: iOS, Android/ })).toBeTruthy();
+    expect(asked.some((r) => r.op === "answer")).toBe(false);
     await fireEvent.press(screen.getByRole("button", { name: "Send answers" }));
     await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
     expect(lastOf("answer")).toMatchObject({ allow: true, answers: { "Which channel?": "Beta", "Which platforms?": "iOS, Android" } });
@@ -371,6 +389,9 @@ describe("a question", () => {
     await fireEvent.press(screen.getByText("Stable"));
     // Typing as soon as an option is picked: the pick doesn't send, what is typed does.
     await fireEvent.changeText(screen.getByLabelText("Something else"), "  Nightly only  ");
+    await new Promise((r) => setTimeout(r, PICK_BEAT_MS + 100));
+    expect(screen.queryByTestId("question-recap")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Next" }));
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(lastOf("answer")).toMatchObject({ answers: { "Which channel?": "Nightly only" } }));
     await new Promise((r) => setTimeout(r, 300));

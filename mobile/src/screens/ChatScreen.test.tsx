@@ -983,6 +983,9 @@ describe("what waits on you, in a chat", () => {
     expect(screen.getByTestId("question-dock")).toBeTruthy();
     expect(screen.queryByLabelText("Message")).toBeNull();
     await fireEvent.press(screen.getByRole("radio", { name: /Beta/ }));
+    // What was picked shows in a recap first; it goes from Send.
+    await waitFor(() => expect(screen.getByText("Check your answer")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "q1", allow: true, answers: { "Which channel?": "Beta" } }));
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 50, event: { kind: "permission_resolved", request_id: "q1", allow: true, by: "phone-x" } } }));
     await waitFor(() => expect(screen.queryByTestId("question-dock")).toBeNull());
