@@ -971,12 +971,21 @@ describe("what waits on you, in a chat", () => {
     expect(screen.getByLabelText("Swipe to approve")).toBeTruthy();
   });
 
-  it("has no swipe for a question: that is answered on the full screen, from Review", async () => {
-    const { h } = await withSession([{ kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }], multiSelect: false }] } }]);
+  it("asks a question where the message box was, as the Claude app does, and gives the box back once it is answered", async () => {
+    const q = { kind: "permission_requested" as const, request_id: "q1", tool_name: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }, { label: "Beta", description: "" }], multiSelect: false }] } };
+    const { controller, lastOf } = await withSession([q]);
+    // In the chat, only a line pointing down to it: no swipe, no Review.
+    expect(screen.getByTestId("question-pointer")).toBeTruthy();
+    expect(screen.getByText(/Claude is asking a question below/)).toBeTruthy();
     expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Review" }));
-    expect(h.onReview).toHaveBeenCalledWith("q1");
+    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+    // The message box gives its place to the question.
+    expect(screen.getByTestId("question-dock")).toBeTruthy();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    await fireEvent.press(screen.getByRole("radio", { name: /Beta/ }));
+    await waitFor(() => expect(lastOf("answer")).toMatchObject({ request_id: "q1", allow: true, answers: { "Which channel?": "Beta" } }));
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 50, event: { kind: "permission_resolved", request_id: "q1", allow: true, by: "phone-x" } } }));
+    await waitFor(() => expect(screen.queryByTestId("question-dock")).toBeNull());
   });
 
   it("says who answered it afterwards, on a small card: the Mac, this phone, or another", async () => {

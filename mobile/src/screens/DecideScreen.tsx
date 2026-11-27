@@ -7,13 +7,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
 import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
-import { buzz, FadeSlideIn, PopIn, PressScale, run, skips } from "../ui/motion";
+import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { Dots } from "../ui/skeleton";
 import { control, radius, space, useBody, useColors } from "../ui/theme";
 import { diffPreviewOf } from "../view/diffPreview";
-import { approvalOf, fieldsOf, promptView, type PromptView, type Question } from "../view/prompts";
+import { approvalOf, fieldsOf, promptView, type PromptView } from "../view/prompts";
+import { QuestionAsk } from "../ui/QuestionAsk";
 import { ago, projectColorOf, projectTint } from "../view/home";
 import { DiffPreviewCard } from "./DiffPreviewCard";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -36,131 +37,7 @@ export const APPROVED_CLOSE_MS = 1000;
 /** `elsewhere`: it left the Mac's list without this screen's answer coming back (`ours`: this phone had sent one, and it went through even though the reply didn't). */
 type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean; /** Approved with a swipe (not a question's answers): it closes sooner, in green. */ swiped: boolean } | { kind: "elsewhere"; ours: boolean } | { kind: "failed"; why: string };
 
-/** How long a picked option shows as picked before the next question comes (so the pick is seen), and how long a question takes to fade away. */
-export const PICK_BEAT_MS = 180;
-export const LEAVE_MS = 140;
-
-/** Whether a question has an answer yet: something typed, or something picked. */
-const hasAnswer = (q: Question, picks: Record<string, string[]>, typed: Record<string, string>) => !!typed[q.question]?.trim() || (picks[q.question] ?? []).length > 0;
-
-/** The question shown comes in from the side it is on: from the right going on, from the left going back. */
-function StepIn({ back, children }: { back: boolean; children: ReactNode }) {
-  const p = useRef(new Animated.Value(skips() ? 1 : 0)).current;
-  useEffect(() => run(p, 1, 240), [p]);
-  return <Animated.View style={{ opacity: p, transform: [{ translateX: p.interpolate({ inputRange: [0, 1], outputRange: [back ? -16 : 16, 0] }) }] }}>{children}</Animated.View>;
-}
-
-/** Where you are in a prompt's questions: "2 of 3", and a dot for each that goes back to it once it has been reached. */
-function StepDots({ questions, at, reached, answered, onGo }: { questions: Question[]; at: number; reached: number; answered: (q: Question) => boolean; onGo: (i: number) => void }) {
-  const colors = useColors();
-  return (
-    <View testID="question-steps" style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-      <Txt variant="small" tone="night" style={{ marginRight: 6, fontVariant: ["tabular-nums"] }} accessibilityLiveRegion="polite">
-        {at + 1} of {questions.length}
-      </Txt>
-      {questions.map((q, i) => {
-        const done = answered(q);
-        const current = i === at;
-        return (
-          <PressScale key={q.question} accessibilityRole="button" accessibilityLabel={`Question ${i + 1}${q.header ? `: ${q.header}` : ""}${done ? ", answered" : ""}`} accessibilityState={{ selected: current, disabled: current || i > reached }} disabled={current || i > reached} onPress={() => onGo(i)} haptic="select" scaleTo={0.85}>
-            <View style={{ padding: 6 }}>
-              <View style={{ width: current ? 20 : 8, height: 8, borderRadius: 4, backgroundColor: current ? colors.hi : done ? colors.nightText : colors.nightLine }} />
-            </View>
-          </PressScale>
-        );
-      })}
-    </View>
-  );
-}
-
-/** What the answers to a prompt's questions come to, one string per question (a multi-select joined with commas). */
-export function answersFrom(qs: Question[], picks: Record<string, string[]>, typed: Record<string, string>): Record<string, string> | null {
-  const out: Record<string, string> = {};
-  for (const q of qs) {
-    const text = typed[q.question]?.trim();
-    const answer = text ? text : (picks[q.question] ?? []).join(", ");
-    if (!answer) return null;
-    out[q.question] = answer;
-  }
-  return out;
-}
-
-/** One answer to choose: it takes the highlighter colour as it is picked, with a check popping in, and gives under a press. */
-function OptionCard({ on, multi, label, description, onPress }: { on: boolean; multi: boolean; label: string; description?: string; onPress: () => void }) {
-  const colors = useColors();
-  const sel = useRef(new Animated.Value(on ? 1 : 0)).current;
-  useEffect(() => {
-    if (skips()) sel.setValue(on ? 1 : 0);
-    else Animated.timing(sel, { toValue: on ? 1 : 0, duration: 200, useNativeDriver: false }).start();
-  }, [on, sel]);
-  return (
-    <PressScale accessibilityRole={multi ? "checkbox" : "radio"} accessibilityState={{ selected: on, checked: on }} onPress={onPress} haptic="select" scaleTo={0.97}>
-      <Animated.View
-        style={{
-          borderRadius: radius.inner,
-          borderWidth: 1.5,
-          borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: [colors.nightLine, colors.hi] }),
-          backgroundColor: sel.interpolate({ inputRange: [0, 1], outputRange: [`${colors.hi}00`, `${colors.hi}24`] }),
-          padding: 12,
-          minHeight: 56,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <View style={{ flex: 1 }}>
-          <Txt variant="body" tone="white" style={{ fontWeight: "600" }}>
-            {label}
-          </Txt>
-          {!!description && (
-            <Txt variant="small" tone="night">
-              {description}
-            </Txt>
-          )}
-        </View>
-        {on && (
-          <PopIn>
-            <View accessibilityElementsHidden style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.hi, alignItems: "center", justifyContent: "center" }}>
-              <View style={{ width: 11, height: 6, marginTop: -2, borderLeftWidth: 2.5, borderBottomWidth: 2.5, borderColor: colors.night, transform: [{ rotate: "-45deg" }] }} />
-            </View>
-          </PopIn>
-        )}
-      </Animated.View>
-    </PressScale>
-  );
-}
-
-function Options({ q, picks, typed, onPick, onType, onSubmit, first, last }: { q: Question; picks: string[]; typed: string; onPick: (label: string) => void; onType: (text: string) => void; /** Return in "Something else": on to the next question, or the answers go. */ onSubmit: () => void; /** The first shown as the screen rises: its options come in after the rest of it. */ first: boolean; last: boolean }) {
-  const colors = useColors();
-  const body = useBody();
-  return (
-    <View style={{ gap: 8 }}>
-      {q.header ? (
-        <Txt variant="small" tone="night">
-          {q.header}
-        </Txt>
-      ) : null}
-      <Txt variant="heading" tone="white">
-        {q.question}
-      </Txt>
-      {q.options.map((o, i) => (
-        <FadeSlideIn key={o.label} from={12} delay={first ? 260 + i * 60 : 60 + i * 40}>
-          <OptionCard on={picks.includes(o.label) && !typed.trim()} multi={!!q.multiSelect} label={o.label} description={o.description} onPress={() => onPick(o.label)} />
-        </FadeSlideIn>
-      ))}
-      <TextInput
-        accessibilityLabel="Something else"
-        value={typed}
-        onChangeText={onType}
-        placeholder="Something else: write your own answer"
-        placeholderTextColor={colors.nightText}
-        returnKeyType={last ? "send" : "next"}
-        onSubmitEditing={() => typed.trim() && onSubmit()}
-        style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: typed.trim() ? colors.hi : colors.nightLine, color: colors.white, padding: 12, minHeight: 48, fontSize: body.fontSize }}
-      />
-    </View>
-  );
-}
+export { answersFrom, LEAVE_MS, PICK_BEAT_MS } from "../ui/QuestionAsk";
 
 /** What the box with a prompt's detail is called, by the prompt's tag. */
 const DETAIL_LABEL: Record<string, string> = { "Run a command": "Command", "Write a file": "File", "Change a file": "File", "Read a file": "File", "Open a web page": "Address", "Search the web": "Search" };
@@ -194,24 +71,10 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
-  const [picks, setPicks] = useState<Record<string, string[]>>({});
-  const [typed, setTyped] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
-  // A prompt's questions, one at a time: the one shown, the furthest reached (its dot and those before it go back to it), the side
-  // the next comes in from, and the shown one fading away.
-  const [step, setStep] = useState(0);
-  const [reached, setReached] = useState(0);
-  const [stepBack, setStepBack] = useState(false);
-  const leave = useRef(new Animated.Value(1)).current;
-  const moving = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Answering already: a pick that moves on, and Send pressed meanwhile, send once.
   const answering = useRef(false);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
-  const stopMoving = () => {
-    if (moving.current) clearTimeout(moving.current);
-    moving.current = null;
-  };
-  useEffect(() => stopMoving, []);
   // How tall the buttons are: they float over the end of the decision, which keeps that much room so its last words can be
   // scrolled up clear of them.
   const [footHeight, setFootHeight] = useState(0);
@@ -297,13 +160,11 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const when = ago(asked.at, Date.now());
   // A file change is shown as the diff it would make, read from the prompt's own input, so what is approved is what is seen.
   const preview = view.kind === "allow" && !approval ? diffPreviewOf(asked.tool_name, asked.input) : null;
-  const answers = view.kind === "question" ? answersFrom(view.questions, picks, typed) : null;
   const busy = outcome.kind === "sending";
 
   const answer = async (allow: boolean, withAnswers: Record<string, string> | null = null) => {
     if (answering.current) return;
     answering.current = true;
-    stopMoving();
     setOutcome({ kind: "sending" });
     try {
       // An approval's note goes with the answer, either way, as on the Mac's card.
@@ -320,42 +181,6 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     }
   };
 
-  // The questions, one at a time, as the Claude app asks them.
-  const qs = view.kind === "question" ? view.questions : [];
-  const at = Math.min(step, Math.max(qs.length - 1, 0));
-  const lastQ = at === qs.length - 1;
-  // To question `to`: the one shown fades away first (at once when motion is reduced), and the page starts at its top.
-  const goTo = (to: number) => {
-    stopMoving();
-    const swap = () => {
-      setStepBack(to < at);
-      setStep(to);
-      setReached((r) => Math.max(r, to));
-      leave.setValue(1);
-      scroll.current?.scrollTo({ y: 0, animated: false });
-    };
-    if (skips()) return swap();
-    Animated.timing(leave, { toValue: 0, duration: LEAVE_MS, useNativeDriver: true }).start(() => swap());
-  };
-  // On from the question shown: to the next, or, from the last, the answers go (to the first still unanswered, if one is).
-  const onward = (p: Record<string, string[]>, t: Record<string, string>) => {
-    if (!lastQ) return goTo(at + 1);
-    const all = answersFrom(qs, p, t);
-    if (all) return void answer(true, all);
-    goTo(qs.findIndex((q) => !hasAnswer(q, p, t)));
-  };
-
-  // A pick: a question with one answer moves on once the pick has been seen; one where several can be picked waits for Next.
-  const toggle = (q: Question, label: string) => {
-    const now = picks[q.question] ?? [];
-    const nextPicks = { ...picks, [q.question]: q.multiSelect ? (now.includes(label) ? now.filter((l) => l !== label) : [...now, label]) : [label] };
-    const nextTyped = { ...typed, [q.question]: "" };
-    setPicks(nextPicks);
-    setTyped(nextTyped);
-    if (q.multiSelect || busy || answering.current) return;
-    stopMoving();
-    moving.current = setTimeout(() => onward(nextPicks, nextTyped), PICK_BEAT_MS);
-  };
 
   return (
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
@@ -467,36 +292,25 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
             </Txt>
           </FadeSlideIn>
         )}
-        {view.kind === "question" && qs.length > 1 && (
-          <FadeSlideIn from={10} delay={220}>
-            <StepDots questions={qs} at={at} reached={reached} answered={(q) => hasAnswer(q, picks, typed)} onGo={goTo} />
+        {/* The questions, one at a time, as the Claude app asks them (the same as where the chat's message box was). */}
+        {view.kind === "question" && (
+          <FadeSlideIn from={12} delay={220}>
+            <QuestionAsk
+              tone="night"
+              kicker={false}
+              questions={view.questions}
+              busy={busy || outcome.kind === "done" || outcome.kind === "elsewhere"}
+              onSend={(all) => void answer(true, all)}
+              onSkip={() => void answer(false)}
+              onStepped={() => scroll.current?.scrollTo({ y: 0, animated: false })}
+            />
           </FadeSlideIn>
-        )}
-        {/* One question at a time: the one shown fades away as the next comes in. */}
-        {view.kind === "question" && qs[at] && (
-          <Animated.View key={at} testID="question-step" style={{ opacity: leave, transform: [{ translateX: leave.interpolate({ inputRange: [0, 1], outputRange: [stepBack ? 10 : -10, 0] }) }] }}>
-            <StepIn back={stepBack}>
-              <Options
-                q={qs[at]}
-                first={reached === 0}
-                last={lastQ}
-                picks={picks[qs[at].question] ?? []}
-                typed={typed[qs[at].question] ?? ""}
-                onPick={(l) => toggle(qs[at], l)}
-                onType={(t) => {
-                  // Writing your own answer: a pick that was about to move on waits.
-                  stopMoving();
-                  setTyped((s) => ({ ...s, [qs[at].question]: t }));
-                }}
-                onSubmit={() => onward(picks, typed)}
-              />
-            </StepIn>
-          </Animated.View>
         )}
       </ScrollView>
 
       {/* Its buttons float over the end of the decision on a tray of glass, the page fading out under it, so they stand apart
           from what scrolls beneath them. */}
+      {!(view.kind === "question" && (outcome.kind === "none" || outcome.kind === "sending")) && (
       <View testID="decide-buttons" pointerEvents="box-none" onLayout={(e) => setFootHeight(e.nativeEvent.layout.height)} style={{ position: "absolute", left: -4, right: -4, bottom: 0 }}>
       <View pointerEvents="none" style={{ position: "absolute", left: -space.lg, right: -space.lg, top: -28, bottom: -40 }}>
         {TRAY_FADE.map((a, i) => (
@@ -519,25 +333,13 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       {outcome.kind === "done" && !(outcome.allowed && view.kind !== "question") && (
         <FadeSlideIn from={8}>
           <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
-            {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Declined." : "Denied."}
+            {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Skipped." : "Denied."}
           </Txt>
         </FadeSlideIn>
       )}
 
       {outcome.kind === "none" || outcome.kind === "sending" || outcome.kind === "failed" ? (
-        view.kind === "question" ? (
-          <View style={{ gap: 8 }}>
-            {lastQ ? (
-              <Button label={qs.length > 1 ? "Send answers" : "Send answer"} kind="hi" disabled={!answers || busy} onPress={() => answers && answer(true, answers)} />
-            ) : (
-              <Button label="Next" kind="hi" disabled={!qs[at] || !hasAnswer(qs[at], picks, typed) || busy} onPress={() => onward(picks, typed)} />
-            )}
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {at > 0 && <Button label="Back" kind="night-ghost" style={{ flex: 1 }} disabled={busy} onPress={() => goTo(at - 1)} />}
-              <Button label="Decline" kind="night-ghost" style={{ flex: 1 }} disabled={busy} onPress={() => answer(false)} />
-            </View>
-          </View>
-        ) : (
+        view.kind === "question" ? null : (
           <View style={{ gap: 8 }}>
             {/* It stays up while the answer goes, and shows it was allowed (it can't be dragged again). */}
             {/* A failed answer brings a fresh one back (the key), not the one that looks allowed. */}
@@ -568,6 +370,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       )}
       </View>
       </View>
+      )}
       </View>
     </AboveKeyboard>
     </Animated.View>

@@ -325,15 +325,16 @@ describe("a question", () => {
     expect(asked.filter((r) => r.op === "answer")).toEqual([expect.objectContaining({ answers: { "Which channel?": "Stable" } })]);
   });
 
-  it("asks several questions one at a time: a pick moves on, Back and the dots go back with the answers kept, and the last sends them all", async () => {
+  it("asks several questions one at a time: a pick moves on, the arrows go back and on with the answers kept, and the last sends them all", async () => {
     const { asked, lastOf } = await decide(several);
     expect(screen.getByText("Claude has questions")).toBeTruthy();
     expect(screen.getByText("1 of 2")).toBeTruthy();
     expect(screen.getByText("Which channel?")).toBeTruthy();
     expect(screen.queryByText("Which platforms?")).toBeNull();
     expect(screen.getByRole("button", { name: "Next" }).props.accessibilityState).toMatchObject({ disabled: true });
-    // The second can't be skipped to before it is reached.
-    expect(screen.getByRole("button", { name: "Question 2: Platforms" }).props.accessibilityState).toMatchObject({ disabled: true });
+    // The second can't be skipped to before it is reached, and there is none before the first.
+    expect(screen.getByRole("button", { name: "Next question" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByRole("button", { name: "Previous question" }).props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(screen.getByText("Beta"));
     await waitFor(() => expect(screen.getByText("Which platforms?")).toBeTruthy());
     expect(screen.queryByText("Which channel?")).toBeNull();
@@ -343,11 +344,11 @@ describe("a question", () => {
     await fireEvent.press(screen.getByText("iOS"));
     await fireEvent.press(screen.getByText("Android"));
     expect(asked.some((r) => r.op === "answer")).toBe(false);
-    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Previous question" }));
     expect(screen.getByText("Which channel?")).toBeTruthy();
     expect(screen.getByRole("radio", { name: /Beta/ }).props.accessibilityState).toMatchObject({ checked: true });
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    await fireEvent.press(screen.getByRole("button", { name: "Question 2: Platforms, answered" }));
+    expect(screen.getByRole("button", { name: "Previous question" }).props.accessibilityState).toMatchObject({ disabled: true });
+    await fireEvent.press(screen.getByRole("button", { name: "Next question" }));
     expect(screen.getByText("Which platforms?")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: /Android/ }).props.accessibilityState).toMatchObject({ checked: true });
     await fireEvent.press(screen.getByRole("button", { name: "Send answers" }));
@@ -360,7 +361,7 @@ describe("a question", () => {
     await fireEvent.changeText(screen.getByLabelText("Something else"), "Nightly");
     await fireEvent.press(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Which platforms?")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Previous question" }));
     await fireEvent(screen.getByLabelText("Something else"), "submitEditing");
     expect(screen.getByText("Which platforms?")).toBeTruthy();
   });
@@ -376,10 +377,17 @@ describe("a question", () => {
     expect(asked.filter((r) => r.op === "answer")).toHaveLength(1);
   });
 
-  it("can be declined", async () => {
+  it("numbers its options, as rows of one list, the last a row to write your own answer", async () => {
+    await decide(question);
+    expect(screen.getByRole("radio", { name: /Stable/ })).toHaveTextContent(/^1/);
+    expect(screen.getByRole("radio", { name: /Beta/ })).toHaveTextContent(/^2/);
+    expect(screen.getByPlaceholderText("Something else…")).toBeTruthy();
+  });
+
+  it("can be skipped", async () => {
     const { lastOf } = await decide(question);
-    await fireEvent.press(screen.getByRole("button", { name: "Decline" }));
-    await waitFor(() => expect(screen.getByText("Declined.")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Skip" }));
+    await waitFor(() => expect(screen.getByText("Skipped.")).toBeTruthy());
     expect(lastOf("answer")).toMatchObject({ allow: false, answers: null });
   });
 });

@@ -56,6 +56,8 @@ import { ActivitySheet } from "./ActivitySheet";
 import { AssistantRow, CompactRow, Composer, DayRow, DesktopRow, DiffSheet, HookRow, PageActionsFloat, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 import { activityOf, elapsed } from "../view/activity";
 import { RunCommandCard } from "./RunCommand";
+import { QuestionDock } from "./QuestionDock";
+import { questionsOf } from "../view/prompts";
 import { ShellCard } from "./ShellCard";
 import { loadSent, photosFor, rememberSent, type SentEntry } from "../view/sentPhotos";
 
@@ -457,6 +459,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
     setProblem((e as Error).message);
     buzz("warning");
   };
+  // Claude's question, still unanswered: it waits where the message box is, as the Claude app asks (the first, when there are several).
+  const docked = view.items.find((it): it is Extract<Item, { kind: "prompt" }> => it.kind === "prompt" && it.state === "open" && it.toolName === "AskUserQuestion") ?? null;
 
   /**
    * A command typed in the terminal. The phone first checks who is holding it by Face ID (or Touch ID, never the passcode
@@ -719,6 +723,17 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
         case "steps":
           return <StepsRow rowKey={row.key} chips={row.chips} entries={row.entries} onActivity={steady(`${row.key}:activity`, () => setActivity(row.key))} notes={row.notes} files={row.files} onFile={openFile} mark={term} took={row.took} onFiles={openFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
+          // The question waiting where the message box is: here, only a line pointing down to it.
+          if (docked && row.item.id === docked.id) {
+            const n = questionsOf(row.item.input).length;
+            return (
+              <View testID="question-pointer" style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
+                <Txt variant="small" tone="ink2">
+                  Claude is asking {n > 1 ? `${n} questions` : "a question"} below ↓
+                </Txt>
+              </View>
+            );
+          }
           return (
             // Its own card for each prompt: a list cell reused for another one doesn't carry over whether it was open, and so
             // play the closing settle on a card decided long ago.
@@ -911,6 +926,11 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar, l
           </SearchBar>
           </Glass>
         </View>
+      ) : docked ? (
+        <QuestionDock key={docked.id} item={docked} onAnswer={(allow, answers) => sync.answer(slot, docked.id, allow, answers, null).catch((e) => {
+            fail(e);
+            throw e;
+          })} />
       ) : (
         // Out of reach of the Mac, words can still be written: they wait, and go once it's back (photos and commands need it now:
         // a command still goes to Run, which says it couldn't).
