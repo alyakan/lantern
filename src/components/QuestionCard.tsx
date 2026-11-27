@@ -191,13 +191,13 @@ export function QuestionCard({ item, onDecide, docked = false }: { item: Permiss
         {many && (
           <div className="question-pager" role="group" aria-label="Questions">
             <button className="question-arrow" aria-label="Previous question" title="Previous question" disabled={at === 0} onClick={() => go(at - 1)}>
-              ‹
+              <span className="question-chev back" aria-hidden />
             </button>
             <span className="question-count" aria-live="polite">
               {at + 1} of {questions.length}
             </span>
             <button className="question-arrow" aria-label="Next question" title="Next question" disabled={at >= reached} onClick={() => go(at + 1)}>
-              ›
+              <span className="question-chev" aria-hidden />
             </button>
           </div>
         )}

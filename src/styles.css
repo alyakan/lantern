@@ -3133,7 +3133,10 @@ button.preset-restore:hover:not(:disabled) { background: none; color: var(--text
 .question-kicker { font-size: calc(11.5px * var(--font-scale)); font-weight: 500; color: var(--muted); }
 .question-pager { display: flex; align-items: center; gap: 2px; }
 .question-count { padding: 0 4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
-button.question-arrow { width: 22px; height: 22px; min-height: 0; padding: 0; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(16px * var(--font-scale)); line-height: 1; }
+button.question-arrow { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; min-height: 0; padding: 0; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); }
+/* Drawn, not a glyph (the UI font's ‹ › are thin and small): as tall as the count's figures beside it. */
+.question-chev { width: 7px; height: 7px; border-left: 1.75px solid currentColor; border-bottom: 1.75px solid currentColor; border-radius: 1px; transform: translateX(-1.5px) rotate(-135deg); }
+.question-chev.back { transform: translateX(1.5px) rotate(45deg); }
 button.question-arrow:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 button.question-arrow:disabled { color: var(--faint); opacity: 1; cursor: default; }
 .question { display: flex; flex-direction: column; gap: 10px; }
