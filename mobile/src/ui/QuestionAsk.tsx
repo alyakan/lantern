@@ -93,10 +93,9 @@ function Arrow({ dir, disabled, tone, onPress }: { dir: "back" | "on"; disabled:
   const l = look(colors, tone);
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={dir === "back" ? "Previous question" : "Next question"} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} haptic="select" scaleTo={0.85} hitSlop={8}>
-      <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", opacity: disabled ? 0.35 : 1 }}>
-        <Txt variant="heading" tone={l.text} style={{ lineHeight: 22 }}>
-          {dir === "back" ? "‹" : "›"}
-        </Txt>
+      <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: disabled ? "transparent" : l.num, opacity: disabled ? 0.35 : 1 }}>
+        {/* A chevron drawn, not a glyph: the text face draws ‹ › small and thin. */}
+        <View accessibilityElementsHidden style={{ width: 9, height: 9, marginLeft: dir === "back" ? 3 : -3, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: tone === "night" ? colors.white : colors.ink, transform: [{ rotate: dir === "back" ? "45deg" : "-135deg" }] }} />
       </View>
     </PressScale>
   );
