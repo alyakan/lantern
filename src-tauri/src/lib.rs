@@ -533,6 +533,7 @@ impl webclaude::mcp::Mac for WebMac {
             slot: c.slot,
             title: c.title,
             folder: c.folder,
+            conversation: c.session_id,
         }).collect()
     }
 
@@ -746,7 +747,12 @@ async fn run_web_request(app: &AppHandle, id: &str, run: bool, folder: Option<St
     };
     match result {
         Ok(slot) => {
-            web.store.started(&action.request, &slot, state.remote.hub.chat(&slot).and_then(|c| c.title));
+            let chat = state.remote.hub.chat(&slot);
+            web.store.started(&action.request, &slot, chat.as_ref().and_then(|c| c.title.clone()));
+            // Its conversation, when it has one already (a new chat's comes with its first turn).
+            if let Some(id) = chat.and_then(|c| c.session_id) {
+                web.store.holds(&slot, &id);
+            }
             Ok(())
         }
         Err(e) => {

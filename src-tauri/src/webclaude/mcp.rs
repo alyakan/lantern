@@ -17,6 +17,8 @@ pub struct ChatLine {
     pub folder: Option<String>,
     /// "needs_you", "working", "idle", "asleep" or "ended".
     pub status: String,
+    /// Its conversation (Lantern's id), once it has one.
+    pub conversation: Option<String>,
 }
 
 /// What the connector reads of the Mac.
@@ -30,7 +32,7 @@ pub trait Mac: Send + Sync + 'static {
 
 pub const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Work goes on in the chat already working on that canvas or project, which knows what was done and costs less than a new chat finding its way again; set new_chat only for work unrelated to what that chat has been doing. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't start a message to you, but wait holds your turn until it has something, so the user needn't come back to tell you Lantern finished: after send_to_lantern or answer, call wait with the id, and call it again (with the `after` it gives) while it says still_working; then carry on with what came back (send the next step, answer a question, or tell the user how it went). To follow a chat on your canvas that the user works in themselves, wait with the canvas. While a request waits for the user's Run, stop waiting after a few tries and tell the user it needs their Run. Look at the outbox too when the user asks what Lantern did or said.";
+const INSTRUCTIONS: &str = "Lantern is the user's Mac app that runs Claude Code chats on the user's projects. Use it to hand design work from a canvas to the code: send_to_lantern puts a card in Lantern with your message, and nothing runs until the user taps Run there, unless they let your work run on its own (its answer says which): tell the user whether it is waiting or running. Name the canvas by its claude.ai link when you have it (the chat in Lantern reads the design from it). Work that isn't about a design can be sent too: leave the canvas out and name the project. Work goes on in the chat already working on that canvas or project, which knows what was done and costs less than a new chat finding its way again; set new_chat only for work unrelated to what that chat has been doing. A project can have several of your chats at once (list_chats gives each an id): when the work belongs with one that isn't the one you used last, name it with chat. Then call check with the id to see how it went (always check before saying where a request stands, or before sending it again): when the chat is done its last message comes back, with the files it changed. A chat that works on your canvas is yours to follow: every turn it finishes (also those the user starts there themselves) leaves its last message in the outbox, and read_chat reads all of it, step by step. Chats in Lantern can leave you questions and notes (preview links to what they built): read_outbox shows them, and answer replies to a question (also after the user's Run). Lantern can't start a message to you, but wait holds your turn until it has something, so the user needn't come back to tell you Lantern finished: after send_to_lantern or answer, call wait with the id, and call it again (with the `after` it gives) while it says still_working; then carry on with what came back (send the next step, answer a question, or tell the user how it went). To follow a chat on your canvas that the user works in themselves, wait with the canvas. While a request waits for the user's Run, stop waiting after a few tries and tell the user it needs their Run. Look at the outbox too when the user asks what Lantern did or said.";
 
 /// How long one wait holds the call by default, and at most (seconds): claude.ai drops a tool call that takes too long.
 const WAIT_DEFAULT: u64 = 50;
@@ -47,7 +49,7 @@ fn tools() -> Value {
         },
         {
             "name": "list_chats",
-            "description": "The chats open in Lantern: their title, project, what they are doing, and the canvas a chat works on when it was started from here.",
+            "description": "The chats open in Lantern: their title, project, what they are doing, and the canvas a chat works on when it was started from here. Your own chats (the ones your work went to) have an id: pass it to send_to_lantern's chat to send work there.",
             "inputSchema": {"type": "object", "properties": {"project": {"type": "string", "description": "Only this project's chats (its name from list_projects)."}}},
             "annotations": {"readOnlyHint": true}
         },
@@ -61,7 +63,8 @@ fn tools() -> Value {
                     "canvas_title": {"type": "string", "description": "The canvas's title, for the user's card."},
                     "message": {"type": "string", "description": "What the chat should do or answer, complete on its own: the chat sees this message and the canvas, not this conversation."},
                     "project": {"type": "string", "description": "The project's name from list_projects. Needed when there is no canvas. With a canvas, leave it out when the canvas is linked already, or to let the user pick."},
-                    "new_chat": {"type": "boolean", "description": "Start a chat of its own instead of going on in the chat already on this canvas or project. Only for work unrelated to what that chat has been doing: a follow-up costs less where the work was done."}
+                    "new_chat": {"type": "boolean", "description": "Start a chat of its own instead of going on in the chat already on this canvas or project. Only for work unrelated to what that chat has been doing: a follow-up costs less where the work was done."},
+                    "chat": {"type": "string", "description": "The id of one of your chats from list_chats: the work goes on in that one (when the project has several and it isn't the one you used last). Leave it out for the usual chat."}
                 },
                 "required": ["message"]
             },
@@ -309,7 +312,12 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                 }
                 // Work with no design is keyed by its project: it shows no canvas.
                 let canvas = store.canvas_of_slot(&c.slot).filter(|k| !k.starts_with("project:")).and_then(|k| links.iter().find(|l| l.key == k).map(|l| l.canvas.clone()).or(Some(k)));
-                Some(json!({"title": c.title, "project": project, "status": c.status, "canvas": canvas}))
+                let mut v = json!({"title": c.title, "project": project, "status": c.status, "canvas": canvas});
+                // Only web Claude's own chats can be sent to, so only they have an id.
+                if let Some(id) = c.conversation.as_deref().filter(|id| store.owns(id)) {
+                    v["id"] = json!(id);
+                }
+                Some(v)
             }).collect();
             Ok(json!({"chats": chats}))
         }
@@ -317,10 +325,10 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
             let canvas = arg(args, "canvas").unwrap_or("");
             let message = need(args, "message")?;
             let projects = mac.projects().await;
-            if canvas.trim().is_empty() && arg(args, "project").is_none() {
+            if canvas.trim().is_empty() && arg(args, "project").is_none() && arg(args, "chat").is_none() {
                 return Err(format!("Name the design canvas this is about, or, when the work has no design, the project it is for. Lantern's projects: {}.", projects.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")));
             }
-            let folder = match arg(args, "project") {
+            let mut folder = match arg(args, "project") {
                 None => None,
                 Some(p) => {
                     let lower = p.to_lowercase();
@@ -334,7 +342,26 @@ async fn call(store: &Store, mac: &dyn Mac, grant: &str, name: &str, args: &Valu
                 None => canvas.to_string(),
             };
             let new_chat = args.get("new_chat").and_then(Value::as_bool).unwrap_or(false);
-            let r = store.propose_to(Kind::Send, canvas, &title, message, folder, new_chat, grant, now)?;
+            let place = match arg(args, "chat") {
+                Some(_) if new_chat => return Err("Give either chat (one of your chats) or new_chat, not both.".into()),
+                Some(id) => {
+                    if !store.owns(id) {
+                        return Err("That isn't one of your chats in Lantern: list_chats gives an id only to the chats your work went to.".into());
+                    }
+                    // The work runs where that chat is: a project named for it must be that chat's.
+                    let chat_folder = mac.chats().into_iter().find(|c| c.conversation.as_deref() == Some(id)).and_then(|c| c.folder);
+                    if let (Some(f), Some(cf)) = (&folder, &chat_folder) {
+                        if f != cf {
+                            return Err("That chat is in another project.".into());
+                        }
+                    }
+                    folder = folder.or(chat_folder);
+                    store::Place::Chat(id.to_string())
+                }
+                None if new_chat => store::Place::NewChat,
+                None => store::Place::Usual,
+            };
+            let r = store.propose_to(Kind::Send, canvas, &title, message, folder, place, grant, now)?;
             let mut v = request_view(&r, &projects);
             v["note"] = json!(if store.auto_run() {
                 "Lantern runs this on its own (the user turned that on): it starts in a moment, unless it has no project to run in, which the user then picks. Call wait with this id to hear back when it's done."
@@ -395,7 +422,10 @@ mod tests {
             Box::pin(async { vec![("/dev/rayak".into(), "rayak".into()), ("/dev/lantern".into(), "lantern".into())] })
         }
         fn chats(&self) -> Vec<ChatLine> {
-            vec![ChatLine { slot: "s1".into(), title: Some("Header".into()), folder: Some("/dev/rayak".into()), status: "idle".into() }]
+            vec![
+                ChatLine { slot: "s1".into(), title: Some("Header".into()), folder: Some("/dev/rayak".into()), status: "idle".into(), conversation: Some("aaaa-1111".into()) },
+                ChatLine { slot: "s2".into(), title: Some("Footer".into()), folder: Some("/dev/rayak".into()), status: "idle".into(), conversation: Some("bbbb-2222".into()) },
+            ]
         }
         fn chat_events(&self, slot: &str) -> Option<Vec<crate::ui_event::UiEvent>> {
             (slot == "s1").then(|| vec![
@@ -471,6 +501,25 @@ mod tests {
         let c = tool(&s, "list_chats", json!({"project": "rayak"})).await;
         assert_eq!(c["structuredContent"]["chats"][0]["canvas"], "https://claude.ai/artifact/abc");
         assert_eq!(tool(&s, "list_chats", json!({"project": "lantern"})).await["structuredContent"]["chats"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn only_web_claude_s_own_chats_have_an_id_and_can_be_picked() {
+        let s = Store::load(None);
+        let r = s.propose(Kind::Send, "", "x", "m", Some("/dev/rayak".into()), "g", 1).unwrap();
+        s.decide_run(&r.id, true, None).unwrap();
+        s.started(&r.id, "s1", None);
+        s.holds("s1", "aaaa-1111");
+        let chats = tool(&s, "list_chats", json!({"project": "rayak"})).await["structuredContent"]["chats"].clone();
+        assert_eq!((chats[0]["id"].as_str(), chats[1].get("id")), (Some("aaaa-1111"), None), "the user's own chat has none");
+        // Picked by its id, the work runs in that chat's project without naming it.
+        let sent = tool(&s, "send_to_lantern", json!({"message": "Add it to the build", "chat": "aaaa-1111"})).await;
+        assert_eq!(sent["isError"], false, "{sent}");
+        let req = s.request(sent["structuredContent"]["id"].as_str().unwrap()).unwrap();
+        assert_eq!((req.chat.as_deref(), req.folder.as_deref()), (Some("aaaa-1111"), Some("/dev/rayak")));
+        assert_eq!(tool(&s, "send_to_lantern", json!({"message": "m", "chat": "bbbb-2222"})).await["isError"], true, "not its chat");
+        assert_eq!(tool(&s, "send_to_lantern", json!({"message": "m", "chat": "aaaa-1111", "new_chat": true})).await["isError"], true);
+        assert_eq!(tool(&s, "send_to_lantern", json!({"message": "m", "chat": "aaaa-1111", "project": "lantern"})).await["isError"], true, "another project");
     }
 
     #[tokio::test]
